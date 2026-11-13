@@ -244,22 +244,9 @@ impl Analyser {
         position: usize,
     ) -> Expects {
         let function = self.vars.resolve(&self.types.callable_type(symbol));
-        if !matches!(
-            function,
-            StaticType::Function {
-                parameters: Some(_),
-                ..
-            }
-        ) {
-            return Expects::Anything;
-        }
         let first = self.vars.count();
-        let StaticType::Function {
-            parameters: Some(parameters),
-            ..
-        } = self.vars.instantiate(&function)
-        else {
-            unreachable!("instantiating a function type gives a function type");
+        let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
+            return Expects::Anything;
         };
         let takes_known = parameters.len() == known.len()
             && parameters.iter().zip(known).all(|(parameter, argument)| {

@@ -821,26 +821,18 @@ impl Analyser {
         }
     }
 
-    /// Joins a new type into an accumulator, as with [`Self::join`].
     /// Adds the value `value` of type `typ` that a function returns to
     /// `returns`. A function with an annotated return type returns that
-    /// type, and each value it returns has to fit it.
+    /// type, and each value it returns has to fit it. Without one, it
+    /// returns the type its values join as, as with [`Self::join`].
     fn add_return(&mut self, returns: &mut Returns, value: &ExpressionLocation, typ: StaticType) {
-        match &returns.annotated {
-            Some(annotated) => {
-                let annotated = annotated.clone();
-                if !self.accepts_write(&annotated, &typ, Some(value.id)) {
-                    self.emit_rejected_write(&annotated, &typ, value.span);
-                }
-            }
-            None => self.fold_join(&mut returns.joined, typ, value.span),
+        if let Some(annotated) = &returns.annotated {
+            self.check_write(annotated, &typ, value.span, Some(value.id));
+            return;
         }
-    }
-
-    fn fold_join(&mut self, acc: &mut Option<StaticType>, new_type: StaticType, span: Span) {
-        *acc = Some(match acc.take() {
-            Some(prev) => self.join(&prev, &new_type, span),
-            None => new_type,
+        returns.joined = Some(match returns.joined.take() {
+            Some(joined) => self.join(&joined, &typ, value.span),
+            None => typ,
         });
     }
 }

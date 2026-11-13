@@ -417,15 +417,9 @@ impl Analyser {
             .iter()
             .map(|argument| self.vars.resolve(argument))
             .collect::<Vec<_>>();
-        let binding = if self
-            .vars
-            .resolve(self.types.get_type(picked))
-            .is_fn_and_matches(&arguments)
-        {
-            Binding::Resolved(Candidate::Scalar(picked))
-        } else {
-            Binding::Dynamic(vec![Candidate::Scalar(picked)])
-        };
+        // An argument of type `Any` is checked where it's passed, so the
+        // program can call `picked` directly.
+        let binding = Binding::Resolved(Candidate::Scalar(picked));
         if cfg!(debug_assertions) {
             self.early_picks.push(EarlyPick::Call {
                 candidates: call.candidates.clone(),
@@ -460,9 +454,15 @@ impl Analyser {
                         .iter()
                         .map(|argument| self.vars.resolve(argument))
                         .collect::<Vec<_>>();
-                    let binding = self
+                    // A pick left to the program among one overload is a
+                    // call of it, with its `Any` arguments checked.
+                    let binding = match self
                         .resolve_overloads(&candidates, &arguments, kind)
-                        .binding;
+                        .binding
+                    {
+                        Binding::Dynamic(only) if only.len() == 1 => Binding::Resolved(only[0]),
+                        binding => binding,
+                    };
                     assert!(
                         binding == picked,
                         "internal error: `{name}` committed to {picked:?} before its arguments \
@@ -929,14 +929,11 @@ impl Analyser {
         candidates: &Candidates,
         arguments: &[StaticType],
     ) -> bool {
-        let parameters_of =
-            |symbol: SymbolId| match self.vars.resolve(&self.types.callable_type(symbol)) {
-                StaticType::Function {
-                    parameters: Some(parameters),
-                    ..
-                } if parameters.len() == arguments.len() => Some(parameters),
-                _ => None,
-            };
+        let parameters_of = |symbol: SymbolId| {
+            self.overloads()
+                .parameters_of(symbol)
+                .filter(|parameters| parameters.len() == arguments.len())
+        };
         let is_number = |typ: &StaticType| {
             matches!(
                 typ,
@@ -980,25 +977,10 @@ impl Analyser {
         result: &StaticType,
     ) -> bool {
         let function = self.vars.resolve(&self.types.callable_type(symbol));
-        let StaticType::Function {
-            parameters: Some(_),
-            ..
-        } = &function
-        else {
+        let Some((parameters, return_type)) = self.vars.instantiate_signature(&function) else {
             return true;
         };
-        let StaticType::Function {
-            parameters: Some(parameters),
-            return_type,
-        } = self.vars.instantiate(&function)
-        else {
-            unreachable!("instantiating a function type gives a function type");
-        };
-        parameters.len() == arguments.len()
-            && parameters
-                .iter()
-                .zip(arguments)
-                .all(|(parameter, argument)| self.vars.bind_argument(parameter, argument))
+        self.vars.bind_arguments(&parameters, arguments)
             && self.vars.bind_argument(result, &return_type)
     }
 
@@ -1070,7 +1052,7 @@ impl Analyser {
                     }
                     CallSite::Getter(_) => {}
                     _ => {
-                        self.settle_waited_for(&result, &typ, call.span, call.nodes.result);
+                        self.check_write(&result, &typ, call.span, call.nodes.result);
                     }
                 }
                 true
@@ -1087,7 +1069,7 @@ impl Analyser {
                 }
                 let (element, span) = (element.clone(), *span);
                 let found = self.iteration_gives(&sequence, span);
-                self.settle_waited_for(&element, &found, span, None);
+                self.check_write(&element, &found, span, None);
                 true
             }
             Constraint::Unpack { value, parts, span } => {
@@ -1116,7 +1098,7 @@ impl Analyser {
                 };
                 let found = found.unwrap_or_else(|| vec![StaticType::Any; parts.len()]);
                 for (part, found) in parts.iter().zip(found) {
-                    self.settle_waited_for(part, &found, *span, None);
+                    self.check_write(part, &found, *span, None);
                 }
                 true
             }
@@ -1130,7 +1112,7 @@ impl Analyser {
                     return false;
                 }
                 let value = value.clone();
-                self.settle_waited_for(&value, &Self::default_value_type(default), *span, None);
+                self.check_write(&value, &Self::default_value_type(default), *span, None);
                 true
             }
             Constraint::Join {
@@ -1160,25 +1142,9 @@ impl Analyser {
                     (StaticType::Never, other) | (other, StaticType::Never) => other.clone(),
                     _ => self.join_known(&a, &b),
                 };
-                self.settle_waited_for(&result, &joined, *span, None);
+                self.check_write(&result, &joined, *span, None);
                 true
             }
-        }
-    }
-
-    /// Settles `waited`, the type a constraint gave out while it waited, as
-    /// `found`, the type it turned out to be. Code analysed meanwhile may
-    /// have settled `waited` already, and then `found` has to fit it: a
-    /// value of type `Any` is checked at `node` as the program runs.
-    fn settle_waited_for(
-        &mut self,
-        waited: &StaticType,
-        found: &StaticType,
-        span: Span,
-        node: Option<NodeId>,
-    ) {
-        if !self.accepts_write(waited, found, node) {
-            self.emit_rejected_write(waited, found, span);
         }
     }
 
@@ -1496,22 +1462,10 @@ impl Analyser {
         if literals.len() < 2 {
             return false;
         }
-        let StaticType::Function {
-            parameters: Some(_),
-            ..
-        } = self.vars.resolve(&self.types.callable_type(symbol))
-        else {
-            return false;
-        };
+        let function = self.vars.resolve(&self.types.callable_type(symbol));
         let snapshot = self.vars.snapshot();
-        let StaticType::Function {
-            parameters: Some(parameters),
-            ..
-        } = self
-            .vars
-            .instantiate(&self.vars.resolve(&self.types.callable_type(symbol)))
-        else {
-            unreachable!("instantiating a function type gives a function type");
+        let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
+            return false;
         };
         for (parameter, argument) in parameters.iter().zip(arguments) {
             self.vars.bind_argument(parameter, argument);
@@ -1646,25 +1600,19 @@ impl Analyser {
         };
         let pending = self.pending.len();
         let signature = picked.map(|symbol| self.instantiate_function(symbol, true));
-        let Some(StaticType::Function {
-            parameters: Some(parameters),
-            return_type: declared_return,
-        }) = signature
+        let Some(
+            signature @ StaticType::Function {
+                parameters: Some(_),
+                ..
+            },
+        ) = signature
         else {
             for argument in arguments {
                 self.vars.settle_unknowns(argument, &StaticType::Any);
             }
             return Some(return_type);
         };
-
-        let typ = self.bind_signature(
-            &StaticType::Function {
-                parameters: Some(parameters),
-                return_type: declared_return,
-            },
-            arguments,
-        );
-        let Some((typ, parameters)) = typ else {
+        let Some((typ, parameters)) = self.bind_signature(&signature, arguments) else {
             self.pending.truncate(pending);
             return None;
         };
@@ -1796,12 +1744,7 @@ impl Analyser {
             unreachable!("only a function with known parameters has a signature to bind");
         };
         let snapshot = self.vars.snapshot();
-        let fits = parameters.len() == arguments.len()
-            && parameters
-                .iter()
-                .zip(arguments)
-                .all(|(parameter, argument)| self.vars.bind_argument(parameter, argument));
-        if !fits {
+        if !self.vars.bind_arguments(parameters, arguments) {
             self.vars.rollback(snapshot);
             return None;
         }
@@ -1962,7 +1905,7 @@ impl Analyser {
         let committed = self.commit_early(&call, &arguments, narrowest);
         if let Some(typ) = &committed {
             let result = call.result.clone();
-            self.settle_waited_for(&result, typ, call.span, call.nodes.result);
+            self.check_write(&result, typ, call.span, call.nodes.result);
         }
         self.copied_through = outer;
         if committed.is_none() {
@@ -1984,15 +1927,7 @@ impl Analyser {
     fn most_specific(&self, symbols: &[SymbolId]) -> Option<SymbolId> {
         let parameters = symbols
             .iter()
-            .map(
-                |&symbol| match self.vars.resolve(&self.types.callable_type(symbol)) {
-                    StaticType::Function {
-                        parameters: Some(parameters),
-                        ..
-                    } => Some(parameters),
-                    _ => None,
-                },
-            )
+            .map(|&symbol| self.overloads().parameters_of(symbol))
             .collect::<Option<Vec<_>>>()?;
         let (narrowest, _) = parameters.iter().enumerate().find(|&(i, narrower)| {
             parameters
@@ -2013,51 +1948,33 @@ impl Analyser {
     /// any kind of sequence, so it can't tell what an argument nothing is
     /// known about is, and the call waits for it as `for x in xs` does.
     fn fits_without_any(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
-        match self.vars.resolve(&self.types.callable_type(symbol)) {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } => parameters
-                .iter()
-                .zip(arguments)
-                .all(|(parameter, argument)| match (parameter, argument) {
-                    (StaticType::Any, argument) => *argument == StaticType::Any,
-                    (StaticType::Iterable(_), StaticType::Var(var)) => self.vars.is_literal(*var),
-                    _ => true,
-                }),
-            _ => false,
-        }
+        self.overloads()
+            .parameters_of(symbol)
+            .is_some_and(|parameters| {
+                parameters
+                    .iter()
+                    .zip(arguments)
+                    .all(|(parameter, argument)| match (parameter, argument) {
+                        (StaticType::Any, argument) => *argument == StaticType::Any,
+                        (StaticType::Iterable(_), StaticType::Var(var)) => {
+                            self.vars.is_literal(*var)
+                        }
+                        _ => true,
+                    })
+            })
     }
 
     /// Whether `symbol` can accept arguments of these types, where each part
     /// not known yet fits anything.
     fn could_accept(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
-        match self.vars.resolve(&self.types.callable_type(symbol)) {
-            StaticType::Function {
-                parameters: None, ..
-            } => true,
-            function @ StaticType::Function {
-                parameters: Some(_),
-                ..
-            } => {
-                let snapshot = self.vars.snapshot();
-                let StaticType::Function {
-                    parameters: Some(parameters),
-                    ..
-                } = self.vars.instantiate(&function)
-                else {
-                    unreachable!("instantiating a function type gives a function type");
-                };
-                let fits = parameters.len() == arguments.len()
-                    && parameters
-                        .iter()
-                        .zip(arguments)
-                        .all(|(parameter, argument)| self.vars.bind_argument(parameter, argument));
-                self.vars.rollback(snapshot);
-                fits
-            }
-            other => other.is_unknown(),
-        }
+        let function = self.vars.resolve(&self.types.callable_type(symbol));
+        let snapshot = self.vars.snapshot();
+        let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
+            return matches!(function, StaticType::Function { .. }) || function.is_unknown();
+        };
+        let fits = self.vars.bind_arguments(&parameters, arguments);
+        self.vars.rollback(snapshot);
+        fits
     }
 
     fn site_candidates(&self, site: CallSite) -> &Candidates {
@@ -2113,18 +2030,8 @@ impl Analyser {
                     (Binding::Resolved(candidate), _) if compatible => Binding::Resolved(candidate),
                     // Which one applies is left to the program as it runs,
                     // which mutates in place where it can.
-                    (Binding::Dynamic(mut candidates), operators) if compatible => {
-                        let operators = match operators {
-                            Binding::Resolved(operator) => vec![operator],
-                            Binding::Dynamic(operators) => operators,
-                            Binding::None => Vec::new(),
-                        };
-                        for operator in operators {
-                            if !candidates.contains(&operator) {
-                                candidates.push(operator);
-                            }
-                        }
-                        Binding::Dynamic(candidates)
+                    (Binding::Dynamic(in_place), operators) if compatible => {
+                        Self::in_place_then_operators(in_place, operators)
                     }
                     (_, binding) => binding,
                 };

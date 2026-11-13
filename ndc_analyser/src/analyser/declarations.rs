@@ -1,9 +1,9 @@
 use super::solver::Constraint;
 use super::{Analyser, Returns};
 use crate::error::AnalysisError;
-use itertools::{Itertools, izip};
+use itertools::izip;
 use ndc_core::r#struct::StructInfo;
-use ndc_core::{NodeId, StaticType, TypeSignature};
+use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{
     BindingPattern, BindingPatternLocation, ExpressionLocation, FunctionParameter, StructField,
@@ -55,20 +55,16 @@ impl Analyser {
             .map(|param| self.lower_parameter_annotation(param.annotation.as_ref()))
             .unzip();
         let expected = self.expected_parameters.remove(&id).unwrap_or_default();
-        let type_signature = TypeSignature::from_annotated_bindings(
-            parameters
-                .iter()
-                .zip(&annotations)
-                .enumerate()
-                .map(|(position, (param, annotation))| {
-                    let typ = annotation
-                        .clone()
-                        .or_else(|| expected.get(position).cloned().flatten())
-                        .unwrap_or_else(|| self.vars.fresh(StaticType::Any));
-                    (param.name().to_string(), Some(typ))
-                })
-                .collect(),
-        );
+        let param_types = annotations
+            .iter()
+            .enumerate()
+            .map(|(position, annotation)| {
+                annotation
+                    .clone()
+                    .or_else(|| expected.get(position).cloned().flatten())
+                    .unwrap_or_else(|| self.vars.fresh(StaticType::Any))
+            })
+            .collect::<Vec<_>>();
         let annotated_return = self.lower_annotation(return_annotation);
         // Until the body says more, a named function's value takes what its
         // annotations say, as its body is compiled once for every type it's
@@ -87,7 +83,7 @@ impl Analyser {
                     })
                     .collect(),
             ),
-            None => type_signature.types(),
+            None => Some(param_types.clone()),
         };
         self.result.analysis.function_types.insert(
             id,
@@ -106,7 +102,6 @@ impl Analyser {
             _ => None,
         };
         if let Some((name, symbol)) = declared {
-            let parameters = type_signature.types();
             // An `Iterable<T>` parameter takes what each call settles, but
             // only sequences of `T`s, which tells it from its other overloads.
             let shape = iterates
@@ -117,17 +112,15 @@ impl Analyser {
                         .map(|element| StaticType::Iterable(Box::new(element.clone())))
                 })
                 .collect::<Vec<_>>();
-            let shaped = parameters.as_ref().map(|parameters| {
-                parameters
-                    .iter()
-                    .zip(&shape)
-                    .map(|(parameter, shape)| shape.clone().unwrap_or_else(|| parameter.clone()))
-                    .collect::<Vec<_>>()
-            });
+            let shaped = param_types
+                .iter()
+                .zip(&shape)
+                .map(|(parameter, shape)| shape.clone().unwrap_or_else(|| parameter.clone()))
+                .collect::<Vec<_>>();
             self.types.declare_shape(symbol, shape);
-            self.check_overlap(symbol, name, shaped.as_deref(), span);
+            self.check_overlap(symbol, name, Some(&shaped), span);
             let placeholder = StaticType::Function {
-                parameters,
+                parameters: Some(param_types.clone()),
                 return_type: Box::new(
                     annotated_return
                         .clone()
@@ -145,10 +138,9 @@ impl Analyser {
         // A function body starts outside of any loop: `break` can't
         // leave the function to end a loop around its declaration.
         let outer_loop_depth = std::mem::take(&mut self.loop_depth);
-        let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
-        let param_types = self.declare_parameters(&type_signature, &parameter_nodes);
-
         for (param, typ) in parameters.iter().zip(&param_types) {
+            let symbol = self.resolver.declared_symbol(param.lvalue.id);
+            self.types.declare(symbol, typ.clone());
             self.result
                 .analysis
                 .variable_types
@@ -299,27 +291,6 @@ impl Analyser {
         StaticType::unit()
     }
 
-    /// Declares a function's parameters and returns their types.
-    fn declare_parameters(
-        &mut self,
-        type_signature: &TypeSignature,
-        parameter_nodes: &[NodeId],
-    ) -> Vec<StaticType> {
-        let TypeSignature::Exact(parameters) = type_signature else {
-            return vec![];
-        };
-
-        for (param, &node) in parameters.iter().zip(parameter_nodes) {
-            let symbol = self.resolver.declared_symbol(node);
-            self.types.declare(symbol, param.type_name.clone());
-        }
-
-        parameters
-            .iter()
-            .map(|param| param.type_name.clone())
-            .collect()
-    }
-
     /// Declares each name in a `let` or `for` pattern, checking
     /// `found_type` against the annotation and the pattern's shape.
     pub(super) fn declare_binding_pattern(
@@ -333,10 +304,8 @@ impl Analyser {
             BindingPattern::Identifier { span, .. } => {
                 // The value is checked like an assignment to the annotated
                 // variable, so `let o: Option<Int> = None` settles `None`.
-                if let Some(expected_type) = &expected_type
-                    && !self.accepts_write(expected_type, &found_type, Some(lvalue.id))
-                {
-                    self.emit_rejected_write(expected_type, &found_type, *span);
+                if let Some(expected_type) = &expected_type {
+                    self.check_write(expected_type, &found_type, *span, Some(lvalue.id));
                 }
 
                 // An annotation decides the type, or else the value does.

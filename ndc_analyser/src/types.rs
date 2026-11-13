@@ -182,8 +182,7 @@ pub(crate) struct Snapshot {
 impl TypeVars {
     /// A new variable, which becomes `fallback` if nothing settles it.
     pub(crate) fn fresh(&mut self, fallback: StaticType) -> StaticType {
-        let var =
-            TypeVar(u32::try_from(self.solutions.len()).expect("fewer than 2^32 type variables"));
+        let var = self.next_var();
         self.solutions.push(None);
         self.fallbacks.push(fallback);
         self.levels.push(self.level);
@@ -451,18 +450,27 @@ impl TypeVars {
         let Some(defaults) = self.literal_defaults(var) else {
             return true;
         };
-        defaults.iter().any(|default| {
-            if self
-                .resolve(default)
-                .contains(&|part| *part == StaticType::Var(var))
-            {
-                return false;
-            }
-            let snapshot = self.snapshot();
-            let fits = self.settle(var, default.clone());
+        let snapshot = self.snapshot();
+        let fits = defaults.iter().any(|default| self.try_settle(var, default));
+        self.rollback(snapshot);
+        fits
+    }
+
+    /// Settles `var` as `typ` if `typ` is within its bounds, and returns
+    /// whether it did. A variable can't stand for a type that contains it.
+    fn try_settle(&mut self, var: TypeVar, typ: &StaticType) -> bool {
+        if self
+            .resolve(typ)
+            .contains(&|part| *part == StaticType::Var(var))
+        {
+            return false;
+        }
+        let snapshot = self.snapshot();
+        let settled = self.settle(var, typ.clone());
+        if !settled {
             self.rollback(snapshot);
-            fits
-        })
+        }
+        settled
     }
 
     /// What the unsettled literal type `var` is shown as: what it would be
@@ -569,11 +577,7 @@ impl TypeVars {
             if made.iter().any(|(generic, _)| generic == name) {
                 continue;
             }
-            let is_number = bounds
-                .0
-                .iter()
-                .any(|bound| matches!(bound, Bound::Number(..)));
-            let typ = self.fresh(if is_number {
+            let typ = self.fresh(if bounds.is_number() {
                 StaticType::Int
             } else {
                 StaticType::Any
@@ -822,22 +826,7 @@ impl TypeVars {
                 Some(defaults) if !self.bounds[var.0 as usize].is_empty() => defaults,
                 _ => vec![self.fallbacks[var.0 as usize].clone()],
             };
-            let settled = defaults.iter().any(|default| {
-                // A variable can't stand for a type that contains it.
-                if self
-                    .resolve(default)
-                    .contains(&|part| *part == StaticType::Var(var))
-                {
-                    return false;
-                }
-                let snapshot = self.snapshot();
-                let settled = self.settle(var, default.clone());
-                if !settled {
-                    self.rollback(snapshot);
-                }
-                settled
-            });
-            if !settled {
+            if !defaults.iter().any(|default| self.try_settle(var, default)) {
                 // `Any` takes anything a literal holds.
                 self.settle(var, StaticType::Any);
             }
@@ -931,6 +920,45 @@ impl TypeVars {
         self.instantiate_with(typ, &mut Vec::new())
     }
 
+    /// The parameters and return type of the function type `typ`, with new
+    /// variables for its type parameters, or `None` when `typ` isn't a
+    /// function whose parameters are known.
+    pub(crate) fn instantiate_signature(
+        &mut self,
+        typ: &StaticType,
+    ) -> Option<(Vec<StaticType>, StaticType)> {
+        let StaticType::Function {
+            parameters: Some(_),
+            ..
+        } = typ
+        else {
+            return None;
+        };
+        let StaticType::Function {
+            parameters: Some(parameters),
+            return_type,
+        } = self.instantiate(typ)
+        else {
+            unreachable!("instantiating a function type gives a function type");
+        };
+        Some((parameters, *return_type))
+    }
+
+    /// Passes each of `arguments` where its parameter is expected, as
+    /// [`Self::bind_argument`], and returns whether there's one argument
+    /// for each parameter and each fits.
+    pub(crate) fn bind_arguments(
+        &mut self,
+        parameters: &[StaticType],
+        arguments: &[StaticType],
+    ) -> bool {
+        parameters.len() == arguments.len()
+            && parameters
+                .iter()
+                .zip(arguments)
+                .all(|(parameter, argument)| self.bind_argument(parameter, argument))
+    }
+
     /// [`Self::instantiate`], with the variables already made for some type
     /// parameters in `made`, which gets the ones made for the others. A
     /// generic function's constraints are instantiated with its signature.
@@ -939,16 +967,7 @@ impl TypeVars {
         typ: &StaticType,
         made: &mut Vec<(Box<str>, StaticType)>,
     ) -> StaticType {
-        let names = std::cell::RefCell::new(Vec::<Box<str>>::new());
-        typ.contains(&|part| {
-            if let StaticType::Generic(name) = part
-                && !names.borrow().contains(name)
-            {
-                names.borrow_mut().push(name.clone());
-            }
-            false
-        });
-        for name in names.into_inner() {
+        for name in typ.type_parameters() {
             if !made.iter().any(|(generic, _)| *generic == name) {
                 let var = self.fresh(StaticType::Any);
                 made.push((name, var));

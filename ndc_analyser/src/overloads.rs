@@ -49,13 +49,30 @@ struct ScalarWalk {
     all_by_name: Vec<SymbolId>,
 }
 
-/// Whether a value of type `arg` might be accepted where `param` is expected
-/// when the program runs: an `Any` might turn out to be anything, and the
-/// parts of either type not known yet could be anything. A lambda
-/// `fn(x) => x * 2` can be passed for an `Fn(Int) -> Int`, but
-/// `fn(x: String) => 1` can't, and neither can a function of two arguments.
-fn could_pass(param: &StaticType, arg: &StaticType) -> bool {
-    arg.may_fit(param)
+/// Whether a value of type `typ` could still accept a call with this
+/// signature at runtime: its type is `Any`, a variadic function, or a function whose
+/// parameters don't provably conflict with `sig`: an `Any` might turn
+/// out to be anything, and the parts of either type not known yet could
+/// be anything. A lambda `fn(x) => x * 2` can be passed for an
+/// `Fn(Int) -> Int`, but `fn(x: String) => 1` can't.
+fn could_take(typ: &StaticType, sig: &[StaticType]) -> bool {
+    match typ {
+        StaticType::Function {
+            parameters: Some(parameters),
+            ..
+        } => {
+            parameters.len() == sig.len()
+                && parameters
+                    .iter()
+                    .zip(sig)
+                    .all(|(param, arg)| arg.may_fit(param))
+        }
+        StaticType::Function {
+            parameters: None, ..
+        } => true,
+        // A value whose type isn't known may hold a function.
+        unknown => unknown.is_unknown(),
+    }
 }
 
 /// Returns `true` iff `more` is strictly more specific than `less`: each of
@@ -356,7 +373,7 @@ impl<'a> Overloads<'a> {
         if walk
             .all_by_name
             .iter()
-            .any(|&symbol| self.could_accept_call(symbol, sig))
+            .any(|&symbol| could_take(&self.type_of(symbol), sig))
         {
             let candidates = walk
                 .all_by_name
@@ -457,28 +474,17 @@ impl<'a> Overloads<'a> {
             .filter(|&symbol| self.type_of(symbol).is_fn_and_matches(sig))
             .collect::<Vec<_>>();
 
-        let params_of = |symbol: SymbolId| -> Option<Vec<StaticType>> {
-            match self.type_of(symbol).into_owned() {
-                StaticType::Function {
-                    parameters: Some(p),
-                    ..
-                } => Some(p),
-                // Variadic / non-function bindings have no concrete shape.
-                _ => None,
-            }
-        };
-
         // `group` is newest first, so ties resolve to the most-recently registered overload.
         matches.iter().copied().find(|&i| {
-            let Some(pi) = params_of(i) else {
+            let Some(pi) = self.parameters_of(i) else {
                 // Variadic only wins if every other match is also variadic.
-                return matches.iter().all(|&j| params_of(j).is_none());
+                return matches.iter().all(|&j| self.parameters_of(j).is_none());
             };
             matches.iter().all(|&j| {
                 if i == j {
                     return true;
                 }
-                let Some(pj) = params_of(j) else {
+                let Some(pj) = self.parameters_of(j) else {
                     // Variadic never dominates a concrete overload.
                     return true;
                 };
@@ -489,7 +495,7 @@ impl<'a> Overloads<'a> {
 
     /// The parameter types of `symbol`, if it's a function that isn't
     /// variadic.
-    fn parameters_of(self, symbol: SymbolId) -> Option<Vec<StaticType>> {
+    pub(crate) fn parameters_of(self, symbol: SymbolId) -> Option<Vec<StaticType>> {
         match self.type_of(symbol).into_owned() {
             StaticType::Function {
                 parameters: Some(parameters),
@@ -553,18 +559,7 @@ impl<'a> Overloads<'a> {
     /// with `sig`, so it might accept the call at runtime.
     fn is_compatible(self, symbol: SymbolId, sig: &[StaticType]) -> bool {
         let typ = self.type_of(symbol);
-        let StaticType::Function { parameters, .. } = typ.as_ref() else {
-            return false;
-        };
-        // A variadic function accepts any arguments.
-        let Some(parameters) = parameters else {
-            return true;
-        };
-        parameters.len() == sig.len()
-            && parameters
-                .iter()
-                .zip(sig)
-                .all(|(param, arg)| could_pass(param, arg))
+        matches!(typ.as_ref(), StaticType::Function { .. }) && could_take(&typ, sig)
     }
 
     /// Try to resolve a vec candidate set for `sig`.
@@ -639,29 +634,6 @@ impl<'a> Overloads<'a> {
             push_unique(&mut out, symbol);
         }
         out
-    }
-
-    /// Whether a candidate could still accept a call with this signature at
-    /// runtime: its type is `Any`, a variadic function, or a function whose
-    /// parameters don't provably conflict with `sig`.
-    fn could_accept_call(self, symbol: SymbolId, sig: &[StaticType]) -> bool {
-        match self.type_of(symbol).as_ref() {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } => {
-                parameters.len() == sig.len()
-                    && parameters
-                        .iter()
-                        .zip(sig)
-                        .all(|(param, arg)| could_pass(param, arg))
-            }
-            StaticType::Function {
-                parameters: None, ..
-            } => true,
-            // A value whose type isn't known may hold a function.
-            unknown => unknown.is_unknown(),
-        }
     }
 
     /// Return type of a scalar candidate. Falls back to `Any` if the binding
