@@ -1,0 +1,4 @@
+// A proven optional cast is Some, and its type is an Option of the target.
+// expect-output: 3
+let n: Option<Int> = 3 as? Int;
+print(n.unwrap());

@@ -1,0 +1,12 @@
+// `as?` tests the type of a value.
+// expect-output: int string other
+fn describe(value: Any) {
+    if (value as? Int).is_some() {
+        "int"
+    } else if (value as? String).is_some() {
+        "string"
+    } else {
+        "other"
+    }
+}
+print(describe(1), describe("a"), describe([1]));

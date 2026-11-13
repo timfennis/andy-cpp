@@ -534,6 +534,37 @@ fn a_proven_cast_needs_no_runtime_check() {
     );
 }
 
+// let x: Any = 1; x as? Int
+//
+// An optional cast tests the value with a TryCast, which gives an option
+// instead of a CheckType guard that fails.
+#[test]
+fn an_unproven_optional_cast_tries_the_type_at_runtime() {
+    let ops = compile_with_analysis("let x: Any = 1; x as? Int");
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, TryCast(t) if **t == ndc_core::StaticType::Int)),
+        "expected a TryCast(Int), got: {ops:?}",
+    );
+    assert!(
+        ops.iter().all(|op| !matches!(op, CheckType(_))),
+        "an optional cast must not emit CheckType, got: {ops:?}",
+    );
+}
+
+// 1 as? Int
+//
+// A proven optional cast is always `Some`, which a TryCast to `Any` makes.
+#[test]
+fn a_proven_optional_cast_is_always_some() {
+    let ops = compile_with_analysis("1 as? Int");
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, TryCast(t) if **t == ndc_core::StaticType::Any)),
+        "expected a TryCast(Any), got: {ops:?}",
+    );
+}
+
 // let a: Any = 1; let n: Int = a;
 //
 // An `Any` stored where an Int is expected is checked before it's stored.

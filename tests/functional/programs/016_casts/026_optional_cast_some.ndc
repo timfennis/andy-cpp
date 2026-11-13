@@ -1,0 +1,4 @@
+// `as?` gives Some of the value when it is the type.
+// expect-output: Some(5)
+let value: Any = 5;
+print(value as? Int);

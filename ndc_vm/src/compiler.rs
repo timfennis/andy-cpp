@@ -246,14 +246,27 @@ impl Compiler {
                 }
                 binding => self.compile_binding(&binding, span)?,
             },
-            Expression::Cast { value, .. } => {
+            Expression::Cast {
+                value, optional, ..
+            } => {
                 self.compile_expr(*value)?;
-                match self.analysis.cast_checks.get(&id) {
+                let check = match self.analysis.cast_checks.get(&id) {
                     None => return Err(CompileError::unresolved_cast(span)),
-                    Some(None) => {}
-                    Some(Some(target)) => {
-                        let target = Rc::new(target.clone());
+                    Some(check) => check.clone().map(Rc::new),
+                };
+                match (check, optional) {
+                    (None, false) => {}
+                    (Some(target), false) => {
                         self.ir.write(OpCode::CheckType(target), span);
+                    }
+                    // A value proven to be the type is always `Some`, as
+                    // every value is an `Any`.
+                    (None, true) => {
+                        self.ir
+                            .write(OpCode::TryCast(Rc::new(StaticType::Any)), span);
+                    }
+                    (Some(target), true) => {
+                        self.ir.write(OpCode::TryCast(target), span);
                     }
                 }
             }

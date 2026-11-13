@@ -1,0 +1,4 @@
+// `as?` gives None when the value is not the type.
+// expect-output: None
+let value: Any = "five";
+print(value as? Int);
