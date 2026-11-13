@@ -253,7 +253,7 @@ impl TypeVars {
                 Bound::Number(..) => None,
             })
             .collect::<AHashSet<_>>();
-        literals.sort_by_key(|&var| (self.is_number(var), held.contains(&var)));
+        literals.sort_by_cached_key(|&var| (self.is_number(var), held.contains(&var)));
         literals
     }
 
