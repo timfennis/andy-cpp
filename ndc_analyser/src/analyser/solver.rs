@@ -1778,7 +1778,9 @@ impl Analyser {
                         _ => return None,
                     };
                 match sequence {
-                    StaticType::Var(var) if !self.vars.is_literal(var) => Some((sequence, element)),
+                    // A literal whose type isn't known yet either, as the
+                    // element of `[1][0]` is, waits like any other value.
+                    StaticType::Var(_) => Some((sequence, element)),
                     _ => None,
                 }
             })

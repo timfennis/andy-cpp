@@ -404,9 +404,14 @@ impl Value {
     fn is_a(&self, target: &StaticType) -> bool {
         if let StaticType::Function { .. } = target
             && let Self::Object(object) = self
-            && let Object::Function(function) = object.as_ref()
         {
-            return function.fit(target) == FunctionFit::Proven;
+            match object.as_ref() {
+                Object::Function(function) => return function.fit(target) == FunctionFit::Proven,
+                // The overloads of a function the analyser couldn't pick
+                // from, of which the program picks one for each call.
+                Object::OverloadSet { .. } => return true,
+                _ => {}
+            }
         }
         match (target, self.static_type()) {
             (StaticType::Iterator(_), StaticType::Iterator(_)) => true,

@@ -807,6 +807,36 @@ impl Vm {
         }
     }
 
+    /// Calls the overload of `overloads` that accepts `args`, inline on this
+    /// VM, as a callback from a native function.
+    fn call_overloads_back(
+        &mut self,
+        overloads: Rc<Object>,
+        args: &[Value],
+    ) -> Result<Value, VmError> {
+        let n = args.len();
+        self.stack.push(Value::Object(overloads));
+        self.stack.extend(args.iter().cloned());
+        let picked = self.resolve_callee(n).map_err(VmError::native)?;
+        let Some(function) = picked else {
+            let types = args
+                .iter()
+                .map(|arg| arg.static_type().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let name = self.callee_name(n).unwrap_or_else(|| "?".to_string());
+            self.stack.truncate(self.stack.len() - n - 1);
+            return Err(VmError::native(format!(
+                "no function called '{name}' found matches the arguments: ({types})"
+            )));
+        };
+        let depth = self.frames.len();
+        if self.dispatch_call(function, n)? == Dispatch::FramePushed {
+            self.run_to_depth(depth)?;
+        }
+        Ok(self.stack.pop().expect("callback must produce a value"))
+    }
+
     /// Returns the expression result left on top of the stack after `run()`.
     /// If the last top-level expression was a statement (semicolon-terminated)
     /// its value was already popped, so the stack is exactly `num_locals` deep
@@ -1205,15 +1235,30 @@ impl CallFrame {
 /// Calling `call()` runs the function inline on the parent VM via
 /// `Vm::call_callback` — no child VM is allocated.
 pub struct VmCallable<'a> {
-    pub function: Function,
+    pub function: Callback,
     pub vm: &'a mut Vm,
+}
+
+/// What a native function calls back.
+pub enum Callback {
+    /// A function.
+    Function(Function),
+    /// The overloads of a function, one of which the program picks for each
+    /// call's arguments: an overloaded function's name used as a value where
+    /// the analyser couldn't tell which one is meant.
+    Overloads(Rc<Object>),
 }
 
 impl VmCallable<'_> {
     /// Call this function with the given arguments, running inline on the
     /// parent VM.
     pub fn call(&mut self, args: &[Value]) -> Result<Value, VmError> {
-        self.vm.call_callback(self.function.clone(), args)
+        match &self.function {
+            Callback::Function(function) => self.vm.call_callback(function.clone(), args),
+            Callback::Overloads(overloads) => {
+                self.vm.call_overloads_back(Rc::clone(overloads), args)
+            }
+        }
     }
 }
 
