@@ -1,0 +1,5 @@
+// `nest` for an Int would need `nest` for a list of Ints, which needs one
+// for lists of those, without end, so the recursive call is the error.
+// expect-error: `nest` calls itself with an argument built from what it was given
+fn nest(x, n) { if n == 0 { x } else { nest([x], n - 1) } }
+nest(1, 3);

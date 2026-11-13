@@ -253,6 +253,17 @@ shout("a");    // error: No function called '+' found that matches the arguments
 
 What the body can do with a parameter can make its type known right away: `xs.push(1)` only works on a list of Ints, so `fn f(xs) { xs.push(1) }` takes a `List<Int>`.
 
+A recursive call has to pass the types the function was called with. One that passes something built from a parameter would need a version of the function for every deeper type, so it's an error. Annotate the parameter with `Any` to let it change as the program runs:
+
+```ndc,fails
+fn nest(x, n) { if n == 0 { x } else { nest([x], n - 1) } }   // error: `nest` calls itself with an argument built from what it was given
+```
+
+```ndc
+fn nest(x: Any, n) { if n == 0 { x } else { nest([x], n - 1) } }
+print(nest(1, 3));   // [[[1]]]
+```
+
 Only a function declared in the program itself is generic. One declared in another function or in a block has one type, like a lambda in a variable, and its first call decides it:
 
 ```ndc,fails
@@ -345,7 +356,7 @@ When nothing says which overload is meant, it's an error that asks for a functio
 let g = split;      // error: 'split' has several overloads, and nothing here says which one is meant
 ```
 
-`print(abs)` is the same error, as `print` takes any value.
+`print(abs)` is the same error, as `print` takes any value, and so is `[len, abs]`: the other values of a list don't say which overload is meant.
 
 Like a call, a value uses the nearest scope with an overload that fits.
 

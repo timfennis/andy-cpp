@@ -122,6 +122,20 @@ impl AnalysisError {
         }
     }
 
+    pub(crate) fn recursion_changes_types(function: &str, span: Span) -> Self {
+        Self {
+            text: format!(
+                "`{function}` calls itself with an argument built from what it was given, so each call would need a version of `{function}` for a deeper type"
+            ),
+            span,
+            help_text: Some(
+                "A recursive call has to pass the types the function was called with. Annotate the parameter with `Any` to let them change as the program runs"
+                    .to_string(),
+            ),
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn iterable_outside_a_parameter(span: Span) -> Self {
         Self {
             text: "`Iterable<T>` can only be the type of a parameter".to_string(),

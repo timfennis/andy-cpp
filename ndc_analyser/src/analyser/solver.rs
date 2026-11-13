@@ -1117,6 +1117,37 @@ impl Analyser {
             .collect::<Vec<_>>();
         let reachable = self.overloads().reachable_symbols(&call.candidates);
 
+        // A generic function that calls itself with an argument made from
+        // the parameter it's passed for, as `nest([x], n - 1)` in `fn
+        // nest(x, n)`, would need a version of itself for `x`'s type, one
+        // for lists of it, one for lists of those, without end.
+        if let Some(function) = self.declaring
+            && self.copied_through.is_none()
+            && self.recording.is_none()
+            && reachable.contains(&function)
+            && let StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } = self.vars.resolve(self.types.get_type(function))
+            && parameters.len() == arguments.len()
+            && parameters
+                .iter()
+                .zip(&arguments)
+                .any(|(parameter, argument)| {
+                    matches!(parameter, StaticType::Var(var)
+                    if *argument != *parameter && self.vars.is_made_from(argument, *var))
+                })
+        {
+            let name = self.resolver.symbol_name(function).to_string();
+            self.emit(AnalysisError::recursion_changes_types(&name, call.span));
+            self.record_pick(
+                call.site,
+                Binding::Resolved(Candidate::Scalar(function)),
+                &call.arguments,
+            );
+            return Some(StaticType::Any);
+        }
+
         // A variable whose type isn't known yet, like the parameter `f` in
         // `fn(f) => f(1)`, holds a function that takes these arguments.
         if let [only] = reachable[..]
