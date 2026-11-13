@@ -211,6 +211,14 @@ impl Analyser {
                 .analysis
                 .inferred_return_types
                 .insert(id, inferred_return.clone());
+            // A lambda's value says what it returns, which tells whether it's
+            // a function type an `Any` is used as without checking its calls.
+            if declared.is_none()
+                && let Some(StaticType::Function { return_type, .. }) =
+                    self.result.analysis.function_types.get_mut(&id)
+            {
+                **return_type = inferred_return.clone();
+            }
         }
 
         // A named function's value is checked as the program runs against

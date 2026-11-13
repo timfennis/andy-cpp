@@ -397,26 +397,41 @@ impl Value {
 
     /// Whether this value is a `target`, a type that holds no other values
     /// as a container does: a scalar, a struct, a function or an iterator.
-    /// What a function takes and returns can't be checked as the program
-    /// runs, only how many arguments it takes, and what an iterator makes
-    /// can't be either without making it.
+    /// A function is one if its own type says so (see [`Function::fit`]):
+    /// only [`Self::converted_to`] can make one that may be one a function
+    /// whose calls are checked. What an iterator makes can't be checked
+    /// without making it.
     fn is_a(&self, target: &StaticType) -> bool {
+        if let StaticType::Function { .. } = target
+            && let Self::Object(object) = self
+            && let Object::Function(function) = object.as_ref()
+        {
+            return function.fit(target) == FunctionFit::Proven;
+        }
         match (target, self.static_type()) {
-            (
-                StaticType::Function {
-                    parameters: expected,
-                    ..
-                },
-                StaticType::Function {
-                    parameters: takes, ..
-                },
-            ) => match (expected, takes) {
-                (Some(expected), Some(takes)) => expected.len() == takes.len(),
-                _ => true,
-            },
             (StaticType::Iterator(_), StaticType::Iterator(_)) => true,
             (target, found) => found == *target,
         }
+    }
+
+    /// This value as a `target`, if it is one, checking every element of a
+    /// container: a function that may be a function `target` is wrapped so
+    /// that each call checks what it returns.
+    pub fn converted_to(&self, target: &StaticType) -> Option<Self> {
+        if let StaticType::Function { .. } = target
+            && let Self::Object(object) = self
+            && let Object::Function(function) = object.as_ref()
+        {
+            return match function.fit(target) {
+                FunctionFit::Proven => Some(self.clone()),
+                FunctionFit::IfChecked => Some(Self::function(Function::Checked {
+                    function: Rc::new(function.unchecked().clone()),
+                    typ: Box::new(target.clone()),
+                })),
+                FunctionFit::No => None,
+            };
+        }
+        self.conforms_to(target).then(|| self.clone())
     }
 
     /// Check whether this value conforms to `target`, scanning container
@@ -1098,7 +1113,7 @@ impl PartialEq for Object {
             ) => a_entries.borrow().eq(&*b_entries.borrow()),
             (Self::Function(a), Self::Function(b)) => {
                 // Compare function values by identity (pointer equality)
-                match (a, b) {
+                match (a.unchecked(), b.unchecked()) {
                     (Function::Compiled(a), Function::Compiled(b)) => {
                         std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
                     }
@@ -1187,7 +1202,7 @@ impl Hash for Object {
             }
             Self::Function(f) => {
                 state.write_u8(9);
-                match f {
+                match f.unchecked() {
                     Function::Compiled(func) => {
                         state.write_u8(1);
                         Rc::as_ptr(func).hash(state);
@@ -1204,6 +1219,7 @@ impl Hash for Object {
                         state.write_u8(4);
                         Rc::as_ptr(cache).hash(state);
                     }
+                    Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
                 }
             }
             Self::OverloadSet { .. } => {

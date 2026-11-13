@@ -1,0 +1,8 @@
+// An overload picked as the program runs doesn't take a function of type
+// `Any` whose own type doesn't show it fits the parameter.
+// expect-error: no function called 'h' found matches the arguments
+fn h(f: Fn(Int) -> Int) => f(1) + 1;
+fn h(x: Int) => x;
+fn text(x) => "s";
+let a: Any = text;
+print(h(a));

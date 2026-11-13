@@ -460,7 +460,15 @@ impl Analyser {
                         .resolve_overloads(&candidates, &arguments, kind)
                         .binding
                     {
-                        Binding::Dynamic(only) if only.len() == 1 => Binding::Resolved(only[0]),
+                        Binding::Dynamic(only)
+                            if let [Candidate::Scalar(only)] = only[..]
+                                && let StaticType::Function {
+                                    parameters: Some(_),
+                                    ..
+                                } = self.vars.resolve(&self.types.callable_type(only)) =>
+                        {
+                            Binding::Resolved(Candidate::Scalar(only))
+                        }
                         binding => binding,
                     };
                     assert!(
@@ -1537,6 +1545,22 @@ impl Analyser {
             binding,
             return_type,
         } = self.resolve_overloads(&call.candidates, arguments, call.kind);
+        // A pick left to the program among one function with known
+        // parameters is a call of it, whose `Any` arguments are checked where
+        // they're passed. A variable of type `Any` may hold any function, so
+        // the program checks the arguments against the one it holds.
+        let binding = match binding {
+            Binding::Dynamic(only)
+                if let [Candidate::Scalar(only)] = only[..]
+                    && let StaticType::Function {
+                        parameters: Some(_),
+                        ..
+                    } = self.vars.resolve(&self.types.callable_type(only)) =>
+            {
+                Binding::Resolved(Candidate::Scalar(only))
+            }
+            binding => binding,
+        };
         if matches!(binding, Binding::None) {
             self.report_failed_call(call, arguments);
             self.record_pick(call.site, binding, arguments);

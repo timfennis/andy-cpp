@@ -8,6 +8,7 @@ use crate::iterator::{
 use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{ClosureFunction, Object, Value};
 use ndc_analysis::{CaptureSource, ResolvedVar};
+use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -218,8 +219,8 @@ impl Vm {
                         .push(frame.closure.prototype.body.constant(idx).clone());
                 }
                 OpCode::CheckType(target) => {
-                    let value = self.stack.last().expect("stack underflow");
-                    if !value.conforms_to(target) {
+                    if !convert_top(&mut self.stack, target) {
+                        let value = self.stack.last().expect("stack underflow");
                         return Err(VmError::new(
                             format!("cannot cast {} to {target}", value.diagnostic_type()),
                             span,
@@ -227,8 +228,8 @@ impl Vm {
                     }
                 }
                 OpCode::ExpectType(target) => {
-                    let value = self.stack.last().expect("stack underflow");
-                    if !value.conforms_to(target) {
+                    if !convert_top(&mut self.stack, target) {
+                        let value = self.stack.last().expect("stack underflow");
                         return Err(VmError::new(
                             format!("expected {target} but found {}", value.diagnostic_type()),
                             span,
@@ -667,6 +668,33 @@ impl Vm {
         }
     }
 
+    /// Calls the function a [`Function::Checked`] checks to completion, and
+    /// checks that what it returns is what the function type it's used as
+    /// says.
+    #[cold]
+    fn call_checked(
+        &mut self,
+        function: Rc<Function>,
+        typ: StaticType,
+        args: usize,
+    ) -> Result<Dispatch, VmError> {
+        let StaticType::Function { return_type, .. } = typ else {
+            unreachable!("a checked function is used as a function type");
+        };
+        let depth = self.frames.len();
+        if self.dispatch_call(Rc::unwrap_or_clone(function), args)? == Dispatch::FramePushed {
+            self.run_to_depth(depth)?;
+        }
+        let returned = self.stack.last().expect("a call leaves its result");
+        if returned.conforms_to(&return_type) {
+            return Ok(Dispatch::Completed);
+        }
+        Err(VmError::native(format!(
+            "expected the function to return {return_type} but it returned {}",
+            returned.diagnostic_type()
+        )))
+    }
+
     /// Inner helper that pushes a new call frame.  `memo` is `Some` when the
     /// call originates from a memoized function and the return value should be
     /// stored in the cache.
@@ -705,6 +733,7 @@ impl Vm {
                 prototype: f,
                 upvalues: Vec::new(),
             },
+            Function::Checked { function, typ } => return self.call_checked(function, *typ, args),
             Function::Memoized { .. } => {
                 // Already unwrapped in dispatch_call; this branch is unreachable.
                 unreachable!(
@@ -1168,4 +1197,21 @@ fn bad_range_bound(value: &Value) -> String {
         return "Integer too large for range bounds".to_string();
     }
     format!("range bounds must be Int, got {}", value.diagnostic_type())
+}
+
+/// Checks that the value on top of `stack` is a `target`, and makes it one:
+/// a function that may be a function `target` gets its calls checked (see
+/// [`Value::converted_to`]).
+fn convert_top(stack: &mut [Value], target: &StaticType) -> bool {
+    let value = stack.last_mut().expect("stack underflow");
+    if !matches!(target, StaticType::Function { .. }) {
+        return value.conforms_to(target);
+    }
+    match value.converted_to(target) {
+        Some(converted) => {
+            *value = converted;
+            true
+        }
+        None => false,
+    }
 }

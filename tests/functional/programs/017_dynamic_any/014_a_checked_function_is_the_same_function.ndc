@@ -1,0 +1,7 @@
+// A function of type `Any` used as a function type is the same function: it
+// equals itself, and a call that returns what's expected works.
+// expect-output: 3 true true
+fn inc(x) => x + 1;
+let a: Any = inc;
+let f: Fn(Int) -> Int = a;
+print(f(2), f == inc, a == f);
