@@ -242,13 +242,18 @@ print(a, b, i);                        // 2 3.5 55
 
 The body is compiled for each set of types it's called with, so the calls in it are picked when the program is compiled, not as it runs. Called with a value of type `Any`, the function picks them as it runs.
 
-A number literal in the body that meets a parameter takes its type from each call, as a literal written at the call would:
+A number literal in the body is typed by the body alone, as one anywhere else is, and never by a call: the `1` in `inc` is an `Int` whatever `inc` is given. So a literal that a result is made of fixes that result's type. `fact` returns the `1` or a product, which can only be one type, an `Int`, so it doesn't take a `Float`:
+
+```ndc,fails
+fn fact(n) => if n < 2 { 1 } else { n * fact(n - 1) };
+let r = fact(5.0);   // error: mismatched types: found Float but expected Int
+```
+
+Write `1.0` for a `fact` of `Float`s, which works for `Int`s too, as a `Float` times an `Int` is a `Float`:
 
 ```ndc
-fn fact(n) => if n < 2 { 1 } else { n * fact(n - 1) };
-fn pair(x) => [x, 1];
-print(fact(5), fact(5.0));    // 120 120.0
-print(pair(2), pair(2.5));    // [2,1] [2.5,1.0]
+fn fact(n) => if n < 2 { 1.0 } else { n * fact(n - 1) };
+print(fact(5), fact(5.0));    // 120.0 120.0
 ```
 
 A call with an argument the body can't use is an error at the call, with a note on the line in the body that can't take it:

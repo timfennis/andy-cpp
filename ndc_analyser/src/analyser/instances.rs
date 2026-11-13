@@ -9,7 +9,6 @@
 use super::Analyser;
 use super::solver::{CallSite, Constraint, Origin, Waiting};
 use crate::error::AnalysisError;
-use crate::types::LiteralBounds;
 use ahash::AHashMap;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType};
@@ -34,15 +33,6 @@ pub(super) struct Scheme {
     pub(super) declaration: NodeId,
     /// The calls its body makes of itself, which have its own types.
     pub(super) recursive_calls: Rc<[NodeId]>,
-    /// Its type parameters that are the types of literals in its body,
-    /// with their bounds, which each call settles as a literal there would
-    /// be: the `1` in `fn fact(n) => if n < 2 { 1 } else { n * fact(n - 1)
-    /// }` is a Float for `fact(5.0)`.
-    pub(super) literals: Rc<[(Box<str>, LiteralBounds)]>,
-    /// The integer literals in its body whose type is one of its type
-    /// parameters, with that type, which an instance records its own types
-    /// for.
-    pub(super) literal_nodes: Rc<[(NodeId, StaticType)]>,
     /// The values its body checks as the program runs against a type that
     /// has its type parameters in it, with their types and that type, which
     /// an instance checks against what its types make it.
@@ -237,23 +227,14 @@ impl Analyser {
     /// The instance of `function` for these types of its key: the function
     /// itself when they're all `Any`, as its own body picks its calls as the
     /// program runs, or when it was declared by an earlier batch, which
-    /// compiled it already. Its own body's integer literals are Ints, so an
-    /// integer literal's type parameter may be one.
+    /// compiled it already.
     fn instance_for(
         &mut self,
         function: SymbolId,
         key: Vec<StaticType>,
         new: &mut Vec<(SymbolId, SymbolId, Vec<StaticType>)>,
     ) -> SymbolId {
-        let scheme = &self.schemes[&function];
-        let is_own = scheme.key.iter().zip(&key).all(|(name, typ)| {
-            *typ == StaticType::Any
-                || (*typ == StaticType::Int
-                    && scheme
-                        .literals
-                        .iter()
-                        .any(|(literal, bounds)| literal == name && bounds.is_number()))
-        });
+        let is_own = key.iter().all(|typ| *typ == StaticType::Any);
         if is_own || !self.declared_in_batch.contains(&function) {
             return function;
         }
@@ -292,7 +273,6 @@ impl Analyser {
             .collect::<Vec<_>>();
         let outer = self.recording.replace(instance);
         let first = self.vars.count();
-        self.vars.instantiate_literals(&scheme.literals, &mut made);
         for waiting in scheme.constraints.iter() {
             let mut copy = Waiting {
                 constraint: waiting
@@ -330,17 +310,6 @@ impl Analyser {
             });
         }
         self.settle_waiting(first);
-        let literal_types = scheme
-            .literal_nodes
-            .iter()
-            .map(|(node, typ)| {
-                let typ = self.vars.instantiate_with(typ, &mut made);
-                (*node, self.vars.resolve(&typ))
-            })
-            .collect::<Vec<_>>();
-        if let Some(picks) = self.picks.instances.get_mut(&instance) {
-            picks.literal_types.extend(literal_types);
-        }
         self.recording = outer;
     }
 }

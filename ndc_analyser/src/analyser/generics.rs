@@ -10,8 +10,8 @@ use super::instances::Scheme;
 use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
-use crate::types::{LiteralBounds, TypeVars};
-use ahash::{AHashMap, AHashSet};
+use crate::types::TypeVars;
+use ahash::AHashSet;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
@@ -29,24 +29,22 @@ impl Analyser {
     /// `signature`, and returns its type with its type parameters: each
     /// variable its body made that nothing outside it refers to becomes
     /// one, and the constraints still waiting on them become the function's.
-    /// A variable those constraints wait on but that the parameters don't
-    /// decide, like the element type of `[]` in `fn f(x) { [].push(x) }`,
-    /// can't be decided by a call either, so it's settled here first, as at
-    /// the end of the program.
+    /// The body's literals are typed by the body alone, as at the end of
+    /// the program: the `1` in `fn inc(x) => x + 1` is an Int, whatever
+    /// `x` is. A variable the constraints wait on but that the parameters
+    /// don't decide, like the element type of `[]` in `fn f(x) {
+    /// [].push(x) }`, can't be decided by a call either, so it's settled
+    /// here too.
     pub(super) fn generalize(
         &mut self,
         symbol: SymbolId,
         signature: &StaticType,
         declaration: NodeId,
-        [first_use, first_literal, first_check]: [usize; 3],
+        [first_use, first_check]: [usize; 2],
     ) -> StaticType {
         self.solve_waiting();
-        // A literal in the body that its type parameters don't reach has
-        // one type, which a call can't change. The others are type
-        // parameters, which each call settles.
-        let tied = self.literals_tied_to_parameters(signature);
-        self.default_literals(|vars, var| vars.is_generalizable(var) && !tied.contains(&var));
-        self.settle_ambiguous(signature, &tied);
+        self.default_literals(TypeVars::is_generalizable);
+        self.settle_ambiguous(signature);
         self.merge_copies();
 
         let scheme = self
@@ -92,68 +90,12 @@ impl Analyser {
             }
         }
         let mut named = 0;
-        let mut literals: Vec<(Box<str>, LiteralBounds)> = Vec::new();
-        let mut seen = parameters.iter().copied().collect::<AHashSet<_>>();
-        // The integer literals one literal holds have one type, `[x, 1, 2]`
-        // holds Ints or Floats, so they're one type parameter, named for
-        // the first of them.
-        let mut first_number = AHashMap::<TypeVar, TypeVar>::new();
-        let mut names = AHashMap::<TypeVar, Box<str>>::new();
-        let mut next = 0;
-        while let Some(&var) = parameters.get(next) {
-            next += 1;
-            // What a literal holds is a type parameter too: the `1` in
-            // `fn g(x) => [x, 1]` is a Float when `x` is.
-            let mut first = None;
-            for held in self.vars.held_vars(var) {
-                if seen.insert(held) {
-                    parameters.push(held);
-                }
-                if self.vars.is_literal(held) && self.vars.is_number(held) {
-                    match first {
-                        None => first = Some(held),
-                        Some(first) if first != held => {
-                            first_number.entry(held).or_insert(first);
-                        }
-                        Some(_) => {}
-                    }
-                }
+        for var in parameters {
+            if self.vars.is_generalizable(var) {
+                self.vars.generalize(var, &type_parameter_name(named));
+                named += 1;
             }
-            if !self.vars.is_generalizable(var) {
-                continue;
-            }
-            if let Some(name) = first_number.get(&var).and_then(|first| names.get(first)) {
-                let name = name.clone();
-                if let Some(bounds) = self.vars.generalize(var, &name)
-                    && let Some((_, first_bounds)) =
-                        literals.iter_mut().find(|(literal, _)| *literal == name)
-                {
-                    first_bounds.extend(bounds);
-                }
-                continue;
-            }
-            let name: Box<str> = type_parameter_name(named).into();
-            if let Some(bounds) = self.vars.generalize(var, &name) {
-                literals.push((name.clone(), bounds));
-            }
-            names.insert(var, name);
-            named += 1;
         }
-        let literals = literals
-            .into_iter()
-            .map(|(name, bounds)| (name, self.vars.resolve_bounds(&bounds)))
-            .collect::<Vec<_>>();
-        // A literal that's tied to a type parameter but that nothing outside
-        // the body sees, like the list in `fn f(x) { let xs = [x]; 0 }`,
-        // takes its default.
-        self.default_literals(TypeVars::is_generalizable);
-        let literal_nodes = self
-            .number_literals
-            .split_off(first_literal)
-            .into_iter()
-            .map(|(node, typ)| (node, self.vars.resolve(&typ)))
-            .filter(|(_, typ)| matches!(typ, StaticType::Generic(_)))
-            .collect::<Vec<_>>();
 
         // A type only the body makes, as of a list nothing else uses, gets
         // its fallback.
@@ -206,13 +148,12 @@ impl Analyser {
             .collect::<Vec<_>>();
         // An instance is for the types of the type parameters that what it
         // compiles differently depends on: the constraints and uses it
-        // picks for, the literals typed by a type parameter, and the checks.
+        // picks for, and the checks.
         let mut key: Vec<Box<str>> = Vec::new();
         for typ in scheme
             .iter()
             .flat_map(|waiting| waiting.constraint.inputs())
             .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
-            .chain(literal_nodes.iter().map(|(_, typ)| typ))
             .chain(checks.iter().map(|(_, _, expected)| expected))
         {
             for name in typ.type_parameters() {
@@ -229,75 +170,10 @@ impl Analyser {
                 uses: uses.into(),
                 declaration,
                 recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
-                literals: literals.into(),
-                literal_nodes: literal_nodes.into(),
                 checks: checks.into(),
             },
         );
         self.vars.resolve(signature)
-    }
-
-    /// The literals in the body of the generic function whose type is
-    /// `signature` that its parameters' types reach, through a waiting
-    /// constraint or what a literal holds: the `1` in `fn fact(n) => if n <
-    /// 2 { 1 } else { n * fact(n - 1) }` is what `fact` returns, like `n *
-    /// fact(n - 1)`, and the list in `fn k(x) => [x, "b"]` holds `x`.
-    fn literals_tied_to_parameters(&self, signature: &StaticType) -> AHashSet<TypeVar> {
-        let open = |var: &TypeVar| self.vars.is_generalizable(*var);
-        let literals = self
-            .vars
-            .unsettled_literals(TypeVars::is_generalizable)
-            .into_iter()
-            .collect::<AHashSet<_>>();
-        // The variables that are the same or decide each other: those of one
-        // constraint, and a literal with what it holds.
-        let mut groups = self
-            .generic_constraints()
-            .into_iter()
-            .map(|serial| {
-                let constraint = &self.waiting[&serial].constraint;
-                constraint
-                    .inputs()
-                    .iter()
-                    .chain(constraint.outputs())
-                    .flat_map(|typ| self.vars.unsettled(typ))
-                    .filter(open)
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        for &literal in &literals {
-            let mut group = self.vars.held_vars(literal);
-            group.retain(open);
-            group.push(literal);
-            groups.push(group);
-        }
-        let parameters = match signature {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } => parameters.as_slice(),
-            _ => &[],
-        };
-        let mut reached = parameters
-            .iter()
-            .flat_map(|typ| self.vars.unsettled(typ))
-            .filter(open)
-            .collect::<AHashSet<_>>();
-        loop {
-            let mut changed = false;
-            for group in &groups {
-                if group.iter().any(|var| reached.contains(var)) {
-                    for &var in group {
-                        changed |= reached.insert(var);
-                    }
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        reached.retain(|var| literals.contains(var));
-        reached
     }
 
     /// The waiting constraints that wait on or settle a variable of the
@@ -358,17 +234,12 @@ impl Analyser {
     /// a constraint settles is decided when what it waits on is. An
     /// overloaded function's name used as a value has to be decided in the
     /// body, which is compiled once, so what it waits on counts too.
-    fn ambiguous_vars(
-        &self,
-        parameters: &[StaticType],
-        tied: &AHashSet<TypeVar>,
-    ) -> Vec<(u64, Vec<TypeVar>)> {
+    fn ambiguous_vars(&self, parameters: &[StaticType]) -> Vec<(u64, Vec<TypeVar>)> {
         let serials = self.generic_constraints();
         let mut decided = parameters
             .iter()
             .flat_map(|typ| self.vars.unsettled(typ))
             .filter(|&var| self.vars.is_generalizable(var))
-            .chain(tied.iter().copied())
             .collect::<AHashSet<_>>();
         loop {
             let mut changed = false;
@@ -411,7 +282,7 @@ impl Analyser {
     /// that its parameters don't decide, like the end of the program
     /// settles its own: a call that a default rule decides is decided by it,
     /// and what's left gets its fallbacks, oldest constraint first.
-    fn settle_ambiguous(&mut self, signature: &StaticType, tied: &AHashSet<TypeVar>) {
+    fn settle_ambiguous(&mut self, signature: &StaticType) {
         let parameters = match signature {
             StaticType::Function {
                 parameters: Some(parameters),
@@ -420,7 +291,7 @@ impl Analyser {
             _ => Vec::new(),
         };
         loop {
-            let ambiguous = self.ambiguous_vars(&parameters, tied);
+            let ambiguous = self.ambiguous_vars(&parameters);
             let Some((_, vars)) = ambiguous.first().cloned() else {
                 return;
             };
@@ -475,8 +346,8 @@ impl Analyser {
     fn merge_copies(&mut self) {
         let serials = self.generic_constraints();
         let mut kept: Vec<u64> = Vec::new();
-        // A call's arguments and result, as one type, so copies of one
-        // literal in them become one, as they're settled the same way.
+        // A call's arguments and result, as one type, so the two calls'
+        // results become one.
         let call_types = |call: &CallConstraint| {
             StaticType::Tuple(
                 call.arguments()

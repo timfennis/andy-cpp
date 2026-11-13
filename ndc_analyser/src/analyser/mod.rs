@@ -75,9 +75,6 @@ pub struct Analyser {
     declaring: Option<SymbolId>,
     /// The calls its body makes of itself.
     recursive_calls: Vec<NodeId>,
-    /// The integer literals in the batch, with their types, which a
-    /// generic function's instances may give types of their own.
-    number_literals: Vec<(NodeId, StaticType)>,
     /// The nodes of overloaded function values that waited for the type
     /// expected of them, as `abs` in `[len, abs]` does.
     waiting_function_values: AHashSet<NodeId>,
@@ -162,7 +159,6 @@ impl Analyser {
             declared_in_batch: AHashSet::new(),
             declaring: None,
             recursive_calls: Vec::new(),
-            number_literals: Vec::new(),
             waiting_function_values: AHashSet::new(),
             expected_parameters: AHashMap::new(),
             copied_through: None,
@@ -198,7 +194,6 @@ impl Analyser {
             self.check_early_picks();
         }
         self.failed_reads.clear();
-        self.number_literals.clear();
         self.waiting_function_values.clear();
         self.types.resolve_all(&self.vars);
         for (instance, node, typ, expected) in std::mem::take(&mut self.checks) {
@@ -401,11 +396,7 @@ impl Analyser {
                 StaticType::Option(Box::new(self.vars.fresh(StaticType::Any)))
             }
             Expression::StringLiteral(_) => StaticType::String,
-            Expression::NumericLiteral(NumericLiteral::Int64(_)) => {
-                let typ = self.vars.fresh_number(*span);
-                self.number_literals.push((*id, typ.clone()));
-                typ
-            }
+            Expression::NumericLiteral(NumericLiteral::Int64(_)) => self.vars.fresh_number(*span),
             Expression::NumericLiteral(NumericLiteral::Float64(_)) => StaticType::Float,
             Expression::NumericLiteral(
                 NumericLiteral::NumberInt(_)

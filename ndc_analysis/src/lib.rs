@@ -93,11 +93,6 @@ pub struct Instance {
     pub augmented_assignments: AHashMap<NodeId, Binding>,
     /// As [`Analysis::type_checks`], for the instance's body.
     pub type_checks: AHashMap<NodeId, StaticType>,
-    /// The types of the integer literals in the instance's body whose type
-    /// is one of the function's type parameters, in place of the ones in
-    /// [`Analysis::expr_types`]: the `1` in `fn fact(n) => if n < 2 { 1 }
-    /// else { n * fact(n - 1) }` is a Float in the instance for Floats.
-    pub literal_types: AHashMap<NodeId, StaticType>,
 }
 
 impl Analysis {

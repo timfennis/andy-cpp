@@ -215,10 +215,7 @@ impl Compiler {
                 let value = match literal {
                     // An integer literal is what its use made it: `1` in
                     // `[1.5, 1]` is a Float.
-                    NumericLiteral::Int64(i) => match self
-                        .instance_pick(|instance| instance.literal_types.get(&id))
-                        .or_else(|| self.analysis.expr_types.get(&id))
-                    {
+                    NumericLiteral::Int64(i) => match self.analysis.expr_types.get(&id) {
                         Some(StaticType::Float) => Value::float(i as f64),
                         Some(StaticType::Number) => {
                             Value::number(crate::value::AdvancedNumber::Int(i.into()))

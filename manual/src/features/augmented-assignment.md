@@ -132,7 +132,7 @@ print(x); // 8
 One common use case is tracking the highest or lowest value in a loop:
 
 ```ndc
-fn g(x) => (x - 40) ^ 2;
+fn g(x) => (x - 40.0) ^ 2;
 let lowest, highest = Inf, -Inf;
 
 for x in 1..100 {
