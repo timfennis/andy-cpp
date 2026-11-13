@@ -30,18 +30,23 @@ mod inner {
         list.windows(subsequence.len()).contains(&subsequence)
     }
 
-    /// Returns the starting index of the first occurrence of `subsequence` in `list`, or unit if not found.
-    #[function(signature = "<T>(List<T>, List<T>) -> Any")]
-    pub fn find_subsequence(list: &[Value], subsequence: &[Value]) -> Value {
-        let result = list
-            .windows(subsequence.len())
-            .enumerate()
-            .find(|(_, seq)| *seq == subsequence)
-            .map(|(idx, _)| idx);
-        if let Some(result) = result {
-            Value::Int(result as i64)
-        } else {
-            Value::unit()
+    /// Returns the starting index of the first occurrence of `subsequence` in `list`, or produces an error if there is none.
+    #[function(signature = "<T>(List<T>, List<T>) -> Int")]
+    pub fn find_subsequence(list: &[Value], subsequence: &[Value]) -> anyhow::Result<Value> {
+        subsequence_start(list, subsequence)
+            .map(|idx| Value::Int(idx as i64))
+            .ok_or_else(|| anyhow!("the list doesn't contain the subsequence"))
+    }
+
+    /// Returns the starting index of the first occurrence of `subsequence` in `list`, or `None` if there is none.
+    #[function(
+        name = "find_subsequence?",
+        signature = "<T>(List<T>, List<T>) -> Option<Int>"
+    )]
+    pub fn maybe_find_subsequence(list: &[Value], subsequence: &[Value]) -> Value {
+        match subsequence_start(list, subsequence) {
+            None => Value::None,
+            Some(idx) => Value::Object(Rc::new(Object::Some(Value::Int(idx as i64)))),
         }
     }
 
@@ -389,4 +394,14 @@ pub mod ops {
         });
         env.declare_global_fn(native);
     }
+}
+
+/// Where `subsequence` first starts in `list`, if it's in it.
+fn subsequence_start(list: &[Value], subsequence: &[Value]) -> Option<usize> {
+    // An empty subsequence starts anywhere, and `windows` can't be empty.
+    if subsequence.is_empty() {
+        return Some(0);
+    }
+    list.windows(subsequence.len())
+        .position(|window| window == subsequence)
 }

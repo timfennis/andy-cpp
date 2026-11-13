@@ -1,0 +1,8 @@
+// `panic` stops the program and never returns, so it can end a branch whose
+// other branch gives a value.
+// expect-error: no such thing
+fn pick(c) {
+    if c { 1 } else { panic("no such thing") }
+}
+let n: Int = pick(true);
+print(n + pick(false));
