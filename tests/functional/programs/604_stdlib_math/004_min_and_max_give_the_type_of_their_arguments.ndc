@@ -1,0 +1,7 @@
+// `min` and `max` of two values give a value of their type, and a literal
+// takes the other argument's type.
+// expect-output: 2 1.0 3.0
+let a = "ab".len();
+let m: Int = min(a, 5);
+let x = 2.5;
+print(m, min(x, 1), max(x, 3));

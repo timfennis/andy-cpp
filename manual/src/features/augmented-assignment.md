@@ -136,5 +136,5 @@ for x in 1..100 {
   highest max= g(x);
 }
 
-print(lowest, highest);  // 0 3481
+print(lowest, highest);  // 0.0 3481.0
 ```
