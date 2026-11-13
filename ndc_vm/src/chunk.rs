@@ -64,6 +64,7 @@ impl std::fmt::Debug for JumpTarget {
 /// | `JumpIfFalse` | `[… bool → … bool]`                    | 0 (peeks, jumps if false)                  |
 /// | `MakeList`    | `[… v1…vn → … list]`                   | −(n−1)                                     |
 /// | `MakeTuple`   | `[… v1…vn → … tuple]`                  | −(n−1)                                     |
+/// | `MakeOverloads` | `[… f1…fn → … function]`             | −(n−1)                                     |
 /// | `MakeMap`     | `[… k1 v1…kn vn (default?) → … map]`   | −(2n−1) or −2n if `has_default`              |
 /// | `MakeRange`   | `[… start (end?) → … iter]`            | −1 if bounded, 0 if unbounded              |
 /// | `Closure`     | `[… → … closure]`                      | +1                                         |
@@ -119,6 +120,10 @@ pub enum OpCode {
     MakeList(usize),
     /// Pops `n` values, pushes a tuple. `[… v1…vn → … tuple]`
     MakeTuple(usize),
+    /// Pops `n` functions, most specific first, and pushes a function that
+    /// calls the first of them that accepts each call's arguments.
+    /// `[… f1…fn → … function]`
+    MakeOverloads(usize),
     /// Pops `2n` values (+ optional default), pushes a map.
     MakeMap { pairs: usize, has_default: bool },
     /// Pushes a closure, capturing values from locals/upvalues. `[… → … closure]`
@@ -175,6 +180,7 @@ impl OpCode {
             Self::SetGlobal(_) => "SetGlobal",
             Self::MakeList(_) => "MakeList",
             Self::MakeTuple(_) => "MakeTuple",
+            Self::MakeOverloads(_) => "MakeOverloads",
             Self::MakeMap { .. } => "MakeMap",
             Self::Closure { .. } => "Closure",
             Self::GetIterator => "GetIterator",
@@ -216,7 +222,7 @@ impl OpCode {
             | Self::GetGlobal(_) => 1,
             Self::SetLocal(_) | Self::SetCell(_) | Self::SetUpvalue(_) | Self::SetGlobal(_) => -1,
             // Pops `n` elements, pushes the collection: -n+1.
-            Self::MakeList(n) | Self::MakeTuple(n) => 1 - *n as isize,
+            Self::MakeList(n) | Self::MakeTuple(n) | Self::MakeOverloads(n) => 1 - *n as isize,
             // Pops a key and a value per pair plus the optional default,
             // pushes the map: -(2*pairs + has_default) + 1.
             Self::MakeMap { pairs, has_default } => {
@@ -270,6 +276,7 @@ impl std::fmt::Debug for OpCode {
             Self::SetUpvalue(n) => write!(f, "SetUpvalue({n})"),
             Self::MakeList(n) => write!(f, "MakeList({n})"),
             Self::MakeTuple(n) => write!(f, "MakeTuple({n})"),
+            Self::MakeOverloads(n) => write!(f, "MakeOverloads({n})"),
             Self::MakeMap { pairs, has_default } => {
                 write!(f, "MakeMap({pairs}, default={has_default})")
             }

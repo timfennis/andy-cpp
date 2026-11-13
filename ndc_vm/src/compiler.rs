@@ -234,9 +234,18 @@ impl Compiler {
                 let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { .. } => {
-                self.compile_binding(&self.binding(id), span)?;
-            }
+            Expression::Identifier { .. } => match self.binding(id) {
+                // A function's name used as a value whose overload is picked
+                // as it's called: each overload is looked up now, where the
+                // value is made, so the value works wherever it's called.
+                Binding::Dynamic(candidates) => {
+                    for candidate in &candidates {
+                        self.emit_get_var(candidate.var(), span);
+                    }
+                    self.ir.write(OpCode::MakeOverloads(candidates.len()), span);
+                }
+                binding => self.compile_binding(&binding, span)?,
+            },
             Expression::Cast { value, .. } => {
                 self.compile_expr(*value)?;
                 match self.analysis.cast_checks.get(&id) {
@@ -433,7 +442,14 @@ impl Compiler {
                     }
                     _ => OpCode::Call(arguments.len()),
                 };
-                self.compile_expr(*function)?;
+                // A named callee is looked up as a call picks it, not as a
+                // value: the overloads the program picks from stay an
+                // overload set, which a call resolves from its frame.
+                if let Expression::Identifier { .. } = function.expression {
+                    self.compile_binding(&self.binding(function.id), function_span)?;
+                } else {
+                    self.compile_expr(*function)?;
+                }
 
                 for argument in arguments {
                     self.compile_expr(argument)?;

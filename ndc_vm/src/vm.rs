@@ -426,6 +426,10 @@ impl Vm {
                     let data = self.stack.split_off(self.stack.len() - size);
                     self.stack.push(Value::Object(Rc::new(Object::Tuple(data))));
                 }
+                OpCode::MakeOverloads(size) => {
+                    let size = *size;
+                    self.make_overloads(size, span)?;
+                }
                 OpCode::MakeMap { pairs, has_default } => {
                     let (pairs, has_default) = (*pairs, *has_default);
                     let default = if has_default {
@@ -726,6 +730,62 @@ impl Vm {
         }
     }
 
+    /// Replaces the `size` functions on top of the stack with a
+    /// [`Function::Overloads`] of them.
+    #[cold]
+    fn make_overloads(&mut self, size: usize, span: Span) -> Result<(), VmError> {
+        let candidates = self
+            .stack
+            .split_off(self.stack.len() - size)
+            .into_iter()
+            .map(|candidate| match candidate {
+                Value::Object(object) => match object.as_ref() {
+                    Object::Function(function) => Ok(function.clone()),
+                    other => Err(other.static_type()),
+                },
+                other => Err(other.static_type()),
+            })
+            .collect::<Result<Rc<[Function]>, _>>()
+            .map_err(|found| {
+                VmError::new(format!("Unable to invoke {found} as a function."), span)
+            })?;
+        self.stack
+            .push(Value::function(Function::Overloads(candidates)));
+        Ok(())
+    }
+
+    /// Calls the first of `candidates`, a [`Function::Overloads`], that
+    /// accepts the arguments on the stack.
+    #[cold]
+    fn call_overloads(
+        &mut self,
+        candidates: &[Function],
+        args: usize,
+    ) -> Result<Dispatch, VmError> {
+        let arguments = &self.stack[self.stack.len() - args..];
+        let picked = candidates
+            .iter()
+            .find(|candidate| candidate.matches_value_args(arguments))
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.conforms_value_args(arguments))
+            })
+            .cloned();
+        let Some(picked) = picked else {
+            let types = arguments
+                .iter()
+                .map(|argument| argument.static_type().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let name = candidates.first().and_then(Function::name).unwrap_or("?");
+            return Err(VmError::native(format!(
+                "no function called '{name}' found matches the arguments: ({types})"
+            )));
+        };
+        self.dispatch_call(picked, args)
+    }
+
     /// Inner helper that pushes a new call frame.  `memo` is `Some` when the
     /// call originates from a memoized function and the return value should be
     /// stored in the cache.
@@ -765,6 +825,7 @@ impl Vm {
                 upvalues: Vec::new(),
             },
             Function::Checked { function, typ } => return self.call_checked(function, *typ, args),
+            Function::Overloads(candidates) => return self.call_overloads(&candidates, args),
             Function::Memoized { .. } => {
                 // Already unwrapped in dispatch_call; this branch is unreachable.
                 unreachable!(
@@ -805,36 +866,6 @@ impl Vm {
             }
             Ok(self.stack.pop().expect("callback must produce a value"))
         }
-    }
-
-    /// Calls the overload of `overloads` that accepts `args`, inline on this
-    /// VM, as a callback from a native function.
-    fn call_overloads_back(
-        &mut self,
-        overloads: Rc<Object>,
-        args: &[Value],
-    ) -> Result<Value, VmError> {
-        let n = args.len();
-        self.stack.push(Value::Object(overloads));
-        self.stack.extend(args.iter().cloned());
-        let picked = self.resolve_callee(n).map_err(VmError::native)?;
-        let Some(function) = picked else {
-            let types = args
-                .iter()
-                .map(|arg| arg.static_type().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let name = self.callee_name(n).unwrap_or_else(|| "?".to_string());
-            self.stack.truncate(self.stack.len() - n - 1);
-            return Err(VmError::native(format!(
-                "no function called '{name}' found matches the arguments: ({types})"
-            )));
-        };
-        let depth = self.frames.len();
-        if self.dispatch_call(function, n)? == Dispatch::FramePushed {
-            self.run_to_depth(depth)?;
-        }
-        Ok(self.stack.pop().expect("callback must produce a value"))
     }
 
     /// Returns the expression result left on top of the stack after `run()`.
@@ -1235,30 +1266,15 @@ impl CallFrame {
 /// Calling `call()` runs the function inline on the parent VM via
 /// `Vm::call_callback` — no child VM is allocated.
 pub struct VmCallable<'a> {
-    pub function: Callback,
+    pub function: Function,
     pub vm: &'a mut Vm,
-}
-
-/// What a native function calls back.
-pub enum Callback {
-    /// A function.
-    Function(Function),
-    /// The overloads of a function, one of which the program picks for each
-    /// call's arguments: an overloaded function's name used as a value where
-    /// the analyser couldn't tell which one is meant.
-    Overloads(Rc<Object>),
 }
 
 impl VmCallable<'_> {
     /// Call this function with the given arguments, running inline on the
     /// parent VM.
     pub fn call(&mut self, args: &[Value]) -> Result<Value, VmError> {
-        match &self.function {
-            Callback::Function(function) => self.vm.call_callback(function.clone(), args),
-            Callback::Overloads(overloads) => {
-                self.vm.call_overloads_back(Rc::clone(overloads), args)
-            }
-        }
+        self.vm.call_callback(self.function.clone(), args)
     }
 }
 

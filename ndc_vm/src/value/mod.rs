@@ -404,14 +404,9 @@ impl Value {
     fn is_a(&self, target: &StaticType) -> bool {
         if let StaticType::Function { .. } = target
             && let Self::Object(object) = self
+            && let Object::Function(function) = object.as_ref()
         {
-            match object.as_ref() {
-                Object::Function(function) => return function.fit(target) == FunctionFit::Proven,
-                // The overloads of a function the analyser couldn't pick
-                // from, of which the program picks one for each call.
-                Object::OverloadSet { .. } => return true,
-                _ => {}
-            }
+            return function.fit(target) == FunctionFit::Proven;
         }
         match (target, self.static_type()) {
             (StaticType::Iterator(_), StaticType::Iterator(_)) => true,
@@ -1131,6 +1126,7 @@ impl PartialEq for Object {
                     (Function::Memoized { cache: a, .. }, Function::Memoized { cache: b, .. }) => {
                         Rc::ptr_eq(a, b)
                     }
+                    (Function::Overloads(a), Function::Overloads(b)) => Rc::ptr_eq(a, b),
                     _ => false,
                 }
             }
@@ -1225,6 +1221,10 @@ impl Hash for Object {
                         Rc::as_ptr(cache).hash(state);
                     }
                     Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
+                    Function::Overloads(candidates) => {
+                        state.write_u8(5);
+                        Rc::as_ptr(candidates).cast::<()>().hash(state);
+                    }
                 }
             }
             Self::OverloadSet { .. } => {

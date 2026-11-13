@@ -408,11 +408,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let mut #temp = match #raw {
                         ndc_vm::value::Value::Object(_obj) => match _obj.as_ref() {
                             ndc_vm::value::Object::Function(f) => ndc_vm::VmCallable {
-                                function: ndc_vm::Callback::Function(f.clone()),
-                                vm: _vm,
-                            },
-                            ndc_vm::value::Object::OverloadSet { .. } => ndc_vm::VmCallable {
-                                function: ndc_vm::Callback::Overloads(_obj.clone()),
+                                function: f.clone(),
                                 vm: _vm,
                             },
                             _ => return Err(#err),
