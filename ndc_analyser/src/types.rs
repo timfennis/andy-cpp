@@ -186,6 +186,46 @@ impl TypeVars {
             })
     }
 
+    /// The unsettled literal types that each unsettled literal type is
+    /// held by: the element type of `[1]` holds the `1`'s.
+    pub(crate) fn holders(&self) -> AHashMap<TypeVar, Vec<TypeVar>> {
+        let mut holders = AHashMap::<TypeVar, Vec<TypeVar>>::new();
+        let mut seen = AHashSet::new();
+        for &holder in &self.literals {
+            if (holder.0 as usize) >= self.solutions.len()
+                || !self.is_literal(holder)
+                || !seen.insert(holder)
+            {
+                continue;
+            }
+            for held in self.held_literals(holder) {
+                let held_by = holders.entry(held).or_default();
+                if !held_by.contains(&holder) {
+                    held_by.push(holder);
+                }
+            }
+        }
+        holders
+    }
+
+    /// The unsettled literal types whose values the literal type `var`
+    /// holds: the `1`'s and the `2`'s in `[1, 2]`.
+    pub(crate) fn held_literals(&self, var: TypeVar) -> Vec<TypeVar> {
+        let mut held_literals = Vec::new();
+        let mut seen = AHashSet::new();
+        for bound in &self.bounds[var.0 as usize] {
+            if let Bound::Holds(held, _, _) = bound
+                && let StaticType::Var(held) = self.resolve(held)
+                && held != var
+                && self.is_literal(held)
+                && seen.insert(held)
+            {
+                held_literals.push(held);
+            }
+        }
+        held_literals
+    }
+
     /// The values the literal type `var` holds, with where each is.
     pub(crate) fn held(&self, var: TypeVar) -> Vec<(StaticType, Span)> {
         self.bounds[var.0 as usize]
@@ -239,7 +279,21 @@ impl TypeVars {
                 literals.push(var);
             }
         }
-        literals.sort_by_key(|&var| self.is_number(var));
+        // What the literals a literal holds take decides whether its uses
+        // fit, so they're settled last: in `n[0]` on `n = [1]`, whether `[]`
+        // gives the `1` back depends on the index `0` being an Int.
+        let held = literals
+            .iter()
+            .flat_map(|&var| self.bounds[var.0 as usize].iter())
+            .filter_map(|bound| match bound {
+                Bound::Holds(held, _, _) => match self.resolve(held) {
+                    StaticType::Var(held) => Some(held),
+                    _ => None,
+                },
+                Bound::Number(..) => None,
+            })
+            .collect::<AHashSet<_>>();
+        literals.sort_by_key(|&var| (self.is_number(var), held.contains(&var)));
         literals
     }
 

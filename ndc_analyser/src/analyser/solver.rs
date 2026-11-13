@@ -7,12 +7,23 @@ use super::function_values::{Choice, FunctionValue};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
 use crate::types::TypeVars;
+use ahash::{AHashMap, AHashSet};
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
 use std::collections::BTreeSet;
 use std::rc::Rc;
+
+/// Whether a waiting call can still take its arguments.
+enum Fit {
+    /// Its overload is known and takes them.
+    Picked,
+    /// Some overload might.
+    Maybe,
+    /// None can.
+    No,
+}
 
 /// What a call can commit to before its arguments are fully known.
 pub(super) enum EarlyOverload {
@@ -633,6 +644,7 @@ impl Analyser {
         let mut settled_any = false;
         loop {
             let mut progress = false;
+            let holders = self.vars.holders();
             for var in self.vars.unsettled_literals(&belongs) {
                 if !self.vars.is_literal(var) {
                     continue;
@@ -642,14 +654,24 @@ impl Analyser {
                 };
                 let fits = defaults.iter().position(|default| {
                     let snapshot = self.vars.snapshot();
-                    let fits = self.vars.settle_literal(var, default) && self.calls_still_fit(var);
+                    let fits = self.literal_fits_as(var, default, &holders);
                     self.vars.rollback(snapshot);
                     fits
                 });
                 // When none fits, the first one says best what's wrong.
                 let default = &defaults[fits.unwrap_or(0)];
+                let holders_of_var = holders
+                    .get(&var)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .filter(|&holder| self.vars.is_literal(holder))
+                    .collect::<Vec<_>>();
                 let snapshot = self.vars.snapshot();
-                if !self.vars.settle_literal(var, default) {
+                if self
+                    .settle_with_fellows(var, default, &holders_of_var)
+                    .is_none()
+                {
                     self.vars.rollback(snapshot);
                     if self.vars.holds_several_literals(var) {
                         self.report_literals_that_differ(var, default);
@@ -699,60 +721,206 @@ impl Analyser {
         self.vars.settle_literal(var, default);
     }
 
-    /// Whether each waiting call that waits on `var` can still take its
-    /// arguments, and give back what's expected of it.
-    fn calls_still_fit(&mut self, var: TypeVar) -> bool {
-        let serials = self.watchers.get(&var).cloned().unwrap_or_default();
-        serials.into_iter().all(|serial| {
-            let Some(Waiting {
-                constraint: Constraint::Call(call),
-                ..
-            }) = self.waiting.get(&serial).cloned()
-            else {
+    /// Settles the literal `var` as `default`, and returns whether the
+    /// waiting calls on it still fit, and those on the literals that hold
+    /// it, `holders` says which, with each settled as one of its own
+    /// defaults: in `let x = n[0]; x = 0.5` on `n = [1]`, `n`'s element type
+    /// holds the `1`, and `[]` gives a Float only if it's a Float. The
+    /// other values those hold take the same type, as the values of a
+    /// literal have one type when they can: `[1, 2]` holds Ints or Floats,
+    /// not one of each.
+    fn literal_fits_as(
+        &mut self,
+        var: TypeVar,
+        default: &StaticType,
+        holders: &AHashMap<TypeVar, Vec<TypeVar>>,
+    ) -> bool {
+        let holders_of_var = holders
+            .get(&var)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&holder| self.vars.is_literal(holder))
+            .collect::<Vec<_>>();
+        let Some(settled) = self.settle_with_fellows(var, default, &holders_of_var) else {
+            return false;
+        };
+        if !self.calls_still_fit(&settled) {
+            return false;
+        }
+        holders_of_var.into_iter().all(|holder| {
+            if !self.vars.is_literal(holder) {
+                return true;
+            }
+            // One that still waits for another literal is checked with it.
+            let Some(defaults) = self.vars.literal_defaults(holder) else {
                 return true;
             };
-            self.call_still_fits(&call)
+            defaults.iter().any(|default| {
+                let snapshot = self.vars.snapshot();
+                let fits = self.literal_fits_as(holder, default, holders);
+                if !fits {
+                    self.vars.rollback(snapshot);
+                }
+                fits
+            })
         })
     }
 
+    /// Settles the literal `var` as `default`, and the other literals that
+    /// `holders` hold too where they can take it, as the values of `[1, 2]`
+    /// have one type. Returns the literals it settled, or `None` if `var`
+    /// can't be `default`.
+    fn settle_with_fellows(
+        &mut self,
+        var: TypeVar,
+        default: &StaticType,
+        holders: &[TypeVar],
+    ) -> Option<Vec<TypeVar>> {
+        if !self.vars.settle_literal(var, default) {
+            return None;
+        }
+        let mut settled = vec![var];
+        for &holder in holders {
+            for other in self.vars.held_literals(holder) {
+                let snapshot = self.vars.snapshot();
+                if self.vars.settle_literal(other, default) {
+                    settled.push(other);
+                } else {
+                    self.vars.rollback(snapshot);
+                }
+            }
+        }
+        Some(settled)
+    }
+
+    /// Whether the waiting calls that wait on `vars` can still take their
+    /// arguments, and give back what's expected of them, together: in
+    /// `let x = xs[0] + 0.5; xs.push(x)` on `xs = [1]`, `+` gives a Float
+    /// when the `1` is an Int, which `push` then can't take. A call whose
+    /// overload is known says what it gives back, so the calls that wait
+    /// on that are checked too, and the others again.
+    fn calls_still_fit(&mut self, vars: &[TypeVar]) -> bool {
+        let mut serials = Vec::new();
+        let mut seen = AHashSet::new();
+        for var in vars {
+            for &watcher in self.watchers.get(var).into_iter().flatten() {
+                if seen.insert(watcher) {
+                    serials.push(watcher);
+                }
+            }
+        }
+        let mut picked = AHashSet::new();
+        loop {
+            let mut learned = false;
+            let mut next = 0;
+            while let Some(&serial) = serials.get(next) {
+                next += 1;
+                if picked.contains(&serial) {
+                    continue;
+                }
+                let Some(Waiting {
+                    constraint: Constraint::Call(call),
+                    ..
+                }) = self.waiting.get(&serial).cloned()
+                else {
+                    continue;
+                };
+                let reached = std::iter::once(&call.result)
+                    .chain(&call.arguments)
+                    .flat_map(|typ| self.vars.unsettled(typ))
+                    .collect::<Vec<_>>();
+                match self.call_still_fits(&call) {
+                    Fit::No => return false,
+                    Fit::Maybe => {}
+                    Fit::Picked => {
+                        picked.insert(serial);
+                        learned = true;
+                        for var in reached {
+                            for &watcher in self.watchers.get(&var).into_iter().flatten() {
+                                if seen.insert(watcher) {
+                                    serials.push(watcher);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !learned {
+                return true;
+            }
+        }
+    }
+
     /// Whether some overload of `call` takes its arguments, as far as
-    /// they're known, and returns what fits its result.
-    fn call_still_fits(&mut self, call: &CallConstraint) -> bool {
+    /// they're known, and returns what fits its result. Once they're
+    /// known, the call gets the overload that resolution picks, so only
+    /// that one counts, and what it binds is kept: `[](Any, Any)` takes
+    /// `xs[0]` but loses to `[](List<T>, Int) -> T`.
+    fn call_still_fits(&mut self, call: &CallConstraint) -> Fit {
         let arguments = call
             .arguments
             .iter()
             .map(|argument| self.vars.resolve(argument))
             .collect::<Vec<_>>();
         if Self::operand_could_be_a_tuple(call.kind, &arguments) {
-            return true;
+            return Fit::Maybe;
         }
         let reachable = self.overloads().reachable_symbols(&call.candidates);
-        reachable.into_iter().any(|symbol| {
-            let function = self.vars.resolve(&self.types.callable_type(symbol));
-            let StaticType::Function {
-                parameters: Some(_),
-                ..
-            } = &function
-            else {
-                return true;
-            };
+        if arguments.iter().all(|argument| !argument.has_vars()) {
+            let taking = reachable
+                .iter()
+                .copied()
+                .filter(|&symbol| self.could_accept(symbol, &arguments))
+                .collect::<Vec<_>>();
+            if let Some(symbol) = self.most_specific(&taking) {
+                let snapshot = self.vars.snapshot();
+                if self.overload_fits(symbol, &arguments, &call.result) {
+                    return Fit::Picked;
+                }
+                self.vars.rollback(snapshot);
+                return Fit::No;
+            }
+        }
+        let fits = reachable.into_iter().any(|symbol| {
             let snapshot = self.vars.snapshot();
-            let StaticType::Function {
-                parameters: Some(parameters),
-                return_type,
-            } = self.vars.instantiate(&function)
-            else {
-                unreachable!("instantiating a function type gives a function type");
-            };
-            let fits = parameters.len() == arguments.len()
-                && parameters
-                    .iter()
-                    .zip(&arguments)
-                    .all(|(parameter, argument)| self.vars.bind_argument(parameter, argument))
-                && self.vars.bind_argument(&call.result, &return_type);
+            let fits = self.overload_fits(symbol, &arguments, &call.result);
             self.vars.rollback(snapshot);
             fits
-        })
+        });
+        if fits { Fit::Maybe } else { Fit::No }
+    }
+
+    /// Whether `symbol` takes `arguments` and returns what fits `result`,
+    /// binding the types on the way. One whose parameters aren't known
+    /// takes anything.
+    fn overload_fits(
+        &mut self,
+        symbol: SymbolId,
+        arguments: &[StaticType],
+        result: &StaticType,
+    ) -> bool {
+        let function = self.vars.resolve(&self.types.callable_type(symbol));
+        let StaticType::Function {
+            parameters: Some(_),
+            ..
+        } = &function
+        else {
+            return true;
+        };
+        let StaticType::Function {
+            parameters: Some(parameters),
+            return_type,
+        } = self.vars.instantiate(&function)
+        else {
+            unreachable!("instantiating a function type gives a function type");
+        };
+        parameters.len() == arguments.len()
+            && parameters
+                .iter()
+                .zip(arguments)
+                .all(|(parameter, argument)| self.vars.bind_argument(parameter, argument))
+            && self.vars.bind_argument(result, &return_type)
     }
 
     /// Tries the waiting constraint `serial` again, if it's still waiting.
