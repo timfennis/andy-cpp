@@ -708,7 +708,10 @@ mod inner {
     }
 
     /// Transposes a sequence of strings, turning rows of characters into columns.
-    #[function(name = "transposed", signature = "(Iterable<String>) -> List<List<String>>")]
+    #[function(
+        name = "transposed",
+        signature = "(Iterable<String>) -> List<List<String>>"
+    )]
     pub fn transposed_strings(seq: SeqValue) -> anyhow::Result<Value> {
         transpose(seq)
     }

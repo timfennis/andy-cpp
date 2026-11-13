@@ -620,6 +620,121 @@ impl StaticType {
                 .iter()
                 .zip(parameters)
                 .all(|(argument, parameter)| argument.fits(parameter))
+            && Self::type_parameters_agree(parameters, types)
+    }
+
+    /// Whether each type parameter of `parameters` stands for one type in
+    /// `arguments`: `(Int, String)` doesn't fit `(T, T)`, as `T` would have to
+    /// be both. Inside a container a type parameter is the type there, as a
+    /// `List<Any>` makes `T` `Any`, and a value passed for `T` itself only has
+    /// to fit it: `push(List<Any>, String)` fits `push(List<T>, T)`. What isn't
+    /// known yet, and an argument that's `Any` as a whole, which is checked as
+    /// the program runs, agree with anything.
+    pub fn type_parameters_agree(parameters: &[Self], arguments: &[Self]) -> bool {
+        let mut bound = Vec::new();
+        for (parameter, argument) in parameters.iter().zip(arguments) {
+            argument.bind_type_parameters(parameter, false, &mut bound);
+        }
+        bound.iter().enumerate().all(|(i, (name, typ, inside))| {
+            let exact = bound
+                .iter()
+                .find(|(other, _, other_inside)| other == name && *other_inside);
+            match exact {
+                // What a container says it is decides, and a value passed
+                // for it fits it.
+                Some((_, exact, _)) if *inside => exact.agrees_with(typ),
+                Some((_, exact, _)) => {
+                    *typ == Self::Any || typ.fits(exact) || typ.agrees_with(exact)
+                }
+                // Values passed for it are what it is, so they agree.
+                None => bound[..i]
+                    .iter()
+                    .filter(|(earlier, _, _)| earlier == name)
+                    .all(|(_, earlier, _)| {
+                        *typ == Self::Any || *earlier == Self::Any || earlier.agrees_with(typ)
+                    }),
+            }
+        })
+    }
+
+    /// Adds to `bound` the part of this type that each type parameter in
+    /// `parameter` is matched against, as [`Self::matches`] matches them,
+    /// with whether it's inside a container, where it has to be that type.
+    fn bind_type_parameters<'p>(
+        &self,
+        parameter: &'p Self,
+        inside: bool,
+        bound: &mut Vec<(&'p str, Self, bool)>,
+    ) {
+        match (self, parameter) {
+            (_, Self::Generic(name)) => bound.push((name, self.clone(), inside)),
+            // A sequence passed for an `Iterable<T>` holds values passed for `T`.
+            (Self::Iterable(a), Self::Iterable(p)) => a.bind_type_parameters(p, inside, bound),
+            (argument, Self::Iterable(p)) if Self::is_sequence(argument) => {
+                if let Some(element) = argument.sequence_element_type() {
+                    element.bind_type_parameters(p, inside, bound);
+                }
+            }
+            (Self::Option(a), Self::Option(p))
+            | (Self::List(a), Self::List(p))
+            | (Self::Iterator(a), Self::Iterator(p))
+            | (Self::MinHeap(a), Self::MinHeap(p))
+            | (Self::MaxHeap(a), Self::MaxHeap(p))
+            | (Self::Deque(a), Self::Deque(p)) => a.bind_type_parameters(p, true, bound),
+            (Self::Tuple(a), Self::Tuple(p)) if a.len() == p.len() => {
+                for (a, p) in a.iter().zip(p) {
+                    a.bind_type_parameters(p, true, bound);
+                }
+            }
+            (Self::Map { key: ak, value: av }, Self::Map { key: pk, value: pv }) => {
+                ak.bind_type_parameters(pk, true, bound);
+                av.bind_type_parameters(pv, true, bound);
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether this type and `other` could be one type, where what isn't
+    /// known yet in either could be anything.
+    fn agrees_with(&self, other: &Self) -> bool {
+        let unknown = |typ: &Self| matches!(typ, Self::Var(_) | Self::Generic(_) | Self::Never);
+        if unknown(self) || unknown(other) {
+            return true;
+        }
+        match (self, other) {
+            (Self::Option(a), Self::Option(b))
+            | (Self::List(a), Self::List(b))
+            | (Self::Iterator(a), Self::Iterator(b))
+            | (Self::Iterable(a), Self::Iterable(b))
+            | (Self::MinHeap(a), Self::MinHeap(b))
+            | (Self::MaxHeap(a), Self::MaxHeap(b))
+            | (Self::Deque(a), Self::Deque(b)) => a.agrees_with(b),
+            (Self::Tuple(a), Self::Tuple(b)) => {
+                a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.agrees_with(b))
+            }
+            (Self::Map { key: ak, value: av }, Self::Map { key: bk, value: bv }) => {
+                ak.agrees_with(bk) && av.agrees_with(bv)
+            }
+            (
+                Self::Function {
+                    parameters: ap,
+                    return_type: ar,
+                },
+                Self::Function {
+                    parameters: bp,
+                    return_type: br,
+                },
+            ) => {
+                let parameters = match (ap, bp) {
+                    (Some(a), Some(b)) => {
+                        a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.agrees_with(b))
+                    }
+                    _ => true,
+                };
+                parameters && ar.agrees_with(br)
+            }
+            (a, b) => a == b,
+        }
     }
 
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {

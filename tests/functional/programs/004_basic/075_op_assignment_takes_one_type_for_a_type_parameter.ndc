@@ -1,0 +1,6 @@
+// `max` of two values takes two of one type, in `a max= b` as in
+// `max(a, b)`: a Float and an Int aren't one type.
+// expect-error: No function called 'max' found that matches the arguments 'Float, Int'
+let best = -Inf;
+let x: Int = 3;
+best max= x;

@@ -23,25 +23,26 @@ impl Analyser {
     ) -> StaticType {
         let left_type = self.analyse_assignment_target(l_value, span);
         let right_type = self.analyse_expr(r_value);
-        // `a op= b` is `a = op(a, b)`. Where the operands aren't fully known
-        // yet, the operator waits for them like any call, and the in-place
-        // overload is picked along with it.
+        // `a op= b` is `a = op(a, b)`: the operator is a call like any other,
+        // and the in-place overload is picked along with it where it does the
+        // same (see `record_pick`).
         let (left_type, right_type) = (
             self.vars.resolve(&left_type),
             self.vars.resolve(&right_type),
         );
-        if (left_type.has_vars() || right_type.has_vars())
-            && !self
-                .overloads()
-                .reachable_symbols(&self.resolver.augmented_candidates(id).operator)
-                .is_empty()
+        if !self
+            .overloads()
+            .reachable_symbols(&self.resolver.augmented_candidates(id).operator)
+            .is_empty()
         {
             let result = self.constrain_call(
                 CallSite::OpAssignment(id),
                 vec![left_type.clone(), right_type],
+                // What the operator returns is checked where it's written
+                // back, when the program picks the operator as it runs.
                 CallNodes {
                     arguments: vec![None, Some(r_value.id)],
-                    result: None,
+                    result: Some(l_value.id),
                 },
                 CallKind::Operator,
                 operation,
@@ -50,16 +51,15 @@ impl Analyser {
             self.validate_assignment_write(l_value, &left_type, &result, span);
             return StaticType::unit();
         }
-        let written = self.op_assignment_now(id, &left_type, &right_type, operation, span);
+        let written = self.in_place_only(id, &left_type, &right_type, operation, span);
         self.validate_assignment_write(l_value, &left_type, &written, span);
         StaticType::unit()
     }
 
-    /// Picks what `a op= b` with operands of these types does and returns
-    /// the type of the value written back to `a`. An in-place overload
-    /// such as `++=` is used where it keeps `a`'s type, and otherwise `op`
-    /// makes a new value.
-    pub(super) fn op_assignment_now(
+    /// Picks the in-place overload `a op= b` calls when there's no operator
+    /// `op` to fall back on, and returns the type of the value written back
+    /// to `a`, which an in-place overload doesn't change.
+    fn in_place_only(
         &mut self,
         id: NodeId,
         left_type: &StaticType,
@@ -67,63 +67,20 @@ impl Analyser {
         operation: &str,
         span: Span,
     ) -> StaticType {
-        let arg_types = vec![left_type.clone(), right_type.clone()];
-
-        let ResolvedCall {
-            binding: assign_binding,
-            return_type: assign_return,
-        } = self.overloads().resolve_call(
+        let arguments = [left_type.clone(), right_type.clone()];
+        let ResolvedCall { binding, .. } = self.overloads().resolve_call(
             &self.resolver.augmented_candidates(id).in_place,
-            &arg_types,
+            &arguments,
             CallKind::Operator,
         );
-        let ResolvedCall {
-            binding: op_binding,
-            return_type: op_return,
-        } = self.overloads().resolve_call(
-            &self.resolver.augmented_candidates(id).operator,
-            &arg_types,
-            CallKind::Operator,
-        );
-        let has_op_binding = !matches!(op_binding, Binding::None);
-        let assign_is_eligible = Self::augmented_rhs_is_compatible(left_type, right_type);
-
-        let writeback_type = match assign_binding {
-            Binding::Resolved(candidate) if assign_is_eligible => {
-                self.record_augmented_pick(id, Binding::Resolved(candidate));
-                None
-            }
-            Binding::Dynamic(assign_candidates) if assign_is_eligible => {
-                let binding = Self::in_place_then_operators(assign_candidates, op_binding.clone());
-                let result_type = if has_op_binding {
-                    assign_return.join(&op_return)
-                } else {
-                    assign_return
-                };
-                self.record_augmented_pick(id, binding);
-                Some(result_type)
-            }
-            Binding::Resolved(_) | Binding::Dynamic(_) => {
-                // A specialized mutation exists, but using it would
-                // change the concrete left type. Reject it here rather
-                // than falling through to an ordinary operation whose
-                // erased return type could widen the same target.
-                self.emit(AnalysisError::mismatched_types(right_type, left_type, span));
-                Some(StaticType::Any)
-            }
-            Binding::None if has_op_binding => {
-                self.record_augmented_pick(id, op_binding);
-                Some(op_return)
-            }
-            Binding::None => {
-                self.emit(AnalysisError::function_not_found(
-                    operation, &arg_types, span,
-                ));
-                Some(StaticType::Any)
-            }
-        };
-
-        writeback_type.unwrap_or_else(|| left_type.clone())
+        if matches!(binding, Binding::None) {
+            self.emit(AnalysisError::function_not_found(
+                operation, &arguments, span,
+            ));
+            return StaticType::Any;
+        }
+        self.record_augmented_pick(id, binding);
+        left_type.clone()
     }
 
     /// What `a op= b` does when the program picks as it runs: the in-place

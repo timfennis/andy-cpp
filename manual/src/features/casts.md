@@ -92,10 +92,10 @@ let values: List<Any> = [1, 2, 3];
 print((values as List<Int>).sum());  // 6
 ```
 
-A specialized `op=` mutates its target in place and keeps its type, so it only
-accepts a right operand that provably fits. A value of unknown type does not,
-and a cast gets the elements checked instead of letting them slip into the
-target unverified:
+A specialized `op=` such as `++=` changes its target in place, so it's only
+used with a right operand that provably fits. With a value of unknown type,
+`a op= b` makes a new value like `a = a op b` does; a cast checks the elements
+first, so the target can be changed in place:
 
 ```ndc
 fn opaque(x) => x;
