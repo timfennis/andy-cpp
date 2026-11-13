@@ -3,7 +3,7 @@ use super::solver::{CallNodes, CallSite, Constraint};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads};
 use ndc_core::{NodeId, StaticType};
-use ndc_lexer::Span;
+use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation};
 use ndc_resolver::Candidates;
 
@@ -147,11 +147,15 @@ impl Analyser {
 
         // A named callee declares nothing, so its overload can be picked after
         // the arguments' types are known.
+        let tuple_index = match arguments {
+            [_, index] if name == "[]" => literal_index(index),
+            _ => None,
+        };
         let arguments = arguments
             .iter()
             .map(|arg| self.analyse_expr(arg))
             .collect::<Vec<_>>();
-        self.constrain_call(
+        self.constrain_index_call(
             CallSite::Call(function.id),
             arguments,
             CallNodes {
@@ -161,6 +165,29 @@ impl Analyser {
             kind,
             name,
             span,
+            tuple_index,
         )
+    }
+}
+
+/// The value of an index that's an integer written in the code, as in
+/// `t[1]` or `t[-1]`.
+fn literal_index(index: &ExpressionLocation) -> Option<i64> {
+    match &index.expression {
+        Expression::NumericLiteral(NumericLiteral::Int64(value)) => Some(*value),
+        Expression::Call {
+            function,
+            arguments,
+        }
+        | Expression::OperatorCall {
+            function,
+            arguments,
+        } => match (&function.expression, &arguments[..]) {
+            (Expression::Identifier { name, .. }, [operand]) if name == "-" => {
+                literal_index(operand).and_then(i64::checked_neg)
+            }
+            _ => None,
+        },
+        _ => None,
     }
 }

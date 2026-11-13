@@ -136,6 +136,15 @@ impl AnalysisError {
         }
     }
 
+    pub(crate) fn tuple_index_out_of_bounds(index: i64, length: usize, span: Span) -> Self {
+        Self {
+            text: format!("Index {index} is out of bounds for a tuple of {length} elements"),
+            span,
+            help_text: None,
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn iterable_outside_a_parameter(span: Span) -> Self {
         Self {
             text: "`Iterable<T>` can only be the type of a parameter".to_string(),

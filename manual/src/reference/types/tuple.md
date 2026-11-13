@@ -21,6 +21,22 @@ let my_tuple = (1,2,3);
 my_tuple[0] = 99; // ERROR
 ```
 
+An index written as a number, like `t[1]` or `t[-1]`, picks one element, and has that element's type. One past the end is an error before the program runs:
+
+```ndc
+let point = ("origin", 0, 0);
+let name: String = point[0];
+let y: Int = point[-1];
+print(name, y);  // origin 0
+```
+
+```ndc,fails
+let point = ("origin", 0, 0);
+print(point[3]);  // error: Index 3 is out of bounds for a tuple of 3 elements
+```
+
+An index computed as the program runs, like `t[i]`, could pick any element, so it gives `Any`.
+
 Create a 1-element tuple by adding a trailing comma:
 
 ```ndc
