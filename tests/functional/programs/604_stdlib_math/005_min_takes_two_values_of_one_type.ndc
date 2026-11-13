@@ -1,0 +1,4 @@
+// An Int and a Float have no type in common, so say which one is meant.
+// expect-error: No function called 'min' found that matches the arguments 'Int, Float'
+let a = "ab".len();
+print(min(a, 2.5));
