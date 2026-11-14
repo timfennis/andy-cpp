@@ -511,10 +511,15 @@ impl Analyser {
             }),
             Expression::Block { statements } => {
                 let mut last = None;
+                let mut diverges = false;
                 for s in statements {
-                    last = Some(self.analyse_expr(s));
+                    let typ = self.analyse_expr(s);
+                    diverges |= typ == StaticType::Never;
+                    last = Some(typ);
                 }
-
+                if diverges {
+                    return StaticType::Never;
+                }
                 last.unwrap_or_else(StaticType::unit)
             }
             Expression::If {

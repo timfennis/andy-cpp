@@ -161,7 +161,7 @@ let m: Map<String, Any> = %{"a": 1, "b": "two"};
 print(b, xs, m["b"]);  // 1 [1,"a"] two
 ```
 
-An `Any` around the whole value doesn't say what the elements are, so `let x: Any = [1, "a"]` is still an error: write `List<Any>`. An `if` without an `else` is `()`, whatever its branch is, and a branch that never finishes, like one ending in `return`, `break` or `panic(…)`, takes the other branch's type.
+An `Any` around the whole value doesn't say what the elements are, so `let x: Any = [1, "a"]` is still an error: write `List<Any>`. An `if` without an `else` is `()`, whatever its branch is, and a branch that never finishes, like one that reaches a `return`, `break` or `panic(…)`, takes the other branch's type.
 
 [Struct](./types/struct.md) names are type names like any other, including inside generics:
 
