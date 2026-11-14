@@ -26,16 +26,13 @@ pub(crate) struct ResolvedCall {
 }
 
 /// Per-position vec resolution result for an operator-form call. See
-/// [`Overloads::resolve_vec`] for the case breakdown.
-pub(crate) enum VecResolution {
-    Static {
-        axis_len: usize,
-        /// `positions[i]` is the priority-ordered scalar overloads compatible
-        /// with the call's element types at position `i`. Always non-empty —
-        /// an empty position cancels the whole vec resolution upstream.
-        positions: Vec<Vec<SymbolId>>,
-    },
-    AnyFallback(Vec<SymbolId>),
+/// [`Overloads::resolve_vec`].
+pub(crate) struct VecResolution {
+    axis_len: usize,
+    /// `positions[i]` is the priority-ordered scalar overloads compatible
+    /// with the call's element types at position `i`. Always non-empty —
+    /// an empty position cancels the whole vec resolution upstream.
+    positions: Vec<Vec<SymbolId>>,
 }
 
 /// Output of a single scalar overload walk across the scope chain.
@@ -44,9 +41,6 @@ struct ScalarWalk {
     exact: Option<SymbolId>,
     /// First-scope-wins loose-compatibility candidates.
     loose: Option<Vec<SymbolId>>,
-    /// Every same-name callable across the whole chain, for runtime-narrowing
-    /// fallback when the callee's static type is `Any`.
-    all_by_name: Vec<SymbolId>,
 }
 
 /// Whether a value of type `typ` could still accept a call with this
@@ -282,10 +276,7 @@ impl<'a> Overloads<'a> {
     ///      contributions (pure-scalar joins the declared returns; pure-vec
     ///      joins per position and wraps in `Tuple<…>`; mixed scalar+vec
     ///      collapses to `Any`).
-    ///   4. **Same-name callables, no signature match** — last-resort
-    ///      fallback so `Any`-typed callees still get a candidate list.
-    ///      Returns `Binding::Dynamic`, return type = `Any`.
-    ///   5. Nothing found — `Binding::None`, return type = `Any`.
+    ///   4. Nothing found — `Binding::None`, return type = `Any`.
     pub(crate) fn resolve_call(
         self,
         candidates: &Candidates,
@@ -313,7 +304,7 @@ impl<'a> Overloads<'a> {
         // some position, the call can't succeed at runtime either. Surfacing
         // this as `Binding::None` lets the caller emit a precise compile-time
         // error instead of letting the program limp on to a runtime miss.
-        if let Some(VecResolution::Static { positions, .. }) = &vec_resolution
+        if let Some(VecResolution { positions, .. }) = &vec_resolution
             && sig
                 .iter()
                 .any(|t| matches!(t, StaticType::Tuple(elems) if !elems.is_empty()))
@@ -330,7 +321,7 @@ impl<'a> Overloads<'a> {
         // Resolved(Vec): vec is the unique candidate (no loose scalars compete)
         // and every position pins the same scalar overload.
         if scalar_loose.is_empty()
-            && let Some(VecResolution::Static {
+            && let Some(VecResolution {
                 axis_len,
                 positions,
             }) = &vec_resolution
@@ -346,13 +337,9 @@ impl<'a> Overloads<'a> {
         // 3. Dynamic: mix scalar loose candidates with vec candidates.
         if !scalar_loose.is_empty() || vec_resolution.is_some() {
             let return_type = self.dynamic_return_type(&scalar_loose, vec_resolution.as_ref());
-            let vec_symbols = match vec_resolution {
-                Some(VecResolution::Static { positions, .. }) => {
-                    positions.into_iter().flatten().collect()
-                }
-                Some(VecResolution::AnyFallback(symbols)) => symbols,
-                None => Vec::new(),
-            };
+            let vec_symbols = vec_resolution
+                .into_iter()
+                .flat_map(|vec| vec.positions.into_iter().flatten());
             let mut combined = Vec::new();
             for symbol in scalar_loose {
                 let candidate = Candidate::Scalar(symbol);
@@ -368,29 +355,7 @@ impl<'a> Overloads<'a> {
             };
         }
 
-        // 4. Last-resort same-name callables (for Any-typed callees, upvalues, …),
-        //    but only when at least one candidate could still accept this call
-        //    at runtime. When every candidate provably rejects the signature
-        //    (fully-annotated functions of the wrong arity or with conflicting
-        //    parameter types) the call can never succeed, so we fall through
-        //    and let the caller report it at compile time.
-        if walk
-            .all_by_name
-            .iter()
-            .any(|&symbol| could_take(&self.type_of(symbol), sig))
-        {
-            let candidates = walk
-                .all_by_name
-                .into_iter()
-                .map(Candidate::Scalar)
-                .collect();
-            return ResolvedCall {
-                binding: Binding::Dynamic(candidates),
-                return_type: StaticType::Any,
-            };
-        }
-
-        // 5. Nothing.
+        // 4. Nothing.
         ResolvedCall {
             binding: Binding::None,
             return_type: StaticType::Any,
@@ -398,12 +363,9 @@ impl<'a> Overloads<'a> {
     }
 
     /// Per-scope walk for scalar matches against `sig`. Exact matches
-    /// short-circuit; `loose` holds the first scope's compatibility candidates;
-    /// `all_by_name` accumulates every callable candidate across the chain for
-    /// the runtime-narrowing fallback.
+    /// short-circuit; `loose` holds the first scope's compatibility candidates.
     fn scalar_walk(self, candidates: &Candidates, sig: &[StaticType]) -> ScalarWalk {
         let mut loose: Option<Vec<SymbolId>> = None;
-        let mut all_by_name = Vec::new();
 
         for group in self.reachable(candidates) {
             let compatible = || {
@@ -415,18 +377,9 @@ impl<'a> Overloads<'a> {
                 self.most_specific_first(compatible)
             };
             if let Some(exact) = self.most_specific_match(group, sig) {
-                // An overload in this scope takes the call, so it's this
-                // scope's, but a more specific one here may take it as the
-                // program runs, which then picks among them.
-                let (exact, loose) = if self.a_more_specific_one_could_fit(group, exact, sig) {
-                    (None, Some(compatible()))
-                } else {
-                    (Some(exact), None)
-                };
                 return ScalarWalk {
-                    exact,
-                    loose,
-                    all_by_name: Vec::new(),
+                    exact: Some(exact),
+                    loose: None,
                 };
             }
 
@@ -436,22 +389,9 @@ impl<'a> Overloads<'a> {
                     loose = Some(compatible);
                 }
             }
-
-            // Oldest first within a scope, as the runtime tries them in order.
-            all_by_name.extend(
-                group
-                    .iter()
-                    .rev()
-                    .copied()
-                    .filter(|&symbol| self.type_of(symbol).could_be_callable()),
-            );
         }
 
-        ScalarWalk {
-            exact: None,
-            loose,
-            all_by_name,
-        }
+        ScalarWalk { exact: None, loose }
     }
 
     /// The best-matching overload in one scope's `group` (newest first) for a
@@ -509,27 +449,6 @@ impl<'a> Overloads<'a> {
         }
     }
 
-    /// Whether an overload in `group` more specific than `exact`, which
-    /// accepts `sig`, might accept the call when the program runs. An
-    /// argument of type `Any` fits `show(x: Any)`, but if it's an Int when
-    /// the program runs, `show(x: Int)` is the overload that takes it.
-    fn a_more_specific_one_could_fit(
-        self,
-        group: &[SymbolId],
-        exact: SymbolId,
-        sig: &[StaticType],
-    ) -> bool {
-        let Some(exact) = self.parameters_of(exact) else {
-            return false;
-        };
-        group.iter().any(|&other| {
-            self.parameters_of(other).is_some_and(|other_parameters| {
-                is_strictly_more_specific(&other_parameters, &exact)
-                    && self.is_compatible(other, sig)
-            })
-        })
-    }
-
     /// `symbols` with each one before every one it's more specific than,
     /// and otherwise in the order given. The program tries the overloads it
     /// picks from as it runs in this order, and takes the first that
@@ -566,47 +485,11 @@ impl<'a> Overloads<'a> {
         matches!(typ.as_ref(), StaticType::Function { .. }) && could_take(&typ, sig)
     }
 
-    /// Try to resolve a vec candidate set for `sig`.
-    ///
-    /// * `Static` — at least one arg is statically a non-empty tuple and
-    ///   every tuple-shaped arg shares that length. Positions *may* contain
-    ///   empty candidate lists; the caller surfaces that as a call error.
-    /// * `AnyFallback` — no static tuple shape but at least one arg isn't
-    ///   known, as in a generic function's own body, so vec might still apply
-    ///   at runtime; the runtime narrows per pair. An `Any` isn't one: it
-    ///   takes a cast to be a tuple.
-    /// * `None` — no possible vec interpretation.
+    /// The scalar overloads for each element position of `sig`, when at
+    /// least one argument is a non-empty tuple and every tuple argument has
+    /// that length. A position may have none; the caller reports that as a
+    /// call error. `None` when the call can't be element-wise.
     fn resolve_vec(self, candidates: &Candidates, sig: &[StaticType]) -> Option<VecResolution> {
-        if let Some((axis_len, positions)) = self.resolve_vec_static(candidates, sig) {
-            return Some(VecResolution::Static {
-                axis_len,
-                positions,
-            });
-        }
-        let unknown = |typ: &StaticType| {
-            matches!(
-                typ,
-                StaticType::Var(_) | StaticType::Generic(_) | StaticType::Error
-            )
-        };
-        if !sig.iter().any(unknown) {
-            return None;
-        }
-        // Each argument could be anything, as a type parameter could.
-        let permissive: Vec<StaticType> = vec![StaticType::Generic("T".into()); sig.len()];
-        let symbols = self.candidates_for_sig(candidates, &permissive);
-        if symbols.is_empty() {
-            None
-        } else {
-            Some(VecResolution::AnyFallback(symbols))
-        }
-    }
-
-    fn resolve_vec_static(
-        self,
-        candidates: &Candidates,
-        sig: &[StaticType],
-    ) -> Option<(usize, Vec<Vec<SymbolId>>)> {
         let mut axis: Option<usize> = None;
         for arg in sig {
             if let StaticType::Tuple(elems) = arg {
@@ -633,7 +516,10 @@ impl<'a> Overloads<'a> {
                 .collect();
             positions.push(self.candidates_for_sig(candidates, &pos_sig));
         }
-        Some((axis_len, positions))
+        Some(VecResolution {
+            axis_len,
+            positions,
+        })
     }
 
     /// Priority-ordered scalar candidates for one signature, used by per-position
@@ -694,7 +580,7 @@ impl<'a> Overloads<'a> {
 
         // Pure static vec: per-position join → Tuple<…> of element returns.
         if !has_scalar
-            && let Some(VecResolution::Static {
+            && let Some(VecResolution {
                 axis_len,
                 positions,
             }) = vec_resolution
@@ -707,7 +593,7 @@ impl<'a> Overloads<'a> {
             return StaticType::Tuple(elements);
         }
 
-        // Mixed scalar+vec, Any-fallback vec, or empty (defensive): the
+        // Mixed scalar+vec, or empty (defensive): the
         // result has no type in common — widen to `Any`. A scalar and a
         // `Tuple<…>` join as `Any` anyway, so there's nothing more precise to
         // compute for the mixed case.
