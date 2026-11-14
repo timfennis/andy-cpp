@@ -1025,13 +1025,13 @@ impl Compiler {
         body: ExpressionLocation,
         instance: Option<InstanceAt>,
     ) -> Result<(CompiledFunction, bool), CompileError> {
-        // A function an instance's body declares takes what the instance's
-        // types make it take. Only a type that differs from the function's
+        // An instance, and a function its body declares, takes what the
+        // instance's types make it take. Only a type that differs from the function's
         // own makes the function the instance's: otherwise it's shared, and
         // stays one function across instances.
         let shared = self.analysis.function_type(id);
-        let differs = self
-            .instance
+        let differs = instance
+            .or(self.instance)
             .and_then(|at| {
                 self.analysis.instances[&at.declaration][at.index]
                     .function_types
@@ -1039,7 +1039,13 @@ impl Compiler {
             })
             .is_some_and(|typ| typ != shared);
         let static_type = if differs {
-            self.instance_pick(|instance| instance.function_types.get(&id))
+            instance
+                .or(self.instance)
+                .and_then(|at| {
+                    self.analysis.instances[&at.declaration][at.index]
+                        .function_types
+                        .get(&id)
+                })
                 .unwrap_or(shared)
                 .clone()
         } else {

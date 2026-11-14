@@ -304,8 +304,16 @@ impl Analyser {
                 self.wait_as(copy);
             }
         }
-        for &node in scheme.functions.iter() {
-            let declared = self.vars.resolve(self.result.analysis.function_type(node));
+        // The instance's own value takes its types, as `wrap<Int>` takes an
+        // Int, and so do the functions its body declares.
+        let own = (scheme.declaration, self.types.get_type(function).clone());
+        let nested = scheme
+            .functions
+            .iter()
+            .map(|&node| (node, self.result.analysis.function_type(node).clone()))
+            .collect::<Vec<_>>();
+        for (node, declared) in std::iter::once(own).chain(nested) {
+            let declared = self.vars.resolve(&declared);
             let typ = self.vars.instantiate_with(&declared, &mut made);
             if let Some(picks) = self.picks.instances.get_mut(&instance) {
                 picks.function_types.insert(node, typ);
