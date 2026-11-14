@@ -131,9 +131,9 @@ impl Analyser {
                 Constraint::Call(call) if waiting.origin.is_none() => {
                     self.pick_for_any_arguments(call);
                 }
-                // The body compiled for arguments of type `Any` can't tell
-                // which overload a function value means, so the program
-                // picks as it calls it.
+                // The body compiled for arguments of any type, which later
+                // REPL lines call, can't tell which overload a function
+                // value means, so the program picks as it calls it.
                 Constraint::FunctionValue(value) if waiting.origin.is_none() => {
                     let binding = self.every_overload(value);
                     self.picks.bindings.insert(value.id(), binding);
@@ -404,12 +404,13 @@ impl Analyser {
         self.solve_waiting();
     }
 
-    /// Records what the body of a generic function calls at `call`, which
-    /// is compiled once for every type it's called with: the overloads that
-    /// can take the arguments, picked as the program runs. Its type
-    /// parameters, and the `Any` that a call picked as it runs gives, stand
-    /// for any type there: an overload that takes an Int may get one. Each
-    /// call of the function checks its body with the types it's given.
+    /// Records what the function's own body calls at `call`: the overloads
+    /// that can take the arguments, picked as the program runs. Its calls
+    /// and values get instances, so the body runs for those of later REPL
+    /// lines, which get none. Its type parameters, and the `Any` that a call
+    /// picked as it runs gives, stand for any type there: an overload that
+    /// takes an Int may get one. Each call of the function checks its body
+    /// with the types it's given.
     fn pick_for_any_arguments(&mut self, call: &CallConstraint) {
         let arguments = call
             .arguments()
@@ -529,6 +530,35 @@ fn type_parameter_name(index: usize) -> String {
         0 => letter.to_string(),
         round => format!("{letter}{round}"),
     }
+}
+
+/// `typ` with its type parameters named in the order they're written, as
+/// an error shows it: `Fn(B) -> A` is `Fn(A) -> B`.
+pub(super) fn named_in_order(typ: &StaticType) -> StaticType {
+    let parts = match typ {
+        StaticType::Function {
+            parameters,
+            return_type,
+        } => parameters
+            .iter()
+            .flatten()
+            .chain([return_type.as_ref()])
+            .collect(),
+        other => vec![other],
+    };
+    let mut order = Vec::new();
+    for name in parts.into_iter().flat_map(StaticType::type_parameters) {
+        if !order.contains(&name) {
+            order.push(name);
+        }
+    }
+    typ.replace(&|part| match part {
+        StaticType::Generic(name) => order
+            .iter()
+            .position(|other| other == name)
+            .map(|index| StaticType::Generic(type_parameter_name(index).into())),
+        _ => None,
+    })
 }
 
 /// Parameter types as an error shows them, with `_` for a parameter whose

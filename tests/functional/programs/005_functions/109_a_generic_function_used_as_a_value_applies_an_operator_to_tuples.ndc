@@ -1,6 +1,5 @@
-// A generic function used as a value runs its body compiled for any
-// arguments, where `+` may get tuples, which it adds element by element,
-// and so may what a call picked as the program runs gives.
+// A generic function used as a value is its instance for the type it's used
+// at, where `+` may get tuples, which it adds element by element.
 // expect-output: (4,6) 3 (2,3)
 fn add(a, b) => a + b;
 let pairs: Fn((Int, Int), (Int, Int)) -> (Int, Int) = add;

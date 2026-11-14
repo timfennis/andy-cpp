@@ -1799,13 +1799,35 @@ impl Analyser {
 
     /// Adds the constraints [`Self::instantiate_function`] copied for a call
     /// at `call`, and solves the ones it can. A call at `site` gets the
-    /// instance its types need; a function's name used as a value, with no
-    /// `site`, stays the function itself, so two values of it are equal.
+    /// instance its types need; a call of a value, with no `site`, calls
+    /// whatever function the value is.
     pub(super) fn flush_copies(&mut self, site: Option<CallSite>, call: Span) {
         match site {
-            Some(site) => self.record_uses(site, call),
+            Some(site) => self.record_uses(site, false, call),
             None => self.pending.uses.clear(),
         }
+        self.add_copies(call);
+    }
+
+    /// Adds the constraints [`Self::instantiate_function`] copied for the
+    /// function value at `id`, as [`Self::flush_copies`] does for a call.
+    /// The value is the instance for the types it's used at: in
+    /// `[[1, 2]].count(is_safe)`, the one for `List<Int>`. A type of it
+    /// nothing settles, as in `let f: Any = is_safe`, is a failed check's,
+    /// so it's reported once, as the value's, and not by its body.
+    pub(super) fn flush_value_copies(&mut self, id: NodeId, span: Span) {
+        for (_, key) in &self.pending.uses {
+            for typ in key {
+                self.vars.fall_back_as_errors(typ);
+            }
+        }
+        self.record_uses(CallSite::Call(id), true, span);
+        self.add_copies(span);
+    }
+
+    /// Adds the constraints [`Self::instantiate_function`] copied for a
+    /// call or function value at `call`, and solves the ones it can.
+    fn add_copies(&mut self, call: Span) {
         for (sequence, element) in std::mem::take(&mut self.pending.iterations) {
             self.wait(Constraint::Iterate {
                 sequence,

@@ -1,7 +1,0 @@
-// A generic function used as a value runs its body compiled for any
-// arguments, where `signum` is left to the program to pick for each element
-// `map` passes it.
-// expect-output: [1,-1]
-fn signs(xs) => xs.map(signum);
-let f: Fn(List<Int>) -> List<Int> = signs;
-print(f([1, -2]));

@@ -1025,26 +1025,29 @@ impl Compiler {
         body: ExpressionLocation,
         instance: Option<InstanceAt>,
     ) -> Result<(CompiledFunction, bool), CompileError> {
-        // A function an instance's body declares takes what the instance's
-        // types make it take. Only a type that differs from the function's
-        // own makes the function the instance's: otherwise it's shared, and
-        // stays one function across instances.
+        // An instance, and a function its body declares, takes what the
+        // instance's types make it take. Only a type that differs from the
+        // function's own makes a declared function the instance's, which
+        // makes the code around it depend on the instance too: otherwise
+        // it's shared, and stays one function across instances.
         let shared = self.analysis.function_type(id);
-        let differs = self
-            .instance
-            .and_then(|at| {
-                self.analysis.instances[&at.declaration][at.index]
-                    .function_types
-                    .get(&id)
-            })
-            .is_some_and(|typ| typ != shared);
-        let static_type = if differs {
-            self.instance_pick(|instance| instance.function_types.get(&id))
-                .unwrap_or(shared)
-                .clone()
-        } else {
-            shared.clone()
-        };
+        let static_type = match instance {
+            Some(at) => self.analysis.instances[&at.declaration][at.index]
+                .function_types
+                .get(&id)
+                .unwrap_or(shared),
+            None => self
+                .instance
+                .and_then(|at| {
+                    self.analysis.instances[&at.declaration][at.index]
+                        .function_types
+                        .get(&id)
+                })
+                .filter(|typ| *typ != shared)
+                .and_then(|_| self.instance_pick(|instance| instance.function_types.get(&id)))
+                .unwrap_or(shared),
+        }
+        .clone();
         let mut fn_compiler = Self {
             ir: Default::default(),
             source_locals: self.analysis.frame_size(id),

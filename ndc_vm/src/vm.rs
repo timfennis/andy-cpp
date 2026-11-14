@@ -967,10 +967,10 @@ impl Vm {
     /// code stays at the same shape and footprint. A parameter like
     /// `List<Int>` isn't checked element by element on that path, so when no
     /// candidate accepts the arguments that way, they're checked again
-    /// element by element before the call fails, if `look_inside`: in
-    /// `fn h(xs) => g(xs)` passed as a value, as in `[[1]].map(h)`, the body
-    /// compiled for arguments of any type calls `g(List<Int>)` with a list
-    /// of Ints.
+    /// element by element before the call fails, if `look_inside`: when a
+    /// REPL line calls `fn h(xs) => g(xs)` from an earlier line, as in
+    /// `[[1]].map(h)`, the body compiled for arguments of any type calls
+    /// `g(List<Int>)` with a list of Ints.
     fn find_scalar_overload(
         &self,
         scalars: &[ResolvedVar],

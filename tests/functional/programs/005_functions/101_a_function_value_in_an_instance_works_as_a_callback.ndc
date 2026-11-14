@@ -1,0 +1,6 @@
+// A generic function used as a value is its instance for the type it's used
+// at, where `signum` is the overload for the elements `map` passes it.
+// expect-output: [1,-1]
+fn signs(xs) => xs.map(signum);
+let f: Fn(List<Int>) -> List<Int> = signs;
+print(f([1, -2]));

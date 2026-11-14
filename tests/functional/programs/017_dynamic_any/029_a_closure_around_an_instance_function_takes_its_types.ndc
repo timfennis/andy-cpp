@@ -1,0 +1,7 @@
+// A closure that returns a function an instance's body declares takes the
+// instance's types too, so a cast through `Any` sees what it returns.
+// expect-error: cannot cast Fn() -> Fn() -> Int to Fn() -> Fn() -> String
+fn make(x) { x + 1; fn() => fn() => x }
+let f: Any = make(1);
+let g = f as Fn() -> Fn() -> String;
+print(g()());

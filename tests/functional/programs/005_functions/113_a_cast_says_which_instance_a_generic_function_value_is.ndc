@@ -1,0 +1,9 @@
+// A cast to a function type says which types a generic function's value
+// takes, which makes it the instance for them, also when it's stored as an
+// `Any`.
+// expect-output: true false 5
+fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }
+fn inc(x) => x + 1
+let f = is_safe as Fn(List<Int>) -> Bool;
+let a: Any = inc as Fn(Int) -> Int;
+print(f([1, 2]), f([0]), (a as Fn(Int) -> Int)(4));

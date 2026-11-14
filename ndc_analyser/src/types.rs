@@ -1103,6 +1103,18 @@ impl TypeVars {
         }
     }
 
+    /// Makes every unsettled variable in `typ` but a literal's fall back to
+    /// the type of a failed check rather than its own fallback: the type
+    /// a generic function's value takes, as `T` in `let f: Any = inc`, is
+    /// unknown where nothing says it, not `Any`.
+    pub(crate) fn fall_back_as_errors(&mut self, typ: &StaticType) {
+        for var in self.unsettled(typ) {
+            if self.solution(var).is_none() && !self.is_literal(var) {
+                self.fallbacks[var.0 as usize] = StaticType::Error;
+            }
+        }
+    }
+
     /// Settles every unsettled variable in `typ` as `to`.
     pub(crate) fn settle_unknowns(&mut self, typ: &StaticType, to: &StaticType) {
         for var in self.unsettled(typ) {

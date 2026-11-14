@@ -1,5 +1,5 @@
-// A function value whose overload the program picks holds the overloads it
-// was made from, so it works where it's called, outside their scope.
+// A function value an instance picks the overload of is that function, so it
+// works where it's called, outside the scope of the overloads.
 // expect-output: int
 fn make(x) {
     fn choose(y: Int) => "int";

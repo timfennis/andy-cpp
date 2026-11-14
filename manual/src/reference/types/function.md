@@ -249,6 +249,23 @@ print(a, b, i);                        // 2 3.5 55
 
 The body is compiled for each set of types it's called with, so the calls in it are picked before the program runs.
 
+Used as a value, a generic function is its version for the types it's used at, as for a call. Here `count` passes `is_safe` a `List<Int>`, so it's the version that takes one, and a cast to a function type says which version is meant too:
+
+```ndc
+fn is_safe(ns) => ns.all(fn(x) => x > 0);
+print([[1, 2], [0, 3]].count(is_safe));   // 1
+
+let f = is_safe as Fn(List<Int>) -> Bool;
+print(f([1, 2]));                         // true
+```
+
+Where nothing says which types the value takes, as when it's stored as an `Any`, it's an error that asks for that cast:
+
+```ndc,fails
+fn inc(x) => x + 1;
+let f: Any = inc;  // error: `inc` is generic, and its value here doesn't say which types it takes
+```
+
 A call with an argument the body can't use is an error at the call, with notes that lead to the line in the body that can't take it:
 
 ```ndc,fails
