@@ -995,6 +995,11 @@ impl TypeVars {
             (StaticType::Var(var), StaticType::Error) if self.is_literal(*var) => true,
             (StaticType::Var(var), StaticType::Any) if self.is_literal(*var) => false,
             (StaticType::Iterable(_), StaticType::Var(var)) if !self.is_literal(*var) => true,
+            // So does a tuple whose elements aren't known yet: `(x, 1)`
+            // iterates as Ints once `x` is one.
+            (StaticType::Iterable(_), StaticType::Tuple(_)) if self.waits_to_iterate(&argument) => {
+                true
+            }
             // A literal passed for an `Iterable<T>` is the sequence it holds,
             // as `["a"]` passed to `len` is a `List<String>`: only a
             // parameter is ever an `Iterable` itself.
