@@ -970,9 +970,10 @@ impl TypeVars {
     /// variables become `Int`. Passing makes the two types the same, except
     /// that a parameter of type `Any` takes anything. An argument of type
     /// `Any` only goes where an `Any` is taken: it takes a cast to be passed
-    /// as anything else. Inside
-    /// a container, a function type, an `Option` or a tuple, `Any` is just
-    /// another type: a `List<Int>` doesn't fit a `List<Any>`. An
+    /// as anything else. Inside a container, an `Option` or a tuple, `Any`
+    /// is just another type: a `List<Int>` doesn't fit a `List<Any>`. A
+    /// function that takes an `Any` takes what any function type passes, and
+    /// one that returns anything fits where an `Any` is returned. An
     /// `Iterable<T>` takes any kind of sequence, and settles `T` from its
     /// elements. An argument nothing is known about yet stays what it is,
     /// as the call that takes it waits for it to iterate.
@@ -1030,9 +1031,11 @@ impl TypeVars {
                 };
                 // A function returning an `Iterable<U>` may return any kind of
                 // sequence of `U`s, as `flat_map`'s callback does.
+                // A function's value goes where an `Any` is expected back,
+                // as any value does.
                 parameters
                     && match self.shallow(p) {
-                        StaticType::Iterable(_) => self.bind_argument(p, a),
+                        StaticType::Iterable(_) | StaticType::Any => self.bind_argument(p, a),
                         _ => self.unify(p, a),
                     }
             }
@@ -1045,12 +1048,13 @@ impl TypeVars {
     }
 
     /// Whether what a function type passes as an `expected` parameter is
-    /// what a function that `takes` it takes: the same type, or any kind of
+    /// what a function that `takes` it takes: the same type, any kind of
     /// sequence for an `Iterable<T>`, as `len` takes the lists that
-    /// `[[1], [2]].map(len)` passes.
+    /// `[[1], [2]].map(len)` passes, or anything for an `Any`, as
+    /// `fn show(x: Any)` takes the Strings of `["a"].map(show)`.
     fn passes(&mut self, expected: &StaticType, takes: &StaticType) -> bool {
         match self.shallow(takes) {
-            StaticType::Iterable(_) => self.bind_argument(takes, expected),
+            StaticType::Iterable(_) | StaticType::Any => self.bind_argument(takes, expected),
             _ => self.unify(expected, takes),
         }
     }

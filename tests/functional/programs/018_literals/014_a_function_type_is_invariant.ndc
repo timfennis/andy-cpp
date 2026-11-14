@@ -1,5 +1,0 @@
-// A function taking Any isn't a function taking an Int: the program
-// couldn't check what a call through it returns.
-// expect-error: mismatched types: found Fn(Any) -> Any but expected Fn(Int) -> Any
-fn f(x: Any) => x;
-let g: Fn(Int) -> Any = f;

@@ -117,13 +117,22 @@ print(total([1, 2]), total((3, 4)), total(1..4));   // 3 7 6
 
 ### Element types are exact
 
-A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options, the other containers, and function types. To change a container's element type, go through `Any` and a cast:
+A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options and the other containers. To change a container's element type, go through `Any` and a cast:
 
 ```ndc,fails
 let words = "a b".split(" ");        // List<String>
 let any: Any = words;
 let anything = any as List<Any>;     // fine: checked as the program runs
 let wrong: List<Any> = words;        // error: found List<String> but expected List<Any>
+```
+
+A function type is exact too, with one exception for `Any`: a function that takes an `Any` can be used where one that takes something narrower is expected, as it takes whatever it's given, and any function fits where one returning `Any` is expected:
+
+```ndc
+fn show(x: Any) => "?";
+print(["a", "b"].map(show));        // ["?","?"]
+let inc: Fn(Int) -> Any = fn(x: Int) => x + 1;
+print(inc(1));                      // 2
 ```
 
 ### Values of different types
