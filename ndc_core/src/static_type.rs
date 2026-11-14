@@ -285,10 +285,12 @@ impl StaticType {
     /// expected as it is, with nothing to check as the program runs. The
     /// two types are the same, except that `parameter` can be `Any`, which
     /// takes anything, and that its type parameters and the parts of it not
-    /// known yet stand for any type. Inside a container, a function type,
-    /// an `Option` or a tuple, `Any` is just another type: a `List<Int>`
-    /// doesn't fit a `List<Any>`, as the list could then get a String. A
-    /// `Iterable<T>` takes any kind of sequence of what fits `T`.
+    /// known yet stand for any type. Inside a container, an `Option` or a
+    /// tuple, `Any` is just another type: a `List<Int>` doesn't fit a
+    /// `List<Any>`, as the list could then get a String. A function that
+    /// takes an `Any` fits a function type with any parameter there, and
+    /// any function fits one that returns `Any`. A `Iterable<T>` takes any
+    /// kind of sequence of what fits `T`.
     pub fn fits(&self, parameter: &Self) -> bool {
         matches!(parameter, Self::Any) || self.matches(parameter, false)
     }
@@ -351,11 +353,18 @@ impl StaticType {
                     // a function type that says nothing about them either.
                     (_, None) => true,
                     (None, Some(_)) => unknowns_match,
+                    // A function that takes an `Any` takes whatever it's
+                    // passed.
                     (Some(a), Some(p)) => {
-                        a.len() == p.len() && a.iter().zip(p).all(|(a, p)| matches(a, p))
+                        a.len() == p.len()
+                            && a.iter()
+                                .zip(p)
+                                .all(|(a, p)| matches!(a, Self::Any) || matches(a, p))
                     }
                 };
-                parameters && matches(ar, pr)
+                // What it returns goes where an `Any` is returned, as any
+                // value does.
+                parameters && (matches!(pr.as_ref(), Self::Any) || matches(ar, pr))
             }
             _ => self == parameter,
         }
