@@ -531,6 +531,10 @@ impl Analyser {
         span: Span,
     ) -> StaticType {
         match self.vars.resolve(&default) {
+            // A number is never a function, so it's the map's values itself,
+            // and takes the type their other uses need: in `%{:0}`, a write
+            // of a String is the mismatch, not the `0`.
+            StaticType::Var(var) if self.vars.is_number(var) => default,
             StaticType::Var(_) => {
                 let value = self.vars.fresh(StaticType::Any);
                 self.wait(Constraint::MapDefault {

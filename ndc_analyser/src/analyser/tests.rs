@@ -1127,6 +1127,26 @@ fn a_map_default_waits_until_it_is_known_whether_it_makes_the_values() {
     );
 }
 
+#[test]
+fn a_write_that_does_not_fit_a_number_default_is_the_mismatch() {
+    let source = "let m = %{:0}; m[\"a\"] = \"many\";";
+    let (_, result) = analyse_with_globals(source, index_natives());
+    assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
+    let error = &result.errors[0];
+    assert_eq!(&source[error.span().range()], "m[\"a\"] = \"many\"");
+}
+
+#[test]
+fn a_number_default_takes_the_type_the_map_s_writes_need() {
+    assert_eq!(
+        analyse_last_type_with_globals("let m = %{:0}; m[\"a\"] = 0.5; m", index_natives()),
+        StaticType::Map {
+            key: Box::new(StaticType::String),
+            value: Box::new(StaticType::Float),
+        },
+    );
+}
+
 /// `split` as the stdlib has it: one overload splits on whitespace, the
 /// other on a pattern.
 fn split_natives() -> Vec<(String, StaticType)> {
