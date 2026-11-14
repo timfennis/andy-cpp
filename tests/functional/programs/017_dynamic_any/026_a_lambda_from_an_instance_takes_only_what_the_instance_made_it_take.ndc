@@ -1,0 +1,9 @@
+// A lambda that an instance of a generic function makes takes what that
+// instance's types make it take, so through `Any` it doesn't take a String.
+// expect-error: found matches the arguments: (String)
+fn show(x: Int) => "int";
+fn show(x) => "other";
+fn mk(x) { fn(y) { let l = [x]; l.push(y); show(l[1]) } }
+print(mk(1)(2));
+let a: Any = mk(1);
+print(a("s"));

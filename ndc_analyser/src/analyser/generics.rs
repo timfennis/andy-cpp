@@ -41,7 +41,7 @@ impl Analyser {
         signature: &StaticType,
         declaration: NodeId,
         pure: bool,
-        [first_use, first_check]: [usize; 2],
+        [first_use, first_check, first_function]: [usize; 3],
     ) -> StaticType {
         self.solve_waiting();
         self.default_literals(TypeVars::is_generalizable);
@@ -191,6 +191,7 @@ impl Analyser {
                 declaration,
                 recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
                 checks: checks.into(),
+                functions: self.declared_functions[first_function..].into(),
             },
         );
         self.vars.resolve(signature)

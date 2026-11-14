@@ -1036,7 +1036,12 @@ impl Compiler {
         body: ExpressionLocation,
         instance: Option<InstanceAt>,
     ) -> Result<(CompiledFunction, bool), CompileError> {
-        let static_type = self.analysis.function_type(id).clone();
+        // A function an instance's body declares takes what the instance's
+        // types make it take.
+        let static_type = self
+            .instance_pick(|instance| instance.function_types.get(&id))
+            .unwrap_or_else(|| self.analysis.function_type(id))
+            .clone();
         let mut fn_compiler = Self {
             ir: Default::default(),
             source_locals: self.analysis.frame_size(id),
