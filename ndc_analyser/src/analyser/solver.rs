@@ -1812,8 +1812,15 @@ impl Analyser {
     /// Adds the constraints [`Self::instantiate_function`] copied for the
     /// function value at `id`, as [`Self::flush_copies`] does for a call.
     /// The value is the instance for the types it's used at: in
-    /// `[[1, 2]].count(is_safe)`, the one for `List<Int>`.
+    /// `[[1, 2]].count(is_safe)`, the one for `List<Int>`. A type of it
+    /// nothing settles, as in `let f: Any = is_safe`, is a failed check's,
+    /// so it's reported once, as the value's, and not by its body.
     pub(super) fn flush_value_copies(&mut self, id: NodeId, span: Span) {
+        for (_, key) in &self.pending.uses {
+            for typ in key {
+                self.vars.fall_back_as_errors(typ);
+            }
+        }
         self.record_uses(CallSite::Call(id), true, span);
         self.add_copies(span);
     }

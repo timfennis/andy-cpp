@@ -175,7 +175,7 @@ impl AnalysisError {
             ),
             span,
             help_text: Some(format!(
-                "A generic function's value is its version for one set of types, which can't be `Any` or unknown. Say which types it takes, as in `{function} as {typ}`{in_place}"
+                "A generic function's value is its version for one set of types, which must be known. Say which types it takes, as in `{function} as {typ}`{in_place}"
             )),
             notes: Vec::new(),
         }

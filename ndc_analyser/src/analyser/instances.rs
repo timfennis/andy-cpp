@@ -135,7 +135,8 @@ impl Analyser {
     /// Points `generic_use` at the instance it needs, adding it to `new` if
     /// it's new. A use that left the pick to the program as it runs keeps
     /// it. A function value is one instance, so its key must be known:
-    /// `let f: Any = inc` doesn't say which `inc` it is.
+    /// `let f: Any = inc` doesn't say which `inc` it is, while
+    /// `let f: Fn(Any) -> Any = inc` is the one for `Any`.
     fn point_at_instance(
         &mut self,
         generic_use: &GenericUse,
@@ -164,9 +165,7 @@ impl Analyser {
         }
         if generic_use.value
             && self.declared_in_batch.contains(&generic_use.function)
-            && key
-                .iter()
-                .any(|typ| typ.contains(&|part| *part == StaticType::Any))
+            && key.iter().any(StaticType::has_errors)
         {
             self.report_unknown_instance(generic_use);
             return;
@@ -192,14 +191,12 @@ impl Analyser {
     }
 
     /// Reports that the generic function value `generic_use` doesn't say
-    /// which instance it is. What its body couldn't do with the unknown
-    /// types was reported at the value too, and this says why.
+    /// which instance it is: its key holds a type nothing settled, which
+    /// [`Self::flush_value_copies`] made a failed check's, so its body
+    /// reported nothing about it.
     fn report_unknown_instance(&mut self, generic_use: &GenericUse) {
         let name = self.resolver.symbol_name(generic_use.function).to_string();
         let typ = named_in_order(&self.vars.shown(self.types.get_type(generic_use.function)));
-        self.result
-            .errors
-            .retain(|error| error.span() != generic_use.span);
         self.emit(AnalysisError::generic_function_value(
             &name,
             &typ,
