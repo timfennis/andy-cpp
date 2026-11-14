@@ -1872,7 +1872,8 @@ impl Analyser {
     }
 
     /// Each argument nothing is known about yet that was passed for an
-    /// `Iterable<T>`, or that a function passed for one returns, with the
+    /// `Iterable<T>`, or that a function passed for one returns, or a tuple
+    /// whose elements aren't, with the
     /// `T` that iterating over it gives once it's known: in `fn total(xs)
     /// => xs.sum()`, what `xs` is waits for a call, and so does `xs` in
     /// `fn flatten(xs) => [0].flat_map(fn(_) => xs)`.
@@ -1904,6 +1905,11 @@ impl Analyser {
                     // A literal whose type isn't known yet either, as the
                     // element of `[1][0]` is, waits like any other value.
                     StaticType::Var(_) => Some((sequence, element)),
+                    // So does a tuple whose elements aren't known yet, as
+                    // `(x, x)` in `[0].flat_map(fn(_) => (x, x))`.
+                    StaticType::Tuple(_) if self.vars.waits_to_iterate(&sequence) => {
+                        Some((sequence, element))
+                    }
                     _ => None,
                 }
             })
