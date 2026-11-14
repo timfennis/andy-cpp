@@ -1,0 +1,4 @@
+let prices = %{:0};
+prices["tea"] = 2.5;
+print(prices["tea"], prices["coffee"]);
+// expect-output: 2.5 0.0
