@@ -175,7 +175,10 @@ impl Analyser {
                 uses: uses.into(),
                 declaration,
                 recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
-                functions: self.declared_functions[first_function..].into(),
+                functions: self.declared_functions[first_function..]
+                    .iter()
+                    .map(|&node| (node, self.result.analysis.function_type(node).clone()))
+                    .collect(),
             },
         );
         self.vars.resolve(signature)

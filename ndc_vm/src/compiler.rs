@@ -21,6 +21,29 @@ struct InstanceAt {
     index: usize,
 }
 
+/// What compiling the earlier lines of a REPL session leaves for the lines
+/// after them, which can call the functions those declared with new types.
+/// After `fn inc(x) => x + 1`, the line `inc(2.5)` compiles the instance
+/// `inc<Float>` from `inc`'s body and what the analyser worked out about it.
+#[derive(Default)]
+pub struct Session {
+    /// What the analyser worked out about every line so far.
+    analysis: Rc<Analysis>,
+    /// The functions the lines declared in globals, by declaration.
+    functions: AHashMap<NodeId, DeclaredFunction>,
+    /// As [`Compiler::prototypes`], for every line so far.
+    prototypes: Rc<RefCell<AHashMap<NodeId, Rc<CompiledFunction>>>>,
+}
+
+/// A function declaration, as [`Compiler::compile_function_decl`] takes it.
+#[derive(Clone)]
+struct DeclaredFunction {
+    name: Option<String>,
+    body: ExpressionLocation,
+    pure: bool,
+    span: Span,
+}
+
 pub struct Compiler {
     ir: OptimizerIr,
     source_locals: usize,
@@ -42,6 +65,9 @@ pub struct Compiler {
     /// function an instance's body declares is the same function when it
     /// compiles the same, so it keeps its identity.
     prototypes: Rc<RefCell<AHashMap<NodeId, Rc<CompiledFunction>>>>,
+    /// The functions the code compiled so far declared in globals, kept when
+    /// compiling a REPL line, whose later lines may need instances of them.
+    functions: Option<AHashMap<NodeId, DeclaredFunction>>,
 }
 
 impl Compiler {
@@ -58,6 +84,7 @@ impl Compiler {
             instance: None,
             used_instance: Cell::new(false),
             prototypes: Rc::default(),
+            functions: None,
         }
     }
 
@@ -74,6 +101,7 @@ impl Compiler {
             instance: None,
             used_instance: Cell::new(false),
             prototypes: Rc::default(),
+            functions: None,
         }
     }
     /// Compiles a program, or one REPL line, into a function the VM runs at
@@ -83,9 +111,83 @@ impl Compiler {
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::new();
-        compiler.compile_batch(expressions, analysis)?;
+        let mut compiler = Self {
+            analysis: Rc::new(analysis),
+            ..Self::new()
+        };
+        compiler.compile_batch(expressions)?;
         Ok(compiler.finish())
+    }
+
+    /// Compiles one line of a REPL session, `analysis` being what the
+    /// analyser worked out about it, and keeps in `session` what later lines
+    /// need. The line starts by storing the instances it made of earlier
+    /// lines' functions.
+    pub fn compile_line(
+        expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
+        session: &mut Session,
+    ) -> Result<CompiledFunction, CompileError> {
+        Rc::make_mut(&mut session.analysis).extend(analysis);
+        let mut compiler = Self {
+            analysis: Rc::clone(&session.analysis),
+            prototypes: Rc::clone(&session.prototypes),
+            functions: Some(std::mem::take(&mut session.functions)),
+            ..Self::new()
+        };
+        let result = compiler
+            .compile_earlier_instances()
+            .and_then(|()| compiler.compile_batch(expressions));
+        session.functions = compiler.functions.take().unwrap_or_default();
+        result?;
+        Ok(compiler.finish())
+    }
+
+    /// Stores the instances the batch made of functions earlier batches
+    /// declared, each its function's body compiled with the instance's
+    /// picks, as [`Self::compile_function_decl`] stores a function's own.
+    fn compile_earlier_instances(&mut self) -> Result<(), CompileError> {
+        let analysis = Rc::clone(&self.analysis);
+        let earlier = analysis
+            .instances
+            .iter()
+            .filter_map(|(declaration, instances)| {
+                let function = self.functions.as_ref()?.get(declaration)?;
+                Some((*declaration, function.clone(), instances))
+            })
+            .collect::<Vec<_>>();
+        for (declaration, function, instances) in earlier {
+            for (index, instance) in instances.iter().enumerate() {
+                let at = InstanceAt { declaration, index };
+                let (body, _) = self.compile_function_body(
+                    declaration,
+                    function.name.clone(),
+                    function.body.clone(),
+                    Some(at),
+                )?;
+                self.store_instance(body, instance, function.pure, function.span);
+            }
+        }
+        Ok(())
+    }
+
+    /// Stores the compiled body of `instance` in its global, with a cache of
+    /// its own if it's an instance of a `pure fn`.
+    fn store_instance(
+        &mut self,
+        body: CompiledFunction,
+        instance: &Instance,
+        pure: bool,
+        span: Span,
+    ) {
+        let idx = self
+            .ir
+            .add_constant(Value::function(Function::Compiled(Rc::new(body))));
+        self.ir.write(OpCode::Constant(idx), span);
+        if pure {
+            self.ir.write(OpCode::Memoize, span);
+        }
+        self.emit_declare(instance.variable, span);
     }
 
     /// Compile expressions without running the peephole optimizer. Useful
@@ -95,20 +197,21 @@ impl Compiler {
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self::new_without_optimization();
-        compiler.compile_batch(expressions, analysis)?;
+        let mut compiler = Self {
+            analysis: Rc::new(analysis),
+            ..Self::new_without_optimization()
+        };
+        compiler.compile_batch(expressions)?;
         Ok(compiler.finish())
     }
 
-    /// Compiles one batch of top-level expressions, `analysis` being what the
-    /// analyser worked out about them.
+    /// Compiles one batch of top-level expressions, [`Self::analysis`] being
+    /// what the analyser worked out about them.
     fn compile_batch(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
-        analysis: Analysis,
     ) -> Result<(), CompileError> {
-        self.source_locals = analysis.top_level_frame_size;
-        self.analysis = Rc::new(analysis);
+        self.source_locals = self.analysis.top_level_frame_size;
         for expression in expressions {
             self.compile_expr(expression)?;
         }
@@ -901,6 +1004,16 @@ impl Compiler {
         span: Span,
     ) -> Result<(), CompileError> {
         let name_variable = self.analysis.variable(id);
+        // A later REPL line may make instances of a function in a global.
+        let kept = (self.functions.is_some()
+            && self.instance.is_none()
+            && matches!(name_variable, Some(ResolvedVar::Global { .. })))
+        .then(|| DeclaredFunction {
+            name: name.clone(),
+            body: body.clone(),
+            pure,
+            span,
+        });
         let analysis = Rc::clone(&self.analysis);
         let instances = analysis.instances.get(&id).map_or(&[][..], Vec::as_slice);
         // The function's own body comes first, so the functions it declares
@@ -973,14 +1086,10 @@ impl Compiler {
         // and `f(1.0)` call different instances, which may return different
         // values.
         for (instance, instance_body) in instances.iter().zip(instance_bodies) {
-            let idx = self
-                .ir
-                .add_constant(Value::function(Function::Compiled(Rc::new(instance_body))));
-            self.ir.write(OpCode::Constant(idx), span);
-            if pure {
-                self.ir.write(OpCode::Memoize, span);
-            }
-            self.emit_declare(instance.variable, span);
+            self.store_instance(instance_body, instance, pure, span);
+        }
+        if let (Some(kept), Some(functions)) = (kept, &mut self.functions) {
+            functions.insert(id, kept);
         }
 
         if name_variable.is_some() {
@@ -1060,6 +1169,7 @@ impl Compiler {
             instance: instance.or(self.instance),
             used_instance: Cell::new(false),
             prototypes: Rc::clone(&self.prototypes),
+            functions: None,
         };
         fn_compiler.compile_expr(body)?;
         fn_compiler.ir.write(OpCode::Return, Span::synthetic());

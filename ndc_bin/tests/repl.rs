@@ -265,3 +265,20 @@ fn a_let_on_a_later_line_is_a_new_variable_earlier_functions_dont_see() {
     let printed = repl(&["let x = 1;", "fn f() { x }", "let x = 2;", "print(f(), x)"]);
     assert_eq!(printed, ["1 2"]);
 }
+
+// A later line compiles the instances it needs of an earlier line's generic
+// function, and a failed line takes the ones it made with it.
+#[test]
+fn later_lines_get_instances_of_earlier_lines_functions() {
+    let printed = repl(&[
+        r#"fn pick(x: Int) => 1; fn pick(x: Any) => "fallback"; fn wrap(x) => pick(x);"#,
+        "let a: Any = 1; let s: String = wrap(a); print(s);",
+        "fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }",
+        "print(is_safe([1, 2]), [[1, 2]].count(is_safe))",
+        "fn inc(x) => x + 1;",
+        "print(inc(2.5)); [1][5]",
+        "print(inc(3.5))",
+        "print(inc(4.5))",
+    ]);
+    assert_eq!(printed, ["fallback", "true 1", "3.5", "4.5", "5.5"]);
+}
