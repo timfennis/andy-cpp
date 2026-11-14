@@ -1,8 +1,8 @@
 // A generic `pure fn` is compiled once for each type it's called with, and
 // each of those copies has a cache of its own. The second direct call finds
-// what the first computed. A call through a value of the function runs the
-// function's own body, which computes it again.
-// expect-output: 10 10 10 2
+// what the first computed, and so does a call through a value of the
+// function used at the same types, which is the same copy.
+// expect-output: 10 10 10 1
 let calls = 0;
 pure fn add(x, y) {
     calls += 1;

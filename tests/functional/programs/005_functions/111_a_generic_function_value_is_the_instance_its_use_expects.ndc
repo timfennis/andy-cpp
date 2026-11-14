@@ -1,0 +1,5 @@
+// `count` passes its function a List<Int>, so `is_safe` is its instance for
+// a List<Int>, whose `all` and `>` are picked for Ints.
+// expect-output: 1
+fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }
+print([[1, 2], [0, 3]].count(is_safe));

@@ -236,3 +236,37 @@ fn a_generic_function_on_one_line_uses_its_instances() {
     let out = repl_output(&["fn inc(x) => x + 1; print(inc(1), inc(2.5));"]);
     assert_eq!(out.trim(), "2 3.5");
 }
+
+// A later line gets no instances of an earlier line's generic function, so
+// it runs the function's own body, compiled for arguments of any type, which
+// leaves what it calls, and which overload a function value in it means, to
+// the program as it runs.
+#[test]
+fn a_function_value_in_an_earlier_lines_generic_body_takes_the_most_specific_overload() {
+    let out = repl_output(&[
+        r#"fn choose(x: Int) => "int"; fn choose(x: Any) => "any";"#,
+        "fn apply(x) { let g = choose; g(x) }",
+        "print(apply(1))",
+    ]);
+    assert_eq!(out.trim(), "int");
+}
+
+#[test]
+fn an_earlier_lines_generic_function_used_as_a_value_runs_its_own_body() {
+    let out = repl_output(&[
+        "fn signs(xs) => xs.map(signum);",
+        "print([[1, -2]].map(signs))",
+    ]);
+    assert_eq!(out.trim(), "[[1,-1]]");
+}
+
+#[test]
+fn a_function_value_from_an_earlier_lines_generic_body_cast_from_any_is_checked() {
+    repl_error(
+        &[
+            "fn bad(x) { let g = abs; g(x); let a: Any = g; let b = a as Fn(Int) -> String; b(1) }",
+            "print(bad(1))",
+        ],
+        "expected the function to return String but it returned Int",
+    );
+}

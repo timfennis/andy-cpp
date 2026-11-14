@@ -152,6 +152,35 @@ impl AnalysisError {
         }
     }
 
+    /// A generic function's name used as a value where nothing says which
+    /// types it takes, as `inc` in `let f: Any = inc` with
+    /// `fn inc(x) => x + 1`, whose type is `Fn(A) -> B`: "say which types it
+    /// takes, as in `inc as Fn(A) -> B` with types in place of `A` and `B`",
+    /// which lists the type parameters of `typ` alphabetically.
+    pub(crate) fn generic_function_value(function: &str, typ: &StaticType, span: Span) -> Self {
+        let mut names = typ.type_parameters();
+        names.sort();
+        let parameters = names
+            .iter()
+            .map(|name| format!("`{name}`"))
+            .collect::<Vec<_>>();
+        let in_place = match &parameters[..] {
+            [] => String::new(),
+            [only] => format!(" with a type in place of {only}"),
+            [rest @ .., last] => format!(" with types in place of {} and {last}", rest.join(", ")),
+        };
+        Self {
+            text: format!(
+                "`{function}` is generic, and its value here doesn't say which types it takes"
+            ),
+            span,
+            help_text: Some(format!(
+                "A generic function's value is its version for one set of types, which can't be `Any` or unknown. Say which types it takes, as in `{function} as {typ}`{in_place}"
+            )),
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn type_too_large(function: &str, limit: usize, span: Span) -> Self {
         Self {
             text: format!(

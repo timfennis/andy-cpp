@@ -7,6 +7,7 @@
 //! every call.
 
 use super::Analyser;
+use super::generics::named_in_order;
 use super::solver::{CallSite, Constraint, Origin, Waiting};
 use crate::error::AnalysisError;
 use ahash::AHashMap;
@@ -44,6 +45,9 @@ pub(super) struct Scheme {
 pub(super) struct GenericUse {
     /// Where the use's pick is recorded.
     pub(super) site: CallSite,
+    /// Whether it's the function's name used as a value, as `inc` in
+    /// `xs.map(inc)`, rather than a call.
+    pub(super) value: bool,
     pub(super) function: SymbolId,
     /// The types it gives the function's key, in the key's order.
     pub(super) key: Vec<StaticType>,
@@ -86,11 +90,12 @@ impl Pending {
 }
 
 impl Analyser {
-    /// Records that the call at `site` committed to the generic functions
-    /// [`Pending::uses`] holds, unless it's in a copy of a constraint, whose
-    /// pick belongs to the function it was copied from. A tuple operator's
-    /// call commits to one overload per element, which needs no instance.
-    pub(super) fn record_uses(&mut self, site: CallSite, span: Span) {
+    /// Records that the call at `site`, or the function value at `site` if
+    /// `value`, committed to the generic functions [`Pending::uses`] holds,
+    /// unless it's in a copy of a constraint, whose pick belongs to the
+    /// function it was copied from. A tuple operator's call commits to one
+    /// overload per element, which needs no instance.
+    pub(super) fn record_uses(&mut self, site: CallSite, value: bool, span: Span) {
         let uses = std::mem::take(&mut self.pending.uses);
         if self.copied_through.is_some() {
             return;
@@ -98,6 +103,7 @@ impl Analyser {
         if let [(function, key)] = &uses[..] {
             self.uses.push(GenericUse {
                 site,
+                value,
                 function: *function,
                 key: key.clone(),
                 instance: self.recording,
@@ -128,7 +134,8 @@ impl Analyser {
 
     /// Points `generic_use` at the instance it needs, adding it to `new` if
     /// it's new. A use that left the pick to the program as it runs keeps
-    /// it.
+    /// it. A function value is one instance, so its key must be known:
+    /// `let f: Any = inc` doesn't say which `inc` it is.
     fn point_at_instance(
         &mut self,
         generic_use: &GenericUse,
@@ -155,6 +162,15 @@ impl Analyser {
             ));
             return;
         }
+        if generic_use.value
+            && self.declared_in_batch.contains(&generic_use.function)
+            && key
+                .iter()
+                .any(|typ| typ.contains(&|part| *part == StaticType::Any))
+        {
+            self.report_unknown_instance(generic_use);
+            return;
+        }
         let instance = self.instance_for(generic_use.function, key, new);
         if instance == generic_use.function {
             return;
@@ -173,6 +189,22 @@ impl Analyser {
             generic_use.site,
             Binding::Resolved(Candidate::Scalar(instance)),
         );
+    }
+
+    /// Reports that the generic function value `generic_use` doesn't say
+    /// which instance it is. What its body couldn't do with the unknown
+    /// types was reported at the value too, and this says why.
+    fn report_unknown_instance(&mut self, generic_use: &GenericUse) {
+        let name = self.resolver.symbol_name(generic_use.function).to_string();
+        let typ = named_in_order(&self.vars.shown(self.types.get_type(generic_use.function)));
+        self.result
+            .errors
+            .retain(|error| error.span() != generic_use.span);
+        self.emit(AnalysisError::generic_function_value(
+            &name,
+            &typ,
+            generic_use.span,
+        ));
     }
 
     /// Whether `generic_use`, in the body of an instance of the function it
@@ -225,7 +257,7 @@ impl Analyser {
     ) -> SymbolId {
         // A call with `Any` arguments gets an instance too: its calls take
         // only the overloads that take `Any`, while the function's own body
-        // leaves its picks to the program, for its value.
+        // leaves its picks to the program, for later batches.
         if !self.declared_in_batch.contains(&function) {
             return function;
         }
@@ -296,6 +328,7 @@ impl Analyser {
                 .collect();
             self.uses.push(GenericUse {
                 site: generic_use.site,
+                value: generic_use.value,
                 function: generic_use.function,
                 key,
                 instance: Some(instance),

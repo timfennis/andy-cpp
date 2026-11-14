@@ -102,9 +102,14 @@ impl Analyser {
             .bindings
             .insert(id, Binding::Resolved(Candidate::Scalar(symbol)));
         // A generic function used as a value, as in `let p = push`, has one
-        // type there, which its uses settle.
+        // type there, which its uses settle, and is the instance for it. In
+        // its own body it has the body's types, so an instance's value of it
+        // is that instance, as its recursive calls are.
+        if self.declaring == Some(symbol) && self.recording.is_none() {
+            self.recursive_calls.push(id);
+        }
         let typ = self.instantiate_function(symbol);
-        self.flush_copies(None, span);
+        self.flush_value_copies(id, span);
         typ
     }
 
@@ -343,7 +348,7 @@ impl Analyser {
     fn commit_function_value(&mut self, value: &FunctionValue, symbol: SymbolId, early: bool) {
         let typ = self.instantiate_function(symbol);
         self.vars.bind_argument(&value.expected, &typ);
-        self.flush_copies(None, value.span);
+        self.flush_value_copies(value.id, value.span);
         if early && cfg!(debug_assertions) {
             self.remember_early_function_value(value, symbol);
         }

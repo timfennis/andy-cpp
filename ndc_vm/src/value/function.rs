@@ -37,7 +37,7 @@ pub enum Function {
     /// calls the first that accepts its arguments: an overloaded function's
     /// name used as a value where the analyser couldn't tell which one is
     /// meant, as `signum` in the body of `fn signs(xs) => xs.map(signum)`
-    /// compiled for arguments of any type.
+    /// compiled for arguments of any type, which later REPL lines call.
     Overloads(Rc<[Self]>),
 }
 
