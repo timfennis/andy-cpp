@@ -46,6 +46,7 @@ impl Analyser {
         self.default_literals(TypeVars::is_generalizable);
         self.settle_ambiguous(signature);
         self.merge_copies();
+        self.keep_outer_constraints_outside();
 
         let scheme = self
             .generic_constraints()
@@ -177,6 +178,30 @@ impl Analyser {
         self.vars.resolve(signature)
     }
 
+    /// Leaves the constraints that wait only on what's outside the generic
+    /// function whose body just ended, and what they settle, to the code
+    /// around it: in `let x = 1; fn f() { x + 1 }`, the `+` waits for the
+    /// `1` to be decided, and what it gives is the same for every call of
+    /// `f`, so it's not a type parameter of `f`. Its pick is then made for
+    /// `f`'s own body, like any other call's outside a generic function.
+    fn keep_outer_constraints_outside(&mut self) {
+        loop {
+            let outer = self
+                .waiting
+                .values()
+                .map(|waiting| &waiting.constraint)
+                .filter(|constraint| !self.waits_on_the_function(constraint))
+                .flat_map(|constraint| self.generic_outputs(constraint))
+                .collect::<Vec<_>>();
+            if outer.is_empty() {
+                return;
+            }
+            for var in outer {
+                self.vars.lower_to_current(&StaticType::Var(var));
+            }
+        }
+    }
+
     /// The waiting constraints that wait on or settle a variable of the
     /// generic function whose body just ended, oldest first.
     fn generic_constraints(&self) -> Vec<u64> {
@@ -214,7 +239,36 @@ impl Analyser {
     /// function's name passed to one, as `signum` in `xs.map(signum)`,
     /// whose type is what the call expects of it.
     fn generic_outputs(&self, constraint: &Constraint) -> Vec<TypeVar> {
-        let passed_functions = match constraint {
+        constraint
+            .outputs()
+            .iter()
+            .chain(&self.passed_functions(constraint))
+            .flat_map(|typ| self.vars.unsettled(typ))
+            .filter(|&var| self.vars.is_generalizable(var))
+            .collect()
+    }
+
+    /// Whether `constraint` waits on a variable of the generic function
+    /// whose body just ended: a call on what's passed to it, a function
+    /// passed to it too, as one may use the function's parameters, and the
+    /// branches of an `if` on theirs. What it settles itself may be one of
+    /// those as well, as `n - 1` in `fn fib(n)` gives what `fib` takes.
+    fn waits_on_the_function(&self, constraint: &Constraint) -> bool {
+        let waits_on: &[StaticType] = match constraint {
+            Constraint::Call(call) => call.arguments(),
+            Constraint::Join { types, .. } => &types[..2],
+            _ => return !self.generic_inputs(constraint).is_empty(),
+        };
+        waits_on
+            .iter()
+            .flat_map(|typ| self.vars.unsettled(typ))
+            .any(|var| self.vars.is_generalizable(var))
+    }
+
+    /// The functions passed to `constraint`, if it's a call, whose types
+    /// it settles: see [`Self::generic_outputs`].
+    fn passed_functions(&self, constraint: &Constraint) -> Vec<StaticType> {
+        match constraint {
             Constraint::Call(call) => {
                 let values = self
                     .waiting
@@ -240,14 +294,7 @@ impl Analyser {
                 _ => Vec::new(),
             },
             _ => Vec::new(),
-        };
-        constraint
-            .outputs()
-            .iter()
-            .chain(&passed_functions)
-            .flat_map(|typ| self.vars.unsettled(typ))
-            .filter(|&var| self.vars.is_generalizable(var))
-            .collect()
+        }
     }
 
     /// The generic function's variables that its constraints wait on but

@@ -594,6 +594,19 @@ impl TypeVars {
         self.solution(var).is_none() && self.levels[var.0 as usize] > self.level
     }
 
+    /// Makes the unsettled variables in `typ` belong where the code being
+    /// analysed now is, so they don't become type parameters of a generic
+    /// function whose body made them.
+    pub(crate) fn lower_to_current(&mut self, typ: &StaticType) {
+        for var in self.unsettled(typ) {
+            let level = self.levels[var.0 as usize];
+            if level > self.level {
+                self.lowered.push((var, level));
+                self.levels[var.0 as usize] = self.level;
+            }
+        }
+    }
+
     /// Settles `var` as the type parameter `name` of the generic function
     /// whose body made it.
     pub(crate) fn generalize(&mut self, var: TypeVar, name: &str) {
