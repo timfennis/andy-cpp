@@ -34,9 +34,9 @@ pub(super) struct Scheme {
     pub(super) declaration: NodeId,
     /// The calls its body makes of itself, which have its own types.
     pub(super) recursive_calls: Rc<[NodeId]>,
-    /// The functions its body declares, whose types an instance makes what
-    /// its own types make them.
-    pub(super) functions: Rc<[NodeId]>,
+    /// The functions its body declares, with the types they're declared
+    /// with, which an instance makes what its own types make them.
+    pub(super) functions: Rc<[(NodeId, StaticType)]>,
 }
 
 /// A call of a generic function, or its name used as a value, which needs
@@ -56,6 +56,10 @@ pub(super) struct GenericUse {
     pub(super) instance: Option<SymbolId>,
     /// Where the use is.
     pub(super) span: Span,
+    /// What the function's own body picks at the use, for a use in the body
+    /// of a function an earlier batch declared: that batch's picks went to
+    /// the compiler with its analysis.
+    pub(super) own_pick: Option<Binding<SymbolId>>,
 }
 
 /// What a call that's about to commit copied from the generic function it
@@ -108,6 +112,7 @@ impl Analyser {
                 key: key.clone(),
                 instance: self.recording,
                 span,
+                own_pick: None,
             });
         }
     }
@@ -133,8 +138,8 @@ impl Analyser {
     }
 
     /// Points `generic_use` at the instance it needs, adding it to `new` if
-    /// it's new. A use that left the pick to the program as it runs keeps
-    /// it. A function value is one instance, so its key must be known:
+    /// it's new. A use that picked another function keeps its pick. A
+    /// function value is one instance, so its key must be known:
     /// `let f: Any = inc` doesn't say which `inc` it is, while
     /// `let f: Fn(Any) -> Any = inc` is the one for `Any`.
     fn point_at_instance(
@@ -163,10 +168,7 @@ impl Analyser {
             ));
             return;
         }
-        if generic_use.value
-            && self.declared_in_batch.contains(&generic_use.function)
-            && key.iter().any(StaticType::has_errors)
-        {
+        if generic_use.value && key.iter().any(StaticType::has_errors) {
             self.report_unknown_instance(generic_use);
             return;
         }
@@ -180,7 +182,8 @@ impl Analyser {
         let picked = generic_use
             .instance
             .and_then(|of| self.pick_tables(Some(of)).at(generic_use.site).cloned())
-            .or_else(|| self.pick_tables(None).at(generic_use.site).cloned());
+            .or_else(|| self.pick_tables(None).at(generic_use.site).cloned())
+            .or_else(|| generic_use.own_pick.clone());
         if picked != Some(function) {
             return;
         }
@@ -243,21 +246,15 @@ impl Analyser {
         }
     }
 
-    /// The instance of `function` for these types of its key: the function
-    /// itself when it was declared by an earlier batch, which compiled it
-    /// already.
+    /// The instance of `function` for these types of its key, which may be
+    /// one an earlier batch made. A call with `Any` arguments gets an
+    /// instance too, whose calls take only the overloads that take `Any`.
     fn instance_for(
         &mut self,
         function: SymbolId,
         key: Vec<StaticType>,
         new: &mut Vec<(SymbolId, SymbolId, Vec<StaticType>)>,
     ) -> SymbolId {
-        // A call with `Any` arguments gets an instance too: its calls take
-        // only the overloads that take `Any`, while the function's own body
-        // leaves its picks to the program, for later batches.
-        if !self.declared_in_batch.contains(&function) {
-            return function;
-        }
         if let Some(&instance) = self.instances.get(&(function, key.clone())) {
             return instance;
         }
@@ -307,12 +304,7 @@ impl Analyser {
         // The instance's own value takes its types, as `wrap<Int>` takes an
         // Int, and so do the functions its body declares.
         let own = (scheme.declaration, self.types.get_type(function).clone());
-        let nested = scheme
-            .functions
-            .iter()
-            .map(|&node| (node, self.result.analysis.function_type(node).clone()))
-            .collect::<Vec<_>>();
-        for (node, declared) in std::iter::once(own).chain(nested) {
+        for (node, declared) in std::iter::once(own).chain(scheme.functions.iter().cloned()) {
             let declared = self.vars.resolve(&declared);
             let typ = self.vars.instantiate_with(&declared, &mut made);
             if let Some(picks) = self.picks.instances.get_mut(&instance) {
@@ -338,10 +330,33 @@ impl Analyser {
                 key,
                 instance: Some(instance),
                 span: generic_use.span,
+                own_pick: generic_use.own_pick.clone(),
             });
         }
         self.settle_waiting(first);
         self.recording = outer;
+    }
+
+    /// Copies into the schemes of the generic functions the batch declares
+    /// what their own bodies pick at their uses of generic functions. The
+    /// batch's picks go to the compiler with its analysis, and a later
+    /// batch's instance of one of them still points those uses at
+    /// instances: in `fn wrap(x) => inc(x)`, at `inc`.
+    pub(super) fn keep_own_picks(&mut self) {
+        for function in std::mem::take(&mut self.declared_in_batch) {
+            let Some(mut scheme) = self.schemes.get(&function).cloned() else {
+                continue;
+            };
+            scheme.uses = scheme
+                .uses
+                .iter()
+                .map(|generic_use| GenericUse {
+                    own_pick: self.pick_tables(None).at(generic_use.site).cloned(),
+                    ..generic_use.clone()
+                })
+                .collect();
+            self.schemes.insert(function, scheme);
+        }
     }
 }
 

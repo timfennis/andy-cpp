@@ -69,8 +69,8 @@ pub struct Analyser {
     /// The instance whose constraints are being solved, which gets the
     /// picks they make.
     recording: Option<SymbolId>,
-    /// The generic functions the batch declares, which the batch compiles
-    /// instances of.
+    /// The generic functions the batch declares, whose own picks the
+    /// batch's analysis takes with it.
     declared_in_batch: AHashSet<SymbolId>,
     /// The generic function whose body is being analysed.
     declaring: Option<SymbolId>,
@@ -200,7 +200,7 @@ impl Analyser {
             "a write waits for literals that are all settled"
         );
         self.instantiate_uses();
-        self.declared_in_batch.clear();
+        self.keep_own_picks();
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
         self.watchers.clear();
         if cfg!(debug_assertions) {

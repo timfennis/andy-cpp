@@ -222,7 +222,7 @@ fn configure_after_a_line_ran_updates_the_globals() {
 #[test]
 fn a_generic_function_from_an_earlier_line_takes_a_call_with_new_types() {
     // The line that declared `inc` compiled its instance for Ints. A later
-    // line calls it with a Float, which its own body takes.
+    // line calls it with a Float, which compiles the instance for Floats.
     let out = repl_output(&[
         "fn inc(x) => x + 1;",
         "print(inc(1));",
@@ -237,12 +237,55 @@ fn a_generic_function_on_one_line_uses_its_instances() {
     assert_eq!(out.trim(), "2 3.5");
 }
 
-// A later line gets no instances of an earlier line's generic function, so
-// it runs the function's own body, compiled for arguments of any type, which
-// leaves what it calls, and which overload a function value in it means, to
-// the program as it runs.
 #[test]
-fn a_function_value_in_an_earlier_lines_generic_body_takes_the_most_specific_overload() {
+fn a_later_line_gets_the_instance_for_any_of_an_earlier_lines_function() {
+    let out = repl_output(&[
+        r#"fn pick(x: Int) => 1; fn pick(x: Any) => "fallback"; fn wrap(x) => pick(x);"#,
+        "let a: Any = 1; let s: String = wrap(a); print(s);",
+    ]);
+    assert_eq!(out.trim(), "fallback");
+}
+
+#[test]
+fn a_later_line_gets_an_instance_whose_lambda_takes_its_types() {
+    let out = repl_output(&[
+        "fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }",
+        "print(is_safe([1, 2]))",
+    ]);
+    assert_eq!(out.trim(), "true");
+}
+
+#[test]
+fn an_earlier_lines_function_used_as_a_value_is_the_instance_for_its_type() {
+    let out = repl_output(&[
+        "fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }",
+        "print([[1, 2]].count(is_safe))",
+    ]);
+    assert_eq!(out.trim(), "1");
+}
+
+#[test]
+fn a_later_line_reuses_the_instance_an_earlier_line_made() {
+    let out = repl_output(&[
+        "fn inc(x) => x + 1;",
+        "print(inc(2.5));",
+        "print(inc(3.5), [1.5].map(inc));",
+    ]);
+    assert_eq!(out.trim(), "3.5\n4.5 [2.5]");
+}
+
+#[test]
+fn an_instance_of_an_earlier_line_calls_the_instances_its_types_need() {
+    let out = repl_output(&[
+        "fn inc(x) => x + 1;",
+        "fn twice(x) => inc(inc(x));",
+        "print(twice(1), twice(0.5));",
+    ]);
+    assert_eq!(out.trim(), "3 2.5");
+}
+
+#[test]
+fn a_function_value_in_an_earlier_lines_generic_body_takes_the_instances_overload() {
     let out = repl_output(&[
         r#"fn choose(x: Int) => "int"; fn choose(x: Any) => "any";"#,
         "fn apply(x) { let g = choose; g(x) }",
@@ -252,7 +295,7 @@ fn a_function_value_in_an_earlier_lines_generic_body_takes_the_most_specific_ove
 }
 
 #[test]
-fn an_earlier_lines_generic_function_used_as_a_value_runs_its_own_body() {
+fn an_earlier_lines_generic_function_used_as_a_value_is_an_instance() {
     let out = repl_output(&[
         "fn signs(xs) => xs.map(signum);",
         "print([[1, -2]].map(signs))",
@@ -267,6 +310,28 @@ fn a_function_value_from_an_earlier_lines_generic_body_cast_from_any_is_checked(
             "fn bad(x) { let g = abs; g(x); let a: Any = g; let b = a as Fn(Int) -> String; b(1) }",
             "print(bad(1))",
         ],
-        "expected the function to return String but it returned Int",
+        "cannot cast Fn(Int) -> Int to Fn(Int) -> String",
     );
+}
+
+#[test]
+fn a_failed_line_takes_the_instances_it_made_with_it() {
+    let mut interp = Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    interp.eval("fn inc(x) => x + 1;").unwrap();
+    assert!(interp.eval("print(inc(2.5)); [1][5]").is_err());
+    interp.eval("fn inc(x) => x + 1;").unwrap();
+    interp.eval("print(inc(2.5))").unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
+    assert_eq!(out.trim(), "3.5\n3.5");
+}
+
+#[test]
+fn an_instance_of_an_earlier_line_calls_the_instance_its_types_need_of_another() {
+    let out = repl_output(&[
+        r#"fn pick(x: Int) => 1; fn pick(x: Any) => "fallback"; fn wrap(x) => pick(x);"#,
+        "fn outer(x) => wrap(x);",
+        "let a: Any = 1; let s: String = outer(a); print(s);",
+    ]);
+    assert_eq!(out.trim(), "fallback");
 }

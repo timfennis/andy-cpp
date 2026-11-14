@@ -30,12 +30,48 @@ pub fn hover(
 
     let node = node_at_offset(&state.ast, offset)?;
     let markdown = match &node.expression {
-        Expression::Identifier { .. } => native_hover(state.analysis.binding(node.id), functions)
-            .or_else(|| type_hover(state, node.id)),
+        Expression::Identifier { .. } => {
+            native_hover(&binding_at(&state.analysis, node.id), functions)
+                .or_else(|| type_hover(state, node.id))
+        }
         _ => type_hover(state, node.id),
     }?;
 
     Some(markup(state, node.span, markdown))
+}
+
+/// What the identifier `id` refers to. In the body of a generic function
+/// whose instances pick for their own types, as `abs` in
+/// `fn f(x) { abs(x) } f(1); f(2.5);` does, that's every overload they pick:
+/// `abs(Int)` and `abs(Float)`.
+fn binding_at(analysis: &Analysis, id: NodeId) -> Binding {
+    let binding = analysis.binding(id);
+    if *binding != Binding::None {
+        return binding.clone();
+    }
+    let mut picked = Vec::new();
+    for binding in analysis
+        .instances
+        .values()
+        .flatten()
+        .filter_map(|instance| instance.bindings.get(&id))
+    {
+        let candidates = match binding {
+            Binding::Resolved(candidate) => std::slice::from_ref(candidate),
+            Binding::Dynamic(candidates) => candidates.as_slice(),
+            Binding::None => &[],
+        };
+        for candidate in candidates {
+            if !picked.contains(candidate) {
+                picked.push(*candidate);
+            }
+        }
+    }
+    if picked.is_empty() {
+        Binding::None
+    } else {
+        Binding::Dynamic(picked)
+    }
 }
 
 /// Markdown for an identifier the analyser resolved to built-in functions: the
@@ -216,9 +252,10 @@ mod tests {
     }
 
     #[test]
-    fn hover_on_a_dynamically_dispatched_builtin_lists_every_candidate() {
-        // `x` is untyped, so which `abs` the call reaches is decided at runtime.
-        let src = "fn f(x) { abs(x) }";
+    fn hover_on_a_builtin_in_a_generic_body_lists_what_its_instances_pick() {
+        // `x` is untyped, so which `abs` the call reaches depends on the
+        // instance.
+        let src = "fn f(x) { abs(x) } f(1); f(2.5);";
         let (state, functions) = analyse(src);
         let pos = state
             .line_index

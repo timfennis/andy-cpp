@@ -12,7 +12,6 @@ use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
 use crate::types::TypeVars;
 use ahash::AHashSet;
-use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{ScopeKind, SymbolId};
@@ -126,21 +125,6 @@ impl Analyser {
                 origin: waiting.origin,
             })
             .collect::<Vec<_>>();
-        for waiting in &scheme {
-            match &waiting.constraint {
-                Constraint::Call(call) if waiting.origin.is_none() => {
-                    self.pick_for_any_arguments(call);
-                }
-                // The body compiled for arguments of any type, which later
-                // REPL lines call, can't tell which overload a function
-                // value means, so the program picks as it calls it.
-                Constraint::FunctionValue(value) if waiting.origin.is_none() => {
-                    let binding = self.every_overload(value);
-                    self.picks.bindings.insert(value.id(), binding);
-                }
-                _ => {}
-            }
-        }
         // An instance is for the types of the type parameters that what it
         // compiles differently depends on: the constraints and uses it
         // picks for.
@@ -167,6 +151,15 @@ impl Analyser {
                 }
             }
         }
+        // A function with a key runs only as its instances, which the
+        // compiler compiles in place of its own body.
+        if !key.is_empty() {
+            self.result
+                .analysis
+                .instances
+                .entry(declaration)
+                .or_default();
+        }
         self.schemes.insert(
             symbol,
             Scheme {
@@ -175,7 +168,10 @@ impl Analyser {
                 uses: uses.into(),
                 declaration,
                 recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
-                functions: self.declared_functions[first_function..].into(),
+                functions: self.declared_functions[first_function..]
+                    .iter()
+                    .map(|&node| (node, self.result.analysis.function_type(node).clone()))
+                    .collect(),
             },
         );
         self.vars.resolve(signature)
@@ -402,61 +398,6 @@ impl Analyser {
             }
         }
         self.solve_waiting();
-    }
-
-    /// Records what the function's own body calls at `call`: the overloads
-    /// that can take the arguments, picked as the program runs. Its calls
-    /// and values get instances, so the body runs for those of later REPL
-    /// lines, which get none. Its type parameters, and the `Any` that a call
-    /// picked as it runs gives, stand for any type there: an overload that
-    /// takes an Int may get one. Each call of the function checks its body
-    /// with the types it's given.
-    fn pick_for_any_arguments(&mut self, call: &CallConstraint) {
-        let arguments = call
-            .arguments()
-            .iter()
-            .map(|argument| {
-                argument.replace(&|part| {
-                    matches!(part, StaticType::Any).then(|| StaticType::Generic("T".into()))
-                })
-            })
-            .collect::<Vec<_>>();
-        let binding = match self
-            .resolve_overloads(call.candidates(), &arguments, call.kind())
-            .binding
-        {
-            // An overload may take the values the body gets as the program
-            // runs although none takes their types with `Any` in them, as
-            // `sum` takes no `List<Any>`. The program picks among them as it
-            // runs, which looks at a container's elements.
-            Binding::None => {
-                let candidates = self
-                    .overloads()
-                    .reachable_symbols(call.candidates())
-                    .into_iter()
-                    .filter(
-                        |&symbol| match self.vars.resolve(self.types.get_type(symbol)) {
-                            StaticType::Function {
-                                parameters: Some(parameters),
-                                ..
-                            } => parameters.len() == arguments.len(),
-                            StaticType::Function {
-                                parameters: None, ..
-                            } => true,
-                            _ => false,
-                        },
-                    )
-                    .map(Candidate::Scalar)
-                    .collect::<Vec<_>>();
-                if candidates.is_empty() {
-                    Binding::None
-                } else {
-                    Binding::Dynamic(candidates)
-                }
-            }
-            binding => binding,
-        };
-        self.record_pick(call.site(), binding, &arguments);
     }
 
     /// Reports the function `symbol`, about to be declared with parameters

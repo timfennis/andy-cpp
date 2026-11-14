@@ -51,11 +51,6 @@ impl FunctionValue {
     pub(super) fn mark_in_literal(&mut self) {
         self.in_literal = true;
     }
-
-    /// The functions the name can mean, grouped by scope, nearest first.
-    pub(super) fn groups(&self) -> &[Vec<SymbolId>] {
-        &self.groups
-    }
 }
 
 /// Which overload a function value means, given what's known of the type
@@ -254,21 +249,6 @@ impl Analyser {
         let fits = self.vars.bind_argument(expected, &typ);
         self.vars.rollback(snapshot);
         fits
-    }
-
-    /// Every overload `value` can mean, for the program to pick from as it
-    /// calls it: nearest scope first, and in each the most specific first,
-    /// as for a call the program picks for, since it takes the first that
-    /// accepts the arguments.
-    pub(super) fn every_overload(&self, value: &FunctionValue) -> Binding<SymbolId> {
-        Binding::Dynamic(
-            value
-                .groups()
-                .iter()
-                .flat_map(|group| self.overloads().most_specific_first(group.clone()))
-                .map(Candidate::Scalar)
-                .collect(),
-        )
     }
 
     /// Picks the overload `value` means if what's known of the type expected

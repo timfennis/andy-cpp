@@ -1126,7 +1126,6 @@ impl PartialEq for Object {
                     (Function::Memoized { cache: a, .. }, Function::Memoized { cache: b, .. }) => {
                         Rc::ptr_eq(a, b)
                     }
-                    (Function::Overloads(a), Function::Overloads(b)) => Rc::ptr_eq(a, b),
                     _ => false,
                 }
             }
@@ -1221,10 +1220,6 @@ impl Hash for Object {
                         Rc::as_ptr(cache).hash(state);
                     }
                     Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
-                    Function::Overloads(candidates) => {
-                        state.write_u8(5);
-                        Rc::as_ptr(candidates).cast::<()>().hash(state);
-                    }
                 }
             }
             Self::OverloadSet { .. } => {

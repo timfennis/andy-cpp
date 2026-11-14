@@ -210,24 +210,12 @@ pub(super) struct CallConstraint {
 }
 
 impl CallConstraint {
-    pub(super) fn site(&self) -> CallSite {
-        self.site
-    }
-
-    pub(super) fn candidates(&self) -> &Candidates {
-        &self.candidates
-    }
-
     pub(super) fn arguments(&self) -> &[StaticType] {
         &self.arguments
     }
 
     pub(super) fn result(&self) -> &StaticType {
         &self.result
-    }
-
-    pub(super) fn kind(&self) -> CallKind {
-        self.kind
     }
 
     /// Whether `other` calls what this calls, the same way, with arguments

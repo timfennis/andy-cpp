@@ -3,7 +3,7 @@ use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
-use ndc_vm::compiler::Compiler;
+use ndc_vm::compiler::{Compiler, Session};
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
@@ -27,6 +27,10 @@ pub struct Interpreter {
     globals: Vec<Value>,
     capturing: bool,
     analyser: Analyser,
+    /// What compiling the evaluations so far leaves for the next, of a
+    /// resumable interpreter: a later one can call an earlier one's generic
+    /// functions with new types, which compiles new instances of them.
+    session: Session,
     source_db: SourceDb,
     resumable: bool,
     /// What the evaluations printed, if output is captured.
@@ -55,6 +59,7 @@ impl Interpreter {
             globals: Vec::new(),
             capturing,
             analyser: Analyser::new(vec![]),
+            session: Session::default(),
             source_db: SourceDb::new(),
             resumable: true,
             output: Vec::new(),
@@ -93,6 +98,7 @@ impl Interpreter {
     /// Forgets everything evaluated so far, keeping only what was printed.
     fn start_over(&mut self) {
         self.analyser = self.new_analyser();
+        self.session = Session::default();
         self.globals = ndc_vm::native_globals(self.function_registry.iter());
     }
 
@@ -259,7 +265,11 @@ impl Interpreter {
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let mut timings = ExecutionTimings::default();
         let code = measure(&mut timings, Phase::Compiling, || {
-            Compiler::compile(expressions, analysis)
+            if self.resumable {
+                Compiler::compile_line(expressions, analysis, &mut self.session)
+            } else {
+                Compiler::compile(expressions, analysis)
+            }
         })?;
         let num_locals = code.num_locals();
         let output = if self.capturing {

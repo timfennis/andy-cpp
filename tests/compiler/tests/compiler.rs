@@ -838,26 +838,28 @@ fn compile_program_with_stdlib(input: &str) -> CompiledFunction {
         .expect("compile failed")
 }
 
-// A generic function's declaration compiles its own body (constant 0), then
-// each instance (constant 1 for `adder` with Ints). A lambda in the body is
-// compiled with the instance: its `+` is picked for Ints there, and as the
-// program runs in the function's own body, so the two differ.
+// A generic function's declaration compiles each of its instances: constant
+// 0 for `adder` with Ints and 1 with Floats, in some order. A lambda in the
+// body is compiled with the instance, whose `+` is picked for its types, so
+// the two differ.
 #[test]
 fn a_function_declared_in_an_instance_uses_the_instances_picks() {
-    let program =
-        compile_program_with_stdlib("fn adder(x) { let g = fn(y) => y + 1; g(x) } adder(1);");
-    let own = nested_functions(&function_constant(&program, 0))[0].clone();
-    let instance = nested_functions(&function_constant(&program, 1))[0].clone();
-    assert!(!Rc::ptr_eq(&own, &instance));
-    assert_ne!(own.opcodes(), instance.opcodes());
+    let program = compile_program_with_stdlib(
+        "fn adder(x) { let g = fn(y) => y + 1; g(x) } adder(1); adder(1.5);",
+    );
+    let first = nested_functions(&function_constant(&program, 0))[0].clone();
+    let second = nested_functions(&function_constant(&program, 1))[0].clone();
+    assert!(!Rc::ptr_eq(&first, &second));
+    assert_ne!(first.opcodes(), second.opcodes());
 }
 
-// A function declared in an instance that compiles as it does in the
-// function's own body is the same function, so it keeps its identity.
+// A function declared in an instance that compiles the same in every
+// instance is the same function, so it keeps its identity.
 #[test]
 fn a_function_declared_in_an_instance_that_compiles_the_same_is_the_same() {
-    let program = compile_program_with_stdlib("fn make(x) { x + 1; fn f() => 42; f } make(1);");
-    let own = nested_functions(&function_constant(&program, 0))[0].clone();
-    let instance = nested_functions(&function_constant(&program, 1))[0].clone();
-    assert!(Rc::ptr_eq(&own, &instance));
+    let program =
+        compile_program_with_stdlib("fn make(x) { x + 1; fn f() => 42; f } make(1); make(1.5);");
+    let first = nested_functions(&function_constant(&program, 0))[0].clone();
+    let second = nested_functions(&function_constant(&program, 1))[0].clone();
+    assert!(Rc::ptr_eq(&first, &second));
 }
