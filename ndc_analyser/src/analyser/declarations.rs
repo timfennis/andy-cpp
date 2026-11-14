@@ -138,7 +138,7 @@ impl Analyser {
             if matches!(self.vars.resolve(returns), StaticType::Var(_)) {
                 self.vars.unify(returns, &StaticType::Any);
             } else {
-                self.emit_rejected_write(returns, &inferred_return, span);
+                self.emit_rejected_write(returns, &inferred_return, span, None);
             }
         }
 

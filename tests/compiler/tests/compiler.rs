@@ -129,6 +129,77 @@ fn an_if_without_else_yields_unit_when_false() {
     );
 }
 
+// if true { 1 }, analysed: an `if` without an `else` is `()`, so the branch's
+// own value is dropped for one.
+//
+// 0: Constant(0)      push `true`
+// 1: JumpIfFalse(5)   if false, jump to the else path (index 7)
+// 2: Pop              pop condition (true path)
+// 3: Constant(1)      push `1`
+// 4: Pop              drop the branch's value
+// 5: Constant(2)      push `()`
+// 6: Jump(2)          skip the else path
+// 7: Pop              pop condition (false path)
+// 8: Constant(3)      push `()`
+// 9: Halt
+#[test]
+fn an_if_without_else_drops_its_branch_s_value() {
+    assert_eq!(
+        compile_with_analysis("if true { 1 }"),
+        [
+            Constant(0),
+            JumpIfFalse(JumpTarget::Offset(5)),
+            Pop,
+            Constant(1),
+            Pop,
+            Constant(2),
+            Jump(JumpTarget::Offset(2)),
+            Pop,
+            Constant(3),
+            Halt
+        ]
+    );
+}
+
+// A branch that's already `()`, or never finishes, needs no extra ops.
+#[test]
+fn an_if_without_else_keeps_a_unit_or_never_branch_as_it_is() {
+    assert_eq!(
+        compile_with_analysis("if true { () }"),
+        [
+            Constant(0),
+            JumpIfFalse(JumpTarget::Offset(3)),
+            Pop,
+            MakeTuple(0),
+            Jump(JumpTarget::Offset(2)),
+            Pop,
+            Constant(1),
+            Halt
+        ]
+    );
+    // The inner `if`'s branch is a `break`, which is `Never`.
+    assert_eq!(
+        compile_with_analysis("while true { if true { break } }"),
+        [
+            Constant(0),
+            JumpIfFalse(JumpTarget::Offset(10)),
+            Pop,
+            Constant(1),
+            JumpIfFalse(JumpTarget::Offset(3)),
+            Pop,
+            Jump(JumpTarget::Offset(6)),
+            Jump(JumpTarget::Offset(2)),
+            Pop,
+            Constant(2),
+            Pop,
+            Jump(JumpTarget::Offset(-12)),
+            Pop,
+            Constant(3),
+            Halt
+        ]
+    );
+}
+
 // if true { 1 } else { 2 }
 //
 // 0: Constant(0)      push `true`

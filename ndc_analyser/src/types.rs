@@ -237,9 +237,12 @@ impl TypeVars {
 
     /// The unsettled types of literals that `belongs` says to settle, the
     /// ones holding values before the numbers, so a value can still say
-    /// what a number is: `1` in `[1, 2.5]` is a Float.
+    /// what a number is: `1` in `[1, 2.5]` is a Float. Those whose values
+    /// share no type come last, so a call waiting for the others can still
+    /// ask for them as `Any`s: in `f(if c { 1 } else { "a" }, 0)` with
+    /// `f(x: Any, y: Int)`, once the `0` is an Int.
     pub(crate) fn unsettled_literals(
-        &self,
+        &mut self,
         belongs: impl Fn(&Self, TypeVar) -> bool,
     ) -> Vec<TypeVar> {
         let mut literals = Vec::new();
@@ -268,8 +271,16 @@ impl TypeVars {
                 Bound::Number(..) => None,
             })
             .collect::<AHashSet<_>>();
-        literals.sort_by_cached_key(|&var| (self.is_number(var), held.contains(&var)));
-        literals
+        let mut keyed = literals
+            .into_iter()
+            .map(|var| {
+                let number = self.is_number(var);
+                let unshared = !number && self.unshared_values(var).is_some();
+                ((unshared, number, held.contains(&var)), var)
+            })
+            .collect::<Vec<_>>();
+        keyed.sort_by_key(|(key, _)| *key);
+        keyed.into_iter().map(|(_, var)| var).collect()
     }
 
     /// Forgets the types of literals, once they're all settled at the end
@@ -380,7 +391,13 @@ impl TypeVars {
             }
         }
         for (literal, held) in literals {
-            if self.plainly_shared(&held) {
+            // A value of type `Any` is checked as whatever the others are, so
+            // it shares their type.
+            if self.plainly_shared(&held)
+                || held
+                    .iter()
+                    .any(|typ| matches!(self.resolve(typ), StaticType::Any | StaticType::Error))
+            {
                 continue;
             }
             for typ in &held {

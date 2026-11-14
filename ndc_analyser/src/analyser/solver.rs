@@ -1079,7 +1079,7 @@ impl Analyser {
                     CallSite::Getter(id)
                         if !self.accepts_write(&result, &typ, call.nodes.result) =>
                     {
-                        self.emit_rejected_write(&typ, &result, call.span);
+                        self.emit_rejected_write(&typ, &result, call.span, None);
                         self.failed_reads.insert(id);
                     }
                     CallSite::Getter(_) => {}

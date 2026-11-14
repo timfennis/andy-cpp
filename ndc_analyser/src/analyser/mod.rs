@@ -21,6 +21,7 @@ pub(crate) mod generics;
 mod instances;
 mod solver;
 
+use assignments::DeferredWrite;
 use declarations::FunctionDeclaration;
 pub use generics::tied_natives;
 use instances::{GenericUse, Pending, Scheme};
@@ -92,6 +93,9 @@ pub struct Analyser {
     /// a generic function's constraints was made in, keyed by its element
     /// type, so an error in its values is reported as one made there.
     literal_origins: AHashMap<TypeVar, (Option<SymbolId>, Option<Origin>)>,
+    /// The writes of values that share no type, which are checked again
+    /// once those are settled.
+    deferred_writes: Vec<DeferredWrite>,
     /// Where a value is checked as the program runs if it's of type `Any`,
     /// with its type and the type it's checked against, which may both
     /// still have variables in them, by the instance whose body checks it,
@@ -171,6 +175,7 @@ impl Analyser {
             expected_parameters: AHashMap::new(),
             copied_through: None,
             literal_origins: AHashMap::new(),
+            deferred_writes: Vec::new(),
             checks: Vec::new(),
             next_serial: 0,
             watchers: AHashMap::new(),
@@ -196,6 +201,10 @@ impl Analyser {
         self.settle_waiting(0);
         self.vars.forget_literals();
         self.literal_origins.clear();
+        debug_assert!(
+            self.deferred_writes.is_empty(),
+            "a write waits for literals that are all settled"
+        );
         self.instantiate_uses();
         self.declared_in_batch.clear();
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
@@ -855,6 +864,7 @@ impl Analyser {
             self.recording = recording;
             self.copied_through = copied_through;
         }
+        self.recheck_deferred_writes();
     }
 
     /// The type of the values a map default of type `default` produces. A
