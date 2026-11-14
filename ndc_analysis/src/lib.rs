@@ -93,6 +93,9 @@ pub struct Instance {
     pub augmented_assignments: AHashMap<NodeId, Binding>,
     /// As [`Analysis::type_checks`], for the instance's body.
     pub type_checks: AHashMap<NodeId, StaticType>,
+    /// As [`Analysis::function_types`], for the functions the instance's
+    /// body declares, with the instance's types.
+    pub function_types: AHashMap<NodeId, StaticType>,
 }
 
 impl Analysis {

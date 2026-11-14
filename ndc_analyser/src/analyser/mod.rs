@@ -77,6 +77,9 @@ pub struct Analyser {
     recursive_calls: Vec<NodeId>,
     /// The nodes of overloaded function values that waited for the type
     /// expected of them, as `abs` in `[len, abs]` does.
+    /// The functions the batch declares, in the order their declarations
+    /// start, so a generic function knows the ones its body declares.
+    declared_functions: Vec<NodeId>,
     waiting_function_values: AHashSet<NodeId>,
     /// The types an anonymous function's unannotated parameters get from
     /// the call it's passed to, by the function's node: in
@@ -160,6 +163,7 @@ impl Analyser {
             declaring: None,
             recursive_calls: Vec::new(),
             waiting_function_values: AHashSet::new(),
+            declared_functions: Vec::new(),
             expected_parameters: AHashMap::new(),
             copied_through: None,
             checks: Vec::new(),
@@ -195,6 +199,17 @@ impl Analyser {
         }
         self.failed_reads.clear();
         self.waiting_function_values.clear();
+        self.declared_functions.clear();
+        // A function an instance's body declares takes what the instance's
+        // types make it take.
+        for picks in self.picks.instances.values_mut() {
+            for typ in picks.function_types.values_mut() {
+                *typ = self.vars.finish(typ).replace(&|part| {
+                    matches!(part, StaticType::Var(_) | StaticType::Generic(_))
+                        .then_some(StaticType::Any)
+                });
+            }
+        }
         self.types.resolve_all(&self.vars);
         for (instance, node, typ, expected) in std::mem::take(&mut self.checks) {
             if self.vars.resolve(&typ) != StaticType::Any {

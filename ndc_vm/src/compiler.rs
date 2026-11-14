@@ -1036,7 +1036,26 @@ impl Compiler {
         body: ExpressionLocation,
         instance: Option<InstanceAt>,
     ) -> Result<(CompiledFunction, bool), CompileError> {
-        let static_type = self.analysis.function_type(id).clone();
+        // A function an instance's body declares takes what the instance's
+        // types make it take. Only a type that differs from the function's
+        // own makes the function the instance's: otherwise it's shared, and
+        // stays one function across instances.
+        let shared = self.analysis.function_type(id);
+        let differs = self
+            .instance
+            .and_then(|at| {
+                self.analysis.instances[&at.declaration][at.index]
+                    .function_types
+                    .get(&id)
+            })
+            .is_some_and(|typ| typ != shared);
+        let static_type = if differs {
+            self.instance_pick(|instance| instance.function_types.get(&id))
+                .unwrap_or(shared)
+                .clone()
+        } else {
+            shared.clone()
+        };
         let mut fn_compiler = Self {
             ir: Default::default(),
             source_locals: self.analysis.frame_size(id),

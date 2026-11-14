@@ -37,6 +37,9 @@ pub(super) struct Scheme {
     /// has its type parameters in it, with their types and that type, which
     /// an instance checks against what its types make it.
     pub(super) checks: Rc<[(NodeId, StaticType, StaticType)]>,
+    /// The functions its body declares, whose types an instance makes what
+    /// its own types make them.
+    pub(super) functions: Rc<[NodeId]>,
 }
 
 /// A call of a generic function, or its name used as a value, which needs
@@ -282,6 +285,13 @@ impl Analyser {
             };
             if !self.try_waiting(&mut copy) {
                 self.wait_as(copy);
+            }
+        }
+        for &node in scheme.functions.iter() {
+            let declared = self.vars.resolve(self.result.analysis.function_type(node));
+            let typ = self.vars.instantiate_with(&declared, &mut made);
+            if let Some(picks) = self.picks.instances.get_mut(&instance) {
+                picks.function_types.insert(node, typ);
             }
         }
         for (node, typ, expected) in scheme.checks.iter() {

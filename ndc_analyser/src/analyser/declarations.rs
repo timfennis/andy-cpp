@@ -69,18 +69,8 @@ impl Analyser {
             })
             .collect::<Vec<_>>();
         let annotated_return = self.lower_annotation(return_annotation);
-        // Until the body says more, a named function's value takes what its
-        // annotations say, as its body is compiled once for every type it's
-        // called with.
-        let runtime_parameters = match declared {
-            Some(_) => Some(
-                annotations
-                    .iter()
-                    .map(|annotation| annotation.clone().unwrap_or(StaticType::Any))
-                    .collect(),
-            ),
-            None => Some(param_types.clone()),
-        };
+        // A function's value takes what its parameters turn out to be.
+        let runtime_parameters = Some(param_types.clone());
         self.result.analysis.function_types.insert(
             id,
             StaticType::Function {
@@ -88,6 +78,8 @@ impl Analyser {
                 return_type: Box::new(annotated_return.clone().unwrap_or_default()),
             },
         );
+        self.declared_functions.push(id);
+        let first_function = self.declared_functions.len();
 
         // The function is declared before its body is analysed, so a
         // recursive call can call it. Its return type is what the body
@@ -167,7 +159,13 @@ impl Analyser {
                 self.vars.leave_level();
                 self.declaring = None;
                 self.declared_in_batch.insert(symbol);
-                let typ = self.generalize(symbol, &signature, id, pure, [first_use, first_check]);
+                let typ = self.generalize(
+                    symbol,
+                    &signature,
+                    id,
+                    pure,
+                    [first_use, first_check, first_function],
+                );
                 self.within_size_limit(symbol, name, typ, span)
             }
             _ => signature,
@@ -186,28 +184,6 @@ impl Analyser {
                     self.result.analysis.function_types.get_mut(&id)
             {
                 **return_type = inferred_return.clone();
-            }
-        }
-
-        // A named function's value is checked as the program runs against
-        // what it takes, as far as that can be checked: its body may have
-        // made an unannotated parameter an Int.
-        if declared.is_some()
-            && let StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } = self.vars.resolve(&function_type)
-            && let Some(StaticType::Function {
-                parameters: Some(runtime),
-                ..
-            }) = self.result.analysis.function_types.get_mut(&id)
-        {
-            for ((runtime, parameter), annotation) in
-                runtime.iter_mut().zip(parameters).zip(&annotations)
-            {
-                if annotation.is_none() {
-                    *runtime = checkable_as_the_program_runs(&parameter);
-                }
             }
         }
 
@@ -404,33 +380,5 @@ impl Analyser {
         for pattern in patterns {
             self.declare_binding_pattern(pattern, None, StaticType::Error, span);
         }
-    }
-}
-
-/// What the program can check about a value of type `typ` as it runs: the
-/// kind of value, but not what a container holds, and nothing about a type
-/// parameter, which takes anything. `List<Int>` is checked as a list.
-fn checkable_as_the_program_runs(typ: &StaticType) -> StaticType {
-    let any = || Box::new(StaticType::Any);
-    match typ {
-        StaticType::Var(_) | StaticType::Generic(_) | StaticType::Tuple(_) => StaticType::Any,
-        StaticType::List(_) => StaticType::List(any()),
-        StaticType::Deque(_) => StaticType::Deque(any()),
-        StaticType::Iterable(_) => StaticType::Iterable(any()),
-        StaticType::Iterator(_) => StaticType::Iterator(any()),
-        StaticType::MinHeap(_) => StaticType::MinHeap(any()),
-        StaticType::MaxHeap(_) => StaticType::MaxHeap(any()),
-        StaticType::Option(_) => StaticType::Option(any()),
-        StaticType::Map { .. } => StaticType::Map {
-            key: any(),
-            value: any(),
-        },
-        StaticType::Function { parameters, .. } => StaticType::Function {
-            parameters: parameters
-                .as_ref()
-                .map(|parameters| vec![StaticType::Any; parameters.len()]),
-            return_type: any(),
-        },
-        other => other.clone(),
     }
 }
