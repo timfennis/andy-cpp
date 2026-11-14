@@ -1,0 +1,5 @@
+// `-1` and `1 + 1` are calls on literals, which become Floats to join `2.5`.
+// expect-output: -1.0 2.0
+let a = if false { 2.5 } else { -1 };
+let b = if false { 2.5 } else { 1 + 1 };
+print(a, b);
