@@ -285,12 +285,14 @@ impl StaticType {
     /// expected as it is, with nothing to check as the program runs. The
     /// two types are the same, except that `parameter` can be `Any`, which
     /// takes anything, and that its type parameters and the parts of it not
-    /// known yet stand for any type. Inside a container, a function type,
-    /// an `Option` or a tuple, `Any` is just another type: a `List<Int>`
-    /// doesn't fit a `List<Any>`, as the list could then get a String. A
-    /// `Iterable<T>` takes any kind of sequence of what fits `T`.
+    /// known yet stand for any type. Inside a container, an `Option` or a
+    /// tuple, `Any` is just another type: a `List<Int>` doesn't fit a
+    /// `List<Any>`, as the list could then get a String. A function that
+    /// takes an `Any` fits a function type with any parameter there, and
+    /// any function fits one that returns `Any`. A `Iterable<T>` takes any
+    /// kind of sequence of what fits `T`.
     pub fn fits(&self, parameter: &Self) -> bool {
-        matches!(parameter, Self::Any) || self.matches(parameter, false)
+        matches!(parameter, Self::Any) || self.matches(parameter, false, true)
     }
 
     /// Whether a value of this type might be passed where `parameter` is
@@ -299,13 +301,19 @@ impl StaticType {
     /// too. `Any` is not one of them: it goes only where `Any` is taken,
     /// and takes a cast to go anywhere else.
     pub fn may_fit(&self, parameter: &Self) -> bool {
-        self.fits(parameter) || self.matches(parameter, true)
+        self.fits(parameter) || self.matches(parameter, true, true)
     }
 
     /// Whether this type is `parameter`, where what [`Self::fits`] and
     /// [`Self::may_fit`] let stand for any type does, and the variables of
-    /// this type too if `unknowns_match`.
-    fn matches(&self, parameter: &Self, unknowns_match: bool) -> bool {
+    /// this type too if `unknowns_match`. Where `loose`, a function that
+    /// takes an `Any` fits a function type with any parameter there, and any
+    /// function one that returns `Any`. That holds for a value and what a
+    /// function returns, not inside a container, which could be given the
+    /// other function, or a parameter, which flips which side takes what: a
+    /// `Fn(Fn(Any) -> Int) -> Int` may pass a String to its callback, so it
+    /// isn't a `Fn(Fn(Int) -> Int) -> Int`.
+    fn matches(&self, parameter: &Self, unknowns_match: bool, loose: bool) -> bool {
         let wildcard = |typ: &Self| matches!(typ, Self::Var(_) | Self::Generic(_));
         if wildcard(parameter)
             || (unknowns_match && wildcard(self))
@@ -314,7 +322,7 @@ impl StaticType {
         {
             return true;
         }
-        let matches = |a: &Self, p: &Self| a.matches(p, unknowns_match);
+        let matches = |a: &Self, p: &Self| a.matches(p, unknowns_match, false);
         match (self, parameter) {
             (Self::Never, _) => true,
             (Self::Iterable(a), Self::Iterable(p)) => a.fits(p) || matches(a, p),
@@ -352,10 +360,15 @@ impl StaticType {
                     (_, None) => true,
                     (None, Some(_)) => unknowns_match,
                     (Some(a), Some(p)) => {
-                        a.len() == p.len() && a.iter().zip(p).all(|(a, p)| matches(a, p))
+                        a.len() == p.len()
+                            && a.iter()
+                                .zip(p)
+                                .all(|(a, p)| (loose && matches!(a, Self::Any)) || matches(a, p))
                     }
                 };
-                parameters && matches(ar, pr)
+                parameters
+                    && ((loose && matches!(pr.as_ref(), Self::Any))
+                        || ar.matches(pr, unknowns_match, loose))
             }
             _ => self == parameter,
         }

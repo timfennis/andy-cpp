@@ -1,0 +1,7 @@
+// An overloaded name used as a value means the overload a call with the
+// same arguments picks, which can be the one that takes an `Any`.
+// expect-output: any
+fn choose(x: Int) => "int";
+fn choose(x: Any) => "any";
+fn apply(x) { let f = choose; f(x) }
+print(apply("s"));

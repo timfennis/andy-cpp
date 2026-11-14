@@ -1,0 +1,7 @@
+// A function whose callback takes an `Any` may pass it a String, so it isn't
+// a function whose callback takes an Int: the cast checks each call, and this
+// one fails.
+// expect-error: the function doesn't take the arguments (Fn(Int) -> Int)
+fn outer(cb: Fn(Any) -> Int) => cb("s");
+let g = outer as Fn(Fn(Int) -> Int) -> Int;
+print(g(fn(x: Int) => x + 1));
