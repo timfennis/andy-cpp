@@ -1,0 +1,6 @@
+// expect-output: 1
+fn f() {
+    return 1;
+    "never"
+}
+print(f());
