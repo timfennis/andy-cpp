@@ -1,5 +1,0 @@
-// Whatever the index turns out to be, a String doesn't go in a list of Ints.
-// expect-error: mismatched types: found String but expected Int
-let xs = ["a".len()];
-let i: Any = 0;
-xs[i] = "bad";

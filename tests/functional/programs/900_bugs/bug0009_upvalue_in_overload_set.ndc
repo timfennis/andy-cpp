@@ -1,13 +1,15 @@
-// A call dispatched at run time among overloads that the calling function
-// captured. `inner` calls `describe` with an argument of unknown type, so the
-// call goes through an overload set whose candidates are upvalues, passed
-// through `middle`. Resolving such a candidate used to panic with "upvalue
+// A call among overloads that the calling function captured. `inner` calls
+// `describe`, whose overloads are upvalues, passed through `middle`.
+// Resolving such a candidate as the program ran used to panic with "upvalue
 // resolution in overload sets".
 fn outer() {
     fn describe(x: Int) { "int" }
     fn describe(x: String) { "string" }
     fn middle() {
-        fn inner(v: Any) { describe(v) }
+        fn inner(v: Any) {
+            let n = v as? Int;
+            if n.is_some() { describe(n.unwrap()) } else { describe(v as String) }
+        }
         inner(1) ++ " " ++ inner("a")
     }
     middle()

@@ -1,0 +1,5 @@
+// No `[]=` for a list takes an index of type `Any`.
+// expect-error: No function called '[]=' found that matches the arguments 'List<Int>, Any, Int'
+let xs = ["a".len()];
+let i: Any = 0;
+xs[i] = 1;

@@ -50,10 +50,10 @@ struct ScalarWalk {
 }
 
 /// Whether a value of type `typ` could still accept a call with this
-/// signature at runtime: its type is `Any`, a variadic function, or a function whose
-/// parameters don't provably conflict with `sig`: an `Any` might turn
-/// out to be anything, and the parts of either type not known yet could
-/// be anything. A lambda `fn(x) => x * 2` can be passed for an
+/// signature at runtime: its type isn't known yet, or it's a variadic
+/// function, or a function whose parameters don't provably conflict with
+/// `sig`, as the parts of either type not known yet could be anything. An
+/// `Any` is not one of them: it only goes where an `Any` is taken. A lambda `fn(x) => x * 2` can be passed for an
 /// `Fn(Int) -> Int`, but `fn(x: String) => 1` can't.
 fn could_take(typ: &StaticType, sig: &[StaticType]) -> bool {
     match typ {
@@ -72,7 +72,10 @@ fn could_take(typ: &StaticType, sig: &[StaticType]) -> bool {
             parameters: None, ..
         } => true,
         // A value whose type isn't known may hold a function.
-        unknown => unknown.is_unknown(),
+        unknown => matches!(
+            unknown,
+            StaticType::Var(_) | StaticType::Generic(_) | StaticType::Error
+        ),
     }
 }
 
@@ -568,8 +571,10 @@ impl<'a> Overloads<'a> {
     /// * `Static` — at least one arg is statically a non-empty tuple and
     ///   every tuple-shaped arg shares that length. Positions *may* contain
     ///   empty candidate lists; the caller surfaces that as a call error.
-    /// * `AnyFallback` — no static tuple shape but at least one arg is `Any`,
-    ///   so vec might still apply at runtime; the runtime narrows per pair.
+    /// * `AnyFallback` — no static tuple shape but at least one arg isn't
+    ///   known, as in a generic function's own body, so vec might still apply
+    ///   at runtime; the runtime narrows per pair. An `Any` isn't one: it
+    ///   takes a cast to be a tuple.
     /// * `None` — no possible vec interpretation.
     fn resolve_vec(self, candidates: &Candidates, sig: &[StaticType]) -> Option<VecResolution> {
         if let Some((axis_len, positions)) = self.resolve_vec_static(candidates, sig) {
@@ -578,10 +583,17 @@ impl<'a> Overloads<'a> {
                 positions,
             });
         }
-        if !sig.iter().any(StaticType::is_unknown) {
+        let unknown = |typ: &StaticType| {
+            matches!(
+                typ,
+                StaticType::Var(_) | StaticType::Generic(_) | StaticType::Error
+            )
+        };
+        if !sig.iter().any(unknown) {
             return None;
         }
-        let permissive: Vec<StaticType> = vec![StaticType::Any; sig.len()];
+        // Each argument could be anything, as a type parameter could.
+        let permissive: Vec<StaticType> = vec![StaticType::Generic("T".into()); sig.len()];
         let symbols = self.candidates_for_sig(candidates, &permissive);
         if symbols.is_empty() {
             None
@@ -865,10 +877,10 @@ mod tests {
         );
     }
 
-    // An `Any` argument might be an `Int` or a `String`, so both overloads stay
-    // candidates, and the call returns what either of them could.
+    // An `Any` argument goes only where `Any` is taken: it takes a cast
+    // to be an `Int` or a `String`.
     #[test]
-    fn overloads_that_might_accept_the_call_are_picked_at_runtime() {
+    fn an_any_argument_takes_no_overload_of_another_type() {
         let list_of = |typ| StaticType::List(Box::new(typ));
         let (types, foos) = table(vec![
             fn_type(vec![StaticType::Int], list_of(StaticType::Int)),
@@ -880,66 +892,36 @@ mod tests {
             &[StaticType::Any],
             CallKind::Regular,
         );
-        let Binding::Dynamic(picked) = resolved.binding else {
-            panic!("expected a dynamic binding, got {:?}", resolved.binding);
-        };
-        assert_eq!(picked.len(), 2);
-        assert!(
-            foos.iter()
-                .all(|&foo| picked.contains(&Candidate::Scalar(foo)))
-        );
-        // A List<Int> and a List<String> have no type in common but `Any`.
-        assert_eq!(resolved.return_type, StaticType::Any);
+        assert_eq!(resolved.binding, Binding::None);
     }
 
     #[test]
-    fn an_unknown_argument_leaves_a_fallback_to_the_program_with_the_more_specific_first() {
-        // An `Any` argument fits `show(Any)`, but when it's an Int as the
-        // program runs, `show(Int)` takes it. The program takes the first
-        // overload that accepts the arguments, so that one comes first,
-        // whichever was declared first.
+    fn an_any_argument_takes_the_overload_that_takes_any() {
+        // `show(Int)` doesn't take an `Any`, whatever it holds as the
+        // program runs, so `show(Any)` takes the call, whichever was
+        // declared first.
         let (types, shows) = table(vec![
             fn_type(vec![StaticType::Int], StaticType::String),
             fn_type(vec![StaticType::Any], StaticType::String),
         ]);
         for group in [[shows[0], shows[1]], [shows[1], shows[0]]] {
-            let resolved = resolve(
-                &types,
-                &candidates(&[&group]),
-                &[StaticType::Any],
-                CallKind::Regular,
-            );
-            assert_eq!(
-                resolved.binding,
-                Binding::Dynamic(vec![
-                    Candidate::Scalar(shows[0]),
-                    Candidate::Scalar(shows[1])
-                ]),
-                "declared in the order {group:?}"
-            );
+            assert_resolves_to(&types, &candidates(&[&group]), &[StaticType::Any], shows[1]);
         }
     }
 
     #[test]
-    fn a_fallback_left_to_the_program_still_hides_the_overloads_further_out() {
+    fn an_any_argument_takes_the_nearest_overload_that_takes_any() {
         // The inner `show(Any)` takes every call, so the outer one never does.
         let (types, shows) = table(vec![
             fn_type(vec![StaticType::Any], StaticType::String),
             fn_type(vec![StaticType::Int], StaticType::String),
             fn_type(vec![StaticType::Any], StaticType::String),
         ]);
-        let resolved = resolve(
+        assert_resolves_to(
             &types,
             &candidates(&[&shows[1..], &shows[..1]]),
             &[StaticType::Any],
-            CallKind::Regular,
-        );
-        assert_eq!(
-            resolved.binding,
-            Binding::Dynamic(vec![
-                Candidate::Scalar(shows[1]),
-                Candidate::Scalar(shows[2])
-            ]),
+            shows[2],
         );
     }
 

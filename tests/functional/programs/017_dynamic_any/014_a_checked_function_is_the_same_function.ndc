@@ -1,7 +1,7 @@
-// A function of type `Any` used as a function type is the same function: it
+// A function of type `Any` cast to a function type is the same function: it
 // equals itself, and a call that returns what's expected works.
 // expect-output: 3 true true
-fn inc(x) => x + 1;
+fn inc(x: Int) => x + 1;
 let a: Any = inc;
-let f: Fn(Int) -> Int = a;
+let f = a as Fn(Int) -> Int;
 print(f(2), f == inc, a == f);

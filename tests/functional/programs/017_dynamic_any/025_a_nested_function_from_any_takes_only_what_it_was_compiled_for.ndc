@@ -1,12 +1,12 @@
 // A nested function's value takes what its first call made its parameter,
-// so through `Any` it doesn't take a String its body wasn't compiled for.
-// expect-error: no function called 'inner' found matches the arguments: (String)
+// so through `Any` it isn't a function that takes a String.
+// expect-error: cannot cast Fn(Int) -> Any to Fn(String) -> String
 fn show(x: Int) => "int";
 fn show(x) => "other";
 fn outer() {
     fn inner(v) => show(v);
     inner(1);
     let a: Any = inner;
-    a("s")
+    (a as Fn(String) -> String)("s")
 }
 print(outer());

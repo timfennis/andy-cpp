@@ -556,6 +556,25 @@ impl TypeVars {
         self.unify(&StaticType::Var(var), typ)
     }
 
+    /// Settles the literal type `var` as a new variable of its level, when
+    /// the values it holds are all of its own type, and returns whether it
+    /// did. In `fn f(x) { [x] ++ [x] }`, the lists' elements are what `x`
+    /// is, which their uses made the literals' type: what isn't known about
+    /// them is what isn't known about `x`, which can still be any type.
+    pub(crate) fn settle_literal_as_its_values(&mut self, var: TypeVar) -> bool {
+        let own = StaticType::Var(var);
+        let held = self.held(var);
+        if held.is_empty() || held.iter().any(|(typ, _)| self.resolve(typ) != own) {
+            return false;
+        }
+        let plain = self.next_var();
+        self.solutions.push(None);
+        self.fallbacks.push(StaticType::Any);
+        self.levels.push(self.levels[var.0 as usize]);
+        self.bounds.push(Vec::new());
+        self.settle_literal(var, &StaticType::Var(plain))
+    }
+
     /// Starts the body of a generic function: the variables made until
     /// [`Self::leave_level`] belong to it.
     pub(crate) fn enter_level(&mut self) {
@@ -949,8 +968,9 @@ impl TypeVars {
     /// where a `parameter` is expected, and returns whether it fits there. In
     /// `push(xs, 1)` with `push(List<?0>, ?0)` and `xs: List<?1>`, both
     /// variables become `Int`. Passing makes the two types the same, except
-    /// that a parameter of type `Any` takes anything, and an argument of
-    /// type `Any` goes anywhere, as it's checked as the program runs. Inside
+    /// that a parameter of type `Any` takes anything. An argument of type
+    /// `Any` only goes where an `Any` is taken: it takes a cast to be passed
+    /// as anything else. Inside
     /// a container, a function type, an `Option` or a tuple, `Any` is just
     /// another type: a `List<Int>` doesn't fit a `List<Any>`. An
     /// `Iterable<T>` takes any kind of sequence, and settles `T` from its
@@ -967,14 +987,12 @@ impl TypeVars {
                 self.settle_literal(*var, &StaticType::Any)
             }
             (_, StaticType::Never) | (StaticType::Any, _) => true,
-            // A value of type `Any` is checked where it goes, so it leaves a
-            // literal's type what the literal says: `n` in `let n = 1;
-            // n = a` is still an Int. So does a value whose check failed.
-            (StaticType::Var(var), StaticType::Any | StaticType::Error)
-                if self.is_literal(*var) =>
-            {
-                true
-            }
+            // A value of type `Any` doesn't make a literal's type `Any`, so it
+            // doesn't go where the literal's values are: `n` in `let n = 1;
+            // n = a` is an Int, which `a` takes a cast to be. A value whose
+            // check failed leaves the literal's type what the literal says.
+            (StaticType::Var(var), StaticType::Error) if self.is_literal(*var) => true,
+            (StaticType::Var(var), StaticType::Any) if self.is_literal(*var) => false,
             (StaticType::Iterable(_), StaticType::Var(var)) if !self.is_literal(*var) => true,
             // A literal passed for an `Iterable<T>` is the sequence it holds,
             // as `["a"]` passed to `len` is a `List<String>`: only a
@@ -989,7 +1007,7 @@ impl TypeVars {
                 self.settle_literal(*var, &held) && self.bind_argument(&parameter, &held)
             }
             (StaticType::Var(_), _) | (_, StaticType::Var(_)) => self.unify(&parameter, &argument),
-            (_, StaticType::Any | StaticType::Error) | (StaticType::Error, _) => true,
+            (_, StaticType::Error) | (StaticType::Error, _) => true,
             (
                 StaticType::Function {
                     parameters: expected,

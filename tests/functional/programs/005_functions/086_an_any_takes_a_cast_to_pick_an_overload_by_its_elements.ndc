@@ -1,0 +1,8 @@
+// Neither overload takes a value of type `Any`, so a cast says which list it
+// is, which checks the elements as the program runs.
+// expect-output: ints strings
+fn process(xs: List<Int>) => "ints";
+fn process(xs: List<String>) => "strings";
+let a: Any = [1];
+let b: Any = ["s"];
+print(process(a as List<Int>), process(b as List<String>));

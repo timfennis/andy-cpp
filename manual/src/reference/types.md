@@ -117,13 +117,13 @@ print(total([1, 2]), total((3, 4)), total(1..4));   // 3 7 6
 
 ### Element types are exact
 
-A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options, the other containers, and function types. To change a container's element type, go through `Any`:
+A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options, the other containers, and function types. To change a container's element type, go through `Any` and a cast:
 
 ```ndc,fails
-let words = "a b".split(" ");     // List<String>
+let words = "a b".split(" ");        // List<String>
 let any: Any = words;
-let anything: List<Any> = any;    // fine: checked as the program runs
-let wrong: List<Any> = words;     // error: found List<String> but expected List<Any>
+let anything = any as List<Any>;     // fine: checked as the program runs
+let wrong: List<Any> = words;        // error: found List<String> but expected List<Any>
 ```
 
 ### Values of different types
@@ -169,21 +169,38 @@ used before (or inside) its own declaration, and it goes out of scope together w
 block or function that declared it. See [Struct](./types/struct.md) for the scoping
 rules.
 
-> **Note:** every value fits `Any`, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`, but values of different types are an error (see [Values of different types](#values-of-different-types)). A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
+> **Note:** every value fits `Any`, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`, which then takes a cast to be used as anything else (see below), and values of different types are an error (see [Values of different types](#values-of-different-types)). A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
 
-### Using an `Any` value where a type is expected
+### Getting a value out of an `Any`
 
-You can use an `Any` value where a specific type is expected. The program checks the value when it gets there:
+Anything goes into an `Any`, but getting a value back out takes a [cast](../features/casts.md): `value as Int` checks as the program runs that the value is an Int, and `value as? Int` gives an `Option<Int>`. An `Any` doesn't go where another type is expected without one:
 
 ```ndc,fails
 let a: Any = 5;
-let n: Int = a;      // fine: a holds an Int
-print(n + 1);        // 6
-
-let b: Any = "five";
-let m: Int = b;      // error: expected Int but found String
+let n: Int = a;  // error: mismatched types: found Any but expected Int
 ```
 
-The same goes for assigning it, passing it to a function, or returning it from one. For a list or a map, every element is checked.
+```ndc
+let a: Any = 5;
+let n: Int = a as Int;  // checked: a holds an Int
+print(n + 1);           // 6
+print(a as? String);    // None
+```
 
-You can also check it yourself with a [cast](../features/casts.md): `value as List<Int>`.
+The same goes for assigning it, passing it to a function, returning it from one, iterating over it, calling it, and using an operator on it: each needs something that takes an `Any`, or a cast.
+
+```ndc,fails
+let a: Any = 5;
+a + 1  // error: No function called '+' found that matches the arguments 'Any, Int'
+```
+
+A call with an `Any` argument only uses an overload that takes an `Any` there: one whose parameter is `Any`, or has no annotation, which is then an `Any` in its body. A cast picks another:
+
+```ndc
+fn describe(x: Int) => "an int";
+fn describe(x: Any) => "something";
+let a: Any = 5;
+print(describe(a), describe(a as Int));  // something an int
+```
+
+Functions like `print`, `string` and `==` take a value of any type as it is, so they take an `Any` too.

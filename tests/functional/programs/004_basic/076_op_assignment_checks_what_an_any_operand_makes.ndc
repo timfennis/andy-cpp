@@ -1,6 +1,0 @@
-// What `a op= b` makes from an `Any` operand is checked where it's written
-// back, so a value that doesn't fit never reaches the target.
-// expect-error: expected List<Int> but found List<Any>
-fn opaque(x) -> Any => x;
-let values = [1];
-values ++= opaque([0.5]);

@@ -1,0 +1,6 @@
+// A value of type `Any` takes a cast to be stored where an Int is expected,
+// which checks that it is one as the program runs.
+// expect-output: 6
+let a: Any = 5;
+let n: Int = a as Int;
+print(n + 1);

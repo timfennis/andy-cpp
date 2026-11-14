@@ -1,0 +1,10 @@
+// A generic function used as a value runs its body compiled for any
+// arguments, where `+` may get tuples, which it adds element by element,
+// and so may what a call picked as the program runs gives.
+// expect-output: (4,6) 3 (2,3)
+fn add(a, b) => a + b;
+let pairs: Fn((Int, Int), (Int, Int)) -> (Int, Int) = add;
+let ints: Fn(Int, Int) -> Int = add;
+fn bump(xs) => xs.first() + (1, 1);
+let bumped: Fn(List<(Int, Int)>) -> (Int, Int) = bump;
+print(pairs((1, 2), (3, 4)), ints(1, 2), bumped([(1, 2)]));

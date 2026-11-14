@@ -1,6 +1,0 @@
-// The map calls `fallback` for a missing key, so the function itself isn't
-// one of the map's Ints.
-// expect-output: 1
-fn fallback() -> Any => 1;
-let m: Map<String, Int> = %{:fallback};
-print(m["a"]);

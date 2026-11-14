@@ -29,6 +29,8 @@ impl Analyser {
                 hides_functions,
                 span,
             )
+        } else if types.contains(&StaticType::Any) {
+            AnalysisError::function_not_found_for_any(name, types, span)
         } else if overloads.a_cast_could_resolve(candidates, types) {
             AnalysisError::function_not_found_suggest_cast(name, types, span)
         } else {

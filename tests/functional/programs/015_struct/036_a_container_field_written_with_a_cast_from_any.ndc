@@ -1,0 +1,6 @@
+// expect-output: [2]
+struct Q { xs: List<Int> }
+let q = Q([1]);
+let v: Any = [2];
+q.xs = v as List<Int>;
+print(q.xs);

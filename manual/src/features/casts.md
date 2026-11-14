@@ -11,6 +11,22 @@ let ints = values as List<Int>;
 print(ints.sum());  // 3
 ```
 
+A cast is the way a value comes out of an `Any`. Anything goes into an
+`Any`, but an `Any` doesn't go where another type is expected, and no
+operator or function takes it unless it takes an `Any` (see [Getting a value
+out of an `Any`](../reference/types.md#getting-a-value-out-of-an-any)):
+
+```ndc,fails
+let value: Any = 5;
+value + 1
+// error[analysis]: No function called '+' found that matches the arguments 'Any, Int'
+```
+
+```ndc
+let value: Any = 5;
+print((value as Int) + 1);  // 6
+```
+
 A cast checks the value without converting it. `n as Float` is an error
 when `n` is an `Int`; use conversion functions like `float(n)` to change a
 value's type. A number literal takes the type the cast says, so `5 as Float`

@@ -55,6 +55,22 @@ mixed ++= ["two"];
 print(mixed);  // [1,"two"]
 ```
 
+An operand of type `Any` takes a [cast](./casts.md) like anywhere else, as
+the operator has to take it:
+
+```ndc,fails
+fn opaque(x) -> Any => x;
+let values = [1];
+values ++= opaque([2]); // error: No function called '++' found that matches the arguments 'List<Int>, Any'
+```
+
+```ndc
+fn opaque(x) -> Any => x;
+let values = [1];
+values ++= opaque([2]) as List<Int>;
+print(values);  // [1,2]
+```
+
 ## Optimization
 
 You might expect `list ++= [1,2,3]` to desugar to `list = list ++ [1,2,3]`, but that would waste work. Andy C++ handles some augmented assignments directly. In this case, it appends `[1,2,3]` without creating an intermediate list.

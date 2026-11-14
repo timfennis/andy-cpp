@@ -1,0 +1,5 @@
+// `f` called with an `Any` has `s` be one, which `enumerate` doesn't take.
+// expect-error: No function called 'enumerate' found that matches the arguments 'Any'
+fn f(s) { [i for (i, c) in s.enumerate()].sum() }
+let a: Any = "abc";
+print(f("ab"), f(a));

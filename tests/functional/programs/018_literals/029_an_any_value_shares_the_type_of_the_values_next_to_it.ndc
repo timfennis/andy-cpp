@@ -1,9 +1,0 @@
-// An `Any` among a literal's values is checked as whatever the others are,
-// so `[n, a]` is a List<Int> when `n` is an Int, and a list of an untyped
-// number and an `Any` is a List<Any>.
-// expect-output: int any
-fn f(xs: List<Int>) => "int";
-fn f(xs: List<Any>) => "any";
-let n: Int = 1;
-let a: Any = 2;
-print(f([n, a]), f([3, a]));

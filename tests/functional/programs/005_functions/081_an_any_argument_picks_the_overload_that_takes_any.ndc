@@ -1,0 +1,13 @@
+// `pick`'s body makes `x` an Int, so a value of type `Any` goes to the `Any`
+// overload, whatever it holds. A type test tells an Int apart, which then
+// goes to the other one.
+// expect-output: fallback fallback 1 1 fallback
+fn need_int(x: Int) => x;
+fn pick(x) => need_int(x);
+fn pick(x: Any) => "fallback";
+fn via(x: Any) => pick(x);
+fn tested(x: Any) -> Any {
+    let n = x as? Int;
+    if n.is_some() { pick(n.unwrap()) } else { pick(x) }
+}
+print(via(1), via("a"), pick(1), tested(1), tested("a"));

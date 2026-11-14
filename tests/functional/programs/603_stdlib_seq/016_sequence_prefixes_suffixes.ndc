@@ -1,12 +1,13 @@
-// The general overload must retain string behavior when the concrete kind is hidden.
+// A string's prefixes and suffixes are strings, even when it comes out of an
+// `Any`.
 let text: Any = "aé🦀";
-assert_eq(text.prefixes(), ["a", "aé", "aé🦀"]);
-assert_eq(text.suffixes(), ["aé🦀", "é🦀", "🦀"]);
-let empty_text: Any = "";
+assert_eq((text as String).prefixes(), ["a", "aé", "aé🦀"]);
+assert_eq((text as String).suffixes(), ["aé🦀", "é🦀", "🦀"]);
+let empty_text = "";
 assert_eq(empty_text.prefixes(), []);
 assert_eq(empty_text.suffixes(), []);
 
-// Untyped parameters exercise runtime overload dispatch for both kinds.
+// Untyped parameters pick the overload for each kind.
 fn prefixes_of(value) => value.prefixes();
 fn suffixes_of(value) => value.suffixes();
 assert_eq(prefixes_of("ab"), ["a", "ab"]);

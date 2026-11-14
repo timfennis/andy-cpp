@@ -1,0 +1,5 @@
+// `in` takes a value of the type the range holds, which an `Any` takes a
+// cast to be.
+// expect-error: No function called 'in' found that matches the arguments 'Any, Iterator<Int>'
+let string: Any = "string";
+print(string in (1..10));

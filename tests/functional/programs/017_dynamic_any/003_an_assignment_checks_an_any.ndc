@@ -1,5 +1,0 @@
-// expect-error: expected Int but found String
-let a: Any = "five";
-let n = 1;
-n = a;
-print(n);

@@ -422,14 +422,18 @@ impl Analyser {
 
     /// Records what the body of a generic function calls at `call`, which
     /// is compiled once for every type it's called with: the overloads that
-    /// can take the arguments, picked as the program runs.
+    /// can take the arguments, picked as the program runs. Its type
+    /// parameters, and the `Any` that a call picked as it runs gives, stand
+    /// for any type there: an overload that takes an Int may get one. Each
+    /// call of the function checks its body with the types it's given, so
+    /// an `Any` the program wrote was checked there.
     fn pick_for_any_arguments(&mut self, call: &CallConstraint) {
         let arguments = call
             .arguments()
             .iter()
             .map(|argument| {
                 argument.replace(&|part| {
-                    matches!(part, StaticType::Generic(_)).then_some(StaticType::Any)
+                    matches!(part, StaticType::Any).then(|| StaticType::Generic("T".into()))
                 })
             })
             .collect::<Vec<_>>();

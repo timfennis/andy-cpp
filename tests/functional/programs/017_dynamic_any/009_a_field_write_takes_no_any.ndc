@@ -1,0 +1,6 @@
+// expect-error: mismatched types: found Any but expected Int
+struct Point { x: Int, y: Int }
+let p = Point(1, 2);
+let a: Any = 3;
+p.x = a;
+print(p);

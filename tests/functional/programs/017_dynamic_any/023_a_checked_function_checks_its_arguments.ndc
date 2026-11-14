@@ -1,9 +1,9 @@
-// A function used as a function type that takes more than it does checks
+// A function cast to a function type that takes more than it does checks
 // each call's arguments: `store` takes an Int, not anything.
 // expect-error: the function doesn't take the arguments (Bool)
 let n: Int = 0;
 fn store(x: Int) { n = x; 0 }
 let a: Any = store;
-let g: Any = a as Fn(Any) -> Int;
+let g = a as Fn(Any) -> Int;
 g(true);
 print(n);
