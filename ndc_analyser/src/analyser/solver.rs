@@ -843,18 +843,21 @@ impl Analyser {
                 if picked.contains(&serial) {
                     continue;
                 }
-                let Some(Waiting {
-                    constraint: Constraint::Call(call),
-                    ..
-                }) = self.waiting.get(&serial).cloned()
-                else {
+                let Some(Waiting { constraint, .. }) = self.waiting.get(&serial).cloned() else {
                     continue;
                 };
-                let reached = std::iter::once(&call.result)
-                    .chain(&call.arguments)
+                let reached = constraint
+                    .inputs()
+                    .iter()
+                    .chain(constraint.outputs())
                     .flat_map(|typ| self.vars.unsettled(typ))
                     .collect::<Vec<_>>();
-                match self.call_still_fits(&call) {
+                let fit = match &constraint {
+                    Constraint::Call(call) => self.call_still_fits(call),
+                    Constraint::Join { types, .. } => self.join_still_fits(types),
+                    _ => continue,
+                };
+                match fit {
                     Fit::No => return false,
                     Fit::Maybe => {}
                     Fit::Picked => {
@@ -914,6 +917,29 @@ impl Analyser {
             fits
         });
         if fits { Fit::Maybe } else { Fit::No }
+    }
+
+    /// Whether the branches of a waiting join, `[a, b, result]`, can still
+    /// be one type: in `if c { 2.5 } else { -1 }`, the `-` gives an Int
+    /// when the `1` is an Int, which the Float can't join. Branches of
+    /// different types are an `Any` where one is expected.
+    fn join_still_fits(&mut self, [a, b, result]: &[StaticType; 3]) -> Fit {
+        let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
+        let unknown =
+            |typ: &StaticType| matches!(typ, StaticType::Var(var) if !self.vars.is_literal(*var));
+        if unknown(&a)
+            || unknown(&b)
+            || matches!(a, StaticType::Never)
+            || matches!(b, StaticType::Never)
+            || self.vars.resolve(result) == StaticType::Any
+        {
+            return Fit::Maybe;
+        }
+        if self.vars.unify(&a, &b) && self.vars.bind_argument(result, &a) {
+            Fit::Picked
+        } else {
+            Fit::No
+        }
     }
 
     /// Whether `symbol` takes a number among `arguments` through an `Any`
