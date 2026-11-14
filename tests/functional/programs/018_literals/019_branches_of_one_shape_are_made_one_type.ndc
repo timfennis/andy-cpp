@@ -1,0 +1,5 @@
+// The two lists are one type, so `e` holds Ints like `[1]`.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'
+let e = [];
+let r = if true { e } else { [1] };
+e.push("s");

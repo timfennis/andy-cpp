@@ -157,7 +157,7 @@ fn group_overloads<'a>(
             continue;
         };
         if let (Some(recv), Some(params)) = (receiver_type, parameters)
-            && (params.is_empty() || !recv.is_subtype(&params[0]))
+            && (params.is_empty() || !recv.may_fit(&params[0]))
         {
             continue;
         }
@@ -193,15 +193,15 @@ fn group_overloads<'a>(
     groups
 }
 
-/// `[Int]` -> `Int`; `[List<Int>, Sequence<Int>]` -> `Sequence<Int>` (a
+/// `[Int]` -> `Int`; `[List<Int>, Iterable<Int>]` -> `Iterable<Int>` (a
 /// candidate subsuming all others wins); `[Int, Float, Number]` ->
 /// `Int | Float | Number` (no candidate subsumes the others).
 fn merged_type_display(candidates: &[&StaticType]) -> String {
-    if let Some(supertype) = candidates
+    if let Some(widest) = candidates
         .iter()
-        .find(|t| candidates.iter().all(|c| c.is_subtype(t)))
+        .find(|t| candidates.iter().all(|c| c.fits(t)))
     {
-        return supertype.to_string();
+        return widest.to_string();
     }
     candidates
         .iter()
@@ -212,8 +212,8 @@ fn merged_type_display(candidates: &[&StaticType]) -> String {
 
 /// Language keywords offered in general (non-dot) completion.
 const KEYWORDS: &[&str] = &[
-    "let", "fn", "pure", "struct", "if", "else", "while", "for", "in", "as", "return", "break",
-    "continue", "and", "or", "not", "true", "false", "None",
+    "let", "fn", "pure", "struct", "if", "else", "while", "for", "in", "as", "as?", "return",
+    "break", "continue", "and", "or", "not", "true", "false", "None",
 ];
 
 fn keyword_completions() -> impl Iterator<Item = CompletionItem> {
@@ -498,7 +498,7 @@ mod tests {
     #[test]
     fn merged_type_display_shows_a_common_supertype_or_a_union() {
         let list = StaticType::List(Box::new(StaticType::Int));
-        let seq = StaticType::Sequence(Box::new(StaticType::Int));
+        let seq = StaticType::Iterable(Box::new(StaticType::Int));
         assert_eq!(merged_type_display(&[&list, &seq]), seq.to_string());
         assert_eq!(
             merged_type_display(&[&StaticType::Int, &StaticType::Float]),

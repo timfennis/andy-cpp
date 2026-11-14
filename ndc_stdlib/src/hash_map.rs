@@ -9,7 +9,7 @@ mod inner {
     /// Returns a list of all the keys in the map or set.
     ///
     /// Note that for a set this will return the values in the set.
-    #[function(return_type = Vec<_>)]
+    #[function(signature = "<K, V>(Map<K, V>) -> List<K>")]
     pub fn keys(map: &mut HashMap<Value, Value>) -> Value {
         Value::Object(Rc::new(Object::list(
             map.keys().cloned().collect::<Vec<_>>(),
@@ -19,7 +19,7 @@ mod inner {
     /// Returns a list of all the values in the map.
     ///
     /// Note that for sets this will return a list of unit types, you should use keys if you want the values in the set.
-    #[function(return_type = Vec<_>)]
+    #[function(signature = "<K, V>(Map<K, V>) -> List<V>")]
     pub fn values(map: &mut HashMap<Value, Value>) -> Value {
         Value::Object(Rc::new(Object::list(
             map.values().cloned().collect::<Vec<_>>(),
@@ -27,12 +27,13 @@ mod inner {
     }
 
     /// Removes a key from the map or a value from a set.
+    #[function(signature = "<K, V>(Map<K, V>, K)")]
     pub fn remove(map: &mut HashMap<Value, Value>, key: Value) {
         map.remove(&key);
     }
 
     /// Removes all keys from the `left` map/set that are present in the `right` map/set.
-    #[function(name = "remove")]
+    #[function(name = "remove", signature = "<K, V, W>(Map<K, V>, Map<K, W>)")]
     pub fn remove_map(left: &mut HashMap<Value, Value>, right: &HashMap<Value, Value>) {
         for (key, _) in right {
             left.remove(key);
@@ -40,24 +41,28 @@ mod inner {
     }
 
     /// Insert a value into a map.
-    #[function(name = "insert")]
+    #[function(name = "insert", signature = "<K, V>(Map<K, V>, K, V)")]
     pub fn insert_map(map: &mut HashMap<Value, Value>, key: Value, value: Value) {
         map.insert(key, value);
     }
 
     /// Inserts a value into a set.
-    #[function(name = "insert")]
+    #[function(name = "insert", signature = "<K>(Map<K, ()>, K)")]
     pub fn insert_set(map: &mut HashMap<Value, Value>, key: Value) {
         map.insert(key, Value::unit());
     }
 
     /// Returns true if the map or set contains no elements.
+    #[function(signature = "<K, V>(Map<K, V>) -> Bool")]
     pub fn is_empty(map: &HashMap<Value, Value>) -> bool {
         map.is_empty()
     }
 
     /// Intersection-assign: retains only elements present in both maps or sets.
-    #[function(name = "&=")]
+    #[function(
+        name = "&=",
+        signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
+    )]
     pub fn intersect_assign(
         lhs: MapValue,
         rhs: &HashMap<Value, Value>,
@@ -75,7 +80,7 @@ mod inner {
     }
 
     /// Union-assign: adds all elements from the right map or set into the left.
-    #[function(name = "|=")]
+    #[function(name = "|=", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
     pub fn union_assign(lhs: MapValue, rhs: &HashMap<Value, Value>) -> anyhow::Result<MapValue> {
         {
             let Value::Object(ref obj) = lhs else {
@@ -93,7 +98,10 @@ mod inner {
     }
 
     /// Difference-assign: removes all elements from the left map or set that are present in the right.
-    #[function(name = "-=")]
+    #[function(
+        name = "-=",
+        signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
+    )]
     pub fn difference_assign(
         lhs: MapValue,
         rhs: &HashMap<Value, Value>,
@@ -111,7 +119,7 @@ mod inner {
     }
 
     /// Symmetric-difference-assign: retains only elements present in exactly one of the two maps or sets.
-    #[function(name = "~=")]
+    #[function(name = "~=", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
     pub fn symmetric_difference_assign(
         lhs: MapValue,
         rhs: &HashMap<Value, Value>,
@@ -132,7 +140,7 @@ mod inner {
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left | right`.
-    #[function(alias = "|")]
+    #[function(alias = "|", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
     pub fn union(left: MapValue, right: &HashMap<Value, Value>) -> anyhow::Result<MapValue> {
         let Value::Object(ref obj) = left else {
             anyhow::bail!("| requires a map on the left side");
@@ -154,7 +162,10 @@ mod inner {
     /// Returns the intersection (elements that are in both `left` and `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left & right`.
-    #[function(alias = "&")]
+    #[function(
+        alias = "&",
+        signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
+    )]
     pub fn intersection(left: MapValue, right: &HashMap<Value, Value>) -> anyhow::Result<MapValue> {
         let Value::Object(ref obj) = left else {
             anyhow::bail!("& requires a map on the left side");
@@ -176,7 +187,7 @@ mod inner {
     /// Returns the symmetric difference (elements that are either in `left` or `right` but not both) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left ~ right`.
-    #[function(alias = "~")]
+    #[function(alias = "~", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
     pub fn symmetric_difference(
         left: MapValue,
         right: &HashMap<Value, Value>,
@@ -199,7 +210,7 @@ mod inner {
     }
 
     /// Converts the given sequence to set.
-    #[function(return_type = Map<_, ()>)]
+    #[function(signature = "<T>(Iterable<T>) -> Map<T, ()>")]
     pub fn set(seq: SeqValue) -> anyhow::Result<Value> {
         use ndc_vm::hash_map::HashMap;
 

@@ -1,0 +1,2 @@
+// expect-output: [1,1,2,2] ["a","b"]
+print([1, 2].flat_map(fn(x) => [x, x]), ["ab"].flat_map(fn(s) => s));

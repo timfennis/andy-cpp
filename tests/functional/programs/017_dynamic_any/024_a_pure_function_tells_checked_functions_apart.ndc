@@ -1,0 +1,11 @@
+// A function checked as two function types gives two arguments a `pure fn`
+// caches separately.
+// expect-output: ok
+pure fn cached(f: Any) => f;
+fn id(x) => x;
+let a: Any = id;
+let ints = a as Fn(Int) -> Int;
+let strs = a as Fn(String) -> String;
+cached(ints);
+let s = cached(strs) as Fn(String) -> String;
+print(s("ok"));

@@ -1,5 +1,5 @@
 fn foo() { 123 }
-let hashmap = %{
+let hashmap: Map<Any, Int> = %{
     "foo": 1,
     123: 2,
     123.1: 3,

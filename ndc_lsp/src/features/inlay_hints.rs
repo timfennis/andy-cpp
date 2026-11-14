@@ -111,6 +111,14 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_check_is_shown_as_any() {
+        // `len(true)` fails, and what it gives is shown as `Any`.
+        let hints = collect_hints("let n = len(true);\nlet m = [n, n];");
+        assert!(has_label(&hints, |l| l == ": Any"), "{hints:?}");
+        assert!(has_label(&hints, |l| l == ": List<Any>"), "{hints:?}");
+    }
+
+    #[test]
     fn annotated_let_binding_skips_type_inlay() {
         let hints = collect_hints("let value: Int = 1;");
         assert!(!has_label(&hints, |l| l == ": Int"));
@@ -142,8 +150,11 @@ mod tests {
 
     #[test]
     fn unannotated_param_gets_inlay() {
+        // `foo` takes any argument, so its parameter's type is `foo`'s type
+        // parameter, which it returns.
         let hints = collect_hints("fn foo(x) { x }");
-        assert!(has_label(&hints, |l| l == ": Any"));
+        assert!(has_label(&hints, |l| l == ": A"), "{hints:?}");
+        assert!(has_label(&hints, |l| l == " -> A"), "{hints:?}");
     }
 
     #[test]

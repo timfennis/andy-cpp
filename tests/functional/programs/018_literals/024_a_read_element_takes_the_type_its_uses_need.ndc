@@ -1,0 +1,10 @@
+// What `[]` and `first` give back is what the list holds, so a use of the
+// element that needs a Float makes the list's `1` a Float too.
+// expect-output: [1.0] 0.5 [1.0,1.5]
+let xs = [1];
+let x = xs[0];
+x = 0.5;
+let ys = [1];
+let y = ys.first() + 0.5;
+ys.push(y);
+print(xs, x, ys);

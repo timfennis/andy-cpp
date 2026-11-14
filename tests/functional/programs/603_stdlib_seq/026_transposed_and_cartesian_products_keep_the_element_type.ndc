@@ -1,0 +1,6 @@
+// `transposed` and `multi_cartesian_product` give lists of the elements the
+// rows hold, and sequences of mixed elements give lists of `Any`.
+// expect-output: [[1,3],[2,4]] [[1,3],[2,3]] [[1,"a"],[2,"a"]]
+let columns: List<List<Int>> = [[1, 2], [3, 4]].transposed();
+let products: List<List<Int>> = [[1, 2], [3]].multi_cartesian_product();
+print(columns, products, [[1, 2], ["a"]].multi_cartesian_product());

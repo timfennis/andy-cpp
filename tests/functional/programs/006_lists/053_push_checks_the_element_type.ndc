@@ -1,0 +1,4 @@
+// `push` takes a List<T> and a T, so a list of integers only takes integers.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, Float'
+let x = ["a".len()];
+x.push(1.0);

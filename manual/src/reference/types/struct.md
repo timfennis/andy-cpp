@@ -144,14 +144,14 @@ needs parentheses around the member access: `(s.f)()` first evaluates `s.f`
 (the getter) and then calls its result.
 
 ```ndc
-struct Callback { f: Any }
+struct Callback { f: Fn(Int) -> Int }
 let cb = Callback(fn (a) => a * 2);
 
 print((cb.f)(21));  // 42
 ```
 
 ```ndc,fails
-struct Callback { f: Any }
+struct Callback { f: Fn(Int) -> Int }
 let cb = Callback(fn (a) => a * 2);
 
 cb.f(21);    // ERROR: this is method-call syntax for `f(cb, 21)`

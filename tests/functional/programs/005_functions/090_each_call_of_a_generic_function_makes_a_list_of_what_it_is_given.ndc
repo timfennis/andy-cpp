@@ -1,0 +1,8 @@
+// Each call of `wrap` makes a list of what it's given, so the two lists
+// hold different types, which the outer list holds as `Any`s.
+// expect-output: [[1],["s"]] [[1,3],[2]]
+fn wrap(x) => [x];
+let xs: List<Any> = [wrap(1), wrap("s")];
+let ys = [wrap(1), wrap(2)];
+ys[0].push(3);
+print(xs, ys);

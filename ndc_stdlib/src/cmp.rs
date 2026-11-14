@@ -16,7 +16,15 @@ mod inner {
         }
     }
 
+    /// Stops the program with the error `message`. It never returns, so it
+    /// can end a branch whose other branches give a value.
+    #[function(signature = "(String) -> Never")]
+    pub fn panic(message: &str) -> anyhow::Result<Value> {
+        Err(anyhow!(message.to_string()))
+    }
+
     /// Produces an error if the arguments aren't equal to each other.
+    #[function(signature = "<A, B>(A, B)")]
     pub fn assert_eq(left: Value, right: Value) -> anyhow::Result<()> {
         if left == right {
             Ok(())
@@ -28,6 +36,7 @@ mod inner {
     }
 
     /// Produces an error if the arguments are equal to each other.
+    #[function(signature = "<A, B>(A, B)")]
     pub fn assert_ne(left: Value, right: Value) -> anyhow::Result<()> {
         if left == right {
             Err(anyhow!(format!(
@@ -49,28 +58,38 @@ mod inner {
     }
 
     /// Returns the larger of `left` and `right`, preferring `left` if they are equal.
+    #[function(signature = "<T>(T, T) -> T")]
     pub fn max(left: Value, right: Value) -> anyhow::Result<Value> {
-        match left.partial_cmp(&right) {
-            Some(Ordering::Equal | Ordering::Greater) => Ok(left),
-            Some(Ordering::Less) => Ok(right),
-            None => Err(anyhow!(
-                "cannot compare {} and {}",
-                left.static_type(),
-                right.static_type()
-            )),
-        }
+        larger(left, right)
     }
 
     /// Returns the smaller of `left` and `right`, preferring `left` if they are equal.
+    #[function(signature = "<T>(T, T) -> T")]
     pub fn min(left: Value, right: Value) -> anyhow::Result<Value> {
+        smaller(left, right)
+    }
+
+    fn larger(left: Value, right: Value) -> anyhow::Result<Value> {
+        match left.partial_cmp(&right) {
+            Some(Ordering::Equal | Ordering::Greater) => Ok(left),
+            Some(Ordering::Less) => Ok(right),
+            None => Err(incomparable(&left, &right)),
+        }
+    }
+
+    fn smaller(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.partial_cmp(&right) {
             Some(Ordering::Equal | Ordering::Less) => Ok(left),
             Some(Ordering::Greater) => Ok(right),
-            None => Err(anyhow!(
-                "cannot compare {} and {}",
-                left.static_type(),
-                right.static_type()
-            )),
+            None => Err(incomparable(&left, &right)),
         }
+    }
+
+    fn incomparable(left: &Value, right: &Value) -> anyhow::Error {
+        anyhow!(
+            "cannot compare {} and {}",
+            left.static_type(),
+            right.static_type()
+        )
     }
 }

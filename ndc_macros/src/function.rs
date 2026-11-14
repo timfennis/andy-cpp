@@ -21,6 +21,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
     )];
 
     let mut return_type = None;
+    let mut signature: Option<syn::LitStr> = None;
 
     let mut documentation_buffer = String::new();
     for attr in &function.attrs {
@@ -37,6 +38,10 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
                     let value: syn::Type = meta.value()?.parse()?;
                     return_type = Some(map_type(&value)?);
                     Ok(())
+                } else if meta.path.is_ident("signature") {
+                    // #[function(signature = "<T>(List<T>, T) -> Option<T>")]
+                    signature = Some(meta.value()?.parse()?);
+                    Ok(())
                 } else {
                     Err(meta.error("unsupported property on function"))
                 }
@@ -49,6 +54,16 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
             writeln!(documentation_buffer, "{}", lit_str.value().trim())
                 .expect("failed to write docs");
         }
+    }
+
+    if let Some(signature) = &signature {
+        if return_type.is_some() {
+            return Err(syn::Error::new_spanned(
+                signature,
+                "a signature already has a return type: drop `return_type`",
+            ));
+        }
+        check_signature(signature, function.sig.inputs.len())?;
     }
 
     let return_type = match return_type {
@@ -73,6 +88,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
                 &ident,
                 function_name,
                 &return_type,
+                signature.as_ref(),
                 &documentation_buffer,
             )
         })
@@ -278,11 +294,40 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
     }
 }
 
+/// Checks that a signature such as `<T>(List<T>, T)` parses, and that it
+/// declares as many parameters as the Rust function takes.
+fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<()> {
+    let parsed = ndc_core::StaticType::signature(&signature.value())
+        .map_err(|error| syn::Error::new_spanned(signature, error))?;
+    let ndc_core::StaticType::Function {
+        parameters: Some(parameters),
+        ..
+    } = parsed
+    else {
+        return Err(syn::Error::new_spanned(
+            signature,
+            "a native function takes a fixed number of arguments, so `(*)` doesn't fit",
+        ));
+    };
+    if parameters.len() == expected {
+        Ok(())
+    } else {
+        Err(syn::Error::new_spanned(
+            signature,
+            format!(
+                "the signature declares {} parameters but the function takes {expected}",
+                parameters.len()
+            ),
+        ))
+    }
+}
+
 fn wrap_single(
     function: &syn::ItemFn,
     identifier: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     return_type: &TokenStream,
+    signature: Option<&syn::LitStr>,
     docs: &str,
 ) -> syn::Result<WrappedFunction> {
     let inner_ident = format_ident!("{}_inner", identifier);
@@ -300,6 +345,7 @@ fn wrap_single(
         register_as_function_name,
         docs,
         return_type,
+        signature,
     )
     .ok_or_else(|| {
         syn::Error::new_spanned(
@@ -350,6 +396,7 @@ fn try_generate_vm_native(
     fn_name: &proc_macro2::Literal,
     docs: &str,
     return_type_override: &TokenStream,
+    signature: Option<&syn::LitStr>,
 ) -> Option<VmNativeTokens> {
     use crate::vm_convert::{try_vm_input, try_vm_return};
 
@@ -415,15 +462,27 @@ fn try_generate_vm_native(
     } else {
         quote! { Some(String::from(#docs)) }
     };
+    // A signature replaces the types read off the Rust parameters.
+    let static_type = if let Some(signature) = signature {
+        quote! {
+            ndc_core::StaticType::signature(#signature).unwrap_or_else(|error| {
+                panic!("invalid signature of {}: {error}", #fn_name)
+            })
+        }
+    } else {
+        quote! {
+            ndc_core::StaticType::Function {
+                parameters: Some(vec![#(#param_types.clone()),*]),
+                return_type: Box::new(#return_static_type),
+            }
+        }
+    };
     let native_let = quote! {
         let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
             std::rc::Rc::new(ndc_vm::value::NativeFunction {
                 name: String::from(#fn_name),
                 documentation: #documentation_tokens,
-                static_type: ndc_core::StaticType::Function {
-                    parameters: Some(vec![#(#param_types.clone()),*]),
-                    return_type: Box::new(#return_static_type),
-                },
+                static_type: #static_type,
                 func: #func_variant,
             });
     };

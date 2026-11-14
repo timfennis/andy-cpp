@@ -1,0 +1,4 @@
+// A parameter of type `Any` takes anything, so the recursive call can wrap it.
+// expect-output: [[[1]]]
+fn nest(x: Any, n) { if n == 0 { x } else { nest([x], n - 1) } }
+print(nest(1, 3));

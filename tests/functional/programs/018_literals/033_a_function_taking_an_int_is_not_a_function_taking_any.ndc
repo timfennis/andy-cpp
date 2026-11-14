@@ -1,0 +1,3 @@
+// A function taking an Int can't be passed what a `Fn(Any) -> Int` takes.
+// expect-error: mismatched types: found Fn(String) -> Int but expected Fn(Any) -> Int
+let g: Fn(Any) -> Int = fn(x: String) => 1;

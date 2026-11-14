@@ -1,0 +1,7 @@
+// A map is a sequence of (key, value) pairs, but `max`, `min` and `in` look
+// at its keys, so the max of a Map<String, Int> is a String.
+// expect-output: b a true
+let m = %{"a": 1, "b": 2};
+let highest: String = m.max();
+let lowest: String = m.min();
+print(highest, lowest, "a" in m);

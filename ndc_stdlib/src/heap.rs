@@ -7,7 +7,7 @@ mod inner {
     use std::collections::BinaryHeap;
 
     /// Creates a new empty min-heap (priority queue where the smallest element is popped first).
-    #[function(name = "MinHeap", return_type = MinHeap<_>)]
+    #[function(name = "MinHeap", signature = "<T>() -> MinHeap<T>")]
     pub fn create_min_heap() -> Value {
         Value::Object(std::rc::Rc::new(Object::MinHeap(std::cell::RefCell::new(
             BinaryHeap::new(),
@@ -15,7 +15,7 @@ mod inner {
     }
 
     /// Creates a new empty max-heap (priority queue where the largest element is popped first).
-    #[function(name = "MaxHeap", return_type = MaxHeap<_>)]
+    #[function(name = "MaxHeap", signature = "<T>() -> MaxHeap<T>")]
     pub fn create_max_heap() -> Value {
         Value::Object(std::rc::Rc::new(Object::MaxHeap(std::cell::RefCell::new(
             BinaryHeap::new(),
@@ -23,7 +23,7 @@ mod inner {
     }
 
     /// Removes and returns the smallest element from the min-heap, or `None` if empty.
-    #[function(name = "pop?", return_type = Option<Value>)]
+    #[function(name = "pop?", signature = "<T>(MinHeap<T>) -> Option<T>")]
     pub fn maybe_min_pop(heap: &mut BinaryHeap<Reverse<OrdValue>>) -> Value {
         match heap.pop() {
             None => Value::None,
@@ -32,7 +32,7 @@ mod inner {
     }
 
     /// Removes and returns the largest element from the max-heap, or `None` if empty.
-    #[function(name = "pop?", return_type = Option<Value>)]
+    #[function(name = "pop?", signature = "<T>(MaxHeap<T>) -> Option<T>")]
     pub fn maybe_max_pop(heap: &mut BinaryHeap<OrdValue>) -> Value {
         match heap.pop() {
             None => Value::None,
@@ -41,7 +41,7 @@ mod inner {
     }
 
     /// Removes and returns the smallest element from the min-heap, or errors if empty.
-    #[function(name = "pop")]
+    #[function(name = "pop", signature = "<T>(MinHeap<T>) -> T")]
     pub fn min_pop(heap: &mut BinaryHeap<Reverse<OrdValue>>) -> anyhow::Result<Value> {
         heap.pop()
             .map(|Reverse(OrdValue(v))| v)
@@ -49,7 +49,7 @@ mod inner {
     }
 
     /// Removes and returns the largest element from the max-heap, or errors if empty.
-    #[function(name = "pop")]
+    #[function(name = "pop", signature = "<T>(MaxHeap<T>) -> T")]
     pub fn max_pop(heap: &mut BinaryHeap<OrdValue>) -> anyhow::Result<Value> {
         heap.pop()
             .map(|OrdValue(v)| v)
@@ -57,13 +57,13 @@ mod inner {
     }
 
     /// Pushes a value onto the min-heap.
-    #[function(name = "push")]
+    #[function(name = "push", signature = "<T>(MinHeap<T>, T)")]
     pub fn min_push(heap: &mut BinaryHeap<Reverse<OrdValue>>, value: Value) {
         heap.push(Reverse(OrdValue(value)));
     }
 
     /// Pushes a value onto the max-heap.
-    #[function(name = "push")]
+    #[function(name = "push", signature = "<T>(MaxHeap<T>, T)")]
     pub fn max_push(heap: &mut BinaryHeap<OrdValue>, value: Value) {
         heap.push(OrdValue(value));
     }

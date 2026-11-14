@@ -1,0 +1,6 @@
+// A function taking an `Any` takes the Int a `Fn(Int) -> Any` is passed, and
+// what it returns goes where an `Any` is returned, as any value does.
+// expect-output: 2
+fn f(x: Any) => x;
+let g: Fn(Int) -> Any = f;
+print(g(2));

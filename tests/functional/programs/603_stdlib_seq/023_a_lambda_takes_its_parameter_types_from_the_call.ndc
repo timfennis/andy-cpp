@@ -1,0 +1,8 @@
+// `sort_by` passes the list's elements to the lambda, so `a.score` reads
+// the field of `P`, and `map` makes a List<Int> that can't take a String.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'
+struct P { score: Int }
+let ps = [P(3), P(1)];
+ps.sort_by(fn(a, b) => a.score - b.score);
+let scores = ps.map(fn(p) => p.score);
+scores.push("a");

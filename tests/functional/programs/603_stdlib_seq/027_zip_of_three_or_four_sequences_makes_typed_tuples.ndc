@@ -1,0 +1,5 @@
+// Zipping three or four sequences makes tuples of their element types.
+// expect-output: [(1,"a",1.5)] [(1,"a",true,2)]
+let triples: List<(Int, String, Float)> = zip([1], ["a"], [1.5]);
+let quadruples: List<(Int, String, Bool, Int)> = zip([1], ["a"], [true], [2]);
+print(triples, quadruples);

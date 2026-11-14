@@ -1,0 +1,4 @@
+// `filter` keeps the elements its predicate returns `true` for, so a
+// predicate returning an Int is an error.
+// expect-error: No function called 'filter' found that matches the arguments 'List<Int>, Fn(Int) -> Int'
+[1, 2, 3].filter(fn(x) => 1);

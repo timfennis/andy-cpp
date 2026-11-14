@@ -1,0 +1,5 @@
+// The `1` is a key of a map of Floats, so it's the Float `1.0`.
+// expect-output: a false true
+let m = %{1: "a", 2.5: "b"};
+let n = %{1.5: "c"};
+print(m[1], 1 in n, 1.5 in n);

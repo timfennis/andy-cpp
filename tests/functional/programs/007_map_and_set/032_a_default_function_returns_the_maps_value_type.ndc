@@ -1,0 +1,6 @@
+// The default function makes each missing value, so it's expected to
+// return the map's value type, and the empty list it returns is a List<Int>.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'
+let m: Map<String, List<Int>> = %{:fn() => []};
+m["a"].push(1);
+m["b"].push("x");

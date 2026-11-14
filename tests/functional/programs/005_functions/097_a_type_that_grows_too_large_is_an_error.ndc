@@ -1,0 +1,12 @@
+// Each function doubles the type the one before it returns, so the types
+// grow too large to work with, which is reported instead of running out of
+// memory.
+// expect-error: The type of `f4` has more than 10000 parts
+fn f0(x) => (x, x);
+fn f1(x) => f0(f0(x));
+fn f2(x) => f1(f1(x));
+fn f3(x) => f2(f2(x));
+fn f4(x) => f3(f3(x));
+fn f5(x) => f4(f4(x));
+fn f6(x) => f5(f5(x));
+if false { print(f6(1)); }

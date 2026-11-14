@@ -55,19 +55,18 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let doc =
         "Retrieves an element by index. Supports negative indices and range slicing.".to_string();
 
-    // []<List, Any> -> Any
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::List(Box::new(StaticType::Any)),
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
-        func: make_get_func_simple(),
-    }));
+    // An element by its index, or a slice by a range of indices.
+    for signature in [
+        "<T>(List<T>, Int) -> T",
+        "<T>(List<T>, Iterator<Int>) -> List<T>",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_get_func_simple(),
+        }));
+    }
 
     // []<String, Any> -> String
     env.declare_global_fn(Rc::new(NativeFunction {
@@ -93,34 +92,23 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         func: make_get_func(),
     }));
 
-    // []<Deque, Any> -> Any
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Deque(Box::new(StaticType::Any)),
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
-        func: make_get_func_simple(),
-    }));
+    // A deque is indexed like a list, and a range of it is a list too.
+    for signature in [
+        "<T>(Deque<T>, Int) -> T",
+        "<T>(Deque<T>, Iterator<Int>) -> List<T>",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_get_func_simple(),
+        }));
+    }
 
-    // []<Map, Any> -> Any
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]".to_string(),
         documentation: Some(doc),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Map {
-                    key: Box::new(StaticType::Any),
-                    value: Box::new(StaticType::Any),
-                },
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
+        static_type: StaticType::signature("<K, V>(Map<K, V>, K) -> V").expect("valid signature"),
         func: make_get_func(),
     }));
 }
@@ -128,20 +116,18 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let doc = "Sets an element by index. Supports negative indices and range slicing for lists and strings.".to_string();
 
-    // []=<List, Any, Any> -> ()
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]=".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::List(Box::new(StaticType::Any)),
-                StaticType::Any,
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::unit()),
-        },
-        func: make_set_func(),
-    }));
+    // An element by its index, or a slice by a range of indices.
+    for signature in [
+        "<T>(List<T>, Int, T)",
+        "<T>(List<T>, Iterator<Int>, Iterable<T>)",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]=".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_set_func(),
+        }));
+    }
 
     // []=<String, Any, String> -> ()
     env.declare_global_fn(Rc::new(NativeFunction {
@@ -158,21 +144,10 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         func: make_set_func(),
     }));
 
-    // []=<Map, Any, Any> -> ()
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]=".to_string(),
         documentation: Some(doc),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Map {
-                    key: Box::new(StaticType::Any),
-                    value: Box::new(StaticType::Any),
-                },
-                StaticType::Any,
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::unit()),
-        },
+        static_type: StaticType::signature("<K, V>(Map<K, V>, K, V)").expect("valid signature"),
         func: make_set_func(),
     }));
 }
@@ -480,21 +455,22 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
                         list[idx] = rhs;
                     }
                     VmOffset::Range(from, to) => {
-                        let rhs_vec = match rhs {
-                            Value::Object(o) => match o.as_ref() {
-                                Object::List(l) => l.borrow().clone(),
-                                Object::Tuple(t) => t.clone(),
-                                _ => {
-                                    return Err(VmError::native(
-                                        "cannot assign non-list to list slice",
-                                    ));
-                                }
-                            },
-                            _ => {
-                                return Err(VmError::native(
-                                    "cannot assign non-list to list slice",
-                                ));
+                        // Any sequence goes in a slice: a list, a tuple, a
+                        // range or another iterator.
+                        let rhs_vec = match &rhs {
+                            Value::Object(o) if matches!(o.as_ref(), Object::List(_)) => {
+                                let Object::List(l) = o.as_ref() else {
+                                    unreachable!("matched a list");
+                                };
+                                l.borrow().clone()
                             }
+                            _ => rhs
+                                .clone()
+                                .try_into_iter()
+                                .ok_or_else(|| {
+                                    VmError::native("cannot assign non-sequence to list slice")
+                                })?
+                                .collect(),
                         };
                         let tail: Vec<Value> = list.drain(from..).collect();
                         list.extend(rhs_vec);

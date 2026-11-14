@@ -1,0 +1,6 @@
+// `v` holds `Any`s, so the list given to it does too.
+// expect-output: ["b",2.5]
+let v: List<Any> = [1, "a"];
+v = ["b"];
+v.push(2.5);
+print(v);

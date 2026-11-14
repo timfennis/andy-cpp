@@ -12,8 +12,8 @@ There are two common ways to create cycles:
 
 ```ndc
 {
-    let m = %{};
-    let n = %{};
+    let m: Map<String, Any> = %{};
+    let n: Map<String, Any> = %{};
     m["n"] = n;
     n["m"] = m;
     print(m["n"]["m"] == m);  // true
@@ -28,7 +28,7 @@ A closure that captures a variable which holds a reference back to itself create
 
 ```ndc
 {
-    let f: Any = ();
+    let f: Fn(Int) -> Int = fn(x) => 0;
     f = fn(x) { if x > 0 { x + f(x - 1) } else { 0 } };
     print(f(3));  // 6
 }

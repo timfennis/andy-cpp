@@ -1,0 +1,10 @@
+// A lambda with a typed parameter takes the list's elements, and an untyped
+// one returning a value of unknown type is checked as the program runs, even
+// when the list's type isn't known either.
+fn big(xs) { xs.filter(fn(x) => x > 1) }
+print([1, 2, 3].map(fn(x: Int) => x + 1));
+print(big([1, 2, 3]));
+print([[true], [false]].filter(fn(x) => x[0]));
+// expect-output: [2,3,4]
+// expect-output: [2,3]
+// expect-output: [[true]]

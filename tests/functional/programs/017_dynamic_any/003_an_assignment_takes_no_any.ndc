@@ -1,0 +1,6 @@
+// `n` is an Int, which a value of type `Any` takes a cast to be.
+// expect-error: mismatched types: found Any but expected Int
+let a: Any = 5;
+let n = 1;
+n = a;
+print(n);

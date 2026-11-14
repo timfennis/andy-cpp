@@ -1,0 +1,4 @@
+// expect-error: cannot cast List<String> to List<Int>
+let a: Any = ["one"];
+let xs: List<Int> = a as List<Int>;
+print(xs);

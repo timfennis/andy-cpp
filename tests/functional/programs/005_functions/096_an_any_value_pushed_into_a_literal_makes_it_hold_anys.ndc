@@ -1,0 +1,12 @@
+// A value of type `Any` pushed into a list the function makes has that list
+// hold `Any`s, whatever each call passes for `x`: `with_five("s")` is a
+// `List<Any>`, not a `List<String>`.
+// expect-output: [1,5] ["s",5]
+fn with_five(x) {
+    let five: Any = 5;
+    let xs = [x];
+    xs.push(five);
+    xs
+}
+let anything: List<Any> = with_five("s");
+print(with_five(1), anything);

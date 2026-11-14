@@ -63,7 +63,7 @@ fn main() {
     let call = fn() { 0 };
     let build = fn() { 0 };
     let get = fn() { 0 };
-    let set = fn() { 0 };
+    let set = fn() { };
     {
         fn helper() { 5 }
         call = fn() { helper() };

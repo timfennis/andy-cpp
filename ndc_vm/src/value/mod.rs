@@ -44,7 +44,7 @@ fn bounded_element_type<'a>(
         }
         let found = value.static_type_with_budget(depth, budget);
         element_type = Some(match element_type {
-            Some(previous) => previous.lub(&found),
+            Some(previous) => previous.join(&found),
             None => found,
         });
     }
@@ -130,11 +130,11 @@ impl Ord for OrdValue {
     }
 }
 
-/// Type alias for [`Value`] that signals `StaticType::Sequence` to the `#[export_module]` macro.
+/// Type alias for [`Value`] that signals `StaticType::Iterable` to the `#[export_module]` macro.
 ///
 /// Use this instead of `ndc_vm::value::Value` in stdlib function signatures when the parameter
 /// must accept any iterable sequence. The extraction is identical (zero-copy pass-through on the
-/// VM path) but the macro emits `StaticType::Sequence(Any)` instead of `StaticType::Any`, which
+/// VM path) but the macro emits `StaticType::Iterable(Any)` instead of `StaticType::Any`, which
 /// preserves the correct type for dispatch and static analysis.
 pub type SeqValue = Value;
 
@@ -277,7 +277,7 @@ impl Value {
     /// # Performance
     ///
     /// **O(n) for `List`, `Map`, and `Deque`** — these variants iterate all
-    /// elements to compute the element type via `lub`.  Avoid calling this in
+    /// elements to join their types into the element type.  Avoid calling this in
     /// hot paths on container values.  Use the dedicated helpers instead:
     ///
     /// - [`Value::is_number`] — O(1) check for numeric types
@@ -323,13 +323,14 @@ impl Value {
     /// avoiding full container iteration for common cases.
     ///
     /// When `param` is a container type whose inner types are all `Any` (e.g.
-    /// `Sequence(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
+    /// `Iterable(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
     /// checked — no element iteration occurs. Typed container parameters are
-    /// rejected rather than scanned; the remaining cases fall back to
-    /// `self.static_type().is_subtype(param)`.
+    /// rejected rather than scanned; the remaining cases are checked as
+    /// [`Value::is_a`] does.
     pub fn matches_param(&self, param: &StaticType) -> bool {
         match param {
-            StaticType::Any => true,
+            // A type parameter like `T` in `push<T>(List<T>, T)` takes any value.
+            param if param.is_unknown() => true,
             StaticType::Int => {
                 matches!(self, Self::Int(_))
             }
@@ -339,21 +340,35 @@ impl Value {
             StaticType::String => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::String(_)))
             }
-            StaticType::List(t) if matches!(t.as_ref(), StaticType::Any) => {
+            StaticType::List(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::List(_)))
             }
-            StaticType::Deque(t) if matches!(t.as_ref(), StaticType::Any) => {
+            StaticType::Deque(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Deque(_)))
             }
-            StaticType::Map { key, value }
-                if matches!(
-                    (key.as_ref(), value.as_ref()),
-                    (StaticType::Any, StaticType::Any)
-                ) =>
-            {
+            StaticType::Map { key, value } if key.is_unknown() && value.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Map { .. }))
             }
-            StaticType::Sequence(t) if matches!(t.as_ref(), StaticType::Any) => {
+            StaticType::MinHeap(t) if t.is_unknown() => {
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::MinHeap(_)))
+            }
+            StaticType::MaxHeap(t) if t.is_unknown() => {
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::MaxHeap(_)))
+            }
+            // Unit, the empty tuple, is checked as cheaply as a scalar.
+            StaticType::Tuple(elements) if elements.is_empty() => {
+                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Tuple(values) if values.is_empty()))
+            }
+            // An option holds at most one value, which is cheap to check.
+            StaticType::Option(t) => match self {
+                Self::None => true,
+                Self::Object(o) => match o.as_ref() {
+                    Object::Some(value) => value.matches_param(t),
+                    _ => false,
+                },
+                _ => false,
+            },
+            StaticType::Iterable(t) if t.is_unknown() => {
                 matches!(self, Self::Object(o) if matches!(
                     o.as_ref(),
                     Object::List(_)
@@ -371,11 +386,52 @@ impl Value {
             // compile time; if it falls through to dynamic dispatch, return false.
             StaticType::List(_)
             | StaticType::Deque(_)
-            | StaticType::Sequence(_)
+            | StaticType::Iterable(_)
             | StaticType::Map { .. }
-            | StaticType::Tuple(_) => false,
-            _ => self.static_type().is_subtype(param),
+            | StaticType::Tuple(_)
+            | StaticType::MinHeap(_)
+            | StaticType::MaxHeap(_) => false,
+            _ => self.is_a(param),
         }
+    }
+
+    /// Whether this value is a `target`, a type that holds no other values
+    /// as a container does: a scalar, a struct, a function or an iterator.
+    /// A function is one if its own type says so (see [`Function::fit`]):
+    /// only [`Self::converted_to`] can make one that may be one a function
+    /// whose calls are checked. What an iterator makes can't be checked
+    /// without making it.
+    fn is_a(&self, target: &StaticType) -> bool {
+        if let StaticType::Function { .. } = target
+            && let Self::Object(object) = self
+            && let Object::Function(function) = object.as_ref()
+        {
+            return function.fit(target) == FunctionFit::Proven;
+        }
+        match (target, self.static_type()) {
+            (StaticType::Iterator(_), StaticType::Iterator(_)) => true,
+            (target, found) => found == *target,
+        }
+    }
+
+    /// This value as a `target`, if it is one, checking every element of a
+    /// container: a function that may be a function `target` is wrapped so
+    /// that each call checks what it returns.
+    pub fn converted_to(&self, target: &StaticType) -> Option<Self> {
+        if let StaticType::Function { .. } = target
+            && let Self::Object(object) = self
+            && let Object::Function(function) = object.as_ref()
+        {
+            return match function.fit(target) {
+                FunctionFit::Proven => Some(self.clone()),
+                FunctionFit::IfChecked => Some(Self::function(Function::Checked {
+                    function: Rc::new(function.unchecked().clone()),
+                    typ: Box::new(target.clone()),
+                })),
+                FunctionFit::No => None,
+            };
+        }
+        self.conforms_to(target).then(|| self.clone())
     }
 
     /// Check whether this value conforms to `target`, scanning container
@@ -391,8 +447,23 @@ impl Value {
     }
 
     fn conforms_to_cached(&self, target: &StaticType, cache: &mut ConformanceCache) -> bool {
+        // Only a container target looks inside the value, which may be shared
+        // or cyclic; checking against another type takes no time to redo.
+        let looks_inside = matches!(
+            target,
+            StaticType::Option(_)
+                | StaticType::List(_)
+                | StaticType::Deque(_)
+                | StaticType::Tuple(_)
+                | StaticType::Map { .. }
+                | StaticType::MinHeap(_)
+                | StaticType::MaxHeap(_)
+                | StaticType::Iterable(_)
+        );
         let cache_key = match self {
-            Self::Object(object) => Some((Rc::as_ptr(object), std::ptr::from_ref(target))),
+            Self::Object(object) if looks_inside => {
+                Some((Rc::as_ptr(object), std::ptr::from_ref(target)))
+            }
             _ => None,
         };
         if let Some(cache_key) = cache_key
@@ -404,7 +475,7 @@ impl Value {
         // Static types are finite trees, so this pair cannot be re-entered
         // before its result is stored.
         let result = match target {
-            StaticType::Any => true,
+            target if target.is_unknown() => true,
             StaticType::Option(inner) => match self {
                 Self::None => true,
                 Self::Object(object) => match object.as_ref() {
@@ -465,7 +536,7 @@ impl Value {
                 Self::Object(object) if matches!(object.as_ref(), Object::MaxHeap(values)
                     if values.borrow().iter().all(|OrdValue(value)| value.conforms_to_cached(element, cache)))
             ),
-            StaticType::Sequence(element) => match self {
+            StaticType::Iterable(element) => match self {
                 Self::Object(object) => match object.as_ref() {
                     Object::List(values) => values
                         .borrow()
@@ -478,7 +549,7 @@ impl Value {
                         .borrow()
                         .iter()
                         .all(|value| value.conforms_to_cached(element, cache)),
-                    Object::String(_) => StaticType::String.is_subtype(element),
+                    Object::String(_) => StaticType::String.fits(element),
                     Object::Map { entries, .. } => {
                         entries
                             .borrow()
@@ -489,7 +560,7 @@ impl Value {
                                     key.conforms_to_cached(&elements[0], cache)
                                         && value.conforms_to_cached(&elements[1], cache)
                                 }
-                                StaticType::Sequence(inner) => {
+                                StaticType::Iterable(inner) => {
                                     key.conforms_to_cached(inner, cache)
                                         && value.conforms_to_cached(inner, cache)
                                 }
@@ -527,7 +598,7 @@ impl Value {
                 {
                     false
                 }
-                _ => self.static_type().is_subtype(target),
+                _ => self.is_a(target),
             },
         };
 
@@ -654,8 +725,8 @@ impl Object {
     /// Returns the best static type descriptor for this runtime value.
     ///
     /// `[1, 2]` reports `List<Int>` and `%{"a": 1}` reports `Map<String, Int>`:
-    /// lists and deques join their element types into a least upper bound, while
-    /// maps do so separately for keys and values. Tuples preserve each position's
+    /// lists and deques join their element types, the type they share or else
+    /// `Any`, while maps do so separately for keys and values. Tuples preserve each position's
     /// type, and `Some` wraps the type of its inner value. Empty lists, deques, and
     /// maps report `Any` for the types they cannot infer.
     ///
@@ -729,11 +800,11 @@ impl Object {
                     }
                     let found_value = value.static_type_with_budget(depth - 1, budget);
                     key_type = Some(match key_type {
-                        Some(previous) => previous.lub(&found_key),
+                        Some(previous) => previous.join(&found_key),
                         None => found_key,
                     });
                     value_type = Some(match value_type {
-                        Some(previous) => previous.lub(&found_value),
+                        Some(previous) => previous.join(&found_value),
                         None => found_value,
                     });
                 }
@@ -1042,7 +1113,7 @@ impl PartialEq for Object {
             ) => a_entries.borrow().eq(&*b_entries.borrow()),
             (Self::Function(a), Self::Function(b)) => {
                 // Compare function values by identity (pointer equality)
-                match (a, b) {
+                match (a.unchecked(), b.unchecked()) {
                     (Function::Compiled(a), Function::Compiled(b)) => {
                         std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
                     }
@@ -1131,7 +1202,7 @@ impl Hash for Object {
             }
             Self::Function(f) => {
                 state.write_u8(9);
-                match f {
+                match f.unchecked() {
                     Function::Compiled(func) => {
                         state.write_u8(1);
                         Rc::as_ptr(func).hash(state);
@@ -1148,6 +1219,7 @@ impl Hash for Object {
                         state.write_u8(4);
                         Rc::as_ptr(cache).hash(state);
                     }
+                    Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
                 }
             }
             Self::OverloadSet { .. } => {
@@ -1255,7 +1327,8 @@ mod tests {
         let mut cache = ConformanceCache::default();
 
         assert!(value.conforms_to_cached(&target, &mut cache));
-        assert_eq!(cache.len(), 4);
+        // One entry per list level; the `Any` inside needs no looking into.
+        assert_eq!(cache.len(), 3);
 
         // Break the reference cycle so the test does not leak its allocations.
         elements.borrow_mut().clear();
@@ -1273,7 +1346,7 @@ mod tests {
         // Dynamic dispatch must only inspect the outer container kind.
         let _borrow = elements.borrow_mut();
         assert!(value.matches_param(&StaticType::List(Box::new(StaticType::Any))));
-        assert!(value.matches_param(&StaticType::Sequence(Box::new(StaticType::Any,))));
+        assert!(value.matches_param(&StaticType::Iterable(Box::new(StaticType::Any,))));
         assert!(!value.matches_param(&StaticType::List(Box::new(StaticType::Int,))));
     }
 

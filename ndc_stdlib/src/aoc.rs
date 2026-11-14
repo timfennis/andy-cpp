@@ -7,6 +7,7 @@ mod inner {
     use std::rc::Rc;
 
     /// Counts the occurrences of each item in a sequence and returns a map with the frequencies.
+    #[function(signature = "<T>(Iterable<T>) -> Map<T, Int>")]
     pub fn frequencies(seq: SeqValue) -> anyhow::Result<Value> {
         let mut counts: HashMap<Value, i64> = HashMap::new();
 

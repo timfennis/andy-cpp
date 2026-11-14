@@ -1,0 +1,7 @@
+// `push(List<T>, T)` takes an Int for a `List<Int>`, which an argument of
+// type `Any` takes a cast to be.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, Any'
+let xs = [1, 2];
+let a: Any = 3;
+xs.push(a);
+print(xs);

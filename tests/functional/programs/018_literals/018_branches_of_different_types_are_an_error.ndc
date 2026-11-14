@@ -1,0 +1,5 @@
+// The `1` becomes a Float like the other branch, but a String and an Int
+// share no type, which takes an annotation to make an `Any`.
+print(if true { 1 } else { 2.5 });
+let x = if false { 1 } else { "a" };
+// expect-error: values of different types: Int and String share no type

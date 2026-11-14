@@ -1,9 +1,8 @@
-use super::Analyser;
+use super::{Analyser, Returns};
 use crate::error::AnalysisError;
-use crate::types::TypeBinding;
-use itertools::{Itertools, izip};
+use itertools::izip;
 use ndc_core::r#struct::StructInfo;
-use ndc_core::{NodeId, StaticType, TypeSignature};
+use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{
     BindingPattern, BindingPatternLocation, ExpressionLocation, FunctionParameter, StructField,
@@ -12,67 +11,107 @@ use ndc_parser::{
 use ndc_resolver::SymbolId;
 use std::rc::Rc;
 
+/// What a function declaration consists of, named like `fn f(x) { … }` or
+/// anonymous like `fn(x) => …`.
+#[derive(Clone, Copy)]
+pub(super) struct FunctionDeclaration<'a> {
+    pub id: NodeId,
+    pub name: Option<&'a str>,
+    pub parameters: &'a [FunctionParameter],
+    pub body: &'a ExpressionLocation,
+    pub return_annotation: Option<&'a TypeExpr>,
+    /// Whether it's a `pure fn`, whose results are cached.
+    pub pure: bool,
+    pub span: Span,
+}
+
 impl Analyser {
-    /// Analyses a function declaration and returns its type.
+    /// Analyses a function declaration and returns its type. Its
+    /// unannotated parameters are type variables that what the body does
+    /// with them constrains. A lambda's, and a nested `fn`'s, are settled by
+    /// how the code around it uses it: in `xs.map(fn(x) => x + 1)`, `x` gets
+    /// the type of `xs`'s elements. A `fn` in the program scope is generic:
+    /// each call settles them anew (see [`Self::generalize`]).
     pub(super) fn analyse_function_declaration(
         &mut self,
-        id: NodeId,
-        name: Option<&str>,
-        parameters: &[FunctionParameter],
-        body: &ExpressionLocation,
-        return_annotation: Option<&TypeExpr>,
-        span: Span,
+        function: FunctionDeclaration<'_>,
     ) -> StaticType {
-        let type_signature = TypeSignature::from_annotated_bindings(
-            parameters
-                .iter()
-                .map(|param| {
-                    let annotation = self.lower_annotation(param.annotation.as_ref());
-                    (param.name().to_string(), annotation)
-                })
-                .collect(),
-        );
+        let FunctionDeclaration {
+            id,
+            name,
+            parameters,
+            body,
+            return_annotation,
+            pure,
+            span,
+        } = function;
+        let declared = name.map(|name| (name, self.resolver.declared_symbol(id)));
+        let generic = declared.is_some_and(|(_, symbol)| self.is_generic_function(symbol));
+        if generic {
+            self.vars.enter_level();
+            self.declaring = declared.map(|(_, symbol)| symbol);
+        }
+        let first_use = self.uses.len();
+        let annotations = parameters
+            .iter()
+            .map(|param| self.lower_annotation(param.annotation.as_ref()))
+            .collect::<Vec<_>>();
+        let expected = self.expected_parameters.remove(&id).unwrap_or_default();
+        let param_types = annotations
+            .iter()
+            .enumerate()
+            .map(|(position, annotation)| {
+                annotation
+                    .clone()
+                    .or_else(|| expected.get(position).cloned().flatten())
+                    .unwrap_or_else(|| self.vars.fresh(StaticType::Any))
+            })
+            .collect::<Vec<_>>();
         let annotated_return = self.lower_annotation(return_annotation);
+        // A function's value takes what its parameters turn out to be.
+        let runtime_parameters = Some(param_types.clone());
         self.result.analysis.function_types.insert(
             id,
             StaticType::Function {
-                parameters: type_signature.types(),
+                parameters: runtime_parameters,
                 return_type: Box::new(annotated_return.clone().unwrap_or_default()),
             },
         );
+        self.declared_functions.push(id);
+        let first_function = self.declared_functions.len();
 
-        // Pre-register the function before analyzing its body so recursive calls can
-        // resolve the name. The return type is unknown at this point so we use Any.
-        // A redefinition is reported but still bound, since the resolver declared it.
-        let declared = if let Some(name) = name {
-            let symbol = self.resolver.declared_symbol(id);
-            let parameters = type_signature.types();
-            if self.redefines_function(symbol, parameters.as_deref()) {
-                self.emit(AnalysisError::function_redefinition(
-                    name,
-                    parameters.as_deref(),
-                    span,
-                ));
-            }
-            let placeholder = StaticType::Function {
-                parameters: type_signature.types(),
-                return_type: Box::new(annotated_return.clone().unwrap_or_default()),
-            };
-            self.types
-                .declare(symbol, TypeBinding::Inferred(placeholder));
-            Some(symbol)
-        } else {
-            None
+        // The function is declared before its body is analysed, so a
+        // recursive call can call it. Its return type is what the body
+        // returns, which the recursive calls share. A redefinition is
+        // reported but still bound, since the resolver declared it.
+        let recursive_return = match (&declared, &annotated_return) {
+            (Some(_), None) => Some(self.vars.fresh(StaticType::Any)),
+            _ => None,
         };
+        if let Some((name, symbol)) = declared {
+            self.check_overlap(symbol, name, Some(&param_types), span);
+            let placeholder = StaticType::Function {
+                parameters: Some(param_types.clone()),
+                return_type: Box::new(
+                    annotated_return
+                        .clone()
+                        .or_else(|| recursive_return.clone())
+                        .unwrap_or_default(),
+                ),
+            };
+            self.types.declare(symbol, placeholder);
+        }
 
-        self.return_type_stack.push(None);
+        self.return_type_stack.push(Returns {
+            annotated: annotated_return.clone(),
+            joined: None,
+        });
         // A function body starts outside of any loop: `break` can't
         // leave the function to end a loop around its declaration.
-        let outer_loop_depth = std::mem::take(&mut self.loop_depth);
-        let parameter_nodes = parameters.iter().map(|p| p.lvalue.id).collect_vec();
-        let param_types = self.declare_parameters(&type_signature, &parameter_nodes);
-
+        let outer_loops = std::mem::take(&mut self.loops);
         for (param, typ) in parameters.iter().zip(&param_types) {
+            let symbol = self.resolver.declared_symbol(param.lvalue.id);
+            self.types.declare(symbol, typ.clone());
             self.result
                 .analysis
                 .variable_types
@@ -80,48 +119,110 @@ impl Analyser {
         }
 
         let implicit_return = self.analyse_expr(body);
-        let explicit_return = self.return_type_stack.pop().unwrap();
-        self.loop_depth = outer_loop_depth;
+        let mut returns = self.return_type_stack.pop().unwrap();
+        self.loops = outer_loops;
 
-        // Combine explicit `return` types with the block's implicit return type.
-        let inferred_return = match explicit_return {
-            Some(ret) => ret.lub(&implicit_return),
-            None => implicit_return,
-        };
+        // The body's value is returned like the values of `return`. An
+        // annotated return type is what each of them returns, which can
+        // settle what the body left waiting: in `fn f() -> Fn(String) ->
+        // List<String> { split }`, it picks `split(String)`.
+        self.add_return(&mut returns, body, implicit_return);
+        let inferred_return = returns.joined.unwrap_or(StaticType::Never);
 
-        // If there is an annotated return type, validate it;
-        // otherwise record the inferred type in the analysis.
-        if let Some(annotated) = &annotated_return {
-            if !inferred_return.is_subtype(annotated) {
-                self.emit(AnalysisError::mismatched_types(
-                    &inferred_return,
-                    annotated,
-                    span,
-                ));
+        if let Some(returns) = &recursive_return
+            && !self.vars.try_unify(returns, &inferred_return)
+        {
+            // A function that returns itself, like `fn f() { f }`, would
+            // have a type that contains itself, so it returns `Any`.
+            if matches!(self.vars.resolve(returns), StaticType::Var(_)) {
+                self.vars.unify(returns, &StaticType::Any);
+            } else {
+                self.emit_rejected_write(returns, &inferred_return, span);
             }
-        } else {
+        }
+
+        let signature = StaticType::Function {
+            parameters: Some(param_types.clone()),
+            return_type: Box::new(
+                annotated_return
+                    .clone()
+                    .unwrap_or_else(|| inferred_return.clone()),
+            ),
+        };
+        let function_type = match declared {
+            Some((_, symbol)) if generic => {
+                self.vars.leave_level();
+                self.declaring = None;
+                self.declared_in_batch.insert(symbol);
+                let typ =
+                    self.generalize(symbol, &signature, id, pure, [first_use, first_function]);
+                self.within_size_limit(symbol, name, typ, span)
+            }
+            _ => signature,
+        };
+        let inferred_return = self.vars.resolve(&inferred_return);
+
+        if annotated_return.is_none() {
             self.result
                 .analysis
                 .inferred_return_types
                 .insert(id, inferred_return.clone());
+            // A lambda's value says what it returns, which tells whether it's
+            // a function type an `Any` is used as without checking its calls.
+            if declared.is_none()
+                && let Some(StaticType::Function { return_type, .. }) =
+                    self.result.analysis.function_types.get_mut(&id)
+            {
+                **return_type = inferred_return.clone();
+            }
         }
-
-        let effective_return = annotated_return.unwrap_or(inferred_return);
-
-        let function_type = StaticType::Function {
-            parameters: Some(param_types.clone()),
-            return_type: Box::new(effective_return),
-        };
 
         // A named declaration stores the function under its name and, like
         // `let`, evaluates to unit. An anonymous one evaluates to the function.
         match declared {
-            Some(symbol) => {
-                let _ = self.types.update_binding_type(symbol, function_type);
+            Some((_, symbol)) => {
+                self.types.declare(symbol, function_type);
                 self.picks.variables.insert(id, symbol);
                 StaticType::unit()
             }
             None => function_type,
+        }
+    }
+
+    /// `typ`, the type of the generic function `symbol`, unless it has more
+    /// parts than the analyser can work with, as when each function in a
+    /// chain doubles what the previous one returns: `fn f1(x) => f0(f0(x))`
+    /// with `fn f0(x) => (x, x)`. Then it's reported, and what the function
+    /// takes and returns are failed checks, so what calls it isn't built
+    /// from its type, and isn't reported again.
+    fn within_size_limit(
+        &mut self,
+        symbol: SymbolId,
+        name: Option<&str>,
+        typ: StaticType,
+        span: Span,
+    ) -> StaticType {
+        const LIMIT: usize = 10_000;
+        let parts = std::cell::Cell::new(0_usize);
+        let too_large = typ.contains(&|_| {
+            parts.set(parts.get() + 1);
+            parts.get() > LIMIT
+        });
+        if !too_large {
+            return typ;
+        }
+        self.emit(AnalysisError::type_too_large(
+            name.unwrap_or("?"),
+            LIMIT,
+            span,
+        ));
+        self.schemes.remove(&symbol);
+        let StaticType::Function { parameters, .. } = typ else {
+            return StaticType::Error;
+        };
+        StaticType::Function {
+            parameters: parameters.map(|parameters| vec![StaticType::Error; parameters.len()]),
+            return_type: Box::new(StaticType::Error),
         }
     }
 
@@ -134,7 +235,7 @@ impl Analyser {
     ) -> StaticType {
         let field_types: Vec<StaticType> = fields
             .iter()
-            .map(|f| self.lower_type_expr(&f.annotation))
+            .map(|f| self.lower_value_type(&f.annotation))
             .collect();
 
         let struct_id = self.struct_registry.register(
@@ -154,67 +255,16 @@ impl Analyser {
         let symbols = self.resolver.struct_symbols(id).clone();
         self.struct_types
             .insert(symbols.type_symbol, Rc::clone(&info));
-        self.types.declare(
-            symbols.constructor,
-            TypeBinding::Annotated(info.constructor_type()),
-        );
+        self.types
+            .declare(symbols.constructor, info.constructor_type());
         self.picks.variables.insert(id, symbols.constructor);
         for (index, &(getter, setter)) in symbols.accessors.iter().enumerate() {
-            self.types
-                .declare(getter, TypeBinding::Annotated(info.getter_type(index)));
-            self.types
-                .declare(setter, TypeBinding::Annotated(info.setter_type(index)));
+            self.types.declare(getter, info.getter_type(index));
+            self.types.declare(setter, info.setter_type(index));
         }
         self.picks.structs.insert(id, StructInfo::clone(&info));
 
         StaticType::unit()
-    }
-
-    /// Whether a function declared earlier in the same scope as `symbol` has
-    /// its name and the same parameter types, which makes `symbol` an illegal
-    /// redefinition. `fn f(x: Int)` and `fn f(x: String)` are two overloads,
-    /// but `fn f(x)` and `fn f(y)` both take `Any`. `None` is variadic.
-    fn redefines_function(&self, symbol: SymbolId, parameters: Option<&[StaticType]>) -> bool {
-        let name = self.resolver.symbol_name(symbol);
-        let scope = self.resolver.scope(self.resolver.scope_of(symbol));
-        scope.bindings()[..self.resolver.binding_position(symbol)]
-            .iter()
-            .filter(|&&earlier| self.resolver.symbol_name(earlier) == name)
-            .any(|&earlier| match self.types.get_type(earlier) {
-                StaticType::Function {
-                    parameters: earlier,
-                    ..
-                } => earlier.as_deref() == parameters,
-                _ => false,
-            })
-    }
-
-    /// Declares a function's parameters and returns their types.
-    fn declare_parameters(
-        &mut self,
-        type_signature: &TypeSignature,
-        parameter_nodes: &[NodeId],
-    ) -> Vec<StaticType> {
-        let TypeSignature::Exact(parameters) = type_signature else {
-            return vec![];
-        };
-
-        for (param, &node) in parameters.iter().zip(parameter_nodes) {
-            let has_annotation = param.type_name != StaticType::Any;
-            let binding = if has_annotation {
-                TypeBinding::Annotated(param.type_name.clone())
-            } else {
-                TypeBinding::Inferred(StaticType::Any)
-            };
-
-            let symbol = self.resolver.declared_symbol(node);
-            self.types.declare(symbol, binding);
-        }
-
-        parameters
-            .iter()
-            .map(|param| param.type_name.clone())
-            .collect()
     }
 
     /// Declares each name in a `let` or `for` pattern, checking
@@ -228,33 +278,32 @@ impl Analyser {
     ) {
         match &lvalue.pattern {
             BindingPattern::Identifier { span, .. } => {
-                // If there is a type annotation and the given type is not a subtype of the annotated type we emit an error
-                if let Some(expected_type) = &expected_type
-                    && !found_type.is_subtype(expected_type)
-                {
-                    self.emit(AnalysisError::mismatched_types(
-                        &found_type,
-                        expected_type,
-                        *span,
-                    ));
+                // The value is checked like an assignment to the annotated
+                // variable, so `let o: Option<Int> = None` settles `None`.
+                if let Some(expected_type) = &expected_type {
+                    self.check_write(expected_type, &found_type, *span);
                 }
 
-                let type_binding = match expected_type {
-                    Some(annotated) => TypeBinding::Annotated(annotated),
-                    None => TypeBinding::Inferred(found_type),
-                };
-
+                // An annotation decides the type, or else the value does.
+                let typ = expected_type.unwrap_or(found_type);
                 let symbol = self.resolver.declared_symbol(lvalue.id);
-                self.types.declare(symbol, type_binding.clone());
+                self.types.declare(symbol, typ.clone());
                 self.picks.variables.insert(lvalue.id, symbol);
-                self.result
-                    .analysis
-                    .variable_types
-                    .insert(lvalue.id, type_binding.typ().clone());
+                self.result.analysis.variable_types.insert(lvalue.id, typ);
             }
             BindingPattern::Sequence(seq) => {
+                // What a value whose type isn't known yet unpacks into is
+                // settled once its type is.
+                let found_type = self.vars.resolve(&found_type);
+                if expected_type.is_none() && matches!(found_type, StaticType::Var(_)) {
+                    let parts = self.constrain_unpacking(found_type, seq.len(), span);
+                    for (sub_lvalue, part) in seq.iter().zip(parts) {
+                        self.declare_binding_pattern(sub_lvalue, None, part, span);
+                    }
+                    return;
+                }
                 // If the type is a fixed-length Tuple whose arity doesn't match
-                // the number of bindings, fall back to Any for each element. This
+                // the number of bindings, bind each name as a failed check. This
                 // can happen when a variable is declared with one type (e.g. ())
                 // and later reassigned to a tuple of a different arity — the
                 // analyser doesn't track reassignment types.
@@ -269,7 +318,7 @@ impl Analyser {
                                 elems.len(),
                                 span,
                             ));
-                            self.bind_patterns_as_any(seq, span);
+                            self.bind_patterns_as_errors(seq, span);
                             return;
                         } else {
                             Box::new(elems.iter())
@@ -278,7 +327,7 @@ impl Analyser {
                         iter
                     } else {
                         self.emit(AnalysisError::unable_to_unpack_type(&resolved_type, span));
-                        self.bind_patterns_as_any(seq, span);
+                        self.bind_patterns_as_errors(seq, span);
                         return;
                     };
 
@@ -308,18 +357,18 @@ impl Analyser {
 
                 if desired_length != actual_len {
                     self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
-                    self.bind_patterns_as_any(&seq[actual_len..], span);
+                    self.bind_patterns_as_errors(&seq[actual_len..], span);
                 }
             }
         }
     }
 
-    /// Binds every name in `patterns` as `Any`, so a pattern that failed to
-    /// type-check still declares its names. In `let (a, b, c) = (1, 2)`, `c`
+    /// Binds every name in `patterns` as a failed check, so a pattern that
+    /// failed to type-check still declares its names. In `let (a, b, c) = (1, 2)`, `c`
     /// is bound and a later `print(c)` reports nothing further.
-    fn bind_patterns_as_any(&mut self, patterns: &[BindingPatternLocation], span: Span) {
+    fn bind_patterns_as_errors(&mut self, patterns: &[BindingPatternLocation], span: Span) {
         for pattern in patterns {
-            self.declare_binding_pattern(pattern, None, StaticType::Any, span);
+            self.declare_binding_pattern(pattern, None, StaticType::Error, span);
         }
     }
 }

@@ -1,0 +1,4 @@
+// `[1].sum` is an Int once its literal is decided, after the outer `sum`
+// is first looked at.
+// expect-output: 2
+print(sum(([1].sum, 1)));

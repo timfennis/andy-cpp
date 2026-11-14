@@ -1,0 +1,4 @@
+// `unwrap_or` returns the type inside the option, so its default must have that type too.
+// expect-error: No function called 'unwrap_or' found that matches the arguments 'Option<Int>, String'
+let o = Some(1);
+print(o.unwrap_or("none"));

@@ -457,7 +457,7 @@ impl VmIterator for CombinationsIter {
         if k == 0 {
             return if self.first {
                 self.first = false;
-                Some(Value::tuple(vec![]))
+                Some(Value::list(vec![]))
             } else {
                 None
             };
@@ -504,7 +504,7 @@ impl VmIterator for CombinationsIter {
         }
 
         // All indices are in-bounds: direct indexing is safe.
-        Some(Value::tuple(
+        Some(Value::list(
             self.indices
                 .iter()
                 .map(|&i| self.buffer[i].clone())

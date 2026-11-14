@@ -39,18 +39,43 @@ print(string);  // raw string with r#"stop doing this"#
 
 `strip_prefix(string, prefix)` and `strip_suffix(string, suffix)` remove one matching
 prefix or suffix. `strip_circumfix(string, prefix, suffix)` removes both only when
-both match without overlapping. Each function returns a new string on success or
-`()` on mismatch, leaving the original string unchanged. Matches are exact and
-case-sensitive; empty patterns match without removing any text.
+both match without overlapping. Each function returns a new string, leaving the
+original string unchanged, and it's an error when the pattern doesn't match. Matches
+are exact and case-sensitive; empty patterns match without removing any text.
 
 ```ndc
-print("foobar".strip_prefix("foo"));             // bar
-print("foobar".strip_suffix("bar"));             // foo
-print("[hello]".strip_circumfix("[", "]"));      // hello
-print("foofoo".strip_prefix("foo"));             // foo
-print("hello".strip_prefix("x") == ());          // true
-print("aaa".strip_circumfix("aa", "aa") == ());  // true
-print("[]".strip_circumfix("[", "]") == "");     // true
+print("foobar".strip_prefix("foo"));         // bar
+print("foobar".strip_suffix("bar"));         // foo
+print("[hello]".strip_circumfix("[", "]"));  // hello
+print("foofoo".strip_prefix("foo"));         // foo
+print("[]".strip_circumfix("[", "]") == "");  // true
+```
+
+A mismatch is an error:
+
+```ndc,fails
+"hello".strip_prefix("x");  // error: "hello" doesn't start with "x"
+```
+
+When a mismatch isn't an error, the `?` variants return an `Option` instead:
+
+```ndc
+print("foobar".strip_prefix?("foo"));         // Some("bar")
+print("hello".strip_prefix?("x"));            // None
+print("aaa".strip_circumfix?("aa", "aa"));    // None
+```
+
+## Splitting once
+
+`split_once(string, pattern)` splits a string at the first occurrence of `pattern` into
+the parts before and after it. It's an error when `pattern` doesn't occur, and
+`split_once?` returns `None` instead:
+
+```ndc
+let (key, value) = "port=80".split_once("=");
+print(key);                       // port
+print("a=b=c".split_once("="));   // ("a","b=c")
+print("abc".split_once?("="));    // None
 ```
 
 ## Operators

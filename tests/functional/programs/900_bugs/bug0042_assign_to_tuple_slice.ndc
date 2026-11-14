@@ -1,5 +1,5 @@
 // Assigning to a slice of a tuple reports that tuples have no `[]=`, and only
 // that: the value isn't also checked against the element type.
-// expect-error: No function called '[]=' found that matches the arguments 'Tuple<Int, Int>, Iterator<Int>, Any'
+// expect-error: No function called '[]=' found that matches the arguments 'Tuple<Int, Int>, Iterator<Int>, Tuple<Int>'
 let t = (1, 2);
 t[0..1] = (5,);

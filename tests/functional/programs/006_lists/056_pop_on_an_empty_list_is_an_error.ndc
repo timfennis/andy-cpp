@@ -1,0 +1,8 @@
+// `pop` returns an element, so an empty list has none to give; `pop?` gives
+// `None` instead.
+// expect-output: None
+// expect-error: the list is empty
+let xs = ["a".len()];
+xs.pop();
+print(xs.pop?());
+xs.pop();

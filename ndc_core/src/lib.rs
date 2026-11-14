@@ -1,9 +1,10 @@
 mod node_id;
+mod signature;
 pub mod static_type;
 pub mod r#struct;
 
 pub use node_id::NodeId;
-pub use static_type::{Parameter, StaticType, TypeSignature};
+pub use static_type::{Parameter, StaticType, TypeSignature, TypeVar};
 use std::slice::Iter;
 
 pub struct FunctionRegistry<T> {

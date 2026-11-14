@@ -62,9 +62,80 @@ pub struct Analysis {
     /// How many global slots the program needs: the natives and every
     /// top-level declaration, counting earlier REPL lines.
     pub global_count: usize,
+    /// The instances of generic functions the batch makes, keyed by the
+    /// function's declaration. An instance is the function's body for the
+    /// types one set of calls gives it, which picks the overloads its calls
+    /// use from those types: `fn inc(x) => x + 1` has one for Ints, whose
+    /// `+` is `+(Int, Int)`. A function the batch declares whose calls
+    /// depend on its types has an entry, empty if nothing calls it, and runs
+    /// only as its instances. For an earlier REPL line's function, the entry
+    /// holds only the instances this line made.
+    pub instances: AHashMap<NodeId, Vec<Instance>>,
+}
+
+/// One instance of a generic function: where it's stored, and the picks in
+/// its body that differ from the function's own.
+#[derive(Debug, Clone)]
+pub struct Instance {
+    /// The global the instance is stored in.
+    pub variable: ResolvedVar,
+    /// As [`Analysis::bindings`], for the instance's body.
+    pub bindings: AHashMap<NodeId, Binding>,
+    /// As [`Analysis::getters`], for the instance's body.
+    pub getters: AHashMap<NodeId, Binding>,
+    /// As [`Analysis::setters`], for the instance's body.
+    pub setters: AHashMap<NodeId, Binding>,
+    /// As [`Analysis::augmented_assignments`], for the instance's body.
+    pub augmented_assignments: AHashMap<NodeId, Binding>,
+    /// As [`Analysis::function_types`], for the functions the instance's
+    /// body declares, with the instance's types.
+    pub function_types: AHashMap<NodeId, StaticType>,
 }
 
 impl Analysis {
+    /// Adds what the analyser worked out about a later batch, such as the
+    /// next REPL line. Node ids are unique across batches, so its tables join
+    /// these. Its instances, top-level frame size and global count replace
+    /// these: they're what compiling the later batch takes, which for
+    /// [`Self::instances`] means the instances it made, of its own functions
+    /// and of earlier ones.
+    pub fn extend(&mut self, later: Self) {
+        let Self {
+            expr_types,
+            inferred_return_types,
+            variable_types,
+            function_types,
+            bindings,
+            variables,
+            captures,
+            getters,
+            setters,
+            augmented_assignments,
+            structs,
+            cast_checks,
+            frame_sizes,
+            top_level_frame_size,
+            global_count,
+            instances,
+        } = later;
+        self.expr_types.extend(expr_types);
+        self.inferred_return_types.extend(inferred_return_types);
+        self.variable_types.extend(variable_types);
+        self.function_types.extend(function_types);
+        self.bindings.extend(bindings);
+        self.variables.extend(variables);
+        self.captures.extend(captures);
+        self.getters.extend(getters);
+        self.setters.extend(setters);
+        self.augmented_assignments.extend(augmented_assignments);
+        self.structs.extend(structs);
+        self.cast_checks.extend(cast_checks);
+        self.frame_sizes.extend(frame_sizes);
+        self.top_level_frame_size = top_level_frame_size;
+        self.global_count = global_count;
+        self.instances = instances;
+    }
+
     /// What the identifier expression `identifier` refers to; `Binding::None`
     /// if it refers to nothing.
     pub fn binding(&self, identifier: NodeId) -> &Binding {

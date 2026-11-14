@@ -39,52 +39,15 @@ source order. The augmented assignment expression itself evaluates to `()`.
 
 ## Type checking
 
-An augmented assignment with an in-place operator such as `++=` never changes
-the type of its target. If the right-hand side would force a type change the
-program is rejected:
+`a op= b` is checked like `a = a op b`: the operator has to take both operands,
+and what it returns has to fit `a`:
 
 ```ndc,fails
 let values = [1];
-values ++= ["two"]; // error: mismatched types: found List<String> but expected List<Int>
+values ++= ["two"]; // error: No function called '++' found that matches the arguments 'List<Int>, List<String>'
 ```
 
-The right-hand side has to *provably* fit. A wider element type is not enough,
-because the operator copies the values across without checking them:
-
-```ndc,fails
-let values: List<Int> = [1];
-let rhs: List<Number> = [0.5n];
-values ++= rhs; // error: mismatched types: found List<Number> but expected List<Int>
-```
-
-The same goes for an operand whose type is unknown. `Any` says nothing about
-what the value holds, and no later step re-checks it, so it is rejected too:
-
-```ndc,fails
-fn opaque(x) => x;
-let values = [1];
-values ++= opaque([2, 3]); // error: mismatched types: found Any but expected List<Int>
-```
-
-[Cast](casts.md) the operand to say what it holds. The cast checks the value, so
-the assignment gets its guarantee from the cast site:
-
-```ndc
-fn opaque(x) => x;
-let values = [1];
-values ++= opaque([2, 3]) as List<Int>;
-print(values);  // [1,2,3]
-```
-
-A cast that does not hold fails there rather than corrupting the target:
-
-```ndc,fails
-fn opaque(x) => x;
-let values = [1];
-values ++= opaque([0.5]) as List<Int>; // error: cannot cast List<Float> to List<Int>
-```
-
-Annotate the target with `Any` to opt into heterogeneous contents:
+Annotate the target with `Any` to opt into mixed contents:
 
 ```ndc
 let mixed: List<Any> = [1];
@@ -92,13 +55,20 @@ mixed ++= ["two"];
 print(mixed);  // [1,"two"]
 ```
 
-Operators without an in-place implementation behave like `target = target op value`
-and may widen the inferred type of the target, just like a regular assignment:
+An operand of type `Any` takes a [cast](./casts.md) like anywhere else, as
+the operator has to take it:
+
+```ndc,fails
+fn opaque(x) -> Any => x;
+let values = [1];
+values ++= opaque([2]); // error: No function called '++' found that matches the arguments 'List<Int>, Any'
+```
 
 ```ndc
-let numbers = [1];
-numbers[0] += 0.5; // fine: the element type widens from Int to Any
-print(numbers);     // [1.5]
+fn opaque(x) -> Any => x;
+let values = [1];
+values ++= opaque([2]) as List<Int>;
+print(values);  // [1,2]
 ```
 
 ## Optimization
@@ -121,7 +91,7 @@ print(x); // 8
 One common use case is tracking the highest or lowest value in a loop:
 
 ```ndc
-fn g(x) => (x - 40) ^ 2;
+fn g(x) => (x - 40.0) ^ 2;
 let lowest, highest = Inf, -Inf;
 
 for x in 1..100 {
@@ -129,5 +99,5 @@ for x in 1..100 {
   highest max= g(x);
 }
 
-print(lowest, highest);  // 0 3481
+print(lowest, highest);  // 0.0 3481.0
 ```

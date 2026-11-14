@@ -42,31 +42,62 @@ print(x); // 3
 
 ## Reassignment
 
-The `=` operator can be used to reassign a value to an existing variable. When you reassign a variable to a value of a different type, the variable's type is widened to the least upper bound (LUB) of the old and new types.
+The `=` operator assigns a new value to an existing variable. A variable keeps the type its first value gave it, so a new value has to fit that type:
 
-```ndc
-let x = 1;     // the initializer and declaration have type Int
-x = 2;         // subsequent reads still have type Int
-x = 3.14;      // subsequent reads have type Any (Int and Float are siblings)
-print(x);      // 3.14
+```ndc,fails
+let n = "abc".len();  // n is Int
+n = 2;                // fine
+n = 3.14;             // error: mismatched types: found Float but expected Int
 ```
 
-Augmented assignment widens an inferred binding from the operation's result in the same way:
+A number literal takes the type its uses need, so a variable that starts at `1` and is later given `3.14` is a `Float` from the start:
 
 ```ndc
-let total = 3;
-total += 0.5;  // Int + Float returns Float, so subsequent reads have type Any
-print(total);  // 3.5
+let x = 1;
+x = 3.14;
+print(x);  // 3.14
 ```
+
+Augmented assignment is checked the same way, against the result of the operation:
+
+```ndc,fails
+let total = "abc".len();
+total += 0.5;  // error: Int + Float is a Float, which doesn't fit in Int
+```
+
+What an empty list or map holds, or what `None` will hold, isn't known yet. The first assignment that stores something settles it, and later ones have to fit:
+
+```ndc,fails
+let counts = %{};     // key and value types not known yet
+counts["a"] = 1;      // counts is Map<String, Int> from here on
+counts["b"] = "two";  // error: mismatched types: found String but expected Int
+```
+
+Calls settle them too, through the types the called function takes. `push` takes a `List<T>` and a `T`, so pushing an `Int` makes the list a `List<Int>`, and later pushes have to fit:
+
+```ndc,fails
+let xs = [];
+xs.push(1);       // xs is List<Int> from here on
+xs.push("two");   // error: No function called 'push' found that matches the arguments 'List<Int>, String'
+```
+
+When nothing settles them, they stay `Any`, which takes a [cast](../features/casts.md) to be used as anything else.
+
+A variable that only gets its real value later holds an `Option`:
 
 ```ndc
-let pos = ();        // type is ()
-pos = (1, 2);        // type widens to Sequence<Any>
-pos = ("a", "b");    // type is still Sequence<Any>
-print(pos);          // ("a","b")
+let pos = None;
+pos = Some((1, 2));
+print(pos);    // Some((1,2))
 ```
 
-> **Tip:** For the best type inference, initialize variables with a value that matches the intended type. For example, use `let pos = (0, 0);` instead of `let pos = ();` if you intend to store a 2-tuple of numbers.
+To store values of different types in one variable, annotate it with `Any`:
+
+```ndc
+let x: Any = 1;
+x = "text";    // fine
+print(x);      // text
+```
 
 ## Type annotations
 
@@ -79,7 +110,7 @@ let xs: List<Int> = [1, 2, 3];
 print(count, name, xs);  // 0 world [1,2,3]
 ```
 
-A subtype is fine. All concrete types fit where `Any` is requested:
+Every value fits where `Any` is requested:
 
 ```ndc
 let n: Number = 3n;
@@ -103,7 +134,7 @@ let nested: List<List<Int>> = [[]];
 print(xs, m, nested);          // [] %{} [[]]
 ```
 
-Once a binding has an annotation, it stays locked to that type. Reassignment and augmented assignment can't widen it the way they widen an inferred binding:
+An annotated variable keeps its annotated type, just as an inferred one keeps the type of its first value:
 
 ```ndc,fails
 let x: Int = 5;
@@ -114,8 +145,6 @@ x = "test";   // ERROR: mismatched types
 let x: Int = 5;
 x += 0.5;     // ERROR: the Float result doesn't fit in Int
 ```
-
-If you want a binding that widens freely, just leave the annotation off. Annotations are opt-in.
 
 The same syntax shows up on function parameters and return types — see the [Function](./types/function.md) page.
 

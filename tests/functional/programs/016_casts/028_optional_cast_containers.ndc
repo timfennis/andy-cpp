@@ -1,0 +1,6 @@
+// A container is checked element by element, as `as` does.
+// expect-output: None Some([1,"a"]) Some([1,2])
+let mixed_list: List<Any> = [1, "a"];
+let mixed: Any = mixed_list;
+let ints: Any = [1, 2];
+print(mixed as? List<Int>, mixed as? List<Any>, ints as? List<Int>);

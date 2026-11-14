@@ -1,0 +1,8 @@
+// `[-x]` with an Int `x` is a `List<Int>`, which isn't the `List<Any>` the
+// first `f` takes, so `f(1)` would need `f` for `List<Int>`, then for
+// `List<List<Int>>`, without end. Another overload taking the call only
+// keeps the error from being reported in the body.
+// expect-error: `f` calls itself with an argument built from what it was given
+fn f(xs: List<Any>) => 42;
+fn f(x) => f([-x]);
+print(f(1));

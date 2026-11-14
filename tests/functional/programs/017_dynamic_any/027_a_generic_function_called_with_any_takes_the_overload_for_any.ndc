@@ -1,0 +1,9 @@
+// A generic function called with an `Any` argument gets its own copy, whose
+// calls take only the overloads that take `Any`, as its type says.
+// expect-output: fallback 1
+fn pick(x: Int) => 1;
+fn pick(x: Any) => "fallback";
+fn wrap(x) => pick(x);
+let a: Any = 1;
+let s: String = wrap(a);
+print(s, wrap(2));

@@ -1,0 +1,7 @@
+// A `pure fn` caches by its arguments, which can be a function value that an
+// instance picks the overload of.
+// expect-output: 1
+pure fn invoke(g, x) => g(x);
+fn apply(x) => invoke(abs, x);
+let h: Fn(Int) -> Int = apply;
+print(h(1));

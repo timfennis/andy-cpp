@@ -13,11 +13,12 @@ sets[0] -= %{2};
 assert_eq(set, %{1, 3});
 assert_eq(sets[0], %{1, 3});
 
-// An Any-typed indexed value resolves dynamically. op= candidates have
-// priority over ordinary op candidates, and their returned lhs is written back.
+// An Any-typed indexed value takes a cast to be a list. The cast gives the
+// same list, which the op= candidate updates in place.
 let dynamic_alias = [10];
 let dynamic_values: List<Any> = [dynamic_alias];
-dynamic_values[0] ++= [20];
+let dynamic_element = dynamic_values[0] as List<Int>;
+dynamic_element ++= [20];
 assert_eq(dynamic_alias, [10, 20]);
 assert_eq(dynamic_values[0], [10, 20]);
 
@@ -59,7 +60,8 @@ assert_eq(typed_values, [1, 2]);
 
 let mixed_values: List<Any> = [1];
 mixed_values ++= ["two"];
-assert_eq(mixed_values, [1, "two"]);
+let expected: List<Any> = [1, "two"];
+assert_eq(mixed_values, expected);
 
 // Compiler temporaries must live beyond every analyser-assigned local whose
 // lifetime overlaps them. Block-local slots are deliberately reused across
