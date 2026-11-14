@@ -96,11 +96,6 @@ pub struct Analyser {
     /// The writes of values that share no type, which are checked again
     /// once those are settled.
     deferred_writes: Vec<DeferredWrite>,
-    /// Where a value is checked as the program runs if it's of type `Any`,
-    /// with its type and the type it's checked against, which may both
-    /// still have variables in them, by the instance whose body checks it,
-    /// or `None` for code compiled once.
-    checks: Vec<(Option<SymbolId>, NodeId, StaticType, StaticType)>,
     /// The number the next waiting constraint gets.
     next_serial: u64,
     /// The waiting constraints that each unsettled variable would let make
@@ -176,7 +171,6 @@ impl Analyser {
             copied_through: None,
             literal_origins: AHashMap::new(),
             deferred_writes: Vec::new(),
-            checks: Vec::new(),
             next_serial: 0,
             watchers: AHashMap::new(),
             watched_settlings: 0,
@@ -226,24 +220,6 @@ impl Analyser {
             }
         }
         self.types.resolve_all(&self.vars);
-        for (instance, node, typ, expected) in std::mem::take(&mut self.checks) {
-            if self.vars.resolve(&typ) != StaticType::Any {
-                continue;
-            }
-            let expected = self
-                .vars
-                .finish(&expected)
-                .replace(&|part| matches!(part, StaticType::Generic(_)).then_some(StaticType::Any));
-            if expected == StaticType::Any {
-                continue;
-            }
-            let checks = match instance.and_then(|instance| self.picks.instances.get_mut(&instance))
-            {
-                Some(picks) => &mut picks.type_checks,
-                None => &mut self.result.analysis.type_checks,
-            };
-            checks.insert(node, expected);
-        }
         let analysis = &mut self.result.analysis;
         for table in [
             &mut analysis.expr_types,
@@ -268,24 +244,6 @@ impl Analyser {
         );
         self.laid_out_scopes = self.resolver.scope_count();
         result
-    }
-
-    /// Records that the value of type `Any` at `node` is checked to be an
-    /// `expected` as the program runs, in the instance whose constraints are
-    /// being solved, if any. A function's own body checks its type
-    /// parameters as `Any`. A copy of a constraint checks nothing, as its
-    /// node is in the body of the function it was copied from, which the
-    /// instance for the call checks.
-    pub(super) fn expect(&mut self, node: NodeId, expected: StaticType) {
-        self.expect_if_any(node, StaticType::Any, expected);
-    }
-
-    /// As [`Self::expect`], for a value of type `typ`, which is checked if
-    /// it turns out to be `Any`.
-    pub(super) fn expect_if_any(&mut self, node: NodeId, typ: StaticType, expected: StaticType) {
-        if self.copied_through.is_none() {
-            self.checks.push((self.recording, node, typ, expected));
-        }
     }
 
     /// Records an analysis error. The analyser continues with a fallback type
@@ -624,11 +582,11 @@ impl Analyser {
             | Expression::MethodCall {
                 function,
                 arguments,
-            } => self.analyse_call(*id, function, arguments, CallKind::Regular, *span),
+            } => self.analyse_call(function, arguments, CallKind::Regular, *span),
             Expression::OperatorCall {
                 function,
                 arguments,
-            } => self.analyse_call(*id, function, arguments, CallKind::Operator, *span),
+            } => self.analyse_call(function, arguments, CallKind::Operator, *span),
             Expression::MemberAccess {
                 receiver,
                 member,
@@ -679,10 +637,9 @@ impl Analyser {
                 }
 
                 // Reads can produce the default value, so its type is part of
-                // the map's value type. A default that's a function, as an
-                // `Any` one may be as the program runs, is called for each
-                // missing key, so what it makes isn't the default's own
-                // value, and has no node to be checked at.
+                // the map's value type. A default that's a function is
+                // called for each missing key, so what it makes isn't the
+                // default's own value.
                 if let Some(default) = default {
                     let default_type = self.analyse_expr(default);
                     let default_type = self.constrain_default_value(default_type, default.span);
@@ -724,7 +681,7 @@ impl Analyser {
                 // `n` is one, whatever else it's used for.
                 for bound in [start, end].into_iter().flatten() {
                     let typ = self.analyse_expr(bound);
-                    self.check_write(&StaticType::Int, &typ, bound.span, Some(bound.id));
+                    self.check_write(&StaticType::Int, &typ, bound.span);
                 }
 
                 StaticType::Iterator(Box::new(StaticType::Int))
@@ -795,9 +752,7 @@ impl Analyser {
 
     /// The type of the elements of the literal at `span` holding `values`,
     /// each with where it is and its type, which takes the type its uses
-    /// settle: in `let xs: List<Any> = [1, 2]`, `Any`. A value of type
-    /// `Any` among them is checked against it as the program runs, at its
-    /// node if it has one.
+    /// settle: in `let xs: List<Any> = [1, 2]`, `Any`.
     fn holding(
         &mut self,
         values: Vec<(Option<NodeId>, Span, StaticType)>,
@@ -810,20 +765,17 @@ impl Analyser {
                 .collect(),
             span,
         );
-        for (node, _, typ) in values {
-            if let Some(node) = node {
-                // An overloaded function value waiting for its type, as
-                // `abs` in `[len, abs]`, is one of the literal's values.
-                if self.waiting_function_values.contains(&node) {
-                    for waiting in self.waiting.values_mut() {
-                        if let Constraint::FunctionValue(value) = &mut waiting.constraint
-                            && value.id() == node
-                        {
-                            value.mark_in_literal();
-                        }
+        // An overloaded function value waiting for its type, as `abs` in
+        // `[len, abs]`, is one of the literal's values.
+        for node in values.into_iter().filter_map(|(node, _, _)| node) {
+            if self.waiting_function_values.contains(&node) {
+                for waiting in self.waiting.values_mut() {
+                    if let Constraint::FunctionValue(value) = &mut waiting.constraint
+                        && value.id() == node
+                    {
+                        value.mark_in_literal();
                     }
                 }
-                self.expect_if_any(node, typ, element.clone());
             }
         }
         element
@@ -883,7 +835,7 @@ impl Analyser {
     /// returns the type its values join as, as with [`Self::join`].
     fn add_return(&mut self, returns: &mut Returns, value: &ExpressionLocation, typ: StaticType) {
         if let Some(annotated) = &returns.annotated {
-            self.check_write(annotated, &typ, value.span, Some(value.id));
+            self.check_write(annotated, &typ, value.span);
             return;
         }
         returns.joined = Some(match returns.joined.take() {

@@ -346,24 +346,16 @@ impl StaticType {
                     return_type: pr,
                 },
             ) => {
-                // What a function value takes and returns isn't checked as
-                // the program runs, so whether it might fit only depends on
-                // what both types know: `fn(x) => x > 1`, typed `Fn(Any) ->
-                // Any` where nothing says what `x` is, might be a predicate.
-                let part = |a: &Self, p: &Self| {
-                    matches(a, p)
-                        || (unknowns_match && (matches!(a, Self::Any) || matches!(p, Self::Any)))
-                };
                 let parameters = match (a, p) {
                     // A function value whose parameters aren't known fits
                     // a function type that says nothing about them either.
                     (_, None) => true,
                     (None, Some(_)) => unknowns_match,
                     (Some(a), Some(p)) => {
-                        a.len() == p.len() && a.iter().zip(p).all(|(a, p)| part(a, p))
+                        a.len() == p.len() && a.iter().zip(p).all(|(a, p)| matches(a, p))
                     }
                 };
-                parameters && part(ar, pr)
+                parameters && matches(ar, pr)
             }
             _ => self == parameter,
         }

@@ -52,12 +52,6 @@ pub struct Analysis {
     /// the cast. `None` when the value is already known to have the type, as
     /// in `1 as Int`, so there is nothing to check.
     pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
-    /// The type a value of type `Any` is checked against as the program
-    /// runs, where code that expects that type gets it, keyed by where it's
-    /// checked: an expression, checked once it's computed, or an assignment
-    /// target or a name a pattern declares, checked before the value is
-    /// stored. In `let n: Int = a` with `a: Any`, `n` checks for an Int.
-    pub type_checks: AHashMap<NodeId, StaticType>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries
     /// after them.
@@ -91,8 +85,6 @@ pub struct Instance {
     pub setters: AHashMap<NodeId, Binding>,
     /// As [`Analysis::augmented_assignments`], for the instance's body.
     pub augmented_assignments: AHashMap<NodeId, Binding>,
-    /// As [`Analysis::type_checks`], for the instance's body.
-    pub type_checks: AHashMap<NodeId, StaticType>,
     /// As [`Analysis::function_types`], for the functions the instance's
     /// body declares, with the instance's types.
     pub function_types: AHashMap<NodeId, StaticType>,

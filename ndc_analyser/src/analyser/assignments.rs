@@ -1,5 +1,5 @@
 use super::Analyser;
-use super::solver::{CallNodes, CallSite, Origin};
+use super::solver::{CallSite, Origin};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall};
 use itertools::izip;
@@ -38,12 +38,6 @@ impl Analyser {
             let result = self.constrain_call(
                 CallSite::OpAssignment(id),
                 vec![left_type.clone(), right_type],
-                // What the operator returns is checked where it's written
-                // back, when the program picks the operator as it runs.
-                CallNodes {
-                    arguments: vec![None, Some(r_value.id)],
-                    result: Some(l_value.id),
-                },
                 CallKind::Operator,
                 operation,
                 span,
@@ -131,10 +125,6 @@ impl Analyser {
                     Some(_) => self.constrain_call(
                         CallSite::Getter(lvalue.id),
                         vec![container.clone(), index_type.clone()],
-                        CallNodes {
-                            arguments: vec![Some(value.id), Some(index.id)],
-                            result: None,
-                        },
                         CallKind::Regular,
                         "[]",
                         span,
@@ -146,10 +136,6 @@ impl Analyser {
                 self.constrain_call(
                     CallSite::Setter(lvalue.id),
                     vec![container, index_type, stored.clone()],
-                    CallNodes {
-                        arguments: vec![Some(value.id), Some(index.id), Some(lvalue.id)],
-                        result: None,
-                    },
                     CallKind::Regular,
                     "[]=",
                     span,
@@ -173,10 +159,6 @@ impl Analyser {
                 let stored = self.constrain_call(
                     CallSite::Getter(lvalue.id),
                     vec![receiver_type.clone()],
-                    CallNodes {
-                        arguments: vec![Some(receiver.id)],
-                        result: None,
-                    },
                     CallKind::Regular,
                     member,
                     *member_span,
@@ -184,10 +166,6 @@ impl Analyser {
                 self.constrain_call(
                     CallSite::FieldSetter(lvalue.id),
                     vec![receiver_type, stored.clone()],
-                    CallNodes {
-                        arguments: vec![Some(receiver.id), Some(lvalue.id)],
-                        result: None,
-                    },
                     CallKind::Regular,
                     &format!("{member}="),
                     *member_span,
@@ -235,7 +213,6 @@ impl Analyser {
         &mut self,
         stored_type: &StaticType,
         value_type: &StaticType,
-        node: Option<NodeId>,
     ) -> bool {
         // A write passes the value where a value of the stored type is
         // expected, as a call passes an argument: `let xs: Iterable<Int> =
@@ -244,11 +221,6 @@ impl Analyser {
         if !self.vars.bind_argument(stored_type, value_type) {
             self.vars.rollback(snapshot);
             return false;
-        }
-        if let Some(node) = node
-            && self.vars.resolve(value_type) == StaticType::Any
-        {
-            self.expect(node, stored_type.clone());
         }
         true
     }
@@ -262,24 +234,22 @@ impl Analyser {
         stored_type: &StaticType,
         value_type: &StaticType,
         span: Span,
-        node: Option<NodeId>,
     ) {
-        if !self.accepts_write(stored_type, value_type, node) {
-            self.emit_rejected_write(stored_type, value_type, span, node);
+        if !self.accepts_write(stored_type, value_type) {
+            self.emit_rejected_write(stored_type, value_type, span);
         }
     }
 
     /// Reports that a value of `value_type` can't be stored where values of
     /// `stored_type` are kept. Values that share no type, as the branches
-    /// of `if c { 1 } else { "a" }`, may still become `Any`s, which are
-    /// checked where they're stored, at `node`, so their write is checked
-    /// again once they're settled.
+    /// of `if c { 1 } else { "a" }`, are reported as such once they're
+    /// settled, unless a later use makes them `Any`s, as `let v: Any = …`
+    /// does, so their write is checked again then.
     pub(super) fn emit_rejected_write(
         &mut self,
         stored_type: &StaticType,
         value_type: &StaticType,
         span: Span,
-        node: Option<NodeId>,
     ) {
         if let StaticType::Var(var) = self.vars.resolve(value_type)
             && self.vars.is_literal(var)
@@ -289,7 +259,6 @@ impl Analyser {
                 stored_type: stored_type.clone(),
                 value_type: value_type.clone(),
                 span,
-                node,
                 recording: self.recording,
                 copied_through: self.copied_through.clone(),
             });
@@ -304,8 +273,9 @@ impl Analyser {
     }
 
     /// Checks again each write [`Self::emit_rejected_write`] put off whose
-    /// value is settled now: as `Any`, the write is checked as the program
-    /// runs, and as values that share no type, it was reported as such.
+    /// value is settled now: as `Any`, the write is reported unless `Any` is
+    /// what's stored there, and as values that share no type, it was
+    /// reported as such.
     pub(super) fn recheck_deferred_writes(&mut self) {
         if self.deferred_writes.is_empty() {
             return;
@@ -322,12 +292,7 @@ impl Analyser {
             }
             let recording = std::mem::replace(&mut self.recording, write.recording);
             let copied_through = std::mem::replace(&mut self.copied_through, write.copied_through);
-            self.check_write(
-                &write.stored_type,
-                &write.value_type,
-                write.span,
-                write.node,
-            );
+            self.check_write(&write.stored_type, &write.value_type, write.span);
             self.recording = recording;
             self.copied_through = copied_through;
         }
@@ -346,10 +311,10 @@ impl Analyser {
             AssignmentTarget::Identifier { .. }
                 if self.picks.variables.contains_key(&lvalue.id) =>
             {
-                self.check_write(stored_type, value_type, span, Some(lvalue.id));
+                self.check_write(stored_type, value_type, span);
             }
             AssignmentTarget::Member { .. } | AssignmentTarget::Index { .. } => {
-                self.check_write(stored_type, value_type, span, Some(lvalue.id));
+                self.check_write(stored_type, value_type, span);
             }
             // Each target gets the element unpacked for it, as in a `let`.
             AssignmentTarget::Sequence(targets) => {
@@ -385,7 +350,6 @@ pub(super) struct DeferredWrite {
     stored_type: StaticType,
     value_type: StaticType,
     span: Span,
-    node: Option<NodeId>,
     recording: Option<SymbolId>,
     copied_through: Option<Origin>,
 }

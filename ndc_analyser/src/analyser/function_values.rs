@@ -169,20 +169,7 @@ impl Analyser {
                 {
                     Binding::Resolved(Candidate::Scalar(symbol)) => Some(symbol),
                     // The program would pick one as it runs, but a function
-                    // value is one function. When the expected type's `Any`
-                    // could be what's not known yet, as in a generic
-                    // function's own body, more than one might be meant.
-                    Binding::Dynamic(candidates) => {
-                        let might = candidates.into_iter().any(|candidate| match candidate {
-                            Candidate::Scalar(symbol) => self.might_be_expected(symbol, expected),
-                            Candidate::Vec(_) => false,
-                        });
-                        return if might {
-                            Choice::Undecided
-                        } else {
-                            Choice::None
-                        };
-                    }
+                    // value is one function.
                     _ => None,
                 }
             };
@@ -247,7 +234,7 @@ impl Analyser {
 
     /// Whether a value of `symbol`'s type might be passed where `expected`
     /// is, once what's not known about either is: an `Fn(Int) -> Int` might
-    /// be the `Fn(Any) -> Any` a generic function's body expects, but an
+    /// be an `Fn(A) -> B` whose `A` and `B` aren't known yet, but an
     /// `Fn(Int, Int) -> Int` isn't.
     fn might_be_expected(&self, symbol: SymbolId, expected: &StaticType) -> bool {
         self.vars

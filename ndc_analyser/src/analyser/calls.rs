@@ -1,5 +1,5 @@
 use super::Analyser;
-use super::solver::{CallNodes, CallSite};
+use super::solver::CallSite;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads};
 use itertools::Itertools;
@@ -80,10 +80,6 @@ impl Analyser {
         self.constrain_call(
             CallSite::Getter(id),
             vec![receiver_type],
-            CallNodes {
-                arguments: vec![Some(receiver.id)],
-                result: Some(id),
-            },
             CallKind::Regular,
             member,
             member_span,
@@ -94,7 +90,6 @@ impl Analyser {
     /// Only operator-form calls are eligible for vec dispatch.
     pub(super) fn analyse_call(
         &mut self,
-        id: NodeId,
         function: &ExpressionLocation,
         arguments: &[ExpressionLocation],
         kind: CallKind,
@@ -104,7 +99,6 @@ impl Analyser {
         // function position, so the callee is analysed as a value. The callee
         // comes before the arguments, in source order like the resolver, so
         // declarations in it get their slots first.
-        let nodes = arguments.iter().map(|arg| Some(arg.id)).collect::<Vec<_>>();
         let Expression::Identifier { name, .. } = &function.expression else {
             let callee_type = self.analyse_expr(function);
             let arguments = arguments
@@ -126,8 +120,6 @@ impl Analyser {
                     ..
                 } => {
                     if let Some((typ, parameters)) = self.bind_signature(&callee, &arguments) {
-                        let checks = self.expected_of_any(&parameters, &arguments, &nodes);
-                        self.pending.checks.extend(checks);
                         let iterations = self.iterations_waited_for(&parameters, &arguments);
                         self.pending.iterations.extend(iterations);
                         self.flush_copies(None, span);
@@ -180,10 +172,6 @@ impl Analyser {
         self.constrain_index_call(
             CallSite::Call(function.id),
             arguments,
-            CallNodes {
-                arguments: nodes,
-                result: Some(id),
-            },
             kind,
             name,
             span,
