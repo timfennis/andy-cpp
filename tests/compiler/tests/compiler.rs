@@ -644,9 +644,7 @@ fn a_proven_optional_cast_is_always_some() {
 fn an_any_cast_for_a_typed_variable_is_checked_once() {
     let ops = compile_with_analysis("let a: Any = 1; let n: Int = a as Int;");
     assert_eq!(
-        ops.iter()
-            .filter(|op| matches!(op, CheckType(_) | ExpectType(_)))
-            .count(),
+        ops.iter().filter(|op| matches!(op, CheckType(_))).count(),
         1,
         "expected a single CheckType(Int) guard, got: {ops:?}",
     );
@@ -659,7 +657,7 @@ fn an_any_cast_for_a_typed_variable_is_checked_once() {
 fn a_typed_value_stored_in_a_typed_variable_is_not_checked() {
     let ops = compile_with_analysis("let n: Int = 1; let m: Int = n;");
     assert!(
-        ops.iter().all(|op| !matches!(op, ExpectType(_))),
+        ops.iter().all(|op| !matches!(op, CheckType(_))),
         "a value of a known type must not be checked, got: {ops:?}",
     );
 }

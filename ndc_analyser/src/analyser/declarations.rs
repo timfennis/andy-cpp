@@ -52,7 +52,6 @@ impl Analyser {
             self.declaring = declared.map(|(_, symbol)| symbol);
         }
         let first_use = self.uses.len();
-        let first_check = self.checks.len();
         let annotations = parameters
             .iter()
             .map(|param| self.lower_annotation(param.annotation.as_ref()))
@@ -138,7 +137,7 @@ impl Analyser {
             if matches!(self.vars.resolve(returns), StaticType::Var(_)) {
                 self.vars.unify(returns, &StaticType::Any);
             } else {
-                self.emit_rejected_write(returns, &inferred_return, span, None);
+                self.emit_rejected_write(returns, &inferred_return, span);
             }
         }
 
@@ -155,13 +154,8 @@ impl Analyser {
                 self.vars.leave_level();
                 self.declaring = None;
                 self.declared_in_batch.insert(symbol);
-                let typ = self.generalize(
-                    symbol,
-                    &signature,
-                    id,
-                    pure,
-                    [first_use, first_check, first_function],
-                );
+                let typ =
+                    self.generalize(symbol, &signature, id, pure, [first_use, first_function]);
                 self.within_size_limit(symbol, name, typ, span)
             }
             _ => signature,
@@ -287,7 +281,7 @@ impl Analyser {
                 // The value is checked like an assignment to the annotated
                 // variable, so `let o: Option<Int> = None` settles `None`.
                 if let Some(expected_type) = &expected_type {
-                    self.check_write(expected_type, &found_type, *span, Some(lvalue.id));
+                    self.check_write(expected_type, &found_type, *span);
                 }
 
                 // An annotation decides the type, or else the value does.

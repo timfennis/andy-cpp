@@ -41,7 +41,7 @@ impl Analyser {
         signature: &StaticType,
         declaration: NodeId,
         pure: bool,
-        [first_use, first_check, first_function]: [usize; 3],
+        [first_use, first_function]: [usize; 2],
     ) -> StaticType {
         self.solve_waiting();
         self.default_literals(TypeVars::is_generalizable);
@@ -141,23 +141,9 @@ impl Analyser {
                 _ => {}
             }
         }
-        // A value of type `Any` that the body passes where a type parameter
-        // is expected, as `a` in `fn f(x) { let a: Any = 5; [x].push(a) }`,
-        // is checked against what each call makes it.
-        let checks = self.checks[first_check..]
-            .iter()
-            .filter(|(instance, ..)| instance.is_none())
-            .map(|(_, node, typ, expected)| {
-                (*node, self.vars.resolve(typ), self.vars.resolve(expected))
-            })
-            .filter(|(_, typ, expected)| {
-                *typ == StaticType::Any
-                    && expected.contains(&|part| matches!(part, StaticType::Generic(_)))
-            })
-            .collect::<Vec<_>>();
         // An instance is for the types of the type parameters that what it
         // compiles differently depends on: the constraints and uses it
-        // picks for, and the checks.
+        // picks for.
         // A `pure fn` caches its results by its arguments' values, which can
         // be equal across types, as `1` and `1.0` are, so each set of types
         // gets an instance, and a cache, of its own.
@@ -173,7 +159,6 @@ impl Analyser {
             .iter()
             .flat_map(|waiting| waiting.constraint.inputs())
             .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
-            .chain(checks.iter().map(|(_, _, expected)| expected))
             .chain(&parameters)
         {
             for name in typ.type_parameters() {
@@ -190,7 +175,6 @@ impl Analyser {
                 uses: uses.into(),
                 declaration,
                 recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
-                checks: checks.into(),
                 functions: self.declared_functions[first_function..].into(),
             },
         );
@@ -425,8 +409,7 @@ impl Analyser {
     /// can take the arguments, picked as the program runs. Its type
     /// parameters, and the `Any` that a call picked as it runs gives, stand
     /// for any type there: an overload that takes an Int may get one. Each
-    /// call of the function checks its body with the types it's given, so
-    /// an `Any` the program wrote was checked there.
+    /// call of the function checks its body with the types it's given.
     fn pick_for_any_arguments(&mut self, call: &CallConstraint) {
         let arguments = call
             .arguments()

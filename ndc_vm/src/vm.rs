@@ -240,15 +240,6 @@ impl Vm {
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
-                OpCode::ExpectType(target) => {
-                    if !convert_top(&mut self.stack, target) {
-                        let value = self.stack.last().expect("stack underflow");
-                        return Err(VmError::new(
-                            format!("expected {target} but found {}", value.diagnostic_type()),
-                            span,
-                        ));
-                    }
-                }
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());
@@ -976,9 +967,10 @@ impl Vm {
     /// code stays at the same shape and footprint. A parameter like
     /// `List<Int>` isn't checked element by element on that path, so when no
     /// candidate accepts the arguments that way, they're checked again
-    /// element by element before the call fails, if `look_inside`: a struct
-    /// with a `List<Int>` field can be made through `Any` with a list of
-    /// Ints.
+    /// element by element before the call fails, if `look_inside`: in
+    /// `fn h(xs) => g(xs)` passed as a value, as in `[[1]].map(h)`, the body
+    /// compiled for arguments of any type calls `g(List<Int>)` with a list
+    /// of Ints.
     fn find_scalar_overload(
         &self,
         scalars: &[ResolvedVar],

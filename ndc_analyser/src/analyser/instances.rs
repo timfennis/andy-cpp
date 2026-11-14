@@ -33,10 +33,6 @@ pub(super) struct Scheme {
     pub(super) declaration: NodeId,
     /// The calls its body makes of itself, which have its own types.
     pub(super) recursive_calls: Rc<[NodeId]>,
-    /// The values its body checks as the program runs against a type that
-    /// has its type parameters in it, with their types and that type, which
-    /// an instance checks against what its types make it.
-    pub(super) checks: Rc<[(NodeId, StaticType, StaticType)]>,
     /// The functions its body declares, whose types an instance makes what
     /// its own types make them.
     pub(super) functions: Rc<[NodeId]>,
@@ -59,8 +55,7 @@ pub(super) struct GenericUse {
 }
 
 /// What a call that's about to commit copied from the generic function it
-/// commits to, and the checks its arguments need, until it's known whether
-/// the call commits.
+/// commits to, until it's known whether the call commits.
 #[derive(Debug, Default)]
 pub(super) struct Pending {
     /// Its constraints, with the function they're copied from and the calls
@@ -68,8 +63,6 @@ pub(super) struct Pending {
     pub(super) copies: Vec<(SymbolId, Constraint, Option<Origin>)>,
     /// The function and the types the call gives its key.
     pub(super) uses: Vec<(SymbolId, Vec<StaticType>)>,
-    /// Where an argument of type `Any` is checked, and against what.
-    pub(super) checks: Vec<(NodeId, StaticType)>,
     /// The arguments not known yet that were passed for an `Iterable<T>`,
     /// with the `T` their elements settle once they're known.
     pub(super) iterations: Vec<(StaticType, StaticType)>,
@@ -77,24 +70,18 @@ pub(super) struct Pending {
 
 impl Pending {
     /// How much is pending, to [`Self::truncate`] to later.
-    pub(super) fn len(&self) -> [usize; 4] {
-        [
-            self.copies.len(),
-            self.uses.len(),
-            self.checks.len(),
-            self.iterations.len(),
-        ]
+    pub(super) fn len(&self) -> [usize; 3] {
+        [self.copies.len(), self.uses.len(), self.iterations.len()]
     }
 
-    pub(super) fn truncate(&mut self, [copies, uses, checks, iterations]: [usize; 4]) {
+    pub(super) fn truncate(&mut self, [copies, uses, iterations]: [usize; 3]) {
         self.copies.truncate(copies);
         self.uses.truncate(uses);
-        self.checks.truncate(checks);
         self.iterations.truncate(iterations);
     }
 
     pub(super) fn clear(&mut self) {
-        self.truncate([0; 4]);
+        self.truncate([0; 3]);
     }
 }
 
@@ -294,11 +281,6 @@ impl Analyser {
             if let Some(picks) = self.picks.instances.get_mut(&instance) {
                 picks.function_types.insert(node, typ);
             }
-        }
-        for (node, typ, expected) in scheme.checks.iter() {
-            let typ = self.vars.instantiate_with(typ, &mut made);
-            let expected = self.vars.instantiate_with(expected, &mut made);
-            self.expect_if_any(*node, typ, expected);
         }
         for &call in scheme.recursive_calls.iter() {
             self.pick_tables(Some(instance)).insert(

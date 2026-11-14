@@ -391,8 +391,8 @@ impl TypeVars {
             }
         }
         for (literal, held) in literals {
-            // A value of type `Any` is checked as whatever the others are, so
-            // it shares their type.
+            // A literal holding a value of type `Any` holds `Any`s, which
+            // every value is.
             if self.plainly_shared(&held)
                 || held
                     .iter()
