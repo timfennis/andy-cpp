@@ -418,10 +418,6 @@ impl Vm {
                     let data = self.stack.split_off(self.stack.len() - size);
                     self.stack.push(Value::Object(Rc::new(Object::Tuple(data))));
                 }
-                OpCode::MakeOverloads(size) => {
-                    let size = *size;
-                    self.make_overloads(size, span)?;
-                }
                 OpCode::MakeMap { pairs, has_default } => {
                     let (pairs, has_default) = (*pairs, *has_default);
                     let default = if has_default {
@@ -722,62 +718,6 @@ impl Vm {
         }
     }
 
-    /// Replaces the `size` functions on top of the stack with a
-    /// [`Function::Overloads`] of them.
-    #[cold]
-    fn make_overloads(&mut self, size: usize, span: Span) -> Result<(), VmError> {
-        let candidates = self
-            .stack
-            .split_off(self.stack.len() - size)
-            .into_iter()
-            .map(|candidate| match candidate {
-                Value::Object(object) => match object.as_ref() {
-                    Object::Function(function) => Ok(function.clone()),
-                    other => Err(other.static_type()),
-                },
-                other => Err(other.static_type()),
-            })
-            .collect::<Result<Rc<[Function]>, _>>()
-            .map_err(|found| {
-                VmError::new(format!("Unable to invoke {found} as a function."), span)
-            })?;
-        self.stack
-            .push(Value::function(Function::Overloads(candidates)));
-        Ok(())
-    }
-
-    /// Calls the first of `candidates`, a [`Function::Overloads`], that
-    /// accepts the arguments on the stack.
-    #[cold]
-    fn call_overloads(
-        &mut self,
-        candidates: &[Function],
-        args: usize,
-    ) -> Result<Dispatch, VmError> {
-        let arguments = &self.stack[self.stack.len() - args..];
-        let picked = candidates
-            .iter()
-            .find(|candidate| candidate.matches_value_args(arguments))
-            .or_else(|| {
-                candidates
-                    .iter()
-                    .find(|candidate| candidate.conforms_value_args(arguments))
-            })
-            .cloned();
-        let Some(picked) = picked else {
-            let types = arguments
-                .iter()
-                .map(|argument| argument.static_type().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let name = candidates.first().and_then(Function::name).unwrap_or("?");
-            return Err(VmError::native(format!(
-                "no function called '{name}' found matches the arguments: ({types})"
-            )));
-        };
-        self.dispatch_call(picked, args)
-    }
-
     /// Inner helper that pushes a new call frame.  `memo` is `Some` when the
     /// call originates from a memoized function and the return value should be
     /// stored in the cache.
@@ -817,7 +757,6 @@ impl Vm {
                 upvalues: Vec::new(),
             },
             Function::Checked { function, typ } => return self.call_checked(function, *typ, args),
-            Function::Overloads(candidates) => return self.call_overloads(&candidates, args),
             Function::Memoized { .. } => {
                 // Already unwrapped in dispatch_call; this branch is unreachable.
                 unreachable!(
@@ -891,17 +830,9 @@ impl Vm {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
                 Object::Function(f) => Ok(Some(f.clone())),
-                Object::OverloadSet {
-                    scalars,
-                    vec_candidates,
-                } => {
+                Object::OverloadSet { scalars, .. } => {
                     let start = self.stack.len() - args;
-                    let args = &self.stack[start..];
-                    // An operator on tuples applies to each element, which
-                    // comes before looking inside containers for a scalar
-                    // overload: that's only before the call fails.
-                    let elementwise = !vec_candidates.is_empty() && vec_axis_len(args).is_some();
-                    Ok(self.find_scalar_overload(scalars, args, !elementwise))
+                    Ok(self.find_scalar_overload(scalars, &self.stack[start..]))
                 }
                 other => Err(format!(
                     "Unable to invoke {} as a function.",
@@ -964,21 +895,10 @@ impl Vm {
     /// Walks the `OverloadSet`'s scalar candidates in priority order,
     /// returning the first whose parameter types accept `args`. Mirrors
     /// master's `find_overload` body so the hot path on numerics-heavy
-    /// code stays at the same shape and footprint. A parameter like
-    /// `List<Int>` isn't checked element by element on that path, so when no
-    /// candidate accepts the arguments that way, they're checked again
-    /// element by element before the call fails, if `look_inside`: when a
-    /// REPL line calls `fn h(xs) => g(xs)` from an earlier line, as in
-    /// `[[1]].map(h)`, the body compiled for arguments of any type calls
-    /// `g(List<Int>)` with a list of Ints.
-    fn find_scalar_overload(
-        &self,
-        scalars: &[ResolvedVar],
-        args: &[Value],
-        look_inside: bool,
-    ) -> Option<Function> {
+    /// code stays at the same shape and footprint.
+    fn find_scalar_overload(&self, scalars: &[ResolvedVar], args: &[Value]) -> Option<Function> {
         let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-        let function = |var| {
+        scalars.iter().find_map(|var| {
             let value = self.resolve_var(var, frame_pointer);
             let Value::Object(obj) = value else {
                 return None;
@@ -986,18 +906,8 @@ impl Vm {
             let Object::Function(f) = obj.as_ref() else {
                 return None;
             };
-            Some(f.clone())
-        };
-        scalars
-            .iter()
-            .find_map(|var| function(var).filter(|f| f.matches_value_args(args)))
-            .or_else(|| {
-                look_inside.then(|| {
-                    scalars
-                        .iter()
-                        .find_map(|var| function(var).filter(|f| f.conforms_value_args(args)))
-                })?
-            })
+            f.matches_value_args(args).then(|| f.clone())
+        })
     }
 
     /// Vec dispatch for `Binding::Dynamic` operator calls: the program picks
