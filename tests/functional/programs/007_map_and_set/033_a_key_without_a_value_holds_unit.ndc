@@ -2,5 +2,7 @@
 fn g(x: Int) => "int";
 fn g(x: ()) => "unit";
 fn g(x: Any) => "any";
-let m = %{"a", "b": 1};
+// The values are `()` and an Int, so they are `Any`s, and each read
+// picks its overload as the program runs.
+let m: Map<String, Any> = %{"a", "b": 1};
 print(g(m["a"]), g(m["b"]));

@@ -18,6 +18,8 @@ let element = my_list.pop();
 print(element, my_list);  // 99 [1,2,4]
 ```
 
+The values of a list share one type. A list of values of different types, like `[1, "a"]`, has to say that it holds `Any`s, as `let xs: List<Any> = [1, "a"]` does (see [Values of different types](../types.md#values-of-different-types)). Number literals take the type of the other numbers: `[1, 2.5]` is a `List<Float>`.
+
 ## Indexing
 
 Lists, strings, and tuples also support negative indexes. Negative indexes count from the end.

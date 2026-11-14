@@ -851,7 +851,20 @@ impl Compiler {
             .ir
             .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), condition_span);
         self.ir.write(OpCode::Pop, Span::synthetic());
+        let on_true_id = on_true.id;
         self.compile_expr(on_true)?;
+        // An `if` without an `else` is `()`, so a branch with a value of
+        // its own, as in `if c { 1 }`, gives `()` instead.
+        if on_false.is_none()
+            && !matches!(
+                self.analysis.expr_types.get(&on_true_id),
+                Some(StaticType::Never) | None
+            )
+            && self.analysis.expr_types.get(&on_true_id) != Some(&StaticType::unit())
+        {
+            self.ir.write(OpCode::Pop, Span::synthetic());
+            self.emit_unit();
+        }
         if let Some(on_false) = on_false {
             let jump_to_end = self
                 .ir

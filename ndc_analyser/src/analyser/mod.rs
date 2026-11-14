@@ -21,6 +21,7 @@ pub(crate) mod generics;
 mod instances;
 mod solver;
 
+use assignments::DeferredWrite;
 use declarations::FunctionDeclaration;
 pub use generics::tied_natives;
 use instances::{GenericUse, Pending, Scheme};
@@ -88,6 +89,13 @@ pub struct Analyser {
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
+    /// The instance and the calls each literal made while solving a copy of
+    /// a generic function's constraints was made in, keyed by its element
+    /// type, so an error in its values is reported as one made there.
+    literal_origins: AHashMap<TypeVar, (Option<SymbolId>, Option<Origin>)>,
+    /// The writes of values that share no type, which are checked again
+    /// once those are settled.
+    deferred_writes: Vec<DeferredWrite>,
     /// Where a value is checked as the program runs if it's of type `Any`,
     /// with its type and the type it's checked against, which may both
     /// still have variables in them, by the instance whose body checks it,
@@ -166,6 +174,8 @@ impl Analyser {
             declared_functions: Vec::new(),
             expected_parameters: AHashMap::new(),
             copied_through: None,
+            literal_origins: AHashMap::new(),
+            deferred_writes: Vec::new(),
             checks: Vec::new(),
             next_serial: 0,
             watchers: AHashMap::new(),
@@ -190,6 +200,11 @@ impl Analyser {
         // is solved, and no variable leaves the analyser.
         self.settle_waiting(0);
         self.vars.forget_literals();
+        self.literal_origins.clear();
+        debug_assert!(
+            self.deferred_writes.is_empty(),
+            "a write waits for literals that are all settled"
+        );
         self.instantiate_uses();
         self.declared_in_batch.clear();
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
@@ -551,12 +566,12 @@ impl Analyser {
             } => {
                 self.analyse_expr(condition);
                 let true_type = self.analyse_expr(on_true);
-                let false_type = if let Some(on_false) = on_false {
-                    self.analyse_expr(on_false)
-                } else {
-                    StaticType::unit()
+                // An `if` without an `else` is `()`, whatever its branch is:
+                // `if c { 1 }` has no value when `c` is false.
+                let Some(on_false) = on_false else {
+                    return StaticType::unit();
                 };
-
+                let false_type = self.analyse_expr(on_false);
                 self.join(&true_type, &false_type, *span)
             }
             Expression::While {
@@ -628,7 +643,7 @@ impl Analyser {
                     let typ = self.analyse_expr(value);
                     types.push(match self.vars.resolve(&typ) {
                         StaticType::Var(_) => typ,
-                        _ => self.holding(vec![(Some(value.id), value.span, typ)]),
+                        _ => self.holding(vec![(Some(value.id), value.span, typ)], value.span),
                     });
                 }
 
@@ -642,7 +657,7 @@ impl Analyser {
                         .iter()
                         .map(|value| (Some(value.id), value.span, self.analyse_expr(value)))
                         .collect();
-                    self.holding(values)
+                    self.holding(values, *span)
                 };
                 StaticType::List(Box::new(element_type))
             }
@@ -677,11 +692,11 @@ impl Analyser {
                 let key_type = if keys.is_empty() {
                     self.vars.fresh(StaticType::Any)
                 } else {
-                    self.holding(keys)
+                    self.holding(keys, *span)
                 };
                 // A literal with keys but no values, like `%{1, 2}`, is a set.
                 let value_type = if !held.is_empty() {
-                    self.holding(held)
+                    self.holding(held, *span)
                 } else if values.is_empty() {
                     self.vars.fresh(StaticType::unit())
                 } else {
@@ -778,17 +793,22 @@ impl Analyser {
         typ
     }
 
-    /// The type of the elements of a literal holding `values`, each with
-    /// where it is and its type, which takes the type its uses settle: in
-    /// `let xs: List<Any> = [1, 2]`, `Any`. A value of type `Any` among
-    /// them is checked against it as the program runs, at its node if it
-    /// has one.
-    fn holding(&mut self, values: Vec<(Option<NodeId>, Span, StaticType)>) -> StaticType {
-        let element = self.vars.fresh_holding(
+    /// The type of the elements of the literal at `span` holding `values`,
+    /// each with where it is and its type, which takes the type its uses
+    /// settle: in `let xs: List<Any> = [1, 2]`, `Any`. A value of type
+    /// `Any` among them is checked against it as the program runs, at its
+    /// node if it has one.
+    fn holding(
+        &mut self,
+        values: Vec<(Option<NodeId>, Span, StaticType)>,
+        span: Span,
+    ) -> StaticType {
+        let element = self.fresh_holding(
             values
                 .iter()
                 .map(|(_, span, typ)| (typ.clone(), *span))
                 .collect(),
+            span,
         );
         for (node, _, typ) in values {
             if let Some(node) = node {
@@ -807,6 +827,44 @@ impl Analyser {
             }
         }
         element
+    }
+
+    /// [`TypeVars::fresh_holding`], remembering where the literal is made
+    /// for [`Self::report_unshared`].
+    pub(super) fn fresh_holding(
+        &mut self,
+        held: Vec<(StaticType, Span)>,
+        span: Span,
+    ) -> StaticType {
+        let element = self.vars.fresh_holding(held, span);
+        let StaticType::Var(var) = element else {
+            unreachable!("a literal's type is a variable");
+        };
+        if self.recording.is_some() || self.copied_through.is_some() {
+            self.literal_origins
+                .insert(var, (self.recording, self.copied_through.clone()));
+        } else {
+            self.literal_origins.remove(&var);
+        }
+        element
+    }
+
+    /// Reports the literals settled as errors since this last ran, as their
+    /// values share no type, as an error made where each literal was.
+    pub(super) fn report_unshared(&mut self) {
+        for unshared in self.vars.take_unshared() {
+            let origin = self
+                .literal_origins
+                .get(&unshared.literal)
+                .cloned()
+                .unwrap_or_default();
+            let recording = std::mem::replace(&mut self.recording, origin.0);
+            let copied_through = std::mem::replace(&mut self.copied_through, origin.1);
+            self.emit(AnalysisError::values_share_no_type(&unshared));
+            self.recording = recording;
+            self.copied_through = copied_through;
+        }
+        self.recheck_deferred_writes();
     }
 
     /// The type of the values a map default of type `default` produces. A

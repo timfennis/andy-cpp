@@ -1,3 +1,4 @@
+use crate::types::Unshared;
 use itertools::Itertools;
 use ndc_core::StaticType;
 use ndc_core::static_type::StaticTypeConstructionError;
@@ -109,6 +110,21 @@ impl AnalysisError {
             text: format!("mismatched types: found {found} but expected {expected}"),
             span,
             help_text: None,
+            notes: Vec::new(),
+        }
+    }
+
+    pub(crate) fn values_share_no_type(unshared: &Unshared) -> Self {
+        Self {
+            text: format!(
+                "values of different types: {} and {} share no type",
+                unshared.first, unshared.second
+            ),
+            span: unshared.span,
+            help_text: Some(
+                "Values of different types are an `Any`, which has to be said: annotate it, as in `let x: Any = …`, `-> Any` or `List<Any>`"
+                    .to_string(),
+            ),
             notes: Vec::new(),
         }
     }

@@ -1,7 +1,8 @@
-// The default is a String, so a read may give one, not just the Ints.
+// The default is a String, so a read may give one, not just the Ints: the
+// values are `Any`s, which pick their overload as the program runs.
 // expect-output: str int
 fn g(x: Int) => "int";
 fn g(x: String) => "str";
 fn g(x: Any) => "any";
-let m = %{:"missing", x: x for x in 1..3};
+let m: Map<Int, Any> = %{:"missing", x: x for x in 1..3};
 print(g(m[99]), g(m[1]));

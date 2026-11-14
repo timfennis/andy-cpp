@@ -164,6 +164,23 @@ If the body produces a value that doesn't fit the declared return type, the anal
 fn bad() -> Int { "hello" }   // error: mismatched types
 ```
 
+Without an annotation, a function returns the type its `return`s and its body's value share. When they share none, say that it returns `Any` (see [Values of different types](../types.md#values-of-different-types)):
+
+```ndc,fails
+fn size(n: Int) {
+  if n > 9 { return "big"; }
+  n  // error: values of different types: String and Int share no type
+}
+```
+
+```ndc
+fn size(n: Int) -> Any {
+  if n > 9 { return "big"; }
+  n
+}
+print(size(3), size(10));  // 3 big
+```
+
 ### Function types
 
 The type of a function is written `Fn(A, B) -> C`: it takes an `A` and a `B` and returns a `C`. Without `-> …` the function returns `()`:

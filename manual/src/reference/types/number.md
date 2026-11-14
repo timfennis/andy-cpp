@@ -123,7 +123,8 @@ print(1 == 1.0);                     // true
 print(1.0 == 1n);                    // true
 print(1n == 1 + 0i);                 // true
 print(0.1 == 1n / 10n);              // false
-print(%{1, 1.0, 1n, 1 + 0i}.len());  // 1
+let numbers: Map<Any, ()> = %{1, 1.0, 1n, 1 + 0i};
+print(numbers.len());                // 1
 ```
 
 Positive and negative zero compare equal. All NaN values compare equal and hash alike. Real scalars sort in this order:

@@ -32,3 +32,13 @@ let x = if n > 0 {
 print(x);  // 1
 
 ```
+
+The branches have to share a type, with number literals taking the other branch's type. Branches of different types, like `if c { 1 } else { "a" }`, are an error unless the `if` is used where an `Any` is expected, as in `let x: Any = if c { 1 } else { "a" };` (see [Values of different types](./types.md#values-of-different-types)). A branch that never finishes, because it ends in `return`, `break` or `panic(…)`, doesn't count.
+
+An `if` without an `else` has no value when the condition is false, so it is `()`, whatever its branch is:
+
+```ndc
+let c = true;
+let x = if c { 1 };
+print(x == ());  // true
+```

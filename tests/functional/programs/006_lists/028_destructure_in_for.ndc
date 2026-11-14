@@ -12,4 +12,5 @@ for key, value in map {
     set.insert(value);
 }
 
-assert(set == %{0,1,2,3,"foo","bar","baz","quux"});
+let expected: Map<Any, ()> = %{0,1,2,3,"foo","bar","baz","quux"};
+assert(set == expected);

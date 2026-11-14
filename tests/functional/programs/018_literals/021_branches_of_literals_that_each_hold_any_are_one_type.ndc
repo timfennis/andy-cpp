@@ -1,6 +1,0 @@
-// Each inner list holds values that share no type, so each is a List<Any>,
-// and the branches are one type: a List<List<Any>>.
-// expect-output: nested
-fn f(x: List<List<Any>>) => "nested";
-fn f(x: Any) => "any";
-print(f(if true { [[1, "a"]] } else { [[2, "b"]] }));

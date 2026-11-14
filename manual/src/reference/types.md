@@ -126,6 +126,34 @@ let anything: List<Any> = any;    // fine: checked as the program runs
 let wrong: List<Any> = words;     // error: found List<String> but expected List<Any>
 ```
 
+### Values of different types
+
+The elements of a list, the keys and the values of a map (its default too), the branches of an `if` and the values a function returns have one type. Number literals take the type of the numbers next to them, and an empty list the type of what's next to it:
+
+```ndc
+let a = if true { 1 } else { 2.5 };   // Float
+let c = if true { [] } else { [1] };  // List<Int>
+let d = [1, 2.5];                     // List<Float>
+print(a, c, d);                       // 1.0 [] [1.0,2.5]
+```
+
+Values that share no type can only be `Any`s, and that has to be said where they meet:
+
+```ndc,fails
+let mixed = [1, "a"];  // error: values of different types: Int and String share no type
+```
+
+An annotation that says `Any` there, or a parameter that does, makes them `Any`s:
+
+```ndc
+let b: Any = if true { 1 } else { "a" };
+let xs: List<Any> = [1, "a"];
+let m: Map<String, Any> = %{"a": 1, "b": "two"};
+print(b, xs, m["b"]);  // 1 [1,"a"] two
+```
+
+An `Any` around the whole value doesn't say what the elements are, so `let x: Any = [1, "a"]` is still an error: write `List<Any>`. An `if` without an `else` is `()`, whatever its branch is, and a branch that never finishes, like one ending in `return`, `break` or `panic(…)`, takes the other branch's type.
+
 [Struct](./types/struct.md) names are type names like any other, including inside generics:
 
 ```ndc
@@ -141,7 +169,7 @@ used before (or inside) its own declaration, and it goes out of scope together w
 block or function that declared it. See [Struct](./types/struct.md) for the scoping
 rules.
 
-> **Note:** every value fits `Any`, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`. A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
+> **Note:** every value fits `Any`, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`, but values of different types are an error (see [Values of different types](#values-of-different-types)). A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
 
 ### Using an `Any` value where a type is expected
 

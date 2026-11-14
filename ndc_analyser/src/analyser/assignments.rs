@@ -1,5 +1,5 @@
 use super::Analyser;
-use super::solver::{CallNodes, CallSite};
+use super::solver::{CallNodes, CallSite, Origin};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall};
 use itertools::izip;
@@ -265,24 +265,72 @@ impl Analyser {
         node: Option<NodeId>,
     ) {
         if !self.accepts_write(stored_type, value_type, node) {
-            self.emit_rejected_write(stored_type, value_type, span);
+            self.emit_rejected_write(stored_type, value_type, span, node);
         }
     }
 
     /// Reports that a value of `value_type` can't be stored where values of
-    /// `stored_type` are kept.
+    /// `stored_type` are kept. Values that share no type, as the branches
+    /// of `if c { 1 } else { "a" }`, may still become `Any`s, which are
+    /// checked where they're stored, at `node`, so their write is checked
+    /// again once they're settled.
     pub(super) fn emit_rejected_write(
         &mut self,
         stored_type: &StaticType,
         value_type: &StaticType,
         span: Span,
+        node: Option<NodeId>,
     ) {
+        if let StaticType::Var(var) = self.vars.resolve(value_type)
+            && self.vars.is_literal(var)
+            && self.vars.holds_unshared_values(var)
+        {
+            self.deferred_writes.push(DeferredWrite {
+                stored_type: stored_type.clone(),
+                value_type: value_type.clone(),
+                span,
+                node,
+                recording: self.recording,
+                copied_through: self.copied_through.clone(),
+            });
+            return;
+        }
         let error = AnalysisError::mismatched_types(
             &self.vars.shown(value_type),
             &self.vars.shown(stored_type),
             span,
         );
         self.emit(error);
+    }
+
+    /// Checks again each write [`Self::emit_rejected_write`] put off whose
+    /// value is settled now: as `Any`, the write is checked as the program
+    /// runs, and as values that share no type, it was reported as such.
+    pub(super) fn recheck_deferred_writes(&mut self) {
+        if self.deferred_writes.is_empty() {
+            return;
+        }
+        let writes = std::mem::take(&mut self.deferred_writes);
+        for write in writes {
+            let value = self.vars.resolve(&write.value_type);
+            if matches!(value, StaticType::Var(var) if self.vars.is_literal(var)) {
+                self.deferred_writes.push(write);
+                continue;
+            }
+            if value.has_errors() {
+                continue;
+            }
+            let recording = std::mem::replace(&mut self.recording, write.recording);
+            let copied_through = std::mem::replace(&mut self.copied_through, write.copied_through);
+            self.check_write(
+                &write.stored_type,
+                &write.value_type,
+                write.span,
+                write.node,
+            );
+            self.recording = recording;
+            self.copied_through = copied_through;
+        }
     }
 
     /// Checks a value that will be stored through an lvalue against the type
@@ -329,4 +377,15 @@ impl Analyser {
             AssignmentTarget::Identifier { .. } => {}
         }
     }
+}
+
+/// A write of values that share no type, put off until they're settled.
+#[derive(Debug)]
+pub(super) struct DeferredWrite {
+    stored_type: StaticType,
+    value_type: StaticType,
+    span: Span,
+    node: Option<NodeId>,
+    recording: Option<SymbolId>,
+    copied_through: Option<Origin>,
 }
