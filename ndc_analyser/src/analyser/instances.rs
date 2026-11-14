@@ -228,17 +228,18 @@ impl Analyser {
     }
 
     /// The instance of `function` for these types of its key: the function
-    /// itself when they're all `Any`, as its own body picks its calls as the
-    /// program runs, or when it was declared by an earlier batch, which
-    /// compiled it already.
+    /// itself when it was declared by an earlier batch, which compiled it
+    /// already.
     fn instance_for(
         &mut self,
         function: SymbolId,
         key: Vec<StaticType>,
         new: &mut Vec<(SymbolId, SymbolId, Vec<StaticType>)>,
     ) -> SymbolId {
-        let is_own = key.iter().all(|typ| *typ == StaticType::Any);
-        if is_own || !self.declared_in_batch.contains(&function) {
+        // A call with `Any` arguments gets an instance too: its calls take
+        // only the overloads that take `Any`, while the function's own body
+        // leaves its picks to the program, for its value.
+        if !self.declared_in_batch.contains(&function) {
             return function;
         }
         if let Some(&instance) = self.instances.get(&(function, key.clone())) {
