@@ -356,9 +356,11 @@ impl Analyser {
     }
 
     /// The one type that values of type `a` and `b` both have, as the two
-    /// branches of an `if`: the type they are once made the same, or `Any`
-    /// if they can't be. `if c { 1 } else { 2.5 }` is a Float, `if c { [] }
-    /// else { [1] }` a `List<Int>`, and `if c { 1 } else { "a" }` is `Any`.
+    /// branches of an `if`: the type they are once made the same. `if c { 1
+    /// } else { 2.5 }` is a Float, and `if c { [] } else { [1] }` a
+    /// `List<Int>`. Types that can't be made the same are held as a
+    /// literal's values are, so `if c { 1 } else { "a" }` is an `Any` where
+    /// one is expected, and an error where not.
     /// A branch nothing is known about yet waits, so a lambda's parameter
     /// isn't fixed by the branch next to it: in `fn(x) => if c { x } else
     /// { 0 }`, `x` can still be a `String`.
@@ -377,19 +379,19 @@ impl Analyser {
                 });
                 result
             }
-            _ => self.join_known(&a, &b),
+            _ => self.join_known(&a, &b, span),
         }
     }
 
     /// [`Self::join`] of two types that aren't wholly unknown: the type
-    /// they are once made the same, or `Any`.
-    fn join_known(&mut self, a: &StaticType, b: &StaticType) -> StaticType {
+    /// they are once made the same, or a literal's type holding both.
+    fn join_known(&mut self, a: &StaticType, b: &StaticType, span: Span) -> StaticType {
         let snapshot = self.vars.snapshot();
         if self.vars.unify(a, b) {
             return self.vars.resolve(a);
         }
         self.vars.rollback(snapshot);
-        StaticType::Any
+        self.fresh_holding(vec![(a.clone(), span), (b.clone(), span)], span)
     }
 
     /// Commits `call` to `picked` while its arguments still have unknown
@@ -595,6 +597,7 @@ impl Analyser {
     /// [`Self::solve_waiting`], returning the constraints it tried that
     /// still wait.
     fn solve_waiting_and_report(&mut self) -> BTreeSet<u64> {
+        self.report_unshared();
         let mut still_waiting = BTreeSet::new();
         loop {
             let settled = self.vars.settled_since(self.watched_settlings);
@@ -717,7 +720,11 @@ impl Analyser {
                     .filter(|&holder| self.vars.is_literal(holder))
                     .collect::<Vec<_>>();
                 let snapshot = self.vars.snapshot();
-                if self
+                // Values that share no type are an error, which its fellows
+                // aren't part of.
+                if *default == StaticType::Error {
+                    self.vars.settle_default(var, default);
+                } else if self
                     .settle_with_fellows(var, default, &holders_of_var)
                     .is_none()
                 {
@@ -1165,7 +1172,7 @@ impl Analyser {
                 }
                 let joined = match (&a, &b) {
                     (StaticType::Never, other) | (other, StaticType::Never) => other.clone(),
-                    _ => self.join_known(&a, &b),
+                    _ => self.join_known(&a, &b, *span),
                 };
                 self.check_write(&result, &joined, *span, None);
                 true
@@ -1297,6 +1304,25 @@ impl Analyser {
 
         if arguments.iter().all(|argument| !argument.has_vars()) {
             return Some(self.resolve_call_now(call, &arguments));
+        }
+
+        // A literal whose values share no type can only be an `Any`, which
+        // is fine where the overload it picks as one asks for that: in
+        // `f([1, "a"])` with `f(xs: List<Any>)`.
+        if let Some(as_any) = self.unshared_literals_as_any(&arguments)
+            && let ResolvedCall {
+                binding: Binding::Resolved(Candidate::Scalar(picked)),
+                ..
+            } = self.resolve_overloads(&call.candidates, &as_any, call.kind)
+        {
+            // An overload picked through a type parameter that the `Any`
+            // fits, as `push(List<T>, T)` with a Float for `[1, "a"]`, may
+            // not take the literal itself, which then isn't an `Any`.
+            let snapshot = self.vars.snapshot();
+            if let Some(typ) = self.commit_early(call, &arguments, picked) {
+                return Some(typ);
+            }
+            self.vars.rollback(snapshot);
         }
 
         match self.early_overload(&call.candidates, &arguments, call.kind) {
@@ -1450,6 +1476,34 @@ impl Analyser {
         }
     }
 
+    /// `arguments` with each literal among them whose values share no type
+    /// as `Any`, when there's one and that leaves nothing unknown.
+    fn unshared_literals_as_any(&mut self, arguments: &[StaticType]) -> Option<Vec<StaticType>> {
+        let mut unshared = Vec::new();
+        for argument in arguments {
+            for var in self.vars.unsettled(argument) {
+                if !self.vars.is_literal(var) || !self.vars.holds_unshared_values(var) {
+                    return None;
+                }
+                unshared.push(var);
+            }
+        }
+        if unshared.is_empty() {
+            return None;
+        }
+        Some(
+            arguments
+                .iter()
+                .map(|argument| {
+                    self.vars.resolve(argument).replace(&|part| match part {
+                        StaticType::Var(var) if unshared.contains(var) => Some(StaticType::Any),
+                        _ => None,
+                    })
+                })
+                .collect(),
+        )
+    }
+
     /// Whether `symbol`'s parameter for each argument with a literal in it
     /// takes any type, as an unannotated one does, and the other arguments
     /// are known, so nothing still to come can change whether `symbol` takes
@@ -1522,7 +1576,7 @@ impl Analyser {
             let decided = defaults.iter().any(|default| {
                 let snapshot = self.vars.snapshot();
                 let fits =
-                    self.vars.settle_literal(var, default) && self.could_accept(only, arguments);
+                    self.vars.settle_default(var, default) && self.could_accept(only, arguments);
                 if !fits {
                     self.vars.rollback(snapshot);
                 }
@@ -1700,8 +1754,23 @@ impl Analyser {
             },
         ) = signature
         else {
+            // What's passed to a function that takes anything, as `print`
+            // does, is an `Any`, and so are the values of a literal among
+            // them that share no type. What's passed to an overload the
+            // program picks isn't known, but a literal says what it is.
+            let variadic = matches!(
+                signature,
+                Some(StaticType::Function {
+                    parameters: None,
+                    ..
+                })
+            );
             for argument in arguments {
-                self.vars.settle_unknowns(argument, &StaticType::Any);
+                if variadic {
+                    self.vars.bind_argument(&StaticType::Any, argument);
+                }
+                self.vars
+                    .settle_unknowns_but_literals(argument, &StaticType::Any);
             }
             return Some(return_type);
         };

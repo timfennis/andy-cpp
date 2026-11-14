@@ -67,6 +67,23 @@ pub(crate) struct TypeVars {
     /// The variables that got a bound, in the order they got it, which are
     /// the types of literals.
     literals: Vec<TypeVar>,
+    /// Where each literal holding values is, keyed by the type its elements
+    /// were made as: the whole of `[1, "a"]`, or of an `if`.
+    literal_spans: AHashMap<TypeVar, Span>,
+    /// The literals settled as [`StaticType::Error`] because their values
+    /// share no type, which the analyser reports.
+    unshared: Vec<(TypeVar, Unshared)>,
+}
+
+/// Two values of a literal that share no type, as `1` and `"a"` in `[1,
+/// "a"]`, with where the literal is.
+#[derive(Debug, Clone)]
+pub(crate) struct Unshared {
+    /// The literal's element type, as it was made.
+    pub(crate) literal: TypeVar,
+    pub(crate) first: StaticType,
+    pub(crate) second: StaticType,
+    pub(crate) span: Span,
 }
 
 /// What a variable may stand for, beyond what unifying says.
@@ -118,12 +135,18 @@ impl TypeVars {
         TypeVar(u32::try_from(self.solutions.len()).expect("fewer than 2^32 type variables"))
     }
 
-    /// The type of the elements of a literal holding values of the types
-    /// `held`, which its uses settle as any type each value fits: in
-    /// `let xs: List<Any> = [1, 2]`, `Any`. Unless something says otherwise
-    /// it's the type the values share, or `Any` if they share none.
-    pub(crate) fn fresh_holding(&mut self, held: Vec<(StaticType, Span)>) -> StaticType {
+    /// The type of the elements of a literal at `span` holding values of
+    /// the types `held`, which its uses settle as any type each value fits:
+    /// in `let xs: List<Any> = [1, "a"]`, `Any`. Unless something says
+    /// otherwise it's the type the values share. Values that share none
+    /// are an error, as `Any` has to be asked for.
+    pub(crate) fn fresh_holding(
+        &mut self,
+        held: Vec<(StaticType, Span)>,
+        span: Span,
+    ) -> StaticType {
         let literal = self.next_var();
+        self.literal_spans.insert(literal, span);
         self.fresh_bounded(
             StaticType::Any,
             held.into_iter()
@@ -313,42 +336,148 @@ impl TypeVars {
             return None;
         }
         if defaults.is_empty() {
-            // Values that share no type are held as `Any`, which settling
-            // the literal's type with a default it doesn't take falls back
-            // to.
+            // Values that never arrive are held as `Any`.
             defaults.push(unknown.unwrap_or(StaticType::Any));
-        } else if !defaults.contains(&StaticType::Any) && self.a_literal_holds_any(var) {
-            // A literal whose values share no type is held as `Any`, which
-            // any literal can be too: after `let v = [1, "a"]`, `v = ["b"]`
-            // holds `Any`s like `v` does.
-            defaults.push(StaticType::Any);
+        } else if !defaults.contains(&StaticType::Any) && self.unshared_values(var).is_some() {
+            // A literal whose values share no type is an error, which is
+            // what's left when nothing asked for `Any`: in `let xs = [1,
+            // "a"]`, the elements are neither Ints nor Strings.
+            defaults.push(StaticType::Error);
         }
         Some(defaults)
     }
 
-    /// Whether a literal whose values `var` holds holds values that share no
-    /// type, as `[1, "a"]` does, and is held as `Any` on its own.
-    fn a_literal_holds_any(&mut self, var: TypeVar) -> bool {
-        let mut literals = Vec::new();
+    /// Whether the values of a literal whose values `var` holds share no
+    /// type, as those of `[1, "a"]` don't.
+    pub(crate) fn holds_unshared_values(&mut self, var: TypeVar) -> bool {
+        self.unshared_values(var).is_some()
+    }
+
+    /// Two values of a literal whose values `var` holds that share no type,
+    /// as `1` and `"a"` in `[1, "a"]`, looking first into the literals it
+    /// holds, as an `if` among the branches of another `if`.
+    fn unshared_values(&mut self, var: TypeVar) -> Option<Unshared> {
+        self.unshared_values_within(var, &mut Vec::new())
+    }
+
+    fn unshared_values_within(
+        &mut self,
+        var: TypeVar,
+        seen: &mut Vec<TypeVar>,
+    ) -> Option<Unshared> {
+        seen.push(var);
+        let mut literals: Vec<(TypeVar, Vec<StaticType>)> = Vec::new();
         for bound in &self.bounds[var.0 as usize] {
             match bound {
-                Bound::Holds(held, literal, _) => match literals
-                    .iter_mut()
-                    .find(|(found, _): &&mut (TypeVar, Vec<StaticType>)| found == literal)
-                {
-                    Some((_, held_by_it)) => held_by_it.push(held.clone()),
-                    None => literals.push((*literal, vec![held.clone()])),
-                },
+                Bound::Holds(held, literal, _) => {
+                    match literals.iter_mut().find(|(found, _)| found == literal) {
+                        Some((_, held_by_it)) => held_by_it.push(held.clone()),
+                        None => literals.push((*literal, vec![held.clone()])),
+                    }
+                }
                 // A number literal is a number.
                 Bound::Number(..) => {}
             }
         }
-        literals.into_iter().any(|(_, held)| {
+        for (literal, held) in literals {
+            if self.plainly_shared(&held) {
+                continue;
+            }
+            for typ in &held {
+                if let StaticType::Var(inner) = self.resolve(typ)
+                    && self.is_literal(inner)
+                    && !seen.contains(&inner)
+                    && let Some(unshared) = self.unshared_values_within(inner, seen)
+                {
+                    return Some(unshared);
+                }
+            }
             let snapshot = self.snapshot();
-            let shared = held[1..].iter().all(|other| self.unify(&held[0], other));
+            let mut found = None;
+            for other in &held[1..] {
+                if !self.try_unify(&held[0], other) {
+                    found = Some((self.shown(&held[0]), self.shown(other)));
+                    break;
+                }
+            }
             self.rollback(snapshot);
-            !shared
-        })
+            if let Some((first, second)) = found {
+                let span = self.literal_spans[&literal];
+                return Some(Unshared {
+                    literal,
+                    first,
+                    second,
+                    span,
+                });
+            }
+        }
+        None
+    }
+
+    /// Whether `held` are plainly of one type without trying to unify
+    /// them: numbers, with at most one kind of number written out, or
+    /// values of one known type. A literal of many numbers, like `[0, 1,
+    /// …, 5000]`, is checked this way.
+    fn plainly_shared(&self, held: &[StaticType]) -> bool {
+        let mut numbers = false;
+        let mut known: Option<StaticType> = None;
+        for typ in held {
+            match self.resolve(typ) {
+                StaticType::Var(var) if self.is_number(var) && self.solution(var).is_none() => {
+                    numbers = true;
+                }
+                StaticType::Var(_) => return false,
+                typ if typ.has_vars() => return false,
+                typ => match &known {
+                    None => known = Some(typ),
+                    Some(other) if *other == typ => {}
+                    Some(_) => return false,
+                },
+            }
+        }
+        !numbers
+            || matches!(
+                known,
+                None | Some(StaticType::Int | StaticType::Float | StaticType::Number)
+            )
+    }
+
+    /// Settles the unsettled literal type `var` as `default`, one of its
+    /// [`Self::literal_defaults`], and returns whether it's within its
+    /// bounds. One whose values share no type is remembered to be reported.
+    pub(crate) fn settle_default(&mut self, var: TypeVar, default: &StaticType) -> bool {
+        match default {
+            StaticType::Error => self.settle_unshared(var),
+            default => self.settle_literal(var, default),
+        }
+    }
+
+    /// Settles the unsettled literal type `var` as [`StaticType::Error`],
+    /// as its values share no type, and remembers it to be reported.
+    fn settle_unshared(&mut self, var: TypeVar) -> bool {
+        let unshared = self.unshared_values(var);
+        let settled = self.settle_literal(var, &StaticType::Error);
+        if let Some(unshared) = unshared {
+            self.unshared.push((var, unshared));
+        }
+        settled
+    }
+
+    /// The literals settled as errors since this was last called, as their
+    /// values share no type, with two of the values. One that a rollback
+    /// unsettled again isn't among them.
+    pub(crate) fn take_unshared(&mut self) -> Vec<Unshared> {
+        if self.unshared.is_empty() {
+            return Vec::new();
+        }
+        let mut seen = AHashSet::new();
+        std::mem::take(&mut self.unshared)
+            .into_iter()
+            .filter(|(var, _)| {
+                seen.insert(*var) && self.resolve(&StaticType::Var(*var)) == StaticType::Error
+            })
+            .map(|(_, unshared)| unshared)
+            .collect()
     }
 
     /// Whether the unsettled literal type `var` could still be settled as
@@ -622,10 +751,14 @@ impl TypeVars {
                 Some(defaults) if !self.bounds[var.0 as usize].is_empty() => defaults,
                 _ => vec![self.fallbacks[var.0 as usize].clone()],
             };
-            if !defaults
-                .iter()
-                .any(|default| self.try_unify(&StaticType::Var(var), default))
-            {
+            if !defaults.iter().any(|default| {
+                let snapshot = self.snapshot();
+                let settled = self.settle_default(var, default);
+                if !settled {
+                    self.rollback(snapshot);
+                }
+                settled
+            }) {
                 // `Any` takes anything a literal holds.
                 self.settle(var, StaticType::Any);
             }
@@ -809,6 +942,13 @@ impl TypeVars {
     pub(crate) fn bind_argument(&mut self, parameter: &StaticType, argument: &StaticType) -> bool {
         let (parameter, argument) = (self.shallow(parameter), self.shallow(argument));
         match (&parameter, &argument) {
+            // Values that share no type are what's asked for where an `Any`
+            // is expected: `let x: Any = if c { 1 } else { "a" }`.
+            (StaticType::Any, StaticType::Var(var))
+                if self.is_literal(*var) && self.unshared_values(*var).is_some() =>
+            {
+                self.settle_literal(*var, &StaticType::Any)
+            }
             (_, StaticType::Never) | (StaticType::Any, _) => true,
             // A value of type `Any` is checked where it goes, so it leaves a
             // literal's type what the literal says: `n` in `let n = 1;
@@ -937,6 +1077,15 @@ impl TypeVars {
         }
     }
 
+    /// Settles every unsettled variable in `typ` but a literal's as `to`.
+    pub(crate) fn settle_unknowns_but_literals(&mut self, typ: &StaticType, to: &StaticType) {
+        for var in self.unsettled(typ) {
+            if self.solution(var).is_none() && !self.is_literal(var) {
+                self.settle(var, to.clone());
+            }
+        }
+    }
+
     /// Settles every unsettled variable in `typ` but a literal's as the
     /// type of a failed check: in `missing(xs).map(fn(x) => x.size)`, the
     /// call of `map` says nothing about `x`, which then isn't checked.
@@ -989,8 +1138,10 @@ mod tests {
     fn a_literal_holds_what_each_value_fits() {
         let mut vars = TypeVars::default();
         let number = vars.fresh_number(span());
-        let element =
-            vars.fresh_holding(vec![(number.clone(), span()), (StaticType::Float, span())]);
+        let element = vars.fresh_holding(
+            vec![(number.clone(), span()), (StaticType::Float, span())],
+            span(),
+        );
         assert!(!vars.try_unify(&element, &StaticType::String));
         assert!(vars.try_unify(&element, &StaticType::Float));
         // Holding a Float made the number a Float too.
@@ -1015,7 +1166,7 @@ mod tests {
         let mut vars = TypeVars::default();
         let number = vars.fresh_number(span());
         let StaticType::Var(element) =
-            vars.fresh_holding(vec![(number, span()), (StaticType::Float, span())])
+            vars.fresh_holding(vec![(number, span()), (StaticType::Float, span())], span())
         else {
             unreachable!("a literal's type is a variable");
         };
@@ -1023,13 +1174,20 @@ mod tests {
             vars.literal_defaults(element),
             Some(vec![StaticType::Float])
         );
-        let StaticType::Var(mixed) = vars.fresh_holding(vec![
-            (StaticType::String, span()),
-            (StaticType::Int, span()),
-        ]) else {
+        // Values that share no type are an error.
+        let StaticType::Var(mixed) = vars.fresh_holding(
+            vec![(StaticType::String, span()), (StaticType::Int, span())],
+            span(),
+        ) else {
             unreachable!("a literal's type is a variable");
         };
         vars.settle_with_fallbacks(&[mixed]);
-        assert_eq!(vars.resolve(&StaticType::Var(mixed)), StaticType::Any);
+        assert_eq!(vars.resolve(&StaticType::Var(mixed)), StaticType::Error);
+        let unshared = vars.take_unshared();
+        assert_eq!(unshared.len(), 1);
+        assert_eq!(
+            (&unshared[0].first, &unshared[0].second),
+            (&StaticType::String, &StaticType::Int)
+        );
     }
 }

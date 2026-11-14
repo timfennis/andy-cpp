@@ -1,4 +1,3 @@
-// The elements share no type, so the list is a List<Any>, which no `sum`
-// takes.
-// expect-error: No function called 'sum'
+// The elements share no type, which a list has to say it holds as `Any`s.
+// expect-error: values of different types: Int and String share no type
 print([1, "two"].sum());

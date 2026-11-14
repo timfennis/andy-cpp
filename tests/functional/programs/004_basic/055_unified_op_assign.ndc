@@ -59,7 +59,8 @@ assert_eq(typed_values, [1, 2]);
 
 let mixed_values: List<Any> = [1];
 mixed_values ++= ["two"];
-assert_eq(mixed_values, [1, "two"]);
+let expected: List<Any> = [1, "two"];
+assert_eq(mixed_values, expected);
 
 // Compiler temporaries must live beyond every analyser-assigned local whose
 // lifetime overlaps them. Block-local slots are deliberately reused across

@@ -172,16 +172,12 @@ fn a_function_returns_the_join_of_its_body_and_every_return() {
          }",
         vec![],
     );
-    // Tuples of different types have no type in common but `Any`.
-    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    // Tuples of different types have no type in common, and `Any` has to
+    // be asked for.
+    let error = result.errors.iter().exactly_one().expect("one error");
     assert_eq!(
-        result
-            .analysis
-            .inferred_return_types
-            .values()
-            .exactly_one()
-            .ok(),
-        Some(&StaticType::Any),
+        error.to_string(),
+        "values of different types: Tuple<String, Int, Int> and Tuple<Int, String, Int> share no type"
     );
 }
 
@@ -1293,15 +1289,20 @@ fn a_join_waits_until_both_branches_are_known() {
         analyse_last_type("let f = fn(x) => if true { x } else { 1 }; f(2)"),
         StaticType::Int
     );
-    // The literal `1` becomes a Float like `x`, but a String and an Int join
-    // as `Any`.
+    // The literal `1` becomes a Float like `x`, but a String and an Int
+    // share no type.
     assert_eq!(
         analyse_last_type("let f = fn(x) => if true { x } else { 1 }; f(2.5)"),
         StaticType::Float
     );
-    assert_eq!(
-        analyse_last_type("let f = fn(x) => if true { x } else { 1 }; f(\"a\")"),
-        StaticType::Any
+    let (_, result) = analyse_with_globals(
+        "let f = fn(x) => if true { x } else { 1 }; f(\"a\")",
+        vec![],
+    );
+    let error = result.errors.iter().exactly_one().expect("one error");
+    assert!(
+        error.to_string().starts_with("values of different types"),
+        "{error}"
     );
     // What both branches share is known meanwhile: two lists join as a list
     // that `push` can take.

@@ -70,7 +70,8 @@ print(value as? String);  // None
 It checks a value the way `as` does, so a container is checked element by element:
 
 ```ndc
-let mixed: Any = [1, "a"];
+let values: List<Any> = [1, "a"];
+let mixed: Any = values;
 print(mixed as? List<Int>);  // None
 print(mixed as? List<Any>);  // Some([1,"a"])
 ```

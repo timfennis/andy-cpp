@@ -270,13 +270,21 @@ impl Analyser {
     }
 
     /// Reports that a value of `value_type` can't be stored where values of
-    /// `stored_type` are kept.
+    /// `stored_type` are kept. Values that share no type, as the branches
+    /// of `if c { 1 } else { "a" }`, are reported as such once nothing
+    /// else can settle them.
     pub(super) fn emit_rejected_write(
         &mut self,
         stored_type: &StaticType,
         value_type: &StaticType,
         span: Span,
     ) {
+        if let StaticType::Var(var) = self.vars.resolve(value_type)
+            && self.vars.is_literal(var)
+            && self.vars.holds_unshared_values(var)
+        {
+            return;
+        }
         let error = AnalysisError::mismatched_types(
             &self.vars.shown(value_type),
             &self.vars.shown(stored_type),
