@@ -138,8 +138,8 @@ impl Analyser {
     }
 
     /// Points `generic_use` at the instance it needs, adding it to `new` if
-    /// it's new. A use that left the pick to the program as it runs keeps
-    /// it. A function value is one instance, so its key must be known:
+    /// it's new. A use that picked another function keeps its pick. A
+    /// function value is one instance, so its key must be known:
     /// `let f: Any = inc` doesn't say which `inc` it is, while
     /// `let f: Fn(Any) -> Any = inc` is the one for `Any`.
     fn point_at_instance(

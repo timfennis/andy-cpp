@@ -58,12 +58,12 @@ pub struct Compiler {
     /// whose picks take the place of the function's own.
     instance: Option<InstanceAt>,
     /// Whether the code compiled so far used a pick of `instance` that
-    /// differs from the function's own, so it differs from what the
-    /// function's own body compiles to.
+    /// differs from the function's own, so it differs between instances.
     used_instance: Cell<bool>,
-    /// The functions compiled outside of any instance, by declaration. A
-    /// function an instance's body declares is the same function when it
-    /// compiles the same, so it keeps its identity.
+    /// The functions compiled the same wherever they're declared, by
+    /// declaration: outside of any instance, or in an instance's body
+    /// without using its picks, so `fn f() => 42` in a generic body is one
+    /// function across its instances and keeps its identity.
     prototypes: Rc<RefCell<AHashMap<NodeId, Rc<CompiledFunction>>>>,
     /// The functions the code compiled so far declared in globals, kept when
     /// compiling a REPL line, whose later lines may need instances of them.
@@ -337,18 +337,7 @@ impl Compiler {
                 let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { .. } => match self.binding(id) {
-                // A function's name used as a value whose overload is picked
-                // as it's called: each overload is looked up now, where the
-                // value is made, so the value works wherever it's called.
-                Binding::Dynamic(candidates) => {
-                    for candidate in &candidates {
-                        self.emit_get_var(candidate.var(), span);
-                    }
-                    self.ir.write(OpCode::MakeOverloads(candidates.len()), span);
-                }
-                binding => self.compile_binding(&binding, span)?,
-            },
+            Expression::Identifier { .. } => self.compile_binding(&self.binding(id), span)?,
             Expression::Cast {
                 value, optional, ..
             } => {
@@ -1014,26 +1003,31 @@ impl Compiler {
             pure,
             span,
         });
+        // A generic function whose body depends on the types it's called
+        // with runs only as its instances, each its body compiled with the
+        // instance's picks. It's declared at the top level, so it captures
+        // nothing and is a global, and its instances are stored in globals
+        // of their own. A `pure fn`'s instance has a cache of its own, as
+        // arguments of different types can be equal: `f(1)` and `f(1.0)`
+        // call different instances, which may return different values.
         let analysis = Rc::clone(&self.analysis);
-        let instances = analysis.instances.get(&id).map_or(&[][..], Vec::as_slice);
-        // The function's own body comes first, so the functions it declares
-        // are there for its instances to reuse.
-        let (compiled, instance_bodies) = if instances.is_empty() {
-            (self.prototype(id, name, body)?, Vec::new())
-        } else {
-            let compiled = self.prototype(id, name.clone(), body.clone())?;
-            let instance_bodies = (0..instances.len())
-                .map(|index| {
-                    let instance = InstanceAt {
-                        declaration: id,
-                        index,
-                    };
-                    self.compile_function_body(id, name.clone(), body.clone(), Some(instance))
-                        .map(|(compiled, _)| compiled)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            (compiled, instance_bodies)
-        };
+        if let Some(instances) = analysis.instances.get(&id) {
+            for (index, instance) in instances.iter().enumerate() {
+                let at = InstanceAt {
+                    declaration: id,
+                    index,
+                };
+                let (compiled, _) =
+                    self.compile_function_body(id, name.clone(), body.clone(), Some(at))?;
+                self.store_instance(compiled, instance, pure, span);
+            }
+            if let (Some(kept), Some(functions)) = (kept, &mut self.functions) {
+                functions.insert(id, kept);
+            }
+            self.emit_unit();
+            return Ok(());
+        }
+        let compiled = self.prototype(id, name, body)?;
         let idx = self
             .ir
             .add_constant(Value::function(Function::Compiled(compiled)));
@@ -1078,16 +1072,6 @@ impl Compiler {
             None => {}
         }
 
-        // Each instance of a generic function is its body compiled with the
-        // instance's picks. A generic function is declared at the top level,
-        // so it captures nothing and is a global, and its instances are
-        // stored in globals of their own. A `pure fn`'s instance has a cache
-        // of its own, as arguments of different types can be equal: `f(1)`
-        // and `f(1.0)` call different instances, which may return different
-        // values.
-        for (instance, instance_body) in instances.iter().zip(instance_bodies) {
-            self.store_instance(instance_body, instance, pure, span);
-        }
         if let (Some(kept), Some(functions)) = (kept, &mut self.functions) {
             functions.insert(id, kept);
         }
@@ -1100,7 +1084,8 @@ impl Compiler {
     }
 
     /// The compiled function declared at `id`. Inside an instance's body, a
-    /// function that compiles as it does outside of it is the same one.
+    /// function that compiles the same in every instance, not using any of
+    /// the instance's picks, is the one the first of them compiled.
     fn prototype(
         &self,
         id: NodeId,
@@ -1117,10 +1102,15 @@ impl Compiler {
         }
         if used_instance {
             self.used_instance.set(true);
-        } else if let Some(prototype) = self.prototypes.borrow().get(&id) {
-            return Ok(Rc::clone(prototype));
+            return Ok(Rc::new(compiled));
         }
-        Ok(Rc::new(compiled))
+        let prototype = self
+            .prototypes
+            .borrow_mut()
+            .entry(id)
+            .or_insert_with(|| Rc::new(compiled))
+            .clone();
+        Ok(prototype)
     }
 
     /// Compiles the body of the function declared at `id`, with the picks

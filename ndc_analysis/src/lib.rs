@@ -63,12 +63,13 @@ pub struct Analysis {
     /// top-level declaration, counting earlier REPL lines.
     pub global_count: usize,
     /// The instances of generic functions the batch makes, keyed by the
-    /// function's declaration, which may be an earlier REPL line's: there
-    /// they're only the line's new ones. An instance is the function's body for the types one
-    /// set of calls gives it, which picks the overloads its calls use from
-    /// those types: `fn inc(x) => x + 1` has one for Ints, whose `+` is
-    /// `+(Int, Int)`. The declaration itself is the instance for arguments
-    /// of any type, whose calls are picked as the program runs.
+    /// function's declaration. An instance is the function's body for the
+    /// types one set of calls gives it, which picks the overloads its calls
+    /// use from those types: `fn inc(x) => x + 1` has one for Ints, whose
+    /// `+` is `+(Int, Int)`. A function the batch declares whose calls
+    /// depend on its types has an entry, empty if nothing calls it, and runs
+    /// only as its instances. For an earlier REPL line's function, the entry
+    /// holds only the instances this line made.
     pub instances: AHashMap<NodeId, Vec<Instance>>,
 }
 

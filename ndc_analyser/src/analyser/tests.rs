@@ -1408,16 +1408,26 @@ fn a_generic_function_has_the_type_its_body_makes_of_each_call() {
 }
 
 #[test]
-fn a_generic_function_calls_what_its_body_calls_as_the_program_runs() {
-    // `inc`'s body is compiled once, for Ints and Floats alike.
-    let (_, result) = analyse_with_globals("fn inc(x) => x + 1; inc(1);", ambiguous_plus());
+fn a_generic_function_whose_calls_depend_on_its_types_runs_only_as_instances() {
+    // `inc`'s `+` depends on what `x` is, so it has instances, none yet,
+    // and its own body picks nothing.
+    let (_, result) = analyse_with_globals("fn inc(x) => x + 1;", ambiguous_plus());
     assert!(result.errors.is_empty(), "{:?}", result.errors);
+    assert_eq!(
+        result
+            .analysis
+            .instances
+            .values()
+            .map(Vec::len)
+            .collect::<Vec<_>>(),
+        [0]
+    );
     assert!(
         result
             .analysis
             .bindings
             .values()
-            .any(|binding| matches!(binding, Binding::Dynamic(_))),
+            .all(|binding| !matches!(binding, Binding::Dynamic(_))),
         "{:?}",
         result.analysis.bindings
     );
