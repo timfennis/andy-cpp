@@ -181,6 +181,17 @@ fn size(n: Int) -> Any {
 print(size(3), size(10));  // 3 big
 ```
 
+A body that can't run to its end has no value of its own, so only the `return`s count. That's one that reaches a `return` or `panic(…)`, or ends in a loop that only a `return` leaves: `while true`, or a `for` over a range without an end, with no `break`:
+
+```ndc
+fn first_square_over(n: Int) {
+  for x in (1..) {
+    if x * x > n { return x; }
+  }
+}
+print(first_square_over(50));  // 8
+```
+
 ### Function types
 
 The type of a function is written `Fn(A, B) -> C`: it takes an `A` and a `B` and returns a `C`. Without `-> …` the function returns `()`:

@@ -569,7 +569,7 @@ impl Analyser {
                     }
                     _ => None,
                 };
-                match (self.analyse_for_iterations(iterations, body), default) {
+                match (self.analyse_for_iterations(iterations, body, true), default) {
                     // Reads can produce the default value, so it's one of the
                     // map's values: `%{:"none", x: x for x in xs}` holds
                     // Strings as well as what `xs` does.
@@ -704,6 +704,7 @@ impl Analyser {
         &mut self,
         iterations: &[ForIteration],
         body: &ForBody,
+        first: bool,
     ) -> StaticType {
         let Some((iteration, tail)) = iterations.split_first() else {
             unreachable!("because this function is never called with an empty slice");
@@ -726,7 +727,7 @@ impl Analyser {
         }
 
         let typ = if !tail.is_empty() {
-            self.analyse_for_iterations(tail, body)
+            self.analyse_for_iterations(tail, body, false)
         } else {
             match body {
                 ForBody::Block(block) => {
@@ -749,8 +750,16 @@ impl Analyser {
                 }
             }
         };
-        if matches!(iteration, ForIteration::Iteration { .. }) {
-            self.loops.pop();
+        let ForIteration::Iteration { sequence, .. } = iteration else {
+            return typ;
+        };
+        let broken = self.loops.pop().expect("the loop was pushed");
+        // A loop over a range without an end that no `break` leaves only
+        // ends by returning, as `while true` does: `for n in 1.. { … }`.
+        // Only the first iteration of a `for` says so, as one after it may
+        // run over an empty sequence.
+        if !broken && first && matches!(body, ForBody::Block(_)) && is_endless_range(sequence) {
+            return StaticType::Never;
         }
         typ
     }
@@ -847,5 +856,22 @@ impl Analyser {
             Some(joined) => self.join(&joined, &typ, value.span),
             None => typ,
         });
+    }
+}
+
+/// Whether `expr` is a range without an end, as `1..` or `(1..)`, which a
+/// loop over never runs out of.
+fn is_endless_range(expr: &ExpressionLocation) -> bool {
+    match &expr.expression {
+        Expression::Grouping(inner) => is_endless_range(inner),
+        Expression::RangeInclusive {
+            start: Some(_),
+            end: None,
+        }
+        | Expression::RangeExclusive {
+            start: Some(_),
+            end: None,
+        } => true,
+        _ => false,
     }
 }

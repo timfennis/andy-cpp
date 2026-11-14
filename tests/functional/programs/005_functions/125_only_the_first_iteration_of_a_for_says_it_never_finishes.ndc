@@ -1,0 +1,8 @@
+// `xs` may be empty, so the loop may finish without a `return`.
+// expect-error: values of different types: Int and () share no type
+fn f(xs) {
+    for x in xs, n in (1..) {
+        if n > 2 { return n; }
+    }
+}
+print(f([1]));

@@ -1,0 +1,8 @@
+// Only a `return` leaves the loop, so `f` returns Ints and nothing else.
+// expect-output: 8
+fn f() {
+    for n in (1..) {
+        if n * n > 50 { return n; }
+    }
+}
+print(f());

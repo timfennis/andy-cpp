@@ -1,0 +1,9 @@
+// A `break` ends the loop, after which `f` returns `()`.
+// expect-error: values of different types: Int and () share no type
+fn f() {
+    for n in (1..) {
+        if n == 2 { return n; }
+        if n > 3 { break; }
+    }
+}
+print(f());
