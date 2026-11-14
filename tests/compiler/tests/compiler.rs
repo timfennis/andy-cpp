@@ -636,16 +636,19 @@ fn a_proven_optional_cast_is_always_some() {
     );
 }
 
-// let a: Any = 1; let n: Int = a;
+// let a: Any = 1; let n: Int = a as Int;
 //
-// An `Any` stored where an Int is expected is checked before it's stored.
+// An `Any` stored where an Int is expected takes a cast, which is the only
+// check: storing what the cast gives needs none.
 #[test]
-fn an_any_stored_in_a_typed_variable_is_checked() {
-    let ops = compile_with_analysis("let a: Any = 1; let n: Int = a;");
-    assert!(
+fn an_any_cast_for_a_typed_variable_is_checked_once() {
+    let ops = compile_with_analysis("let a: Any = 1; let n: Int = a as Int;");
+    assert_eq!(
         ops.iter()
-            .any(|op| matches!(op, ExpectType(t) if **t == ndc_core::StaticType::Int)),
-        "expected an ExpectType(Int) guard, got: {ops:?}",
+            .filter(|op| matches!(op, CheckType(_) | ExpectType(_)))
+            .count(),
+        1,
+        "expected a single CheckType(Int) guard, got: {ops:?}",
     );
 }
 

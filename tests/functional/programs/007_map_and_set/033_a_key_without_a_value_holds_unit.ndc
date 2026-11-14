@@ -1,8 +1,17 @@
-// expect-output: unit int
+// expect-output: any unit int
 fn g(x: Int) => "int";
 fn g(x: ()) => "unit";
 fn g(x: Any) => "any";
-// The values are `()` and an Int, so they are `Any`s, and each read
-// picks its overload as the program runs.
+// The values are `()` and an Int, so they are `Any`s, which go to `g(Any)`.
+// A type test tells what each one holds.
+fn what(x: Any) {
+    if (x as? Int).is_some() {
+        g(x as Int)
+    } else if (x as? ()).is_some() {
+        g(x as ())
+    } else {
+        g(x)
+    }
+}
 let m: Map<String, Any> = %{"a", "b": 1};
-print(g(m["a"]), g(m["b"]));
+print(g(m["a"]), what(m["a"]), what(m["b"]));

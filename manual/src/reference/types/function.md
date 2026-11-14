@@ -226,7 +226,7 @@ let players = [Player("ann", 3), Player("bob", 5)];
 players.map(fn(p) => p.size);    // error: p is a Player, which has no size
 ```
 
-A lambda stored in a variable has one type, like any variable, so unlike a function declared with `fn` it can't take an `Int` in one call and a `Float` in the next. A lambda parameter that nothing gives a type is `Any`, and is checked when the program runs.
+A lambda stored in a variable has one type, like any variable, so unlike a function declared with `fn` it can't take an `Int` in one call and a `Float` in the next. A lambda parameter that nothing gives a type is `Any`, which its body then has to work with: in `let f = fn(x) => x + 1;` with nothing calling `f`, no `+` takes `x`, so annotate it as `fn(x: Int)`.
 
 ## Generic functions
 
@@ -258,7 +258,13 @@ shout("a");    // error: No function called '+' found that matches the arguments
                //   `shout` calls `inc` here, and `inc` needs `x + 1`
 ```
 
-To take any value whatever its type, annotate the parameter with `Any`: the body then works with it as the program runs.
+To take any value whatever its type, annotate the parameter with `Any`: the body then works with an `Any`, which takes a [cast](../../features/casts.md) to be used as anything else. A call with an `Any` argument has an unannotated parameter be an `Any` too, so its body has to work with one:
+
+```ndc,fails
+fn inc(x) => x + 1;
+let a: Any = 1;
+inc(a);  // error: No function called '+' found that matches the arguments 'Any, Int'
+```
 
 ## Function overloading
 
@@ -282,6 +288,16 @@ fn describe(x: Any) { "something else" }
 print(describe(1));    // int
 print(describe("a"));  // string
 print(describe([1]));  // something else
+```
+
+An argument of type `Any` only goes to an overload that takes an `Any`, whatever it holds as the program runs, and a cast picks another:
+
+```ndc
+fn describe(x: Int) { "int" }
+fn describe(x: Any) { "something else" }
+
+let a: Any = 1;
+print(describe(a), describe(a as Int));  // something else int
 ```
 
 Two overloads in the same scope can't have the same parameter types. Parameter names don't count:

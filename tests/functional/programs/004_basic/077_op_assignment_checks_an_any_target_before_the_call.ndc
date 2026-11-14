@@ -1,7 +1,0 @@
-// The target of `a op= b` is passed to the operator, so a target of type
-// `Any` is checked against what the operator takes before it runs.
-// expect-error: no function called 'choose' found matches the arguments: (String, Int)
-fn choose(a: Int, b: Int) => a;
-let x: Any = "wrong";
-x choose= 1;
-print(x);

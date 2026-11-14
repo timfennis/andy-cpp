@@ -7,5 +7,5 @@ let a: Any = id;
 let ints = a as Fn(Int) -> Int;
 let strs = a as Fn(String) -> String;
 cached(ints);
-let s: Fn(String) -> String = cached(strs);
+let s = cached(strs) as Fn(String) -> String;
 print(s("ok"));

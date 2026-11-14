@@ -1,8 +1,0 @@
-// `a op= b` with an `Any` right operand is `a = a op b`, checked as the
-// program runs: nothing says the operand fits, so `++` makes a new list,
-// which is checked where it's written back.
-// expect-output: [1,2,3]
-fn opaque(x) -> Any => x;
-let values = [1];
-values ++= opaque([2, 3]);
-print(values)

@@ -35,7 +35,7 @@ let point = ("origin", 0, 0);
 print(point[3]);  // error: Index 3 is out of bounds for a tuple of 3 elements
 ```
 
-An index computed as the program runs, like `t[i]`, could pick any element, so it gives `Any`.
+An index computed as the program runs, like `t[i]`, could pick any element, so it gives `Any`, which takes a [cast](../../features/casts.md) to say what it is: `t[i] as Int`.
 
 Create a 1-element tuple by adding a trailing comma:
 

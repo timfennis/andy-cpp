@@ -1,0 +1,5 @@
+// expect-output: [1,2]
+struct Q { xs: List<Int> }
+let make: Any = Q;
+let q = make as Fn(List<Int>) -> Q;
+print(q([1, 2]).xs);

@@ -24,18 +24,6 @@ assert_eq(-1 in (-10..=-1), true);   // -1 is at the upper bound
 assert_eq(-1 in (-10..-1), false);   // 0 is outside the negative range
 assert_eq(0 in (-10..=-1), false);   // 0 is outside the negative range
 
-// Invalid types, typed `Any` so that only the range itself can tell
-let string: Any = "string";
-let float: Any = 3.14;
-let boolean: Any = true;
-let unit: Any = ();
-let array: Any = [1, 2, 3];
-assert_eq(string in (1..10), false);     // Non-integer type
-assert_eq(float in (1..10), false);      // Float type
-assert_eq(boolean in (1..10), false);    // Boolean type
-assert_eq(unit in (1..10), false);       // Null type
-assert_eq(array in (1..10), false);      // Array type
-
 // Boundary cases
 assert_eq(1 in (1..=1), true);  // Single-value inclusive range
 assert_eq(1 in (1..1), false);  // Single-value exclusive range

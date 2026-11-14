@@ -1,0 +1,9 @@
+// The instance of `has` for a `List<Any>` takes an `Any` for `v`, which the
+// one for a `List<Int>` doesn't.
+// expect-error: No function called 'contains' found that matches the arguments 'List<Int>, Any'
+pure fn has(xs, v) { xs.contains(v) }
+let anything: List<Any> = [];
+let numbers: List<Int> = [];
+let a: Any = "s";
+print(has(anything, a));
+print(has(numbers, a));

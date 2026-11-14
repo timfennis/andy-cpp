@@ -1,0 +1,4 @@
+// A lambda that takes a String isn't a `Fn(Int) -> Int`.
+// expect-error: cannot cast Fn(String) -> Int to Fn(Int) -> Int
+let a: Any = fn(s: String) => 1;
+let f = a as Fn(Int) -> Int;

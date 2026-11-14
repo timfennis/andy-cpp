@@ -109,7 +109,7 @@ impl AnalysisError {
         Self {
             text: format!("mismatched types: found {found} but expected {expected}"),
             span,
-            help_text: None,
+            help_text: (*found == StaticType::Any).then(|| cast_out_of_any(&expected.to_string())),
             notes: Vec::new(),
         }
     }
@@ -133,7 +133,7 @@ impl AnalysisError {
         Self {
             text: format!("{typ} is not iterable"),
             span,
-            help_text: None,
+            help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("List<Int>")),
             notes: Vec::new(),
         }
     }
@@ -270,14 +270,17 @@ impl AnalysisError {
             ),
             other => format!("The variable '{name}' is {other}, which can't be called"),
         };
+        let help_text = if hides_functions {
+            Some(format!(
+                "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
+            ))
+        } else {
+            (*variable_type == StaticType::Any).then(|| cast_out_of_any("Fn(Int) -> Int"))
+        };
         Self {
             text,
             span,
-            help_text: hides_functions.then(|| {
-                format!(
-                    "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
-                )
-            }),
+            help_text,
             notes: Vec::new(),
         }
     }
@@ -305,6 +308,20 @@ impl AnalysisError {
         Self {
             help_text: Some(help_text),
             ..self
+        }
+    }
+
+    /// Same as [`Self::function_not_found`], for a call with an argument of
+    /// type `Any` that only overloads taking something else could take:
+    /// `a + 1` with `a: Any`.
+    pub(crate) fn function_not_found_for_any(
+        ident: &str,
+        types: &[StaticType],
+        span: Span,
+    ) -> Self {
+        Self {
+            help_text: Some(cast_out_of_any("Int")),
+            ..Self::function_not_found(ident, types, span)
         }
     }
 
@@ -408,8 +425,16 @@ impl AnalysisError {
         Self {
             text: format!("Unable to invoke {typ} as a function."),
             span,
-            help_text: None,
+            help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("Fn(Int) -> Int")),
             notes: Vec::new(),
         }
     }
+}
+
+/// Help for a value of type `Any` used where `example`, or another type,
+/// is expected.
+fn cast_out_of_any(example: &str) -> String {
+    format!(
+        "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `value as {example}`, or `value as? {example}` to get an Option"
+    )
 }

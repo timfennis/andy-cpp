@@ -1,7 +1,0 @@
-// `v` becomes an `Any` where it's stored as one, so storing it in an Int is
-// checked as the program runs.
-// expect-error: expected Int but found String
-let v = if false { 1 } else { "a" };
-let n: Int = v;
-let a: Any = v;
-print(n);

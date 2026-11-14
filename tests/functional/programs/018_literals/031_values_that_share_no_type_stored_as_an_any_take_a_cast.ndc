@@ -1,0 +1,7 @@
+// `v` becomes an `Any` where it's stored as one, and an `Any` takes a cast to
+// be stored in an Int.
+// expect-error: mismatched types: found Any but expected Int
+let v = if false { 1 } else { "a" };
+let n: Int = v;
+let a: Any = v;
+print(n);

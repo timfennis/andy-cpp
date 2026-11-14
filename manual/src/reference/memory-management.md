@@ -28,7 +28,7 @@ A closure that captures a variable which holds a reference back to itself create
 
 ```ndc
 {
-    let f: Any = ();
+    let f: Fn(Int) -> Int = fn(x) => 0;
     f = fn(x) { if x > 0 { x + f(x - 1) } else { 0 } };
     print(f(3));  // 6
 }

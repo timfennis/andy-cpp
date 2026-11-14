@@ -1,0 +1,4 @@
+// expect-error: The variable 'make' is Any, which can't be called
+struct P { x: Int }
+let make: Any = P;
+make(1);

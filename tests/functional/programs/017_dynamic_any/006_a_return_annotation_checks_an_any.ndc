@@ -1,8 +1,0 @@
-// expect-error: expected Int but found String
-fn first(xs: Any) -> Int {
-    if xs.len() == 0 {
-        return 0;
-    }
-    xs[0]
-}
-print(first(["three"]));

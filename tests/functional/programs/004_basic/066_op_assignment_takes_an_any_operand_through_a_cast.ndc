@@ -1,0 +1,7 @@
+// `a op= b` with an `Any` right operand takes a cast that says what it is,
+// which is checked as the program runs.
+// expect-output: [1,2,3]
+fn opaque(x) -> Any => x;
+let values = [1];
+values ++= opaque([2, 3]) as List<Int>;
+print(values)

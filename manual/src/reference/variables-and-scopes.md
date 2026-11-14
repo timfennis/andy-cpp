@@ -81,7 +81,7 @@ xs.push(1);       // xs is List<Int> from here on
 xs.push("two");   // error: No function called 'push' found that matches the arguments 'List<Int>, String'
 ```
 
-When nothing settles them, they stay `Any`.
+When nothing settles them, they stay `Any`, which takes a [cast](../features/casts.md) to be used as anything else.
 
 A variable that only gets its real value later holds an `Option`:
 

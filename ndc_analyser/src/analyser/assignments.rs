@@ -229,8 +229,8 @@ impl Analyser {
     /// `stored_type` are kept, settling type variables on the way: in
     /// `let xs = []; xs[0] = 1`, the write settles the element type of `xs`
     /// as `Int`. The stored type never widens to fit the value. An `Any`
-    /// value fits anywhere, as `Any` is the dynamic type, and is checked at
-    /// `node` as the program runs.
+    /// value only fits where an `Any` is kept: it takes a cast to be stored
+    /// as anything else.
     pub(super) fn accepts_write(
         &mut self,
         stored_type: &StaticType,

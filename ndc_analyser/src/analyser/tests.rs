@@ -259,20 +259,16 @@ fn annotated_declaration_rejects_a_mismatched_container_literal() {
     );
 }
 
-// `f` might hold any function, so which one runs is only known at runtime.
+// An `Any` takes a cast to be called, which says what function it holds.
 #[test]
-fn a_call_of_a_value_of_unknown_type_dispatches_at_runtime() {
-    let (_, result) = analyse_with_globals("fn call(f: Any) { f(\"x\") }", vec![]);
-    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
-    let callee = result
-        .analysis
-        .bindings
-        .values()
-        .exactly_one()
-        .expect("`f` is the only identifier");
-    assert!(
-        matches!(callee, Binding::Dynamic(candidates) if candidates.len() == 1),
-        "{callee:?}"
+fn calling_an_any_takes_a_cast() {
+    assert_eq!(
+        errors("fn call(f: Any) { f(\"x\") }", vec![]),
+        vec!["The variable 'f' is Any, which can't be called"]
+    );
+    assert_eq!(
+        analyse_last_type("fn call(f: Any) { (f as Fn(String) -> Int)(\"x\") } call"),
+        function(vec![StaticType::Any], StaticType::Int)
     );
 }
 
@@ -445,7 +441,7 @@ fn a_variable_keeps_its_inferred_type() {
 }
 
 #[test]
-fn an_any_value_can_be_stored_anywhere() {
+fn an_any_value_takes_a_cast_to_be_stored_in_a_typed_variable() {
     let any_value = vec![(
         "anything".to_string(),
         StaticType::Function {
@@ -454,8 +450,17 @@ fn an_any_value_can_be_stored_anywhere() {
         },
     )];
     assert_eq!(
-        analyse_last_type_with_globals("let x = 3; x = anything(); x", any_value),
+        errors("let x = 3; x = anything(); x", any_value.clone()),
+        vec!["mismatched types: found Any but expected Int"]
+    );
+    assert_eq!(
+        analyse_last_type_with_globals("let x = 3; x = anything() as Int; x", any_value.clone()),
         StaticType::Int
+    );
+    // Anything goes into an `Any` without one.
+    assert_eq!(
+        analyse_last_type_with_globals("let x: Any = anything(); x = 3; x", any_value),
+        StaticType::Any
     );
 }
 
@@ -535,16 +540,20 @@ fn each_call_instantiates_the_signature_afresh() {
 }
 
 #[test]
-fn a_call_picked_at_runtime_has_no_type_parameters_in_its_type() {
-    // `xs` could be anything, so `reversed` is picked when the program runs
-    // and its `T` is never known.
+fn an_any_passed_for_a_list_takes_a_cast_that_says_its_elements() {
+    // `xs` could hold anything, so `reversed` doesn't take it, but a cast
+    // says what it holds, which settles `T`.
     let globals = natives(&[("reversed", "<T>(List<T>) -> List<T>")]);
     assert_eq!(
-        analyse_last_type_with_globals("fn f(xs: Any) { reversed(xs) } f", globals),
-        StaticType::Function {
-            parameters: Some(vec![StaticType::Any]),
-            return_type: Box::new(StaticType::List(Box::new(StaticType::Any))),
-        }
+        errors("fn f(xs: Any) { reversed(xs) }", globals.clone()),
+        vec!["No function called 'reversed' found that matches the arguments 'Any'"]
+    );
+    assert_eq!(
+        analyse_last_type_with_globals("fn f(xs: Any) { reversed(xs as List<Int>) } f", globals),
+        function(
+            vec![StaticType::Any],
+            StaticType::List(Box::new(StaticType::Int))
+        )
     );
 }
 
@@ -960,13 +969,13 @@ fn a_call_nothing_else_settles_takes_no_narrowest_overload_when_unsure() {
         parameters: Some(vec![parameter]),
         return_type: Box::new(returns),
     };
-    // Nothing is known about `x`, so it's `Any`, and the program picks
-    // `pick(Int)` or `pick(Any)` as it runs.
+    // Nothing is known about `x`, so it's `Any`, which only `pick(Any)`
+    // takes.
     assert_eq!(
         analyse_last_type(
             "fn pick(x: Int) => 1; fn pick(x: Any) => \"any\"; let f = fn(x) => pick(x); f"
         ),
-        function(StaticType::Any, StaticType::Any)
+        function(StaticType::Any, StaticType::String)
     );
     // Overloads in two scopes fit, so none settles `x`: it's `Any`, and
     // `[x]` is a `List<Any>`, which neither takes.
@@ -1085,17 +1094,24 @@ fn an_operator_waits_while_an_operand_could_still_be_a_tuple() {
 }
 
 #[test]
-fn an_operator_doesnt_commit_early_while_an_operand_is_any() {
-    // `a` is `Any`, so it may be a tuple that `++` applies to element-wise:
-    // the call is picked when the program runs, among all the overloads
-    // that could do that, as it would be with the types as they end up.
+fn an_operator_takes_no_any_operand_that_no_overload_takes() {
+    // `a` could be a tuple that `++` applies to element-wise, or a list,
+    // but it takes a cast to be either.
     let globals = natives(&[("++", "<T>(List<T>, List<T>) -> List<T>")]);
-    let (_, result) = analyse_with_globals("let g = fn(a: Any) => a ++ [];", globals);
+    assert_eq!(
+        errors("let g = fn(a: Any) => a ++ [];", globals.clone()),
+        vec!["No function called '++' found that matches the arguments 'Any, List<Any>'"]
+    );
+    let (_, result) =
+        analyse_with_globals("let g = fn(a: Any) => (a as List<Int>) ++ [];", globals);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
-    assert!(matches!(
-        result.analysis.bindings.values().find(|binding| matches!(binding, Binding::Dynamic(_))),
-        Some(Binding::Dynamic(candidates)) if candidates.iter().any(|c| matches!(c, Candidate::Vec(_)))
-    ));
+    assert!(
+        result
+            .analysis
+            .bindings
+            .values()
+            .all(|binding| !matches!(binding, Binding::Dynamic(_)))
+    );
 }
 
 #[test]
@@ -1211,17 +1227,6 @@ fn the_help_for_an_ambiguous_function_value_names_an_overload_that_fits() {
                 .to_string()
         )
     );
-    // The inner `pick` takes two arguments, so the example is an outer one.
-    assert_eq!(
-        help(
-            "fn pick(x: Int) => 1; fn pick(x: Float) => 1.0; { fn pick(a, b) => 0; let f: Fn(Any) -> Any = pick; }",
-            vec![]
-        ),
-        Some(
-            "Say which one with a function type, as in `let f: Fn(Float) -> Float = pick`"
-                .to_string()
-        )
-    );
 }
 
 #[test]
@@ -1316,10 +1321,12 @@ fn a_join_waits_until_both_branches_are_known() {
 }
 
 #[test]
-fn a_call_nothing_picks_falls_back_to_picking_at_runtime() {
-    let (last, result) = analyse_with_globals("let f = fn(x) => x + 1; f", ambiguous_plus());
-    assert!(result.errors.is_empty(), "{:?}", result.errors);
-    assert_eq!(last, function(vec![StaticType::Any], StaticType::Any));
+fn a_parameter_nothing_settles_is_an_any_that_no_overload_takes() {
+    // Nothing says what `x` is, so it's `Any`, which neither `+` takes.
+    assert_eq!(
+        errors("let f = fn(x) => x + 1; f", ambiguous_plus()),
+        vec!["No function called '+' found that matches the arguments 'Any, Int'"]
+    );
 }
 
 /// `len`, a native taking a `String`, for the test below.
@@ -1656,10 +1663,19 @@ fn a_function_whose_calls_dont_depend_on_its_types_has_no_instances() {
 }
 
 #[test]
-fn a_call_with_any_arguments_uses_the_function_itself() {
+fn a_call_with_an_any_argument_checks_the_body_with_any() {
+    // `x` is `Any` in this call, which no `+` takes.
+    assert_eq!(
+        errors(
+            "fn inc(x) => x + 1; let a: Any = 1; inc(a);",
+            ambiguous_plus()
+        ),
+        vec!["No function called '+' found that matches the arguments 'Any, Int'"]
+    );
+    // A body that works with `Any` takes it.
     assert_eq!(
         instance_count(
-            "fn inc(x) => x + 1; let a: Any = 1; inc(a);",
+            "fn wrap(x) => [x]; let a: Any = 1; wrap(a);",
             ambiguous_plus()
         ),
         0

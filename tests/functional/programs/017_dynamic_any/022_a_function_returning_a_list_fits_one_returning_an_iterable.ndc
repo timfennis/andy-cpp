@@ -1,7 +1,0 @@
-// A function whose own type says it returns a list of Ints fits a function
-// type that returns one, without checking its calls.
-// expect-output: 1
-fn h(f: Fn(Int) -> List<Int>) => 1;
-fn h(x: Int) => 0;
-let a: Any = fn(x: Int) => [x];
-print(h(a));

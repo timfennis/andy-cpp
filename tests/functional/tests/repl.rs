@@ -201,7 +201,7 @@ fn functions_share_globals_with_later_lines() {
 #[test]
 fn closures_keep_the_loop_variables_of_a_finished_line() {
     let out = repl_output(&[
-        "let fs = []; let i = 0;",
+        "let fs: List<Fn() -> Int> = []; let i = 0;",
         "while i < 3 { let j = i; fs.push(fn() { j }); i += 1; }",
         "print([f() for f in fs])",
     ]);

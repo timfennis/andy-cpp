@@ -328,6 +328,11 @@ impl Analyser {
     /// What iterating over a value of the known type `sequence` gives,
     /// reporting a value that doesn't iterate, like `true`.
     fn iteration_gives(&mut self, sequence: &StaticType, span: Span) -> StaticType {
+        if self.vars.resolve(sequence) == StaticType::Any {
+            let error = AnalysisError::not_iterable(&StaticType::Any, span);
+            self.emit(error);
+            return StaticType::Error;
+        }
         if let Some(element) = self.vars.element_type(sequence) {
             return element;
         }
@@ -483,6 +488,13 @@ impl Analyser {
                         }
                         binding => binding,
                     };
+                    // A call that nothing takes any more is one an error
+                    // was reported for, as an argument whose overload
+                    // couldn't be told then got the fallback `Any`, and a
+                    // program with errors doesn't run.
+                    if binding == Binding::None && !self.result.errors.is_empty() {
+                        continue;
+                    }
                     assert!(
                         binding == picked,
                         "internal error: `{name}` committed to {picked:?} before its arguments \
@@ -500,6 +512,11 @@ impl Analyser {
                         continue;
                     }
                     let choice = self.choose_function_value(&value, &expected);
+                    // As for a call: a value nothing fits any more got the
+                    // fallback `Any` from a failed use, which was reported.
+                    if choice == Choice::None && !self.result.errors.is_empty() {
+                        continue;
+                    }
                     assert!(
                         choice == Choice::One(picked),
                         "internal error: the function value {value:?} committed to {picked:?} \
@@ -752,6 +769,11 @@ impl Analyser {
                         Some(held) if self.vars.is_literal(var) => {
                             self.vars.settle_literal(var, &StaticType::Var(held));
                         }
+                        // A literal that holds only values of its own type,
+                        // as `[x]` does once a parameter `x` is its type, is
+                        // what they are, which isn't known yet: settling it
+                        // as `Any` would make `x` one.
+                        _ if self.vars.settle_literal_as_its_values(var) => {}
                         _ => self.vars.settle_with_fallbacks(&[var]),
                     }
                 }
@@ -1387,12 +1409,13 @@ impl Analyser {
     }
 
     /// Whether an operator might still apply to each element of a tuple: an
-    /// operand that isn't known yet, or is `Any`, can be one.
+    /// operand that isn't known yet can be one, but an `Any` takes a cast
+    /// to be one.
     fn operand_could_be_a_tuple(kind: CallKind, arguments: &[StaticType]) -> bool {
         kind == CallKind::Operator
             && arguments
                 .iter()
-                .any(|argument| matches!(argument, StaticType::Var(_) | StaticType::Any))
+                .any(|argument| matches!(argument, StaticType::Var(_)))
     }
 
     /// The overload a call of `candidates` with arguments of these types
@@ -1754,10 +1777,10 @@ impl Analyser {
             },
         ) = signature
         else {
-            // What's passed to a function that takes anything, as `print`
-            // does, is an `Any`, and so are the values of a literal among
-            // them that share no type. What's passed to an overload the
-            // program picks isn't known, but a literal says what it is.
+            // A function that takes anything, as `print` does, takes each
+            // value as the type it is, as a type parameter would, so it
+            // settles nothing. What's passed to an overload the program
+            // picks isn't known, but a literal says what it is.
             let variadic = matches!(
                 signature,
                 Some(StaticType::Function {
@@ -1765,12 +1788,11 @@ impl Analyser {
                     ..
                 })
             );
-            for argument in arguments {
-                if variadic {
-                    self.vars.bind_argument(&StaticType::Any, argument);
+            if !variadic {
+                for argument in arguments {
+                    self.vars
+                        .settle_unknowns_but_literals(argument, &StaticType::Any);
                 }
-                self.vars
-                    .settle_unknowns_but_literals(argument, &StaticType::Any);
             }
             return Some(return_type);
         };

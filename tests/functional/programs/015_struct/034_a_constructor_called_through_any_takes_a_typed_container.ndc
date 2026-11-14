@@ -1,5 +1,0 @@
-// The list is checked element by element, as nothing takes it otherwise.
-// expect-output: [1,2]
-struct Q { xs: List<Int> }
-let make: Any = Q;
-print(make([1, 2]).xs);

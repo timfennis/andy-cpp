@@ -295,12 +295,11 @@ impl StaticType {
 
     /// Whether a value of this type might be passed where `parameter` is
     /// expected, once what isn't known about it is: as [`Self::fits`],
-    /// except that the parts of this type not known yet, and the whole of
-    /// it if it's `Any`, stand for any type too. `Any` checked as the
-    /// program runs can turn out to be an Int, but a `List<Any>` is never a
-    /// `List<Int>`.
+    /// except that the parts of this type not known yet stand for any type
+    /// too. `Any` is not one of them: it goes only where `Any` is taken,
+    /// and takes a cast to go anywhere else.
     pub fn may_fit(&self, parameter: &Self) -> bool {
-        matches!(self, Self::Any) || self.fits(parameter) || self.matches(parameter, true)
+        self.fits(parameter) || self.matches(parameter, true)
     }
 
     /// Whether this type is `parameter`, where what [`Self::fits`] and
@@ -608,11 +607,14 @@ impl StaticType {
         self.sequence_element_type()
     }
 
-    /// Returns `true` if this type could be a callable function at runtime.
-    /// This is true for `Function` types and for `Any` (which might be a
-    /// function at runtime). Concrete non-function types return `false`.
+    /// Whether a value of this type can be called: a function, or a value
+    /// whose type isn't known yet or whose check failed. An `Any` takes a
+    /// cast to a function type to be called, like any other use.
     pub fn could_be_callable(&self) -> bool {
-        matches!(self, Self::Function { .. }) || self.is_unknown()
+        matches!(
+            self,
+            Self::Function { .. } | Self::Var(_) | Self::Generic(_) | Self::Error
+        )
     }
 
     pub fn is_fn_and_matches(&self, types: &[Self]) -> bool {
@@ -638,9 +640,10 @@ impl StaticType {
     /// `arguments`: `(Int, String)` doesn't fit `(T, T)`, as `T` would have to
     /// be both. Inside a container a type parameter is the type there, as a
     /// `List<Any>` makes `T` `Any`, and a value passed for `T` itself only has
-    /// to fit it: `push(List<Any>, String)` fits `push(List<T>, T)`. What isn't
-    /// known yet, and an argument that's `Any` as a whole, which is checked as
-    /// the program runs, agree with anything.
+    /// to fit it: `push(List<Any>, String)` fits `push(List<T>, T)`, but
+    /// `push(List<Int>, Any)` doesn't. What isn't known yet agrees with
+    /// anything, but `Any` is a type like any other: `(Int, Any)` doesn't fit
+    /// `(T, T)`.
     pub fn type_parameters_agree(parameters: &[Self], arguments: &[Self]) -> bool {
         let mut bound = Vec::new();
         for (parameter, argument) in parameters.iter().zip(arguments) {
@@ -654,16 +657,12 @@ impl StaticType {
                 // What a container says it is decides, and a value passed
                 // for it fits it.
                 Some((_, exact, _)) if *inside => exact.agrees_with(typ),
-                Some((_, exact, _)) => {
-                    *typ == Self::Any || typ.fits(exact) || typ.agrees_with(exact)
-                }
+                Some((_, exact, _)) => typ.fits(exact) || typ.agrees_with(exact),
                 // Values passed for it are what it is, so they agree.
                 None => bound[..i]
                     .iter()
                     .filter(|(earlier, _, _)| earlier == name)
-                    .all(|(_, earlier, _)| {
-                        *typ == Self::Any || *earlier == Self::Any || earlier.agrees_with(typ)
-                    }),
+                    .all(|(_, earlier, _)| earlier.agrees_with(typ)),
             }
         })
     }
@@ -849,8 +848,8 @@ mod test {
         assert!(!list_of_two_tuple_int.fits(&list_of_any));
         assert!(list_of_two_tuple_int.fits(&list_of_two_tuple_int));
         assert!(list_of_two_tuple_int.fits(&StaticType::Any));
-        // ...but might once an `Any` it's passed for turns out to hold one.
-        assert!(StaticType::Any.may_fit(&list_of_two_tuple_int));
+        // An `Any` goes only where `Any` is taken, whatever it holds.
+        assert!(!StaticType::Any.may_fit(&list_of_two_tuple_int));
     }
 
     #[test]
