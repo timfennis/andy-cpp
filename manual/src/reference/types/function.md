@@ -164,8 +164,6 @@ If the body produces a value that doesn't fit the declared return type, the anal
 fn bad() -> Int { "hello" }   // error: mismatched types
 ```
 
-A recursive call returns what the function returns, so `fib` below returns an `Int` when it's called with one, without an annotation.
-
 ### Function types
 
 The type of a function is written `Fn(A, B) -> C`: it takes an `A` and a `B` and returns a `C`. Without `-> …` the function returns `()`:
@@ -211,15 +209,7 @@ let players = [Player("ann", 3), Player("bob", 5)];
 players.map(fn(p) => p.size);    // error: p is a Player, which has no size
 ```
 
-A lambda stored in a variable has one type, like any variable, so it can't take an `Int` in one call and a `Float` in the next:
-
-```ndc,fails
-let twice = fn(x) => x * 2;
-twice("abc".len());
-twice(2.5);    // error: twice takes an Int
-```
-
-A function declared with `fn` in the program, such as `fn twice(x) => x * 2`, can be called with both (see [Generic functions](#generic-functions)). A lambda parameter that nothing gives a type is `Any`, and is checked when the program runs.
+A lambda stored in a variable has one type, like any variable, so unlike a function declared with `fn` it can't take an `Int` in one call and a `Float` in the next. A lambda parameter that nothing gives a type is `Any`, and is checked when the program runs.
 
 ## Generic functions
 
@@ -240,61 +230,15 @@ let i: Int = fib(10);
 print(a, b, i);                        // 2 3.5 55
 ```
 
-The body is compiled for each set of types it's called with, so the calls in it are picked when the program is compiled, not as it runs. Called with a value of type `Any`, the function picks them as it runs.
+The body is compiled for each set of types it's called with, so the calls in it are picked before the program runs.
 
-A number literal in the body is typed by the body alone, as one anywhere else is, and never by a call: the `1` in `inc` is an `Int` whatever `inc` is given. So a literal that a result is made of fixes that result's type. `fact` returns the `1` or a product, which can only be one type, an `Int`, so it doesn't take a `Float`:
-
-```ndc,fails
-fn fact(n) => if n < 2 { 1 } else { n * fact(n - 1) };
-let r = fact(5.0);   // error: mismatched types: found Float but expected Int
-```
-
-Write `1.0` for a `fact` of `Float`s, which works for `Int`s too, as a `Float` times an `Int` is a `Float`:
-
-```ndc
-fn fact(n) => if n < 2 { 1.0 } else { n * fact(n - 1) };
-print(fact(5), fact(5.0));    // 120.0 120.0
-```
-
-A call with an argument the body can't use is an error at the call, with a note on the line in the body that can't take it:
+A call with an argument the body can't use is an error at the call, with notes that lead to the line in the body that can't take it:
 
 ```ndc,fails
 fn inc(x) => x + 1;
 fn shout(s) => inc(s) ++ "!";
 shout("a");    // error: No function called '+' found that matches the arguments 'String, Int'
                //   `shout` calls `inc` here, and `inc` needs `x + 1`
-```
-
-What the body can do with a parameter can make its type known right away: `xs.push(1)` only works on a list of Ints, so `fn f(xs) { xs.push(1) }` takes a `List<Int>`.
-
-A recursive call has to pass the types the function was called with. One that passes something built from a parameter would need a version of the function for every deeper type, so it's an error. Annotate the parameter with `Any` to let it change as the program runs:
-
-```ndc,fails
-fn nest(x, n) { if n == 0 { x } else { nest([x], n - 1) } }   // error: `nest` calls itself with an argument built from what it was given
-```
-
-```ndc
-fn nest(x: Any, n) { if n == 0 { x } else { nest([x], n - 1) } }
-print(nest(1, 3));   // [[[1]]]
-```
-
-Only a function declared in the program itself is generic. One declared in another function or in a block has one type, like a lambda in a variable, and its first call decides it:
-
-```ndc,fails
-fn outer() {
-    fn same(v) => v;
-    same(1);
-    same("a");    // error: same takes an Int
-}
-```
-
-A variable declared outside a function has one type too, even when the function is generic, so the first call decides what it holds:
-
-```ndc,fails
-let seen = [];
-fn remember(n) { seen.push(n); n }
-remember(1);
-remember("a");    // error: seen holds Ints, so remember takes an Int
 ```
 
 To take any value whatever its type, annotate the parameter with `Any`: the body then works with it as the program runs.
@@ -340,13 +284,6 @@ print(show(1));    // int
 print(show("a"));  // other
 ```
 
-Two overloads in one scope can't both fit a call with neither more specific than the other, as nothing would say which one the call means:
-
-```ndc,fails
-fn f(x: Int, y) { "first" }
-fn f(x, y: Int) { "second" }   // error: A call could fit both f(_, Int) and f(Int, _), declared earlier in the same scope, and neither is more specific
-```
-
 ## An overloaded function as a value
 
 A function's name can be used as a value, as in `xs.map(abs)`. When the name has several overloads, the type expected where it's used picks one. `map` passes each element, so over a list of Floats `abs` is `abs(Float)`, and over strings `split` is `split(String)` rather than `split(String, String)`. A function type annotation picks one too, and so do a variable's uses:
@@ -362,17 +299,7 @@ let f = split;
 print(f("a b"));                 // ["a","b"]
 ```
 
-Here `f` is `split(String)`, as it's called with one String.
-
-When nothing says which overload is meant, it's an error that asks for a function type:
-
-```ndc,fails
-let g = split;      // error: 'split' has several overloads, and nothing here says which one is meant
-```
-
-`print(abs)` is the same error, as `print` takes any value, and so is `[len, abs]`: the other values of a list don't say which overload is meant.
-
-Like a call, a value uses the nearest scope with an overload that fits.
+Here `f` is `split(String)`, as it's called with one String. When nothing says which overload is meant, as in `let g = split;`, it's an error that asks for a function type.
 
 In a generic function, each call's types pick the overload, as they pick the calls in its body:
 

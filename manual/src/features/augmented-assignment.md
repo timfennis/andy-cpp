@@ -40,76 +40,19 @@ source order. The augmented assignment expression itself evaluates to `()`.
 ## Type checking
 
 `a op= b` is checked like `a = a op b`: the operator has to take both operands,
-and what it returns has to fit `a`. An in-place operator such as `++=` is used
-where it does the same thing, so it never changes the type of its target. A
-right-hand side whose element type differs is rejected:
+and what it returns has to fit `a`:
 
 ```ndc,fails
 let values = [1];
 values ++= ["two"]; // error: No function called '++' found that matches the arguments 'List<Int>, List<String>'
 ```
 
-A wider element type is not enough either, as `++` keeps one element type:
-
-```ndc,fails
-let values: List<Int> = [1];
-let rhs: List<Number> = [0.5n];
-values ++= rhs; // error: No function called '++' found that matches the arguments 'List<Int>, List<Number>'
-```
-
-An operand of type `Any` is checked as the program runs, as in `a = a op b`.
-What the operator makes is checked where it's written back, so a value that
-doesn't fit fails there and leaves the target as it was. As nothing says the
-operand fits before it's checked, the operator makes a new value rather than
-changing the target in place:
-
-```ndc
-fn opaque(x: Any) => x;
-let values = [1];
-let same = values;
-values ++= opaque([2, 3]);
-print(values, same);  // [1,2,3] [1]
-```
-
-```ndc,fails
-fn opaque(x: Any) => x;
-let values = [1];
-values ++= opaque([0.5]); // error: expected List<Int> but found List<Any>
-```
-
-[Cast](casts.md) the operand to say what it holds, which checks it at the cast
-and lets `++=` change the target in place:
-
-```ndc
-fn opaque(x: Any) => x;
-let values = [1];
-let same = values;
-values ++= opaque([2, 3]) as List<Int>;
-print(values, same);  // [1,2,3] [1,2,3]
-```
-
-Annotate the target with `Any` to opt into heterogeneous contents:
+Annotate the target with `Any` to opt into mixed contents:
 
 ```ndc
 let mixed: List<Any> = [1];
 mixed ++= ["two"];
 print(mixed);  // [1,"two"]
-```
-
-Operators without an in-place implementation behave like `target = target op value`,
-so the result has to fit the target's type, just like in a regular assignment:
-
-```ndc,fails
-let numbers = ["a".len()];   // a List<Int>
-numbers[0] += 0.5;           // error: Int + Float is a Float, which doesn't fit in List<Int>
-```
-
-A list of number literals takes the type its uses need, so there the numbers are Floats:
-
-```ndc
-let numbers = [1, 2];
-numbers[0] += 0.5;
-print(numbers);  // [1.5,2.0]
 ```
 
 ## Optimization

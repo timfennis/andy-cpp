@@ -20,18 +20,3 @@ while n <= 100 {
   n += 1;
 }
 ```
-
-A `while true` loop that no `break` leaves never ends, so it has no value at all, like a `return`. A function can end in one and leave it with `return`, and it returns what its `return`s do:
-
-```ndc
-fn first_square_above(n) {
-    let i = 1;
-    while true {
-        if i * i > n {
-            return i * i;
-        }
-        i += 1;
-    }
-}
-print(first_square_above(50) + 1);  // 65
-```

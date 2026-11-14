@@ -1,6 +1,65 @@
 # Types
 
-Andy C++ runs as a dynamically typed language — values carry their types at runtime and most checking happens then. You can also attach type annotations to variables, function parameters, and return values, and the analyser will use them to flag obvious mismatches before the program runs.
+Values in Andy C++ carry their types at runtime, but you rarely have to write one down: the analyser works out the type of every expression before the program runs, and rejects code that can't work. Annotations on variables, parameters and return values are optional.
+
+## What the analyser works out
+
+Functions declared with `fn` are generic without saying so. Here the analyser works out that `compose` takes a function from some `B` to some `C` and a function from that `C` onwards:
+
+```ndc
+fn compose(f, g) => fn(x) => g(f(x));
+let shout = compose(to_upper, fn(s) => s ++ "!");
+let half = compose(len, fn(n) => n / 2.0);
+print(shout("hi"), half("four"));  // HI! 2.0
+```
+
+So it knows `len` and `to_upper` don't compose, without running anything:
+
+```ndc,fails
+fn compose(f, g) => fn(x) => g(f(x));
+compose(len, to_upper);
+// error: No function called 'compose' found that matches the arguments 'Fn(Iterable<Any>) -> Int, Fn(String) -> String'
+//   `compose` takes (Fn(B) -> C, Fn(C) -> A)
+```
+
+A mistake is found even in code that never runs, and the error leads you through the calls to the line that can't work. This program prints nothing:
+
+```ndc,fails
+fn inc(x) => x + 1;
+fn shout(s) => inc(s) ++ "!";
+print("hello");
+if false {
+    shout("a");  // error: No function called '+' found that matches the arguments 'String, Int'
+}                //   `shout` calls `inc` here, and `inc` needs `x + 1`
+```
+
+A lambda knows what it's given:
+
+```ndc,fails
+struct Player { name: String, score: Int }
+let players = [Player("ann", 3), Player("bob", 5)];
+players.map(fn(p) => p.score ++ " points");
+// error: No function called '++' found that matches the arguments 'Int, String'
+```
+
+An empty list learns what it holds from how it's used:
+
+```ndc,fails
+let xs = [];
+xs.push(1);
+xs.push("two");  // error: No function called 'push' found that matches the arguments 'List<Int>, String'
+```
+
+And the types pick which overload of a function is meant. A generic function is compiled once for each set of types it's called with, so `signum` below is the `Int` version in one call and the `Float` version in the other:
+
+```ndc
+print(["a b", "c d"].map(split));  // [["a","b"],["c","d"]]
+
+fn signs(xs) => xs.map(signum);
+print(signs([3, -2]), signs([0.5, -1.5]));  // [1,-1] [1.0,-1.0]
+```
+
+## The types
 
 Every value is an `Any`. The other types are:
 
@@ -56,8 +115,6 @@ fn total(xs) {
 print(total([1, 2]), total((3, 4)), total(1..4));   // 3 7 6
 ```
 
-Built-in functions say this with `Iterable<T>` in their signatures, as `sum(Iterable<Int>)` does, but an annotation can't: a value has a kind of sequence, which its annotation names, as in `List<Int>`. A tuple whose elements have different types iterates as `Any`.
-
 ### Element types are exact
 
 A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options, the other containers, and function types. To change a container's element type, go through `Any`:
@@ -67,24 +124,6 @@ let words = "a b".split(" ");     // List<String>
 let any: Any = words;
 let anything: List<Any> = any;    // fine: checked as the program runs
 let wrong: List<Any> = words;     // error: found List<String> but expected List<Any>
-```
-
-A literal takes the type its use needs, so an annotation can widen it directly. A literal whose values share no type is a container of `Any`:
-
-```ndc
-let xs: List<Any> = [1, 2];
-xs.push("three");
-let mixed = [1, "a"];             // List<Any>
-print(xs, mixed);                 // [1,2,"three"] [1,"a"]
-```
-
-The branches of an `if` work the same way. They're one type when they can be, with literals taking the other branch's type, and `Any` when they can't:
-
-```ndc
-let a = if true { 1 } else { 2.5 };   // Float
-let b = if true { 1 } else { "a" };   // Any
-let c = if true { [] } else { [1] };  // List<Int>
-print(a, b, c);                       // 1.0 1 []
 ```
 
 [Struct](./types/struct.md) names are type names like any other, including inside generics:

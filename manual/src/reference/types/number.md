@@ -53,16 +53,6 @@ print([1.5, 2.25].fold(0, fn(acc, x) => acc + x));  // 3.75
 
 A value that's already an `Int`, like the result of `len`, stays one.
 
-A variable has one type, which all its uses decide, including the ones after it's read. So a later use can make a literal a `Float`, and `/` and `\` then divide `Float`s rather than truncate:
-
-```ndc
-let x = 7;
-print(x / 2);  // 3.5
-x = 2.5;       // x is a Float, so the 7 is too
-```
-
-Write `7.0` or annotate `let x: Int = 7` to say which one is meant.
-
 Arbitrary-radix literals such as `16r2a` remain `Int` literals and do not accept `n`. The `i` and `j` suffixes create complex `Number` values:
 
 ```ndc
