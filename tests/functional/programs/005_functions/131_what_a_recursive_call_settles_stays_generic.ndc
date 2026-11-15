@@ -1,0 +1,6 @@
+// The `%{}`s hold what each call's recursion makes them hold, not `Any`s:
+// a function's constraints that its parameters reach settle them per call.
+// expect-output: %{1: 2} %{"a": "b"} 1 %{1: "a"}
+fn merged(m, n) => if n == 0 { m } else { merged(m, n - 1) | %{} };
+fn filled(x, n) => if n == 0 { %{} } else { let m = filled(x, n - 1); m[n] = x; m };
+print(merged(%{1: 2}, 2), merged(%{"a": "b"}, 1), filled(1, 2)[2], filled("a", 1));

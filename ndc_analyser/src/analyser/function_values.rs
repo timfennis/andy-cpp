@@ -104,7 +104,7 @@ impl Analyser {
             self.recursive_calls.push(id);
         }
         let typ = self.instantiate_function(symbol);
-        self.flush_value_copies(id, span);
+        self.flush_value_copies(id, &typ, span);
         typ
     }
 
@@ -328,7 +328,7 @@ impl Analyser {
     fn commit_function_value(&mut self, value: &FunctionValue, symbol: SymbolId, early: bool) {
         let typ = self.instantiate_function(symbol);
         self.vars.bind_argument(&value.expected, &typ);
-        self.flush_value_copies(value.id, value.span);
+        self.flush_value_copies(value.id, &typ, value.span);
         if early && cfg!(debug_assertions) {
             self.remember_early_function_value(value, symbol);
         }

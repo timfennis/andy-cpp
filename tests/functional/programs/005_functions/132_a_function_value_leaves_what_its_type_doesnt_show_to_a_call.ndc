@@ -1,0 +1,6 @@
+// expect-output: 2 2
+fn pick(xs: List<Int>, x: Int) => 1;
+fn pick(xs: List<Any>, x: Any) => 2;
+fn f(x) => pick([], x);
+let g: Fn(Int) -> Int = f;
+print(g(3), f(3));
