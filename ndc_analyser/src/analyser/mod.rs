@@ -81,6 +81,9 @@ pub struct Analyser {
     /// The functions the batch declares, in the order their declarations
     /// start, so a generic function knows the ones its body declares.
     declared_functions: Vec<NodeId>,
+    /// The native that indexes a tuple or an `Any`: see
+    /// [`ndc_core::ANY_INDEX`].
+    any_index: Option<SymbolId>,
     waiting_function_values: AHashSet<NodeId>,
     /// The types an anonymous function's unannotated parameters get from
     /// the call it's passed to, by the function's node: in
@@ -149,10 +152,15 @@ impl Analyser {
             StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
         );
         let mut types = TypeTable::default();
-        for ((_, typ), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
+        let mut any_index = None;
+        for ((name, typ), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
+            if name == ndc_core::ANY_INDEX {
+                any_index = Some(symbol);
+            }
             types.declare(symbol, typ);
         }
         Self {
+            any_index,
             resolver,
             types,
             vars: TypeVars::default(),

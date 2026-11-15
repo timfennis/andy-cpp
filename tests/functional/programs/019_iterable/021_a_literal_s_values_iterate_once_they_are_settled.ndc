@@ -1,0 +1,12 @@
+// The values of the map literal are lists of Strings once they're settled,
+// so `nb` is a String that `path` takes, not an `Any`.
+// expect-output: ["A","0"]
+fn route(from, graph) {
+    let path = [from];
+    for nb in graph[from] {
+        path.push(nb);
+    }
+    path
+}
+let g = %{"A": ["0"]};
+print(route("A", g));

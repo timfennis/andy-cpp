@@ -99,12 +99,19 @@ impl Analyser {
         }
 
         // A type only the body makes, as of a list nothing else uses, gets
-        // its fallback.
+        // its fallback. One from outside the function is the outside's to
+        // settle, as the keys of `pairs` in `fn f(r) => r.pairwise(fn(a, b)
+        // => pairs[a, b])`, which the code around `f` may still decide.
         let uses = uses
             .into_iter()
             .map(|mut generic_use| {
                 for typ in &generic_use.key {
-                    let unnamed = self.vars.unsettled(typ);
+                    let unnamed = self
+                        .vars
+                        .unsettled(typ)
+                        .into_iter()
+                        .filter(|&var| self.vars.is_generalizable(var))
+                        .collect::<Vec<_>>();
                     self.vars.settle_with_fallbacks(&unnamed);
                 }
                 generic_use.key = generic_use
