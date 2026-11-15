@@ -44,7 +44,8 @@ impl Analyser {
     ) -> StaticType {
         self.solve_waiting();
         self.default_literals(TypeVars::is_generalizable);
-        self.settle_ambiguous(signature);
+        let connected = self.reached_from_parameters(signature);
+        self.settle_ambiguous(signature, &connected);
         self.merge_copies();
         self.keep_outer_constraints_outside();
 
@@ -183,6 +184,55 @@ impl Analyser {
             },
         );
         self.vars.resolve(signature)
+    }
+
+    /// The generic function's variables that its constraints connect to its
+    /// parameters, which each call settles. Unlike the `[]` of `fn f(x) {
+    /// [].push(x) }`, which no call decides, the inner `%{}` of `fn f(data,
+    /// k) { let m = %{:fn() => %{}}; m[k].insert(data) }` is what `data` is
+    /// once `m[k]` is picked.
+    fn reached_from_parameters(&self, signature: &StaticType) -> AHashSet<TypeVar> {
+        let open = |var: &TypeVar| self.vars.is_generalizable(*var);
+        let groups = self
+            .generic_constraints()
+            .into_iter()
+            .map(|serial| {
+                let constraint = &self.waiting[&serial].constraint;
+                constraint
+                    .inputs()
+                    .iter()
+                    .chain(constraint.outputs())
+                    .flat_map(|typ| self.vars.unsettled(typ))
+                    .filter(open)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let parameters = match signature {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => parameters.as_slice(),
+            _ => &[],
+        };
+        let mut reached = parameters
+            .iter()
+            .flat_map(|typ| self.vars.unsettled(typ))
+            .filter(open)
+            .collect::<AHashSet<_>>();
+        loop {
+            let mut changed = false;
+            for group in &groups {
+                if group.iter().any(|var| reached.contains(var)) {
+                    for &var in group {
+                        changed |= reached.insert(var);
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        reached
     }
 
     /// Leaves the constraints that wait only on what's outside the generic
@@ -382,8 +432,11 @@ impl Analyser {
     /// Settles the variables of the generic function with type `signature`
     /// that its parameters don't decide, like the end of the program
     /// settles its own: a call that a default rule decides is decided by it,
-    /// and what's left gets its fallbacks, oldest constraint first.
-    fn settle_ambiguous(&mut self, signature: &StaticType) {
+    /// and what's left gets its fallbacks, oldest constraint first, except
+    /// what the constraints `connected` to the parameters, which each call
+    /// settles: in `fn f(data, k) { let m = %{:fn() => %{}}; m[k].insert(data)
+    /// }`, the inner map's keys are what `data` is once `m[k]` is picked.
+    fn settle_ambiguous(&mut self, signature: &StaticType, connected: &AHashSet<TypeVar>) {
         let parameters = match signature {
             StaticType::Function {
                 parameters: Some(parameters),
@@ -393,9 +446,9 @@ impl Analyser {
         };
         loop {
             let ambiguous = self.ambiguous_vars(&parameters);
-            let Some((_, vars)) = ambiguous.first().cloned() else {
+            if ambiguous.is_empty() {
                 return;
-            };
+            }
             let decided_by_default = ambiguous.iter().any(|(serial, vars)| {
                 let only_ambiguous = self.waiting.get(serial).is_some_and(|waiting| {
                     self.generic_inputs(&waiting.constraint)
@@ -407,6 +460,16 @@ impl Analyser {
                     || self.default_to_branch(*serial, vars)
             });
             if !decided_by_default {
+                let Some(vars) = ambiguous.iter().find_map(|(_, vars)| {
+                    let unconnected = vars
+                        .iter()
+                        .copied()
+                        .filter(|var| !connected.contains(var))
+                        .collect::<Vec<_>>();
+                    (!unconnected.is_empty()).then_some(unconnected)
+                }) else {
+                    return;
+                };
                 self.vars.settle_with_fallbacks(&vars);
             }
             self.solve_waiting();
