@@ -1,0 +1,7 @@
+// expect-output: 1 2 1
+fn pick(xs: List<Int>) => 1;
+fn pick(xs: List<Any>) => 2;
+let ints: List<Int> = [];
+let anys: List<Any> = [];
+fn only(xs: List<Int>) => 1;
+print(pick(ints), pick(anys), only([]));

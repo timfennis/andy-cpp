@@ -394,7 +394,7 @@ impl Analyser {
             Expression::BoolLiteral(_) => StaticType::Bool,
             // What `None`, `[]` and `%{}` hold is only known from later uses.
             Expression::NoneLiteral => {
-                StaticType::Option(Box::new(self.vars.fresh(StaticType::Any)))
+                StaticType::Option(Box::new(self.vars.fresh_stand_in(StaticType::Any)))
             }
             Expression::StringLiteral(_) => StaticType::String,
             Expression::NumericLiteral(NumericLiteral::Int64(_)) => self.vars.fresh_number(*span),
@@ -622,7 +622,7 @@ impl Analyser {
             }
             Expression::List { values } => {
                 let element_type = if values.is_empty() {
-                    self.vars.fresh(StaticType::Any)
+                    self.vars.fresh_stand_in(StaticType::Any)
                 } else {
                     let values = values
                         .iter()
@@ -660,7 +660,7 @@ impl Analyser {
                 }
 
                 let key_type = if keys.is_empty() {
-                    self.vars.fresh(StaticType::Any)
+                    self.vars.fresh_stand_in(StaticType::Any)
                 } else {
                     self.holding(keys, *span)
                 };
@@ -668,7 +668,7 @@ impl Analyser {
                 let value_type = if !held.is_empty() {
                     self.holding(held, *span)
                 } else if values.is_empty() {
-                    self.vars.fresh(StaticType::unit())
+                    self.vars.fresh_stand_in(StaticType::unit())
                 } else {
                     StaticType::unit()
                 };

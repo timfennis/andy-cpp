@@ -1,0 +1,13 @@
+// A function of the program hides the builtins of its name, `zip` takes
+// lists of anything, and unpacking picks no overload: none of these depends
+// on what the empty literals hold.
+// expect-output: 42 3 [] ok
+fn len(xs) => 42;
+fn unwrap_or(o, d) => d;
+for (a, b) in zip([], []) {
+    print(a, b);
+}
+for (a, b) in [] {
+    print(a, b);
+}
+print(len([]), unwrap_or(None, 3), zip([], []), "ok");

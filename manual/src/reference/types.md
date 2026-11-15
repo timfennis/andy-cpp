@@ -50,6 +50,16 @@ xs.push(1);
 xs.push("two");  // error: No function called 'push' found that matches the arguments 'List<Int>, String'
 ```
 
+When nothing says what an empty `[]`, `%{}` or `None` holds, it doesn't matter as long as nothing depends on it: `print([])` prints `[]`. When it's all that could pick an overload, it does, and an annotation has to say what it holds:
+
+```ndc,fails
+fn describe(xs: List<Int>) => "ints";
+fn describe(xs: List<String>) => "strings";
+let ints: List<Int> = [];
+describe(ints);  // fine: "ints"
+describe([]);    // error: can't tell which `describe` this is: part of what it's given has no known type
+```
+
 And the types pick which overload of a function is meant. A generic function is compiled once for each set of types it's called with, so `signum` below is the `Int` version in one call and the `Float` version in the other:
 
 ```ndc

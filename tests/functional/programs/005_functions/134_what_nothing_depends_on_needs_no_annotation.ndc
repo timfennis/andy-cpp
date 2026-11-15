@@ -1,0 +1,7 @@
+// expect-output: [] %{} None 0 [3] ["b"]
+fn f(xs) => if xs.len() == 0 { [] } else { f(xs[1..]) };
+let r = f([1, 2]);
+r.push(3);
+let s = f(["a"]);
+s.push("b");
+print([], %{}, None, len([]), r, s);

@@ -43,6 +43,11 @@ pub(crate) struct TypeVars {
     /// What each variable becomes if nothing settles it: `Any` for the
     /// elements of `[]`, which is what `[]` was typed as before.
     fallbacks: Vec<StaticType>,
+    /// Whether each variable's fallback is only a stand-in that nothing may
+    /// depend on: what `[]`, `%{}` and `None` hold, or a type parameter of a
+    /// generic function, when nothing says what it is. Any type would do
+    /// for a list nothing is put in, but not to pick an overload with.
+    stand_ins: Vec<bool>,
     /// The variables in the order they were settled, so a [`Snapshot`] can
     /// unsettle the ones settled after it, and the solver can tell which
     /// ones were settled since it last looked.
@@ -117,9 +122,26 @@ impl TypeVars {
         let var = self.next_var();
         self.solutions.push(None);
         self.fallbacks.push(fallback);
+        self.stand_ins.push(false);
         self.levels.push(self.level);
         self.bounds.push(Vec::new());
         StaticType::Var(var)
+    }
+
+    /// A new variable for what an empty literal holds, or for a type
+    /// parameter, which becomes `fallback` only where nothing depends on it.
+    pub(crate) fn fresh_stand_in(&mut self, fallback: StaticType) -> StaticType {
+        let typ = self.fresh(fallback);
+        if let StaticType::Var(var) = typ {
+            self.stand_ins[var.0 as usize] = true;
+        }
+        typ
+    }
+
+    /// Whether `var`'s fallback only stands in where nothing depends on it:
+    /// see [`Self::fresh_stand_in`].
+    pub(crate) fn is_stand_in(&self, var: TypeVar) -> bool {
+        self.stand_ins[var.0 as usize]
     }
 
     /// The type of an integer literal, like `1`, which its uses settle as an
@@ -570,6 +592,7 @@ impl TypeVars {
         let plain = self.next_var();
         self.solutions.push(None);
         self.fallbacks.push(StaticType::Any);
+        self.stand_ins.push(false);
         self.levels.push(self.levels[var.0 as usize]);
         self.bounds.push(Vec::new());
         self.settle_literal(var, &StaticType::Var(plain))
@@ -761,6 +784,7 @@ impl TypeVars {
         }
         self.solutions.truncate(snapshot.vars);
         self.fallbacks.truncate(snapshot.vars);
+        self.stand_ins.truncate(snapshot.vars);
         self.levels.truncate(snapshot.vars);
         self.bounds.truncate(snapshot.vars);
     }
@@ -977,7 +1001,7 @@ impl TypeVars {
     ) -> StaticType {
         for name in typ.type_parameters() {
             if !made.iter().any(|(generic, _)| *generic == name) {
-                let var = self.fresh(StaticType::Any);
+                let var = self.fresh_stand_in(StaticType::Any);
                 made.push((name, var));
             }
         }

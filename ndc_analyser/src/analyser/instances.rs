@@ -169,7 +169,18 @@ impl Analyser {
             return;
         }
         if generic_use.value && key.iter().any(StaticType::has_errors) {
-            self.report_unknown_instance(generic_use);
+            // A type that only the function's body has, as the list's in
+            // `fn f(x) => pick([], x)`, failed where it was used, and so did
+            // one that a use of it the value copies reported here.
+            if self.shown_parts_failed(generic_use.function, &key)
+                && !self
+                    .result
+                    .errors
+                    .iter()
+                    .any(|error| error.span() == generic_use.span)
+            {
+                self.report_unknown_instance(generic_use);
+            }
             return;
         }
         let instance = self.instance_for(generic_use.function, key, new);
@@ -191,6 +202,19 @@ impl Analyser {
             generic_use.site,
             Binding::Resolved(Candidate::Scalar(instance)),
         );
+    }
+
+    /// Whether a part of `key`, an instance key of `function`, that the
+    /// function's type shows is a failed check's.
+    fn shown_parts_failed(&self, function: SymbolId, key: &[StaticType]) -> bool {
+        let shown = self.types.get_type(function).type_parameters();
+        self.schemes.get(&function).is_none_or(|scheme| {
+            scheme
+                .key
+                .iter()
+                .zip(key)
+                .any(|(name, typ)| shown.contains(name) && typ.has_errors())
+        })
     }
 
     /// Reports that the generic function value `generic_use` doesn't say

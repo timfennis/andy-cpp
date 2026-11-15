@@ -314,6 +314,23 @@ impl AnalysisError {
         }
     }
 
+    /// The call of `function` at `span` could be to several of its
+    /// overloads, and what decides between them has no known type: what an
+    /// empty `[]`, `%{}` or `None` holds, or what a generic function gives,
+    /// as in `pick([])` with `pick` taking a `List<Int>` or a `List<Any>`.
+    pub(crate) fn contents_not_known(function: &str, span: Span) -> Self {
+        Self {
+            text: format!(
+                "can't tell which `{function}` this is: part of what it's given has no known type"
+            ),
+            span,
+            help_text: Some(
+                "an empty `[]`, `%{}` or `None` that nothing stores anything in has none: say what it holds where it's made, as in `let xs: List<Int> = []`".to_string(),
+            ),
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn function_not_found(ident: &str, types: &[StaticType], span: Span) -> Self {
         Self {
             text: format!(

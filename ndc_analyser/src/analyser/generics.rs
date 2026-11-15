@@ -44,7 +44,7 @@ impl Analyser {
     ) -> StaticType {
         self.solve_waiting();
         self.default_literals(TypeVars::is_generalizable);
-        let connected = self.reached_from_parameters(signature);
+        let connected = self.reached_from_signature(signature);
         self.settle_ambiguous(signature, &connected);
         self.merge_copies();
         self.keep_outer_constraints_outside();
@@ -187,11 +187,13 @@ impl Analyser {
     }
 
     /// The generic function's variables that its constraints connect to its
-    /// parameters, which each call settles. Unlike the `[]` of `fn f(x) {
-    /// [].push(x) }`, which no call decides, the inner `%{}` of `fn f(data,
-    /// k) { let m = %{:fn() => %{}}; m[k].insert(data) }` is what `data` is
-    /// once `m[k]` is picked.
-    fn reached_from_parameters(&self, signature: &StaticType) -> AHashSet<TypeVar> {
+    /// parameters or what it returns, which each call settles. Unlike the
+    /// `[]` of `fn f(x) { [].push(x) }`, which no call decides, the inner
+    /// `%{}` of `fn f(data, k) { let m = %{:fn() => %{}}; m[k].insert(data)
+    /// }` is what `data` is once `m[k]` is picked, and the `[]` of `fn f(xs)
+    /// => if xs.len() == 0 { [] } else { f(xs[1..]) }` is what the call's
+    /// result is used as.
+    fn reached_from_signature(&self, signature: &StaticType) -> AHashSet<TypeVar> {
         let open = |var: &TypeVar| self.vars.is_generalizable(*var);
         let groups = self
             .generic_constraints()
@@ -207,16 +209,10 @@ impl Analyser {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let parameters = match signature {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } => parameters.as_slice(),
-            _ => &[],
-        };
-        let mut reached = parameters
-            .iter()
-            .flat_map(|typ| self.vars.unsettled(typ))
+        let mut reached = self
+            .vars
+            .unsettled(signature)
+            .into_iter()
             .filter(open)
             .collect::<AHashSet<_>>();
         loop {
@@ -460,17 +456,17 @@ impl Analyser {
                     || self.default_to_branch(*serial, vars)
             });
             if !decided_by_default {
-                let Some(vars) = ambiguous.iter().find_map(|(_, vars)| {
+                let Some((serial, vars)) = ambiguous.iter().find_map(|(serial, vars)| {
                     let unconnected = vars
                         .iter()
                         .copied()
                         .filter(|var| !connected.contains(var))
                         .collect::<Vec<_>>();
-                    (!unconnected.is_empty()).then_some(unconnected)
+                    (!unconnected.is_empty()).then_some((*serial, unconnected))
                 }) else {
                     return;
                 };
-                self.vars.settle_with_fallbacks(&vars);
+                self.fall_back(serial, &vars);
             }
             self.solve_waiting();
         }

@@ -633,7 +633,7 @@ impl Analyser {
                 break;
             };
             fallen_back = serial;
-            self.vars.settle_with_fallbacks(&vars);
+            self.fall_back(serial, &vars);
             unchecked.extend(self.solve_waiting_and_report());
         }
         self.vars.settle_from(first);
@@ -645,6 +645,104 @@ impl Analyser {
             self.retry(serial);
         }
         self.solve_waiting();
+    }
+
+    /// Settles `vars`, which the waiting constraint `serial` waits on and
+    /// nothing else settles, as their fallbacks. What an empty `[]`, `%{}`
+    /// or `None` holds, or a type parameter, stands in as its fallback only
+    /// where nothing depends on it, which a call's pick does when it's what
+    /// decides between overloads: in `pick([])`, with `pick` taking a
+    /// `List<Int>` or a `List<Any>`, nothing says which it is. That's
+    /// reported, and they're failed checks.
+    pub(super) fn fall_back(&mut self, serial: u64, vars: &[TypeVar]) {
+        let others = vars
+            .iter()
+            .copied()
+            .filter(|&var| !self.vars.is_stand_in(var))
+            .collect::<Vec<_>>();
+        if !others.is_empty() {
+            self.vars.settle_with_fallbacks(&others);
+            return;
+        }
+        let Some(Waiting {
+            constraint: Constraint::Call(call),
+            origin,
+        }) = self.waiting.get(&serial).cloned()
+        else {
+            self.vars.settle_with_fallbacks(vars);
+            return;
+        };
+        if !self.pick_depends_on(&call, vars) {
+            self.vars.settle_with_fallbacks(vars);
+            return;
+        }
+        let error = AnalysisError::contents_not_known(&call.name, call.span);
+        let outer = std::mem::replace(&mut self.copied_through, origin);
+        self.emit(error);
+        self.copied_through = outer;
+        for &var in vars {
+            self.vars.settle_unknowns_as_errors(&StaticType::Var(var));
+        }
+    }
+
+    /// Whether which overload `call` picks depends on what the types
+    /// `stand_ins` are. The overloads in the nearest scope with one that
+    /// takes the call hide the others. Of those, one with known parameters
+    /// is picked over one that takes anything, as `zip`'s are, and the
+    /// narrowest over the rest, as `[](Map<K, V>, K)` is over `[](Any,
+    /// Any)`. The pick doesn't depend on them when that one takes them as
+    /// whatever they are, as `zip(Iterable<A>, Iterable<B>)` takes `[]`,
+    /// and does when it only takes some types: `describe(xs: List<Int>)`
+    /// next to `describe(x: Any)` isn't the pick for a `List<String>`.
+    fn pick_depends_on(&mut self, call: &CallConstraint, stand_ins: &[TypeVar]) -> bool {
+        let arguments = call
+            .arguments
+            .iter()
+            .map(|argument| self.vars.resolve(argument))
+            .collect::<Vec<_>>();
+        let Some(group) = self
+            .overloads()
+            .reachable_groups(&call.candidates)
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .filter(|&symbol| self.could_accept(symbol, &arguments))
+                    .collect::<Vec<_>>()
+            })
+            .find(|fitting| !fitting.is_empty())
+        else {
+            // What none takes is wrong whatever they are.
+            return false;
+        };
+        if let [_] = group[..] {
+            return false;
+        }
+        let typed = group
+            .iter()
+            .copied()
+            .filter(|&symbol| self.overloads().parameters_of(symbol).is_some())
+            .collect::<Vec<_>>();
+        let Some(narrowest) = self.most_specific(&typed) else {
+            return true;
+        };
+        let declared = self.vars.resolve(self.types.get_type(narrowest));
+        let snapshot = self.vars.snapshot();
+        let signature = self.vars.instantiate_with(&declared, &mut Vec::new());
+        let takes_any = match signature {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => {
+                self.vars.bind_arguments(&parameters, &arguments)
+                    && stand_ins.iter().all(|&var| {
+                        matches!(self.vars.resolve(&StaticType::Var(var)), StaticType::Var(_))
+                    })
+            }
+            _ => false,
+        };
+        self.vars.rollback(snapshot);
+        !takes_any
     }
 
     /// Settles the types of the literals that `belongs` says to that nothing
