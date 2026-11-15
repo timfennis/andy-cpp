@@ -1,0 +1,5 @@
+// The `[]` and `%{}` take the type of what the recursive call returns.
+// expect-output: [1] ["a"] %{1: 1} %{"a": 1}
+fn list(x, n) => if n == 0 { [x] } else { list(x, n - 1) ++ [] };
+fn table(x, n) => if n == 0 { %{x: 1} } else { table(x, n - 1) | %{} };
+print(list(1, 3), list("a", 2), table(1, 2), table("a", 1));

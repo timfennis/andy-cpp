@@ -1,0 +1,8 @@
+// The `[]` is a list of what `rest` holds, which each call says.
+// expect-output: [1] ["a","b"]
+fn f(rest) {
+    let t = if true { [] } else { rest };
+    t ++ [1]
+}
+fn g(rest) => (if false { [] } else { rest }) ++ ["b"];
+print(f([2]), g(["a"]));

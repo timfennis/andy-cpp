@@ -1,0 +1,8 @@
+// What's next to a parameter in an `if` is decided by each call's argument.
+// expect-output: %{"b": 2} 4 ["x"]
+fn maps(xs) => if true { %{} } else { xs };
+let m = maps(%{"a": 1});
+m["b"] = 2;
+fn funcs(g) => if true { g } else { fn(x) => x * 2 };
+fn lists(xs) => if false { [] } else { xs };
+print(m, funcs(fn(x) => x + 1)(3), lists(["x"]));

@@ -299,9 +299,12 @@ impl Analyser {
 
     /// The generic function's variables that its constraints wait on but
     /// that its parameters don't decide, by constraint, oldest first. What
-    /// a constraint settles is decided when what it waits on is. An
-    /// overloaded function's name used as a value is picked like a call:
-    /// for each instance, from the types its parameters decide.
+    /// a constraint settles is decided when what it waits on is, and a
+    /// branch of an `if` decides the other one once it's partly known: in
+    /// `fn f(xs) => if c { [] } else { xs }`, what `xs` is says what the
+    /// `[]` holds. An overloaded function's name used as a value is picked
+    /// like a call: for each instance, from the types its parameters
+    /// decide.
     fn ambiguous_vars(&self, parameters: &[StaticType]) -> Vec<(u64, Vec<TypeVar>)> {
         let serials = self.generic_constraints();
         let mut decided = parameters
@@ -313,6 +316,33 @@ impl Analyser {
             let mut changed = false;
             for serial in &serials {
                 let constraint = &self.waiting[serial].constraint;
+                if let Constraint::Join { types, .. } = constraint {
+                    let vars = |typ: &StaticType| {
+                        self.vars
+                            .unsettled(typ)
+                            .into_iter()
+                            .filter(|&var| self.vars.is_generalizable(var))
+                            .collect::<Vec<_>>()
+                    };
+                    // The join waits while a branch is wholly unknown, so it
+                    // decides nothing about such a branch: the result of
+                    // `f(x, n - 1) ++ []` is decided by the `++`.
+                    let waits_on = |typ: &StaticType| match self.vars.resolve(typ) {
+                        StaticType::Var(var) => !self.vars.is_literal(var),
+                        _ => false,
+                    };
+                    let [a, b, result] = types.each_ref().map(vars);
+                    for (branch, other, other_type) in [(&a, &b, &types[1]), (&b, &a, &types[0])] {
+                        if !branch.is_empty()
+                            && branch.iter().all(|var| decided.contains(var))
+                            && !waits_on(other_type)
+                        {
+                            for &var in other.iter().chain(&result) {
+                                changed |= decided.insert(var);
+                            }
+                        }
+                    }
+                }
                 if !self
                     .generic_inputs(constraint)
                     .iter()
