@@ -1,0 +1,14 @@
+// `multi_cartesian_product` takes an `Iterable<List<T>>` or an
+// `Iterable<Any>`. Lists of functions whose types aren't known yet are a
+// `List<T>` whatever those turn out to be, and that overload is the
+// narrower one, so the call is its: what `op` is then comes from it.
+// expect-output: [5,6]
+fn mul(a, b) => a * b;
+fn add(a, b) => a + b;
+let results = [];
+for ops in [[mul, add]].multi_cartesian_product() {
+    for op in ops {
+        results.push(op(2, 3));
+    }
+}
+print(results.sorted());

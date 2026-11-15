@@ -73,6 +73,10 @@ pub(crate) struct TypeVars {
     /// The literals settled as [`StaticType::Error`] because their values
     /// share no type, which the analyser reports.
     unshared: Vec<(TypeVar, Unshared)>,
+    /// Whether each variable is the type of an `if` or a `match` whose
+    /// branches aren't known yet, which is `Any` where an `Any` is expected:
+    /// see [`Self::fresh_join`].
+    joins: Vec<bool>,
 }
 
 /// Two values of a literal that share no type, as `1` and `"a"` in `[1,
@@ -119,7 +123,36 @@ impl TypeVars {
         self.fallbacks.push(fallback);
         self.levels.push(self.level);
         self.bounds.push(Vec::new());
+        self.joins.push(false);
         StaticType::Var(var)
+    }
+
+    /// The type of an `if` or a `match` whose branches aren't known yet.
+    /// Where an `Any` is expected of it, it's an `Any`, so its branches
+    /// may share no type, as they may once they're known: in `g(if c { x }
+    /// else { [] })` with `g(v: Any)`.
+    pub(crate) fn fresh_join(&mut self) -> StaticType {
+        let typ = self.fresh(StaticType::Any);
+        if let StaticType::Var(var) = typ {
+            self.joins[var.0 as usize] = true;
+        }
+        typ
+    }
+
+    /// Whether `typ` is, or is settled as, the type of an `if` or a `match`
+    /// whose branches aren't known yet.
+    fn is_join(&self, typ: &StaticType) -> bool {
+        let mut typ = typ;
+        while let StaticType::Var(var) = typ {
+            if self.joins[var.0 as usize] {
+                return true;
+            }
+            match self.solution(*var) {
+                Some(solution) => typ = solution,
+                None => return false,
+            }
+        }
+        false
     }
 
     /// The type of an integer literal, like `1`, which its uses settle as an
@@ -763,6 +796,7 @@ impl TypeVars {
         self.fallbacks.truncate(snapshot.vars);
         self.levels.truncate(snapshot.vars);
         self.bounds.truncate(snapshot.vars);
+        self.joins.truncate(snapshot.vars);
     }
 
     /// Unifies `a` and `b` if they can be made the same type, and otherwise
@@ -1004,8 +1038,12 @@ impl TypeVars {
     /// elements. An argument nothing is known about yet stays what it is,
     /// as the call that takes it waits for it to iterate.
     pub(crate) fn bind_argument(&mut self, parameter: &StaticType, argument: &StaticType) -> bool {
+        let join = self.is_join(argument);
         let (parameter, argument) = (self.shallow(parameter), self.shallow(argument));
         match (&parameter, &argument) {
+            (StaticType::Any, StaticType::Var(var)) if join && !self.is_literal(*var) => {
+                self.settle(*var, StaticType::Any)
+            }
             // Values that share no type are what's asked for where an `Any`
             // is expected: `let x: Any = if c { 1 } else { "a" }`.
             (StaticType::Any, StaticType::Var(var))

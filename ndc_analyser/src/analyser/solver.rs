@@ -347,7 +347,7 @@ impl Analyser {
             (_, StaticType::Never) => a,
             _ if a == b => a,
             _ if unknown(self, &a) || unknown(self, &b) => {
-                let result = self.vars.fresh(StaticType::Any);
+                let result = self.vars.fresh_join();
                 self.wait(Constraint::Join {
                     types: [a, b, result.clone()],
                     span,
@@ -1419,14 +1419,16 @@ impl Analyser {
     }
 
     /// The overload a call of `candidates` with arguments of these types
-    /// commits to while the arguments aren't fully known: the only one that
-    /// can take them, once nothing learned later could make another one the
-    /// pick. One that takes them only through an `Any` parameter would lose
-    /// to an exact type once they're known, and an operator may also apply
-    /// to each element of a tuple, which an unknown or `Any` operand can be:
-    /// `fn(x) => x ++ "!"` can take `("a", "b")`.
-    /// Function values are picked by the same rule, as calls with the
-    /// expected parameter types.
+    /// commits to while the arguments aren't fully known: one that is the
+    /// pick however their unknown parts turn out, so learning more can't
+    /// change it. That's the only overload, in any scope, that could take
+    /// them, counting each unknown as able to become any type, a tuple or an
+    /// `Any` among them, and each literal as any type it may become. Or it's
+    /// one that wins whatever they turn out to be: see [`Self::dominant`].
+    /// An operator may apply to each element of a tuple, which an unknown
+    /// operand can be: `fn(x) => x ++ "!"` can take `("a", "b")`. Function
+    /// values are picked by the same rule, as calls with the expected
+    /// parameter types.
     pub(super) fn early_overload(
         &mut self,
         candidates: &Candidates,
@@ -1437,28 +1439,7 @@ impl Analyser {
         let literals = arguments
             .iter()
             .flat_map(|argument| self.vars.unsettled(argument))
-            .filter(|&var| self.vars.is_literal(var))
-            .collect::<Vec<_>>();
-        // The nearest scope with an overload that takes the call hides those
-        // further out. When that scope has one overload, whose parameters
-        // take whatever the literals turn out to be, as a nested `fn d(x)`
-        // does, the call is its, though a literal isn't decided yet.
-        if !literals.is_empty()
-            && !Self::operand_could_be_a_tuple(kind, arguments)
-            && let Some(nearest) = self
-                .overloads()
-                .reachable_groups(candidates)
-                .into_iter()
-                .find(|group| {
-                    group
-                        .iter()
-                        .any(|&symbol| self.could_accept(symbol, arguments))
-                })
-            && let [only] = nearest[..]
-            && self.takes_any_literal(only, arguments)
-        {
-            return EarlyOverload::Only(only);
-        }
+            .any(|var| self.vars.is_literal(var));
         let viable = reachable
             .iter()
             .copied()
@@ -1468,35 +1449,108 @@ impl Analyser {
             // A literal may still become `Any`, which an overload that can't
             // take it now might take: `[1, "s"]` holds `Any`s, which
             // `p(x: String)` may get.
-            [] if !literals.is_empty() && self.fits_once_any(&reachable, arguments, None) => {
+            [] if literals && self.fits_once_any(&reachable, arguments, None) => {
                 EarlyOverload::Undecided
             }
             [] => EarlyOverload::NoneFits,
             [only]
-                if self.fits_without_any(only, arguments)
-                    && !Self::operand_could_be_a_tuple(kind, arguments)
-                    && !self.merges_literals(only, arguments) =>
+                if !Self::operand_could_be_a_tuple(kind, arguments)
+                    && self.iterables_known(only, arguments)
+                    && !(literals && self.fits_once_any(&reachable, arguments, Some(only))) =>
             {
-                // When the pick depends on what a literal is now, as
-                // `p(x)` over `p(x: Int)` does for the Strings in
-                // `["s"].map(p)`, the literal is what it is from here on:
-                // the first use that depends on it decides it.
-                // What they're decided as may still leave the pick open,
-                // as `Any` would, so it's made again with them settled.
-                if !literals.is_empty() && self.fits_once_any(&reachable, arguments, Some(only)) {
-                    if !self.decide_literals(&literals, only, arguments) {
-                        return EarlyOverload::Undecided;
-                    }
-                    let arguments = arguments
-                        .iter()
-                        .map(|argument| self.vars.resolve(argument))
-                        .collect::<Vec<_>>();
-                    return self.early_overload(candidates, &arguments, kind);
-                }
                 EarlyOverload::Only(only)
             }
-            _ => EarlyOverload::Undecided,
+            [_] => EarlyOverload::Undecided,
+            _ => match self.dominant(candidates, &viable, arguments, kind) {
+                Some(dominant) => EarlyOverload::Only(dominant),
+                None => EarlyOverload::Undecided,
+            },
         }
+    }
+
+    /// The one of `viable`, the overloads that could take `arguments`, that
+    /// resolution picks however their unknown parts turn out: it's in the
+    /// nearest scope with one of them, takes the arguments without settling
+    /// any unknown part of them or making two of them one, and is narrower
+    /// than the others in its scope. As it always takes the call, overloads
+    /// further out never get it, and nearer ones can't take it. In
+    /// `multi_cartesian_product([[f, g]])`, `(Iterable<List<T>>)` is the
+    /// pick over `(Iterable<Any>)` whatever `f` and `g` turn out to be. An
+    /// argument nothing is known about could be an `Any`, which only the
+    /// overloads taking an `Any` take, so it leaves the pick open.
+    fn dominant(
+        &mut self,
+        candidates: &Candidates,
+        viable: &[SymbolId],
+        arguments: &[StaticType],
+        kind: CallKind,
+    ) -> Option<SymbolId> {
+        if Self::operand_could_be_a_tuple(kind, arguments)
+            || arguments
+                .iter()
+                .any(|argument| matches!(argument, StaticType::Var(_)))
+        {
+            return None;
+        }
+        let nearest = self
+            .overloads()
+            .reachable_groups(candidates)
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .filter(|symbol| viable.contains(symbol))
+                    .collect::<Vec<_>>()
+            })
+            .find(|group| !group.is_empty())?;
+        let narrowest = self.most_specific(&nearest)?;
+        if !self.iterables_known(narrowest, arguments) {
+            return None;
+        }
+        let unknowns = arguments
+            .iter()
+            .flat_map(|argument| self.vars.unsettled(argument))
+            .collect::<Vec<_>>();
+        let declared = self.vars.resolve(self.types.get_type(narrowest));
+        let snapshot = self.vars.snapshot();
+        let free = match self.vars.instantiate_with(&declared, &mut Vec::new()) {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => {
+                self.vars.bind_arguments(&parameters, arguments)
+                    && unknowns
+                        .iter()
+                        .filter_map(|&var| match self.vars.resolve(&StaticType::Var(var)) {
+                            StaticType::Var(now) if !self.vars.is_literal(var) => Some(now),
+                            _ => None,
+                        })
+                        .unique()
+                        .count()
+                        == unknowns.len()
+            }
+            _ => false,
+        };
+        self.vars.rollback(snapshot);
+        free.then_some(narrowest)
+    }
+
+    /// Whether `symbol`'s `Iterable` parameters are given arguments whose
+    /// kind of sequence is known. An `Iterable<T>` parameter takes any kind
+    /// of sequence, so it can't tell what an argument nothing is known about
+    /// is, and the call waits for it as `for x in xs` does.
+    fn iterables_known(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+        self.overloads()
+            .parameters_of(symbol)
+            .is_some_and(|parameters| {
+                parameters
+                    .iter()
+                    .zip(arguments)
+                    .all(|(parameter, argument)| match parameter {
+                        StaticType::Iterable(_) => !self.vars.waits_to_iterate(argument),
+                        _ => true,
+                    })
+            })
     }
 
     /// `arguments` with each literal among them whose values share no type
@@ -1527,31 +1581,6 @@ impl Analyser {
         )
     }
 
-    /// Whether `symbol`'s parameter for each argument with a literal in it
-    /// takes any type, as an unannotated one does, and the other arguments
-    /// are known, so nothing still to come can change whether `symbol` takes
-    /// the call.
-    fn takes_any_literal(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
-        let Some(parameters) = self.overloads().parameters_of(symbol) else {
-            return false;
-        };
-        parameters.len() == arguments.len()
-            && parameters
-                .iter()
-                .zip(arguments)
-                .all(|(parameter, argument)| {
-                    let unsettled = self.vars.unsettled(argument);
-                    if unsettled.iter().all(|&var| !self.vars.is_literal(var)) {
-                        return unsettled.is_empty();
-                    }
-                    match self.vars.resolve(parameter) {
-                        StaticType::Var(var) => !self.vars.is_literal(var),
-                        StaticType::Generic(_) => true,
-                        _ => false,
-                    }
-                })
-    }
-
     /// Whether one of `reachable` other than `except` takes `arguments`
     /// once each literal among them is `Any`.
     fn fits_once_any(
@@ -1573,80 +1602,6 @@ impl Analyser {
             .iter()
             .filter(|&&symbol| Some(symbol) != except)
             .any(|&symbol| self.could_accept(symbol, &as_any))
-    }
-
-    /// Settles each of `literals` as the first of its defaults with which
-    /// `only` still takes `arguments`, and returns whether it could.
-    fn decide_literals(
-        &mut self,
-        literals: &[TypeVar],
-        only: SymbolId,
-        arguments: &[StaticType],
-    ) -> bool {
-        for &var in literals {
-            // A list of numbers is what the numbers are.
-            while let Some(held) = self.vars.held_literal(var) {
-                if !self.decide_literals(&[held], only, arguments) {
-                    return false;
-                }
-            }
-            if !self.vars.is_literal(var) {
-                continue;
-            }
-            let Some(defaults) = self.vars.literal_defaults(var) else {
-                return false;
-            };
-            let decided = defaults.iter().any(|default| {
-                let snapshot = self.vars.snapshot();
-                let fits =
-                    self.vars.settle_default(var, default) && self.could_accept(only, arguments);
-                if !fits {
-                    self.vars.rollback(snapshot);
-                }
-                fits
-            });
-            if !decided {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Whether passing these arguments to `symbol` would make the types of
-    /// two literals one, as `++(List<T>, List<T>)` does with `[1]` and
-    /// `["a"]`. Each literal first gets its own type, which says better
-    /// whether they're the same.
-    fn merges_literals(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
-        // A literal in two arguments, as the element of `[0]` is in
-        // `[0].flat_map(fn(x) => …)` once `x` has its type, is one literal.
-        let literals = arguments
-            .iter()
-            .flat_map(|argument| self.vars.unsettled(argument))
-            .filter(|&var| self.vars.is_literal(var))
-            .unique()
-            .collect::<Vec<_>>();
-        if literals.len() < 2 {
-            return false;
-        }
-        let function = self.vars.resolve(self.types.get_type(symbol));
-        let snapshot = self.vars.snapshot();
-        let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
-            return false;
-        };
-        for (parameter, argument) in parameters.iter().zip(arguments) {
-            self.vars.bind_argument(parameter, argument);
-        }
-        let mut became = Vec::new();
-        let merged = literals.iter().any(|&var| {
-            let StaticType::Var(now) = self.vars.resolve(&StaticType::Var(var)) else {
-                return false;
-            };
-            let merged = became.contains(&now);
-            became.push(now);
-            merged
-        });
-        self.vars.rollback(snapshot);
-        merged
     }
 
     /// `binding`, except that a pick left to the program among one function

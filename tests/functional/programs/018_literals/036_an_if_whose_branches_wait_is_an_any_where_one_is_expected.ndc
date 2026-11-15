@@ -1,0 +1,9 @@
+// An `if` whose branches aren't known yet, as a call's result or a
+// parameter isn't, is an `Any` where an `Any` is expected of it, as one
+// whose branches are known is: its branches may then share no type.
+// expect-output: s s [1]
+fn g(v: Any) => v;
+fn f(x) => g(if false { x } else { [1] });
+let a: Any = if true { "s" } else { -1 };
+let b: Any = if true { "s" } else { abs(1) };
+print(a, b, f(1));
