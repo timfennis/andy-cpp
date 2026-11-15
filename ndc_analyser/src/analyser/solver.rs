@@ -1858,12 +1858,22 @@ impl Analyser {
     /// The value is the instance for the types it's used at: in
     /// `[[1, 2]].count(is_safe)`, the one for `List<Int>`. A type of it
     /// nothing settles, as in `let f: Any = is_safe`, is a failed check's,
-    /// so it's reported once, as the value's, and not by its body.
-    pub(super) fn flush_value_copies(&mut self, id: NodeId, span: Span) {
-        for (_, key) in &self.pending.uses {
-            for typ in key {
-                self.vars.fall_back_as_errors(typ);
-            }
+    /// so it's reported once, as the value's, and not by its body. A type
+    /// the body's constraints connect to its parameters that the value's
+    /// type doesn't show, as the list's in `fn f(x) => pick([], x)`, is left
+    /// to what settles it, as at a call.
+    pub(super) fn flush_value_copies(&mut self, id: NodeId, typ: &StaticType, span: Span) {
+        let shown = self.vars.unsettled(typ);
+        let keys = self
+            .pending
+            .uses
+            .iter()
+            .flat_map(|(_, key)| key.iter())
+            .flat_map(|part| self.vars.unsettled(part))
+            .filter(|var| shown.contains(var))
+            .collect::<Vec<_>>();
+        for var in keys {
+            self.vars.fall_back_as_errors(&StaticType::Var(var));
         }
         self.record_uses(CallSite::Call(id), true, span);
         self.add_copies(span);
