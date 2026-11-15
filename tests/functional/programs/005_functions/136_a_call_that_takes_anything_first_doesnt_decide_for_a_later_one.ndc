@@ -1,0 +1,6 @@
+// expect-error: can't tell which `pick` this is: part of what it's given has no known type
+fn pick(xs: List<Int>) => 1;
+fn pick(xs: List<Any>) => 2;
+let xs = [];
+print(xs);
+print(pick(xs));

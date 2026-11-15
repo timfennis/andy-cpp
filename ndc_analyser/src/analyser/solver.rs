@@ -633,7 +633,7 @@ impl Analyser {
                 break;
             };
             fallen_back = serial;
-            self.fall_back(serial, &vars);
+            self.fall_back(&vars);
             unchecked.extend(self.solve_waiting_and_report());
         }
         self.vars.settle_from(first);
@@ -647,14 +647,17 @@ impl Analyser {
         self.solve_waiting();
     }
 
-    /// Settles `vars`, which the waiting constraint `serial` waits on and
-    /// nothing else settles, as their fallbacks. What an empty `[]`, `%{}`
-    /// or `None` holds, or a type parameter, stands in as its fallback only
-    /// where nothing depends on it, which a call's pick does when it's what
+    /// Settles `vars`, which a waiting constraint waits on and nothing else
+    /// settles, as their fallbacks. What an empty `[]`, `%{}` or `None`
+    /// holds, or a type parameter, stands in as its fallback only where
+    /// nothing depends on it, which a call's pick does when it's what
     /// decides between overloads: in `pick([])`, with `pick` taking a
-    /// `List<Int>` or a `List<Any>`, nothing says which it is. That's
-    /// reported, and they're failed checks.
-    pub(super) fn fall_back(&mut self, serial: u64, vars: &[TypeVar]) {
+    /// `List<Int>` or a `List<Any>`, nothing says which it is. Every waiting
+    /// call on them is asked, not just the one that's first, as a fallback
+    /// settles them for all of them: in `print(xs); pick(xs)`, `print`
+    /// taking anything doesn't make `xs` a `List<Any>` for `pick`. The calls
+    /// that depend on them are reported, and they're failed checks.
+    pub(super) fn fall_back(&mut self, vars: &[TypeVar]) {
         let others = vars
             .iter()
             .copied()
@@ -664,22 +667,35 @@ impl Analyser {
             self.vars.settle_with_fallbacks(&others);
             return;
         }
-        let Some(Waiting {
-            constraint: Constraint::Call(call),
-            origin,
-        }) = self.waiting.get(&serial).cloned()
-        else {
-            self.vars.settle_with_fallbacks(vars);
-            return;
-        };
-        if !self.pick_depends_on(&call, vars) {
+        let calls = self
+            .waiting
+            .values()
+            .filter_map(|waiting| match &waiting.constraint {
+                Constraint::Call(call) => Some((call.clone(), waiting.origin.clone())),
+                _ => None,
+            })
+            .filter(|(call, _)| {
+                call.arguments
+                    .iter()
+                    .flat_map(|argument| self.vars.unsettled(argument))
+                    .any(|var| vars.contains(&var))
+            })
+            .collect::<Vec<_>>();
+        let mut depends = false;
+        for (call, origin) in calls {
+            if !self.pick_depends_on(&call, vars) {
+                continue;
+            }
+            depends = true;
+            let error = AnalysisError::contents_not_known(&call.name, call.span);
+            let outer = std::mem::replace(&mut self.copied_through, origin);
+            self.emit(error);
+            self.copied_through = outer;
+        }
+        if !depends {
             self.vars.settle_with_fallbacks(vars);
             return;
         }
-        let error = AnalysisError::contents_not_known(&call.name, call.span);
-        let outer = std::mem::replace(&mut self.copied_through, origin);
-        self.emit(error);
-        self.copied_through = outer;
         for &var in vars {
             self.vars.settle_unknowns_as_errors(&StaticType::Var(var));
         }

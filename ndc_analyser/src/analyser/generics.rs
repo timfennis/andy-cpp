@@ -456,17 +456,17 @@ impl Analyser {
                     || self.default_to_branch(*serial, vars)
             });
             if !decided_by_default {
-                let Some((serial, vars)) = ambiguous.iter().find_map(|(serial, vars)| {
+                let Some(vars) = ambiguous.iter().find_map(|(_, vars)| {
                     let unconnected = vars
                         .iter()
                         .copied()
                         .filter(|var| !connected.contains(var))
                         .collect::<Vec<_>>();
-                    (!unconnected.is_empty()).then_some((*serial, unconnected))
+                    (!unconnected.is_empty()).then_some(unconnected)
                 }) else {
                     return;
                 };
-                self.fall_back(serial, &vars);
+                self.fall_back(&vars);
             }
             self.solve_waiting();
         }
