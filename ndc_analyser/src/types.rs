@@ -73,10 +73,14 @@ pub(crate) struct TypeVars {
     /// The literals settled as [`StaticType::Error`] because their values
     /// share no type, which the analyser reports.
     unshared: Vec<(TypeVar, Unshared)>,
-    /// Whether each variable is the type of an `if` or a `match` whose
-    /// branches aren't known yet, which is `Any` where an `Any` is expected:
-    /// see [`Self::fresh_join`].
-    joins: Vec<bool>,
+    /// The types of the `if`s and `match`es whose branches aren't known yet:
+    /// see [`Self::mark_join`]. With them in the order they were marked, so
+    /// a [`Snapshot`] can take them back.
+    joins: AHashSet<TypeVar>,
+    marked_joins: Vec<TypeVar>,
+    /// Those an `Any` was expected of, in order, so a [`Snapshot`] can take
+    /// them back.
+    expects_any: Vec<TypeVar>,
 }
 
 /// Two values of a literal that share no type, as `1` and `"a"` in `[1,
@@ -113,6 +117,8 @@ pub(crate) struct Snapshot {
     trail: usize,
     lowered: usize,
     bounded: usize,
+    expects_any: usize,
+    joins: usize,
 }
 
 impl TypeVars {
@@ -123,36 +129,44 @@ impl TypeVars {
         self.fallbacks.push(fallback);
         self.levels.push(self.level);
         self.bounds.push(Vec::new());
-        self.joins.push(false);
         StaticType::Var(var)
     }
 
-    /// The type of an `if` or a `match` whose branches aren't known yet.
-    /// Where an `Any` is expected of it, it's an `Any`, so its branches
-    /// may share no type, as they may once they're known: in `g(if c { x }
-    /// else { [] })` with `g(v: Any)`.
-    pub(crate) fn fresh_join(&mut self) -> StaticType {
-        let typ = self.fresh(StaticType::Any);
-        if let StaticType::Var(var) = typ {
-            self.joins[var.0 as usize] = true;
+    /// Marks `typ`, if it's an unsettled variable, as the type of an `if` or
+    /// a `match` whose branches aren't known yet. Where an `Any` is expected
+    /// of it, its branches may share no type, as those of one whose branches
+    /// are known may: in `g(if c { x } else { [] })` with `g(v: Any)`, it's
+    /// an `Any` once `x` is an Int. Branches that share a type keep it: see
+    /// [`Self::any_is_expected_of`].
+    pub(crate) fn mark_join(&mut self, typ: &StaticType) {
+        if let StaticType::Var(var) = self.shallow(typ)
+            && self.joins.insert(var)
+        {
+            self.marked_joins.push(var);
         }
-        typ
     }
 
-    /// Whether `typ` is, or is settled as, the type of an `if` or a `match`
-    /// whose branches aren't known yet.
-    fn is_join(&self, typ: &StaticType) -> bool {
+    /// The variables `typ` is, through what each is settled as.
+    fn chain(&self, typ: &StaticType) -> Vec<TypeVar> {
+        let mut chain = Vec::new();
         let mut typ = typ;
         while let StaticType::Var(var) = typ {
-            if self.joins[var.0 as usize] {
-                return true;
-            }
+            chain.push(*var);
             match self.solution(*var) {
                 Some(solution) => typ = solution,
-                None => return false,
+                None => break,
             }
         }
-        false
+        chain
+    }
+
+    /// Whether an `Any` was expected of the `if` or `match` whose type
+    /// `typ` is, when its branches weren't known yet, which then makes it
+    /// an `Any` if they share no type.
+    pub(crate) fn any_is_expected_of(&self, typ: &StaticType) -> bool {
+        self.chain(typ)
+            .iter()
+            .any(|var| self.expects_any.contains(var))
     }
 
     /// The type of an integer literal, like `1`, which its uses settle as an
@@ -775,6 +789,8 @@ impl TypeVars {
             trail: self.trail.len(),
             lowered: self.lowered.len(),
             bounded: self.bounded.len(),
+            expects_any: self.expects_any.len(),
+            joins: self.marked_joins.len(),
         }
     }
 
@@ -796,7 +812,10 @@ impl TypeVars {
         self.fallbacks.truncate(snapshot.vars);
         self.levels.truncate(snapshot.vars);
         self.bounds.truncate(snapshot.vars);
-        self.joins.truncate(snapshot.vars);
+        for var in self.marked_joins.drain(snapshot.joins..) {
+            self.joins.remove(&var);
+        }
+        self.expects_any.truncate(snapshot.expects_any);
     }
 
     /// Unifies `a` and `b` if they can be made the same type, and otherwise
@@ -1038,12 +1057,19 @@ impl TypeVars {
     /// elements. An argument nothing is known about yet stays what it is,
     /// as the call that takes it waits for it to iterate.
     pub(crate) fn bind_argument(&mut self, parameter: &StaticType, argument: &StaticType) -> bool {
-        let join = self.is_join(argument);
+        if *parameter == StaticType::Any
+            && let Some(join) = self
+                .chain(argument)
+                .into_iter()
+                .find(|var| self.joins.contains(var))
+            && self
+                .solution(join)
+                .is_none_or(|solution| matches!(solution, StaticType::Var(_)))
+        {
+            self.expects_any.push(join);
+        }
         let (parameter, argument) = (self.shallow(parameter), self.shallow(argument));
         match (&parameter, &argument) {
-            (StaticType::Any, StaticType::Var(var)) if join && !self.is_literal(*var) => {
-                self.settle(*var, StaticType::Any)
-            }
             // Values that share no type are what's asked for where an `Any`
             // is expected: `let x: Any = if c { 1 } else { "a" }`.
             (StaticType::Any, StaticType::Var(var))

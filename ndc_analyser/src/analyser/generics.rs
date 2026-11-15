@@ -127,11 +127,24 @@ impl Analyser {
 
         let scheme = scheme
             .into_iter()
-            .map(|waiting| Waiting {
-                constraint: waiting
+            .map(|waiting| {
+                let mut constraint = waiting
                     .constraint
-                    .map_types(&mut |typ| self.vars.resolve(typ)),
-                origin: waiting.origin,
+                    .map_types(&mut |typ| self.vars.resolve(typ));
+                if let (
+                    Constraint::Join {
+                        types: [_, _, result],
+                        ..
+                    },
+                    Constraint::Join { expects_any, .. },
+                ) = (&waiting.constraint, &mut constraint)
+                {
+                    *expects_any |= self.vars.any_is_expected_of(result);
+                }
+                Waiting {
+                    constraint,
+                    origin: waiting.origin,
+                }
             })
             .collect::<Vec<_>>();
         // An instance is for the types of the type parameters that what it

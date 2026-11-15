@@ -79,8 +79,15 @@ pub(super) enum Constraint {
         span: Span,
     },
     /// The one type the two branches of an `if` have, once neither is
-    /// wholly unknown: the branches' types and then the result's.
-    Join { types: [StaticType; 3], span: Span },
+    /// wholly unknown: the branches' types and then the result's. If an
+    /// `Any` was expected of the `if` in a generic function's body before
+    /// that, a copy of it for a call is told so by `expects_any`: see
+    /// [`crate::types::TypeVars::mark_join`].
+    Join {
+        types: [StaticType; 3],
+        expects_any: bool,
+        span: Span,
+    },
 }
 
 impl Constraint {
@@ -144,8 +151,13 @@ impl Constraint {
                 value: replace(value),
                 span: *span,
             },
-            Self::Join { types, span } => Self::Join {
+            Self::Join {
+                types,
+                expects_any,
+                span,
+            } => Self::Join {
                 types: types.clone().map(|typ| replace(&typ)),
+                expects_any: *expects_any,
                 span: *span,
             },
         }
@@ -347,9 +359,10 @@ impl Analyser {
             (_, StaticType::Never) => a,
             _ if a == b => a,
             _ if unknown(self, &a) || unknown(self, &b) => {
-                let result = self.vars.fresh_join();
+                let result = self.vars.fresh(StaticType::Any);
                 self.wait(Constraint::Join {
                     types: [a, b, result.clone()],
+                    expects_any: false,
                     span,
                 });
                 result
@@ -515,6 +528,23 @@ impl Analyser {
 
     /// Makes `constraint` wait, in the order it started waiting, until one
     /// of the variables it waits on is settled.
+    /// Marks the result of `constraint`, if it's a join, as the type of an
+    /// `if` whose branches aren't known yet, of which an `Any` is expected if
+    /// the constraint says so.
+    fn mark_join(&mut self, constraint: &Constraint) {
+        if let Constraint::Join {
+            types: [_, _, result],
+            expects_any,
+            ..
+        } = constraint
+        {
+            self.vars.mark_join(result);
+            if *expects_any {
+                self.vars.bind_argument(&StaticType::Any, result);
+            }
+        }
+    }
+
     pub(super) fn wait(&mut self, constraint: Constraint) {
         let origin = self.copied_through.clone();
         self.wait_as(Waiting { constraint, origin });
@@ -522,6 +552,7 @@ impl Analyser {
 
     /// Makes `waiting` wait, as [`Self::wait`].
     pub(super) fn wait_as(&mut self, waiting: Waiting) {
+        self.mark_join(&waiting.constraint);
         let serial = self.next_serial;
         self.next_serial += 1;
         self.wait_again(serial, waiting);
@@ -1142,6 +1173,7 @@ impl Analyser {
             Constraint::Join {
                 types: [a, b, result],
                 span,
+                ..
             } => {
                 let (a, b, result) = (a.clone(), b.clone(), result.clone());
                 // A result known from outside is what's expected of each
@@ -1166,6 +1198,11 @@ impl Analyser {
                     (StaticType::Never, other) | (other, StaticType::Never) => other.clone(),
                     _ => self.join_known(&a, &b, *span),
                 };
+                // Branches that share no type are an `Any` where one was
+                // expected of the `if` while they weren't known.
+                if self.vars.any_is_expected_of(&result) {
+                    self.vars.bind_argument(&StaticType::Any, &joined);
+                }
                 self.check_write(&result, &joined, *span);
                 true
             }
@@ -1858,6 +1895,7 @@ impl Analyser {
                 }))
                 .chain(origin.iter().flat_map(|inner| inner.iter().cloned()))
                 .collect::<Vec<_>>();
+            self.mark_join(&constraint);
             let mut waiting = Waiting {
                 constraint,
                 origin: Some(frames.into()),
