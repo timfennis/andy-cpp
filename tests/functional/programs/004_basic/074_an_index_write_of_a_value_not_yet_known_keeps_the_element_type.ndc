@@ -1,5 +1,5 @@
-// The empty list's elements aren't known when it's written, but it's still
-// not an Int, which is what the list holds.
-// expect-error: mismatched types: found List<Any> but expected Int
+// Nothing says what the empty list holds, but it's still not an Int, which
+// is what the list holds.
+// expect-error: mismatched types: found List<Unknown> but expected Int
 let values = [1];
 values[0] = [];

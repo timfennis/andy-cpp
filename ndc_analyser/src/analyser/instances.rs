@@ -24,6 +24,10 @@ use std::rc::Rc;
 pub(super) struct Scheme {
     /// The constraints its body left waiting on its type parameters.
     pub(super) constraints: Rc<[Waiting]>,
+    /// Its type parameters that are what an empty `[]`, `%{}` or `None` in
+    /// its body holds, which each call makes anew as one: see
+    /// [`crate::types::TypeVars::fresh_contents`].
+    pub(super) contents: Rc<[Box<str>]>,
     /// The type parameters the constraints and `uses` depend on, which an
     /// instance is for.
     pub(super) key: Rc<[Box<str>]>,

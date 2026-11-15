@@ -109,7 +109,11 @@ impl AnalysisError {
         Self {
             text: format!("mismatched types: found {found} but expected {expected}"),
             span,
-            help_text: (*found == StaticType::Any).then(|| cast_out_of_any(&expected.to_string())),
+            help_text: if *found == StaticType::Any {
+                Some(cast_out_of_any(&expected.to_string()))
+            } else {
+                has_unknown(std::slice::from_ref(found)).then(say_what_it_holds)
+            },
             notes: Vec::new(),
         }
     }
@@ -354,6 +358,20 @@ impl AnalysisError {
         }
     }
 
+    /// Same as [`Self::function_not_found`], for a call given what an empty
+    /// literal holds when nothing says what, which only a type parameter or
+    /// an `Any` takes.
+    pub(crate) fn function_not_found_for_unknown(
+        ident: &str,
+        types: &[StaticType],
+        span: Span,
+    ) -> Self {
+        Self {
+            help_text: Some(say_what_it_holds()),
+            ..Self::function_not_found(ident, types, span)
+        }
+    }
+
     /// Same as [`Self::function_not_found`], for a call an overload would
     /// accept if the arguments were known more precisely.
     pub(crate) fn function_not_found_suggest_cast(
@@ -462,6 +480,22 @@ impl AnalysisError {
 
 /// Help for a value of type `Any` used where `example`, or another type,
 /// is expected.
+/// Whether any of `types` has [`StaticType::Unknown`] in it.
+pub(crate) fn has_unknown(types: &[StaticType]) -> bool {
+    types
+        .iter()
+        .any(|typ| typ.contains(&|part| *part == StaticType::Unknown))
+}
+
+fn say_what_it_holds() -> String {
+    concat!(
+        "`Unknown` is what an empty `[]`, `%{}` or `None` holds when nothing stores anything in it, ",
+        "which only a type parameter or an `Any` takes. ",
+        "Say what it holds where it's made, as in `let xs: List<Int> = []`",
+    )
+    .to_string()
+}
+
 fn cast_out_of_any(example: &str) -> String {
     format!(
         "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `value as {example}`, or `value as? {example}` to get an Option"

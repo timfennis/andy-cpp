@@ -1,5 +1,5 @@
-// `%{}` doesn't say what its values are, so `+=` on one of them is checked
-// when the program runs, and fails there because the key is missing.
-// expect-error: Key not found in map
+// Nothing says what `%{}` holds, so nothing says which `+` adds 3 to one
+// of its values.
+// expect-error: No function called '+' found that matches the arguments 'Unknown, Int'
 let map = %{};
 map["invalid key"] += 3;

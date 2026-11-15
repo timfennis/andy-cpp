@@ -81,6 +81,9 @@ pub(crate) struct TypeVars {
     /// Those an `Any` was expected of, in order, so a [`Snapshot`] can take
     /// them back.
     expects_any: Vec<TypeVar>,
+    /// The variables made as what an empty `[]`, `%{}` or `None` holds, in
+    /// the order they were made: see [`Self::fresh_contents`].
+    contents: Vec<TypeVar>,
 }
 
 /// Two values of a literal that share no type, as `1` and `"a"` in `[1,
@@ -130,6 +133,54 @@ impl TypeVars {
         self.levels.push(self.level);
         self.bounds.push(Vec::new());
         StaticType::Var(var)
+    }
+
+    /// What an empty `[]`, `%{}` or `None` holds, which its uses settle. If
+    /// nothing does, it's [`StaticType::Unknown`], which a type parameter or
+    /// an `Any` takes, but no other type is: `print([])` prints `[]`, and
+    /// `pick([])` with `pick(List<Int>)` and `pick(List<Any>)` is an error.
+    /// It doesn't depend on what the calls the literal is passed to need,
+    /// so it's the same whatever order they're solved in.
+    pub(crate) fn fresh_contents(&mut self) -> StaticType {
+        let typ = self.fresh(StaticType::Unknown);
+        if let StaticType::Var(var) = typ {
+            self.contents.push(var);
+        }
+        typ
+    }
+
+    /// The unsettled variables made since `first` that stand for what an
+    /// empty `[]`, `%{}` or `None` holds, as the variable made for it does,
+    /// or one it was unified with does in its place.
+    pub(crate) fn unsettled_contents(&self, first: usize) -> Vec<TypeVar> {
+        let mut unsettled = Vec::new();
+        for &var in &self.contents {
+            if let StaticType::Var(now) = self.resolve(&StaticType::Var(var))
+                && now.0 as usize >= first
+                && !unsettled.contains(&now)
+            {
+                unsettled.push(now);
+            }
+        }
+        unsettled
+    }
+
+    /// Whether the unsettled variable `var` stands for what an empty `[]`,
+    /// `%{}` or `None` holds.
+    pub(crate) fn is_contents(&self, var: TypeVar) -> bool {
+        self.contents
+            .iter()
+            .any(|&made| self.resolve(&StaticType::Var(made)) == StaticType::Var(var))
+    }
+
+    /// Settles each of `vars`, what empty literals hold, as
+    /// [`StaticType::Unknown`].
+    pub(crate) fn settle_contents(&mut self, vars: &[TypeVar]) {
+        for &var in vars {
+            if self.solution(var).is_none() {
+                self.settle(var, StaticType::Unknown);
+            }
+        }
     }
 
     /// Marks `typ`, if it's an unsettled variable, as the type of an `if` or
@@ -340,6 +391,24 @@ impl TypeVars {
             "a literal's type is left unsettled"
         );
         self.literals.clear();
+    }
+
+    /// Whether `var` is the unsettled type of a number literal, or of a
+    /// literal that holds only those, as the elements of `[1, 2]` are.
+    pub(crate) fn is_number_literal(&self, var: TypeVar) -> bool {
+        if self.solution(var).is_some() || !self.is_literal(var) {
+            return false;
+        }
+        let bounds = &self.bounds[var.0 as usize];
+        self.is_number(var)
+            || (!bounds.is_empty()
+                && bounds.iter().all(|bound| match bound {
+                    Bound::Holds(held, _, _) => matches!(
+                        self.resolve(held),
+                        StaticType::Var(held) if self.is_number_literal(held)
+                    ),
+                    Bound::Number(..) => true,
+                }))
     }
 
     /// Whether `var` is the type of an integer literal.
@@ -816,6 +885,7 @@ impl TypeVars {
             self.joins.remove(&var);
         }
         self.expects_any.truncate(snapshot.expects_any);
+        self.contents.retain(|var| (var.0 as usize) < snapshot.vars);
     }
 
     /// Unifies `a` and `b` if they can be made the same type, and otherwise
@@ -1251,6 +1321,8 @@ impl TypeVars {
     /// Settles every variable made since `first` that nothing settled with
     /// its fallback.
     pub(crate) fn settle_from(&mut self, first: usize) {
+        let contents = self.unsettled_contents(first);
+        self.settle_contents(&contents);
         for index in first..self.solutions.len() {
             let var = TypeVar(u32::try_from(index).expect("fewer than 2^32 type variables"));
             self.settle_with_fallbacks(&[var]);

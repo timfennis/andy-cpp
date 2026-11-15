@@ -277,7 +277,7 @@ fn map_default_value_contributes_to_value_type() {
     assert_eq!(
         analyse_last_type("let m = %{:0}; m"),
         StaticType::Map {
-            key: Box::new(StaticType::Any),
+            key: Box::new(StaticType::Unknown),
             value: Box::new(StaticType::Int),
         },
     );
@@ -739,42 +739,42 @@ fn a_default_function_gives_a_map_the_values_it_returns() {
     assert_eq!(
         analyse_last_type("%{:fn() => 1}"),
         StaticType::Map {
-            key: Box::new(StaticType::Any),
+            key: Box::new(StaticType::Unknown),
             value: Box::new(StaticType::Int),
         }
     );
 }
 
 #[test]
-fn what_nothing_settles_falls_back_to_any() {
+fn what_an_empty_literal_holds_is_unknown_when_nothing_says() {
     assert_eq!(
         analyse_last_type("let xs = []; xs"),
-        StaticType::List(Box::new(StaticType::Any))
+        StaticType::List(Box::new(StaticType::Unknown))
     );
     assert_eq!(
         analyse_last_type("None"),
-        StaticType::Option(Box::new(StaticType::Any))
+        StaticType::Option(Box::new(StaticType::Unknown))
     );
-    // An empty map with nothing written to it is an empty set.
     assert_eq!(
         analyse_last_type("%{}"),
         StaticType::Map {
-            key: Box::new(StaticType::Any),
-            value: Box::new(StaticType::unit()),
+            key: Box::new(StaticType::Unknown),
+            value: Box::new(StaticType::Unknown),
         }
     );
 }
 
 #[test]
 fn a_function_settles_its_own_type_variables_when_its_body_ends() {
-    // `f` returns a list of unknown elements: they fall back to `Any` when
-    // `f` ends, so a caller's write can't settle them for every caller.
+    // `f` returns a list of whatever each call's caller stores in it, so
+    // one caller's write doesn't settle it for another: the last call's
+    // list holds nothing known.
     assert_eq!(
         analyse_last_type_with_globals(
             "fn f() { [] } let xs = f(); xs[0] = \"a\"; f()",
             index_natives()
         ),
-        StaticType::List(Box::new(StaticType::Any))
+        StaticType::List(Box::new(StaticType::Unknown))
     );
 }
 
@@ -942,23 +942,17 @@ fn an_op_assignment_waits_for_its_operands_like_any_call() {
             ndc_analysis::ResolvedVar::Global { slot: 2 }
         ))]
     );
-    // A target nothing else settles keeps the type of what's added to it.
-    assert_eq!(
-        analyse_last_type_with_globals("let f = fn(x) { x += 1; x }; f", ambiguous_plus()),
-        function(vec![StaticType::Int], StaticType::Int)
-    );
 }
 
 #[test]
-fn a_call_nothing_else_settles_takes_its_narrowest_overload() {
-    // `[](Any, Any)` would take the map too, but loses to the map's own `[]`,
-    // which settles the key type.
-    let globals = [natives(&[("[]", "(Any, Any) -> Any")]), index_natives()].concat();
+fn a_call_only_one_overload_could_take_commits_to_it() {
+    // Only the map's `[]` takes a map, so `m["k"]` is its, which makes the
+    // keys Strings, though nothing is known about them before.
     assert_eq!(
-        analyse_last_type_with_globals("let m = %{}; m[\"k\"]; m", globals),
+        analyse_last_type_with_globals("let m = %{}; m[\"k\"]; m", index_natives()),
         StaticType::Map {
             key: Box::new(StaticType::String),
-            value: Box::new(StaticType::unit()),
+            value: Box::new(StaticType::Unknown),
         }
     );
 }
@@ -1076,7 +1070,7 @@ fn a_waiting_call_does_not_commit_to_an_overload_taking_any_instead() {
     // Without the catch-all, nothing takes it.
     assert_eq!(
         errors("let xs = [1]; xs[0] = [];", index_natives()),
-        vec!["mismatched types: found List<Any> but expected Int"]
+        vec!["mismatched types: found List<Unknown> but expected Int"]
     );
 }
 

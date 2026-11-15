@@ -57,6 +57,12 @@ pub enum StaticType {
     /// Bottom type for diverging expressions (`return`, `break`, `continue`).
     /// A value of it fits anywhere, and it joins with any type as that type.
     Never,
+    /// What an empty `[]`, `%{}` or `None` holds when nothing says what: a
+    /// type no other type is, which has no values. A type parameter or an
+    /// `Any` takes it, but a `List<Int>` or a `List<Any>` isn't a
+    /// `List<Unknown>`, so which overload `pick([])` means isn't decided by
+    /// it. Only the analyser makes it.
+    Unknown,
     Bool,
     Function {
         parameters: Option<Vec<Self>>,
@@ -433,6 +439,7 @@ impl StaticType {
             | Self::Generic(_)
             | Self::Error
             | Self::Never
+            | Self::Unknown
             | Self::Bool
             | Self::Struct { .. }
             | Self::Number
@@ -472,6 +479,7 @@ impl StaticType {
             | Self::Generic(_)
             | Self::Error
             | Self::Never
+            | Self::Unknown
             | Self::Bool
             | Self::Struct { .. }
             | Self::Number
@@ -781,7 +789,8 @@ impl StaticType {
             | Self::Int
             | Self::Map { .. }
             | Self::Struct { .. } // for now, we won't have positional unpacking
-            | Self::Never => None,
+            | Self::Never
+            | Self::Unknown => None,
         }
     }
 }
@@ -793,6 +802,7 @@ impl fmt::Display for StaticType {
             Self::Any | Self::Error => write!(f, "Any"),
             Self::Var(_) => write!(f, "_"),
             Self::Never => write!(f, "Never"),
+            Self::Unknown => write!(f, "Unknown"),
             Self::Bool => write!(f, "Bool"),
             Self::Function {
                 parameters,
