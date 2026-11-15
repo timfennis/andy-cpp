@@ -213,3 +213,10 @@ print(describe(a), describe(a as Int));  // something an int
 ```
 
 Functions like `print`, `string` and `==` take a value of any type as it is, so they take an `Any` too.
+
+Indexing a value with `[]` looks the index up in it, so the index has the type its keys or positions have: a key of another type is an error rather than a lookup that would store a map's default under it.
+
+```ndc,fails
+let counts: Map<String, Int> = %{:fn() => 0};
+counts[5] += 1;  // error: No function called '[]' found that matches the arguments 'Map<String, Int>, Int'
+```

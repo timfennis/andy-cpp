@@ -1,2 +1,2 @@
-// expect-error: cannot index into Int
+// expect-error: No function called '[]' found that matches the arguments 'Int, Int'
 1[2]

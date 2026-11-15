@@ -1172,6 +1172,24 @@ impl Analyser {
         }
     }
 
+    /// Picks the native that indexes a tuple or an `Any` for `call`, if it's
+    /// a read of `[]` and there is one, and returns whether it did: see
+    /// [`ndc_core::ANY_INDEX`].
+    fn index_any(&mut self, call: &CallConstraint, arguments: &[StaticType]) -> bool {
+        let Some(any_index) = self.any_index else {
+            return false;
+        };
+        if call.name != "[]" || arguments.len() != 2 {
+            return false;
+        }
+        self.record_pick(
+            call.site,
+            Binding::Resolved(Candidate::Scalar(any_index)),
+            arguments,
+        );
+        true
+    }
+
     /// Picks the overload `call` means, records it, and returns the call's
     /// type, or `None` when the arguments aren't known well enough yet. A
     /// call whose arguments are known is resolved the usual way. Otherwise
@@ -1203,7 +1221,9 @@ impl Analyser {
             if let [_, index_type] = &arguments[..] {
                 self.vars.bind_argument(&StaticType::Int, index_type);
             }
-            self.resolve_call_now(call, &indexed);
+            if !self.index_any(call, &indexed) {
+                self.resolve_call_now(call, &indexed);
+            }
             let Some(element) = element else {
                 self.emit(AnalysisError::tuple_index_out_of_bounds(
                     index,
@@ -1213,6 +1233,16 @@ impl Analyser {
                 return Some(StaticType::Error);
             };
             return Some(element);
+        }
+
+        // Any other index of a tuple, and any of an `Any`, is the program's
+        // to check as it runs.
+        if matches!(
+            arguments.first(),
+            Some(StaticType::Tuple(_) | StaticType::Any)
+        ) && self.index_any(call, &arguments)
+        {
+            return Some(StaticType::Any);
         }
 
         let reachable = self.overloads().reachable_symbols(&call.candidates);

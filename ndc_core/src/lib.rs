@@ -26,3 +26,10 @@ impl<T> FunctionRegistry<T> {
         self.functions.iter()
     }
 }
+
+/// The name of the native that indexes a tuple or an `Any`, which the
+/// analyser picks itself rather than as an overload of `[]`: no signature
+/// says what a tuple's element at an index is, and as an overload it would
+/// take a map indexed with a key of the wrong type. No identifier is spelled
+/// like it.
+pub const ANY_INDEX: &str = "[any]";

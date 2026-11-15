@@ -1,4 +1,4 @@
-use ndc_core::{FunctionRegistry, StaticType};
+use ndc_core::{ANY_INDEX, FunctionRegistry, StaticType};
 use ndc_vm::Vm;
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
@@ -68,22 +68,24 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         }));
     }
 
-    // []<String, Any> -> String
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![StaticType::String, StaticType::Any]),
-            return_type: Box::new(StaticType::String),
-        },
-        func: make_get_func_simple(),
-    }));
+    // A character by its index, or a substring by a range of indices.
+    for signature in [
+        "(String, Int) -> String",
+        "(String, Iterator<Int>) -> String",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_get_func_simple(),
+        }));
+    }
 
-    // []<Any, Any> -> Any (fallback for Tuple and other indexable types).
-    // Kept on the WithVm path because Maps can fall through here when their
-    // static type is `Any`, and the Map default-function lookup needs `&mut Vm`.
+    // Indexing a tuple or an `Any`: see `ANY_INDEX`. Kept on the WithVm path
+    // because a map can come here as an `Any`, and the Map default-function
+    // lookup needs `&mut Vm`.
     env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
+        name: ANY_INDEX.to_string(),
         documentation: Some(doc.clone()),
         static_type: StaticType::Function {
             parameters: Some(vec![StaticType::Any, StaticType::Any]),
@@ -129,20 +131,14 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         }));
     }
 
-    // []=<String, Any, String> -> ()
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]=".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::String,
-                StaticType::Any,
-                StaticType::String,
-            ]),
-            return_type: Box::new(StaticType::unit()),
-        },
-        func: make_set_func(),
-    }));
+    for signature in ["(String, Int, String)", "(String, Iterator<Int>, String)"] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]=".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_set_func(),
+        }));
+    }
 
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]=".to_string(),

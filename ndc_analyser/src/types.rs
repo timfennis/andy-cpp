@@ -607,6 +607,19 @@ impl TypeVars {
         }
     }
 
+    /// Where the integer literal whose type is `var` is, if `var` is the
+    /// type of integer literals only, as the `1` in `fn inc(x) => x + 1`
+    /// has, and not of a literal holding values.
+    pub(crate) fn number_literal_span(&self, var: TypeVar) -> Option<Span> {
+        let bounds = &self.bounds[var.0 as usize];
+        let mut spans = bounds.iter().map(|bound| match bound {
+            Bound::Number(_, span) => Some(*span),
+            Bound::Holds(..) => None,
+        });
+        let first = spans.next()??;
+        spans.all(|span| span.is_some()).then_some(first)
+    }
+
     /// Settles `var` as the type parameter `name` of the generic function
     /// whose body made it.
     pub(crate) fn generalize(&mut self, var: TypeVar, name: &str) {
@@ -1082,7 +1095,11 @@ impl TypeVars {
     /// aren't all known.
     pub(crate) fn waits_to_iterate(&self, typ: &StaticType) -> bool {
         match self.resolve(typ) {
-            StaticType::Var(var) => !self.is_literal(var),
+            // A number never iterates, but a literal holding values is what
+            // they are once they're settled: the values of `%{"a": ["b"]}`.
+            StaticType::Var(var) => {
+                !self.is_literal(var) || self.number_literal_span(var).is_none()
+            }
             StaticType::Tuple(elements) => elements.iter().any(|e| self.has_unknowns(e)),
             _ => false,
         }
