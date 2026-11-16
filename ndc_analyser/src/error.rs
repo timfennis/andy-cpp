@@ -258,6 +258,32 @@ impl AnalysisError {
         }
     }
 
+    /// A call that several overloads take, none more specific than the
+    /// others: `f(1, 2)` with `f(a, b)` and `f(a: Any, b: Any)`.
+    pub(crate) fn ambiguous_call(
+        name: &str,
+        arguments: &[StaticType],
+        overloads: &[String],
+        span: Span,
+    ) -> Self {
+        let arguments = arguments
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        Self {
+            text: format!(
+                "The call {name}({}) is ambiguous: {} all take it, and none is more specific than the others",
+                arguments.join(", "),
+                overloads.join(", "),
+            ),
+            span,
+            help_text: Some(
+                "Annotate the parameters of one of them so it's more specific, or cast an argument so only one takes it".to_string(),
+            ),
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn tied_overloads(
         name: &str,
         parameters: &[String],

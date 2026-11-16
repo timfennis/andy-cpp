@@ -5,7 +5,7 @@
 use super::Analyser;
 use super::function_values::{Choice, FunctionValue};
 use crate::error::AnalysisError;
-use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
+use crate::overloads::{CallKind, Overloads, ResolvedCall, is_strictly_more_specific};
 use crate::types::TypeVars;
 use ahash::AHashSet;
 use itertools::Itertools;
@@ -194,6 +194,16 @@ pub(super) enum EarlyPick {
         value: FunctionValue,
         picked: SymbolId,
     },
+}
+
+/// What [`Analyser::pick_overload`] picks.
+enum Pick {
+    /// The overload the call means.
+    One(SymbolId),
+    /// Overloads that take the call, none more specific than the others.
+    Tied(Vec<SymbolId>),
+    /// No overload takes the call.
+    None,
 }
 
 /// What [`Analyser::type_literal_operands`] did with an operator's operands.
@@ -1592,14 +1602,95 @@ impl Analyser {
         }
     }
 
-    /// [`Overloads::resolve_call`] over the types as they're known now.
+    /// The overload a call with arguments of these types means, which
+    /// [`Self::pick_overload`] picks with the same test the calls that are
+    /// decided early pass, so one decided early and once its arguments are
+    /// known is the same. An operator no overload takes applies to each
+    /// element of tuple arguments, as `(1, 2) + (3, 4)` adds the pairs.
     pub(super) fn resolve_overloads(
         &mut self,
         candidates: &Candidates,
         arguments: &[StaticType],
         kind: CallKind,
     ) -> ResolvedCall {
-        self.overloads().resolve_call(candidates, arguments, kind)
+        match self.pick_overload(candidates, arguments) {
+            Pick::One(symbol) => {
+                return ResolvedCall {
+                    binding: Binding::Resolved(Candidate::Scalar(symbol)),
+                    return_type: self.overloads().scalar_return_type(symbol),
+                    tied: Vec::new(),
+                };
+            }
+            Pick::Tied(tied) => {
+                return ResolvedCall {
+                    tied,
+                    ..ResolvedCall::none()
+                };
+            }
+            Pick::None => {}
+        }
+        if kind == CallKind::Operator
+            && let Some(axis) = Overloads::tuple_axis(arguments)
+        {
+            let positions = (0..axis)
+                .map(|position| {
+                    let elements = Overloads::at_position(arguments, position);
+                    match self.pick_overload(candidates, &elements) {
+                        Pick::One(symbol) => vec![symbol],
+                        Pick::Tied(tied) => tied,
+                        Pick::None => Vec::new(),
+                    }
+                })
+                .collect();
+            return self.overloads().tuple_call(positions);
+        }
+        ResolvedCall::none()
+    }
+
+    /// The overload of `candidates` arguments of these types call: of the
+    /// nearest scope with overloads that take them, as [`Self::could_accept`]
+    /// says, the one more specific than the others. A variadic overload is
+    /// the least specific. Overloads none of which is more specific than the
+    /// others tie, and the call is ambiguous, unless they take the same
+    /// parameters, as a redefinition does. A call that never happens, as one
+    /// given what `return` gives, takes the first.
+    fn pick_overload(&mut self, candidates: &Candidates, arguments: &[StaticType]) -> Pick {
+        for group in self.overloads().reachable_groups(candidates) {
+            let viable = group
+                .into_iter()
+                .filter(|&symbol| self.could_accept(symbol, arguments))
+                .collect::<Vec<_>>();
+            let Some(&first) = viable.first() else {
+                continue;
+            };
+            if arguments.contains(&StaticType::Never) {
+                return Pick::One(first);
+            }
+            let fixed = viable
+                .iter()
+                .copied()
+                .filter(|&symbol| self.overloads().parameters_of(symbol).is_some())
+                .collect::<Vec<_>>();
+            let narrowest = match fixed[..] {
+                [] if viable.len() == 1 => Some(first),
+                [] => None,
+                [only] => Some(only),
+                _ => self.most_specific(&fixed),
+            };
+            let tied = if fixed.is_empty() { viable } else { fixed };
+            // Overloads with the same parameters were reported where the
+            // later one redefines the earlier, which a call then means.
+            let redefined = tied
+                .iter()
+                .map(|&symbol| self.overloads().parameters_of(symbol))
+                .all_equal();
+            return match narrowest {
+                Some(symbol) => Pick::One(symbol),
+                None if redefined => Pick::One(tied[0]),
+                None => Pick::Tied(tied),
+            };
+        }
+        Pick::None
     }
 
     /// Resolves `call` with the arguments as they are, reporting it when no
@@ -1608,7 +1699,13 @@ impl Analyser {
         let ResolvedCall {
             binding,
             return_type,
+            tied,
         } = self.resolve_overloads(&call.candidates, arguments, call.kind);
+        if !tied.is_empty() {
+            self.report_ambiguous_call(call, arguments, &tied);
+            self.record_pick(call.site, Binding::None, arguments);
+            return StaticType::Error;
+        }
         let binding = self.call_of_the_only_one(binding);
         // `a op= b` with no operator that takes the operands calls an in-place
         // overload if one does, as a set has `-=` but no `-`, which keeps `a`.
@@ -1939,6 +2036,7 @@ impl Analyser {
         let ResolvedCall {
             binding,
             return_type,
+            ..
         } = self.resolve_overloads(&call.candidates, arguments, call.kind);
         let fits = !matches!(binding, Binding::None)
             && self.commit_call(&binding, arguments, return_type).is_some();
@@ -1970,7 +2068,13 @@ impl Analyser {
         let function = self.vars.resolve(self.types.get_type(symbol));
         let snapshot = self.vars.snapshot();
         let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
-            return matches!(function, StaticType::Function { .. }) || function.is_unknown();
+            return matches!(
+                function,
+                StaticType::Function { .. }
+                    | StaticType::Var(_)
+                    | StaticType::Generic(_)
+                    | StaticType::Error
+            );
         };
         let fits = self.vars.bind_arguments(&parameters, arguments);
         self.vars.rollback(snapshot);
@@ -2020,11 +2124,8 @@ impl Analyser {
                     .iter()
                     .map(|argument| self.vars.resolve(argument))
                     .collect::<Vec<_>>();
-                let in_place = self.overloads().resolve_call(
-                    &self.resolver.augmented_candidates(id).in_place,
-                    &arguments,
-                    CallKind::Operator,
-                );
+                let candidates = self.resolver.augmented_candidates(id).in_place.clone();
+                let in_place = self.resolve_overloads(&candidates, &arguments, CallKind::Operator);
                 let compatible = Self::augmented_rhs_is_compatible(&arguments[0], &arguments[1]);
                 let binding = match (in_place.binding, binding) {
                     (Binding::Resolved(candidate), _) => Binding::Resolved(candidate),
@@ -2051,6 +2152,43 @@ impl Analyser {
     /// Reports that no overload accepts `call`. Writing `xs[i] += 1` reads
     /// and writes `xs[i]`, and when the read fails, the write fails the same
     /// way, which is reported once.
+    /// Reports that overloads `tied` take `call` equally well.
+    fn report_ambiguous_call(
+        &mut self,
+        call: &CallConstraint,
+        arguments: &[StaticType],
+        tied: &[SymbolId],
+    ) {
+        let arguments = arguments
+            .iter()
+            .map(|argument| self.vars.shown(argument))
+            .collect::<Vec<_>>();
+        let overloads = tied
+            .iter()
+            .map(|&symbol| {
+                let typ = self.vars.shown(self.types.get_type(symbol));
+                match typ {
+                    StaticType::Function {
+                        parameters: Some(parameters),
+                        ..
+                    } => format!(
+                        "{}({})",
+                        call.name,
+                        parameters
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    other => format!("{}: {other}", call.name),
+                }
+            })
+            .collect::<Vec<_>>();
+        self.emit(AnalysisError::ambiguous_call(
+            &call.name, &arguments, &overloads, call.span,
+        ));
+    }
+
     fn report_failed_call(&mut self, call: &CallConstraint, arguments: &[StaticType]) {
         let arguments = &arguments
             .iter()

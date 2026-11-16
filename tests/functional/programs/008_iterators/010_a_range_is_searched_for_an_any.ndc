@@ -1,0 +1,6 @@
+// `in` takes a value and a sequence of values of one type, which an `Any`
+// and a range of Ints share as `Any`: the Ints are `Any`s too.
+// expect-output: false true
+let string: Any = "string";
+let three: Any = 3;
+print(string in (1..10), three in (1..10));

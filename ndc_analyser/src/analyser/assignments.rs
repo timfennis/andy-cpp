@@ -67,11 +67,9 @@ impl Analyser {
         if arguments.iter().any(StaticType::has_errors) {
             return StaticType::Error;
         }
-        let ResolvedCall { binding, .. } = self.overloads().resolve_call(
-            &self.resolver.augmented_candidates(id).in_place,
-            &arguments,
-            CallKind::Operator,
-        );
+        let candidates = self.resolver.augmented_candidates(id).in_place.clone();
+        let ResolvedCall { binding, .. } =
+            self.resolve_overloads(&candidates, &arguments, CallKind::Operator);
         if matches!(binding, Binding::None) {
             self.emit(AnalysisError::function_not_found(
                 operation, &arguments, span,

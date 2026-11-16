@@ -163,8 +163,7 @@ impl Analyser {
                 }
             } else {
                 match self
-                    .overloads()
-                    .resolve_call(&value.candidates, parameters, CallKind::Regular)
+                    .resolve_overloads(&value.candidates, parameters, CallKind::Regular)
                     .binding
                 {
                     Binding::Resolved(Candidate::Scalar(symbol)) => Some(symbol),

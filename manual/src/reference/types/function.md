@@ -334,6 +334,14 @@ print(show(1));    // int
 print(show("a"));  // other
 ```
 
+When several overloads accept a call and none of them is more specific than the others, the call is ambiguous, which is an error. Annotate one overload's parameters so it's more specific, or cast an argument so only one accepts it:
+
+```ndc,fails
+fn pair(x: Int, y: Any) { "first" }
+fn pair(x: Any, y: Int) { "second" }
+pair(1, 2);  // error: The call pair(Int, Int) is ambiguous
+```
+
 ## An overloaded function as a value
 
 A function's name can be used as a value, as in `xs.map(abs)`. When the name has several overloads, the type expected where it's used picks one. `map` passes each element, so over a list of Floats `abs` is `abs(Float)`, and over strings `split` is `split(String)` rather than `split(String, String)`. A function type annotation picks one too, and so do a variable's uses:

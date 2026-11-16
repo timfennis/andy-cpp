@@ -1,0 +1,6 @@
+// `f(Int, Any)` and `f(Any, Int)` both take `f(1, 1)`, and neither is more
+// specific than the other.
+// expect-error: The call f(Int, Int) is ambiguous
+fn f(x: Int, y: Any) => 1;
+fn f(x: Any, y: Int) => 2;
+f(1, 1);
