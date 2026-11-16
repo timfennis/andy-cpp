@@ -18,15 +18,23 @@ pub struct AnalysisError {
 impl From<NameResolutionError> for AnalysisError {
     fn from(error: NameResolutionError) -> Self {
         Self {
-            text: error.to_string(),
-            span: error.span(),
             help_text: error.help_text(),
-            notes: Vec::new(),
+            ..Self::new(error.to_string(), error.span())
         }
     }
 }
 
 impl AnalysisError {
+    /// An error that says `text` at `span`, with no help or notes.
+    fn new(text: impl Into<String>, span: Span) -> Self {
+        Self {
+            text: text.into(),
+            span,
+            help_text: None,
+            notes: Vec::new(),
+        }
+    }
+
     pub fn span(&self) -> Span {
         self.span
     }
@@ -72,79 +80,67 @@ impl AnalysisError {
         self
     }
 
-    pub(crate) fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
+    /// This error with `help` as its help.
+    pub(crate) fn with_help(self, help: impl Into<String>) -> Self {
         Self {
-            text: err.to_string(),
-            span,
-            help_text: Some(err.help_text().to_string()),
-            notes: Vec::new(),
+            help_text: Some(help.into()),
+            ..self
         }
     }
 
+    pub(crate) fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
+        Self::new(err.to_string(), span).with_help(err.help_text())
+    }
+
     pub(crate) fn type_does_not_take_generic_args(name: &str, span: Span) -> Self {
-        Self {
-            text: format!("type `{name}` does not take generic arguments"),
+        Self::new(
+            format!("type `{name}` does not take generic arguments"),
             span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        )
     }
 
     /// A pattern of `names` names for a tuple of `values` values, the value
     /// or the annotation of `let (a, b): (Int, Int, Int) = …`.
     pub(crate) fn tuple_arity_mismatch(names: usize, values: usize, span: Span) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "mismatched tuple arity: {names} names can't take apart a tuple of {values} values"
             ),
             span,
-            help_text: None,
-            notes: Vec::new(),
-        }
-    }
-
-    /// This error with `help` as its help.
-    pub(crate) fn with_help(self, help: &str) -> Self {
-        Self {
-            help_text: Some(help.to_string()),
-            ..self
-        }
+        )
     }
 
     pub(crate) fn mismatched_types(found: &StaticType, expected: &StaticType, span: Span) -> Self {
         Self {
-            text: format!("mismatched types: found {found} but expected {expected}"),
-            span,
             help_text: if *found == StaticType::Any {
                 Some(cast_out_of_any(&expected.to_string()))
             } else {
                 has_unknown(std::slice::from_ref(found)).then(annotate_the_unknown)
             },
-            notes: Vec::new(),
+            ..Self::new(
+                format!("mismatched types: found {found} but expected {expected}"),
+                span,
+            )
         }
     }
 
     pub(crate) fn values_share_no_type(unshared: &Unshared) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "values of different types: {} and {} share no type",
                 unshared.first, unshared.second
             ),
-            span: unshared.span,
-            help_text: Some(
-                "Give them one type, as with `String(n)` for a number among strings, or, as values of different types are an `Any`, which has to be said, annotate it, as in `let x: Any = …`, `-> Any` or `List<Any>`"
-                    .to_string(),
-            ),
-            notes: Vec::new(),
-        }
+            unshared.span,
+        )
+        .with_help(
+            "Give them one type, as with `String(n)` for a number among strings, or, as values of different types are an `Any`, which has to be said, annotate it, as in `let x: Any = …`, `-> Any` or `List<Any>`",
+        )
     }
 
     pub(crate) fn not_iterable(typ: &StaticType, span: Span) -> Self {
         Self {
-            text: format!("{typ} is not iterable"),
-            span,
             help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("List<Int>")),
-            notes: Vec::new(),
+            ..Self::new(format!("{typ} is not iterable"), span)
         }
     }
 
@@ -152,44 +148,40 @@ impl AnalysisError {
     /// the function itself or another overload of its name, while its
     /// return type isn't written.
     pub(crate) fn overloaded_recursion_needs_return_type(function: &str, span: Span) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "`{function}` calls itself here, where another `{function}` could be meant too, so its return type has to be written"
             ),
             span,
-            help_text: Some(format!(
-                "Which `{function}` this call is depends on types that are only known when `{function}` is called, so what `{function}` returns can't be worked out from its body. Write what it returns, as in `fn {function}(...) -> Int`, or the types of its parameters, so the call is decided in the body"
-            )),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(format!(
+            "Which `{function}` this call is depends on types that are only known when `{function}` is called, so what `{function}` returns can't be worked out from its body. Write what it returns, as in `fn {function}(...) -> Int`, or the types of its parameters, so the call is decided in the body"
+        ))
     }
 
     /// A function whose result would have a type that contains itself.
     pub(crate) fn return_type_contains_itself(function: &str, span: Span) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "What `{function}` returns would have a type that contains itself, as it returns itself or a value built from what it returns"
             ),
             span,
-            help_text: Some(format!(
-                "Only an `Any` can hold it, which has to be written: `fn {function}(...) -> Any`"
-            )),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(format!(
+            "Only an `Any` can hold it, which has to be written: `fn {function}(...) -> Any`"
+        ))
     }
 
     pub(crate) fn recursion_changes_types(function: &str, span: Span) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "`{function}` calls itself with an argument built from what it was given, so each call would need a version of `{function}` for a deeper type"
             ),
             span,
-            help_text: Some(
-                "A recursive call has to pass the types the function was called with. Annotate the parameter with `Any` to let them change as the program runs"
-                    .to_string(),
-            ),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(
+            "A recursive call has to pass the types the function was called with. Annotate the parameter with `Any` to let them change as the program runs",
+        )
     }
 
     /// A generic function's name used as a value where nothing says which
@@ -209,16 +201,15 @@ impl AnalysisError {
             [only] => format!(" with a type in place of {only}"),
             [rest @ .., last] => format!(" with types in place of {} and {last}", rest.join(", ")),
         };
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "`{function}` is generic, and its value here doesn't say which types it takes"
             ),
             span,
-            help_text: Some(format!(
-                "A generic function's value is its version for one set of types, which must be known. Say which types it takes, as in `{function} as {typ}`{in_place}"
-            )),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(format!(
+            "A generic function's value is its version for one set of types, which must be known. Say which types it takes, as in `{function} as {typ}`{in_place}"
+        ))
     }
 
     /// A use of a generic function whose types make `parameter` of the
@@ -236,14 +227,13 @@ impl AnalysisError {
             || "A `pure fn`".to_string(),
             |name| format!("`{name}` is a `pure fn`, which"),
         );
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "{function} only takes data, but here its parameter `{parameter}` would have type `{typ}`"
             ),
             span,
-            help_text: Some(Self::pure_fn_takes_data(part)),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(Self::pure_fn_takes_data(part))
     }
 
     /// A parameter of a `pure fn` whose type `typ` holds `part`: a
@@ -259,14 +249,11 @@ impl AnalysisError {
             || "This `pure fn`".to_string(),
             |name| format!("`{name}` is a `pure fn`, which"),
         );
-        Self {
-            text: format!(
-                "{function} only takes data, but its parameter `{parameter}` has type `{typ}`"
-            ),
+        Self::new(
+            format!("{function} only takes data, but its parameter `{parameter}` has type `{typ}`"),
             span,
-            help_text: Some(Self::pure_fn_takes_data(part)),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(Self::pure_fn_takes_data(part))
     }
 
     /// Why a `pure fn` can't take a value with `part` in it.
@@ -289,47 +276,30 @@ impl AnalysisError {
     }
 
     pub(crate) fn type_too_large(function: &str, limit: usize, span: Span) -> Self {
-        Self {
-            text: format!(
-                "The type of `{function}` has more than {limit} parts, too many to work with"
-            ),
+        Self::new(
+            format!("The type of `{function}` has more than {limit} parts, too many to work with"),
             span,
-            help_text: Some(
-                "Each call through it makes a bigger type. Annotate a parameter or the return type with `Any` to stop it growing"
-                    .to_string(),
-            ),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(
+            "Each call through it makes a bigger type. Annotate a parameter or the return type with `Any` to stop it growing",
+        )
     }
 
     pub(crate) fn tuple_index_out_of_bounds(index: i64, length: usize, span: Span) -> Self {
-        Self {
-            text: format!("Index {index} is out of bounds for a tuple of {length} elements"),
+        Self::new(
+            format!("Index {index} is out of bounds for a tuple of {length} elements"),
             span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        )
     }
 
     pub(crate) fn iterable_in_an_annotation(span: Span) -> Self {
-        Self {
-            text: "`Iterable<T>` can't be written in a type annotation".to_string(),
-            span,
-            help_text: Some(
-                "A parameter without an annotation takes any kind of sequence. Say which kind a value is, as in `List<Int>`"
-                    .to_string(),
-            ),
-            notes: Vec::new(),
-        }
+        Self::new("`Iterable<T>` can't be written in a type annotation", span).with_help(
+            "A parameter without an annotation takes any kind of sequence. Say which kind a value is, as in `List<Int>`",
+        )
     }
 
     pub(crate) fn impossible_cast(found: &StaticType, target: &StaticType, span: Span) -> Self {
-        Self {
-            text: format!("invalid cast: {found} can never be {target}"),
-            span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        Self::new(format!("invalid cast: {found} can never be {target}"), span)
     }
 
     pub(crate) fn function_redefinition(
@@ -341,16 +311,15 @@ impl AnalysisError {
             Some(types) => format!("({})", types.iter().join(", ")),
             None => "variadic parameters".to_string(),
         };
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "Illegal redefinition of function '{name}' with parameters {parameters_desc} in the same scope"
             ),
             span,
-            help_text: Some(
-                "Overloads in one scope need different parameter types, so annotate a parameter's type to tell them apart".to_string(),
-            ),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(
+            "Overloads in one scope need different parameter types, so annotate a parameter's type to tell them apart",
+        )
     }
 
     /// A call that several overloads take, none more specific than the
@@ -361,22 +330,17 @@ impl AnalysisError {
         overloads: &[String],
         span: Span,
     ) -> Self {
-        let arguments = arguments
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "The call {name}({}) is ambiguous: {} all take it, and none is more specific than the others",
-                arguments.join(", "),
+                arguments.iter().join(", "),
                 overloads.join(", "),
             ),
             span,
-            help_text: Some(
-                "Annotate the parameters of one of them so it's more specific, or cast an argument so only one takes it".to_string(),
-            ),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(
+            "Annotate the parameters of one of them so it's more specific, or cast an argument so only one takes it",
+        )
     }
 
     pub(crate) fn tied_overloads(
@@ -385,37 +349,30 @@ impl AnalysisError {
         earlier: &[String],
         span: Span,
     ) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "A call could fit both {name}({}) and {name}({}), declared earlier in the same scope, and neither is more specific",
                 parameters.join(", "),
                 earlier.join(", "),
             ),
             span,
-            help_text: Some(
-                "A parameter without a type annotation (`_` here) takes any argument the body can work with. Annotate the parameters so that one overload is more specific, or so that they take different arguments".to_string(),
-            ),
-            notes: Vec::new(),
-        }
+        )
+        .with_help(
+            "A parameter without a type annotation (`_` here) takes any argument the body can work with. Annotate the parameters so that one overload is more specific, or so that they take different arguments",
+        )
     }
 
     pub(crate) fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
-        Self {
-            text: format!("Unable to index into {typ}"),
-            span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        Self::new(format!("Unable to index into {typ}"), span)
     }
+
     pub(crate) fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
         Self {
-            text: format!("Invalid unpacking of {typ}"),
-            span,
             help_text: (*typ == StaticType::Any).then(|| {
                 "An `Any` could hold anything. Cast it to say what it holds, as in `value as (Int, Int)`"
                     .to_string()
             }),
-            notes: Vec::new(),
+            ..Self::new(format!("Invalid unpacking of {typ}"), span)
         }
     }
 
@@ -460,36 +417,31 @@ impl AnalysisError {
             None
         };
         Self {
-            text,
-            span,
             help_text,
-            notes: Vec::new(),
+            ..Self::new(text, span)
         }
     }
 
     pub(crate) fn function_not_found(ident: &str, types: &[StaticType], span: Span) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "No function called '{ident}' found that matches the arguments '{}'",
                 types.iter().join(", ")
             ),
             span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        )
     }
 
     /// This error with help saying what the overloads of `name` take, given
     /// as `(Int, String)` each, if any.
     pub(crate) fn with_overloads(self, name: &str, overloads: &[String]) -> Self {
-        let help_text = match overloads {
-            [] => return self,
-            [only] => format!("`{name}` takes {only}"),
-            several => format!("The overloads of `{name}` take {}", several.join(", ")),
-        };
-        Self {
-            help_text: Some(help_text),
-            ..self
+        match overloads {
+            [] => self,
+            [only] => self.with_help(format!("`{name}` takes {only}")),
+            several => self.with_help(format!(
+                "The overloads of `{name}` take {}",
+                several.join(", ")
+            )),
         }
     }
 
@@ -501,10 +453,7 @@ impl AnalysisError {
         types: &[StaticType],
         span: Span,
     ) -> Self {
-        Self {
-            help_text: Some(cast_out_of_any("Int")),
-            ..Self::function_not_found(ident, types, span)
-        }
+        Self::function_not_found(ident, types, span).with_help(cast_out_of_any("Int"))
     }
 
     /// Same as [`Self::function_not_found`], for a call given what an empty
@@ -515,10 +464,7 @@ impl AnalysisError {
         types: &[StaticType],
         span: Span,
     ) -> Self {
-        Self {
-            help_text: Some(annotate_the_unknown()),
-            ..Self::function_not_found(ident, types, span)
-        }
+        Self::function_not_found(ident, types, span).with_help(annotate_the_unknown())
     }
 
     /// Same as [`Self::function_not_found`], for a call an overload would
@@ -528,17 +474,11 @@ impl AnalysisError {
         types: &[StaticType],
         span: Span,
     ) -> Self {
-        Self {
-            help_text: Some(
-                concat!(
-                    "An overload would accept a narrower argument type. ",
-                    "Cast to say what the value holds, as in `value.clone() as List<Int>`: ",
-                    "a container is cast as a copy while something else still holds it.",
-                )
-                .to_string(),
-            ),
-            ..Self::function_not_found(ident, types, span)
-        }
+        Self::function_not_found(ident, types, span).with_help(concat!(
+            "An overload would accept a narrower argument type. ",
+            "Cast to say what the value holds, as in `value.clone() as List<Int>`: ",
+            "a container is cast as a copy while something else still holds it.",
+        ))
     }
 
     /// `example` is one of the overloads' types, to show how to say which
@@ -556,50 +496,25 @@ impl AnalysisError {
                 "'{name}' has several overloads that are a {expected}, and nothing here says which one is meant"
             )
         };
-        Self {
-            text,
-            span,
-            help_text: Some(format!(
-                "Say which one with a function type, as in `let f: {example} = {name}`"
-            )),
-            notes: Vec::new(),
-        }
+        Self::new(text, span).with_help(format!(
+            "Say which one with a function type, as in `let f: {example} = {name}`"
+        ))
     }
 
     pub(crate) fn no_overload_fits(name: &str, expected: &StaticType, span: Span) -> Self {
-        Self {
-            text: format!("No overload of '{name}' is a {expected}"),
-            span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        Self::new(format!("No overload of '{name}' is a {expected}"), span)
     }
 
     pub(crate) fn break_outside_loop(span: Span) -> Self {
-        Self {
-            text: "unexpected break statement outside of loop".to_string(),
-            span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        Self::new("unexpected break statement outside of loop", span)
     }
 
     pub(crate) fn continue_outside_loop(span: Span) -> Self {
-        Self {
-            text: "unexpected continue statement outside of loop".to_string(),
-            span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        Self::new("unexpected continue statement outside of loop", span)
     }
 
     pub(crate) fn return_outside_function(span: Span) -> Self {
-        Self {
-            text: "unexpected return statement outside of function body".to_string(),
-            span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        Self::new("unexpected return statement outside of function body", span)
     }
 
     pub(crate) fn callee_rejects_arguments(
@@ -607,29 +522,23 @@ impl AnalysisError {
         types: &[StaticType],
         span: Span,
     ) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "A function of type {callee} doesn't accept the arguments '{}'",
                 types.iter().join(", ")
             ),
             span,
-            help_text: None,
-            notes: Vec::new(),
-        }
+        )
     }
 
     pub(crate) fn not_callable(typ: &StaticType, span: Span) -> Self {
         Self {
-            text: format!("Unable to invoke {typ} as a function."),
-            span,
             help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("Fn(Int) -> Int")),
-            notes: Vec::new(),
+            ..Self::new(format!("Unable to invoke {typ} as a function."), span)
         }
     }
 }
 
-/// Help for a value of type `Any` used where `example`, or another type,
-/// is expected.
 /// Whether any of `types` has [`StaticType::Unknown`] in it.
 pub(crate) fn has_unknown(types: &[StaticType]) -> bool {
     types
@@ -647,6 +556,8 @@ fn annotate_the_unknown() -> String {
     .to_string()
 }
 
+/// Help for a value of type `Any` used where `example`, or another type,
+/// is expected.
 fn cast_out_of_any(example: &str) -> String {
     format!(
         "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `value as {example}`, or `value as? {example}` to get an Option"

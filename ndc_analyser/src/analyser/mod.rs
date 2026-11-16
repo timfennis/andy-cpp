@@ -492,7 +492,7 @@ impl Analyser {
                 // list of Strings. A number written there is what it's cast
                 // to, as with `as`: `1 as? Float` is `Some(1.0)`.
                 let found = self.vars.resolve(&found);
-                let unknown = matches!(found, StaticType::Var(var) if !self.vars.is_literal(var));
+                let unknown = self.vars.is_unknown(&found);
                 let literal = matches!(found, StaticType::Var(var) if self.vars.is_literal(var));
                 // Any value is an `Any`, so `(1 + 2) as Any` says nothing
                 // about what the `1` and `2` are.

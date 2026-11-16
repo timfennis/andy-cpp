@@ -97,13 +97,15 @@ impl Analyser {
                 },
             );
         }
-        // A function's value takes what its parameters turn out to be.
+        // A function's value takes what its parameters turn out to be. What
+        // it returns is `Any` unless it's written, or, for a lambda, until
+        // its body says.
         let runtime_parameters = Some(param_types.clone());
         self.result.analysis.function_types.insert(
             id,
             StaticType::Function {
                 parameters: runtime_parameters,
-                return_type: Box::new(annotated_return.clone().unwrap_or_default()),
+                return_type: Box::new(annotated_return.clone().unwrap_or(StaticType::Any)),
             },
         );
         self.declared_functions.push(id);
@@ -126,7 +128,7 @@ impl Analyser {
                     annotated_return
                         .clone()
                         .or_else(|| recursive_return.clone())
-                        .unwrap_or_default(),
+                        .expect("internal error: a declared function's return type is known"),
                 ),
             };
             self.types.declare(symbol, placeholder);

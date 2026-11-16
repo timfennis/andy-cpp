@@ -254,17 +254,6 @@ pub enum ResolvedVar {
     },
 }
 
-impl ResolvedVar {
-    pub fn slot(self) -> usize {
-        match self {
-            Self::Local { slot }
-            | Self::Cell { slot }
-            | Self::Upvalue { slot, .. }
-            | Self::Global { slot } => slot,
-        }
-    }
-}
-
 /// A function overload candidate the analyser picked. The two variants encode
 /// what kind of call this candidate is — a direct scalar call, or an element-wise
 /// tuple broadcast over the scalar overload that `var()` returns.
