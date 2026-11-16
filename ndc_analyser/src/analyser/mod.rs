@@ -209,10 +209,30 @@ impl Analyser {
     /// Take the accumulated analysis result (including any errors),
     /// resetting it for the next analysis.
     pub fn take_result(&mut self) -> AnalysisResult {
-        // Nothing after this batch can settle its type variables any more,
-        // so the ones left unsettled get their fallbacks, what waited on them
-        // is solved, and no variable leaves the analyser.
-        self.settle_waiting(0);
+        self.finish_batch(false)
+    }
+
+    /// Take the result of a REPL line, which more lines may follow: what
+    /// the line's code doesn't need settled to run stays open for them, as
+    /// later code in a program would settle it. `let xs = [];` leaves what
+    /// `xs` holds to a later `xs.push(1)`, while `let f = fn(x) => x * 2;`
+    /// has to pick its `*` now, before the next line exists.
+    pub fn take_line_result(&mut self) -> AnalysisResult {
+        self.finish_batch(true)
+    }
+
+    /// The batch's result. Unless `more_may_follow`, nothing after it can
+    /// settle its type variables any more, so the ones left unsettled get
+    /// their fallbacks, what waited on them is solved, and no variable leaves
+    /// the analyser. Otherwise the ones nothing in the batch needs stay open,
+    /// and the analysis shows them as `Unknown`.
+    fn finish_batch(&mut self, more_may_follow: bool) -> AnalysisResult {
+        let open = if more_may_follow {
+            self.not_needed_now()
+        } else {
+            AHashSet::new()
+        };
+        self.settle_waiting_keeping(0, &open);
         self.vars.forget_literals();
         self.literal_origins.clear();
         debug_assert!(
@@ -235,13 +255,13 @@ impl Analyser {
         // types make it take.
         for picks in self.picks.instances.values_mut() {
             for typ in picks.function_types.values_mut() {
-                *typ = self.vars.finish(typ).replace(&|part| {
+                *typ = self.vars.finish_open(typ).replace(&|part| {
                     matches!(part, StaticType::Var(_) | StaticType::Generic(_))
                         .then_some(StaticType::Any)
                 });
             }
         }
-        self.types.resolve_all(&self.vars);
+        self.types.resolve_all(&self.vars, more_may_follow);
         let analysis = &mut self.result.analysis;
         for table in [
             &mut analysis.expr_types,
@@ -250,12 +270,11 @@ impl Analyser {
             &mut analysis.function_types,
         ] {
             for typ in table.values_mut() {
-                *typ = self.vars.finish(typ);
-                debug_assert!(!typ.has_vars(), "unsettled type variable in {typ}");
+                *typ = self.vars.finish_open(typ);
             }
         }
         for typ in analysis.cast_checks.values_mut().flatten() {
-            *typ = self.vars.finish(typ);
+            *typ = self.vars.finish_open(typ);
         }
 
         let mut result = std::mem::take(&mut self.result);
