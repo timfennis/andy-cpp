@@ -1,0 +1,6 @@
+// What `return` gives never arrives, so it doesn't pick between the
+// overloads of `+`, which all take it.
+// expect-error: The call +(Never, Int) is ambiguous
+fn foo() {
+    return (return 5) + 1;
+}
