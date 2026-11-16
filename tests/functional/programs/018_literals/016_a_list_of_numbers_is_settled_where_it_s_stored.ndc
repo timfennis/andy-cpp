@@ -1,0 +1,4 @@
+// `let xs = [1]` makes `xs` a `List<Int>`, which a Float can't be pushed onto.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, Float'
+let xs = [1];
+xs.push(1.5);

@@ -719,6 +719,37 @@ impl Analyser {
         self.solve_waiting();
     }
 
+    /// Gives the number literals in `typ` their defaults, as what a variable
+    /// is given: in `let n = 7`, `n` is an Int, whatever its uses are, so
+    /// `n * 0.5` is a Float and `0..n` a range of Ints in any order. A literal
+    /// list of numbers takes the type they share, as in `let xs = [1, 2.5]`
+    /// and `let grid = [[1], [2.5]]`.
+    /// Within one expression a literal still takes its operand's type, as
+    /// the `2` in `x / 2` with a Float `x` does.
+    pub(super) fn settle_number_literals(&mut self, typ: &StaticType) {
+        // A literal whose values share no type, as `if c { 1 } else { "a" }`,
+        // stays one, as what it is depends on where it's stored; the number
+        // literals it holds don't.
+        // What a literal that's settled holds is settled with it, as the
+        // `[2.5]` in `[[1], [2.5]]`.
+        let mut literals = AHashSet::new();
+        for (var, holds_a_number) in self.vars.literal_tree(typ) {
+            if holds_a_number && (self.vars.is_number(var) || !self.vars.holds_unshared_values(var))
+            {
+                literals.extend(
+                    self.vars
+                        .literal_tree(&StaticType::Var(var))
+                        .into_iter()
+                        .map(|(held, _)| held),
+                );
+            }
+        }
+        if !literals.is_empty() {
+            self.default_literals(|_, var| literals.contains(&var));
+            self.solve_waiting();
+        }
+    }
+
     /// Settles the types of the literals that `belongs` says to that nothing
     /// settled, and returns whether it settled any. Each takes its first
     /// default, which depends only on the literal, never on the calls

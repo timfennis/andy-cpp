@@ -37,18 +37,24 @@ print(binary, octal, hexadecimal);  // 42 42 42
 
 An integer literal without `n` must fit in `i64`. The lexer reports an error and suggests the suffixed form when it does not fit.
 
-An integer literal without a suffix is an `Int`, unless how it's used says otherwise. Then it's a `Float` or a `Number`:
+An integer literal without a suffix is an `Int`, unless the expression it's written in says otherwise: an annotation, the other operand of an operator, or the other numbers of a list. Then it's a `Float` or a `Number`:
 
 ```ndc
 print(7 / 2);          // 3
 let f: Float = 7;
 print(f / 2);          // 3.5
-
-let total = 0;
-total += 2.5;          // total is a Float
-print(total);          // 2.5
+print(f + 1, [1, 2.5]);  // 8.0 [1.0,2.5]
 
 print([1.5, 2.25].fold(0, fn(acc, x) => acc + x));  // 3.75
+```
+
+A variable is what it's declared with, so one that starts at `0` is an `Int`, whatever is done with it later. To keep a running total of Floats, start it at `0.0`:
+
+```ndc,fails
+let total = 0.0;
+total += 2.5;          // fine: total is a Float
+let count = 0;
+count += 2.5;          // error: mismatched types: found Float but expected Int
 ```
 
 A value that's already an `Int`, like the result of `len`, stays one.

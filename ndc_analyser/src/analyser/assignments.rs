@@ -21,7 +21,8 @@ impl Analyser {
         operation: &str,
         span: Span,
     ) -> StaticType {
-        let left_type = self.analyse_assignment_target(l_value, span);
+        let stored_type = self.analyse_assignment_target(l_value, span);
+        let left_type = stored_type.clone();
         let right_type = self.analyse_expr(r_value);
         // `a op= b` is `a = op(a, b)`: the operator is a call like any other,
         // and the in-place overload is picked along with it where it does the
@@ -42,11 +43,11 @@ impl Analyser {
                 operation,
                 span,
             );
-            self.validate_assignment_write(l_value, &left_type, &result, span);
+            self.validate_assignment_write(l_value, &stored_type, &result, span);
             return StaticType::unit();
         }
         let written = self.in_place_only(id, &left_type, &right_type, operation, span);
-        self.validate_assignment_write(l_value, &left_type, &written, span);
+        self.validate_assignment_write(l_value, &stored_type, &written, span);
         StaticType::unit()
     }
 
@@ -112,7 +113,7 @@ impl Analyser {
             AssignmentTarget::Identifier { .. } => {
                 let symbol = self.resolver.assigned_symbol(lvalue.id);
                 self.picks.variables.insert(lvalue.id, symbol);
-                self.vars.resolve(self.types.get_type(symbol))
+                self.types.get_type(symbol).clone()
             }
             AssignmentTarget::Index { index, value } => {
                 // The container before the index, in source order like the resolver.
@@ -264,11 +265,18 @@ impl Analyser {
             });
             return;
         }
-        let error = AnalysisError::mismatched_types(
+        let mut error = AnalysisError::mismatched_types(
             &self.vars.shown(value_type),
             &self.vars.shown(stored_type),
             span,
         );
+        if self.vars.has_number_literal(stored_type) {
+            error = error.with_help(
+                "A number written without a `.` is an Int, and a variable holds what it's \
+                 given first: write it as a Float, as in `let total = 0.0`, or annotate the \
+                 variable, as in `let total: Float = 0`",
+            );
+        }
         self.emit(error);
     }
 

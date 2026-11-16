@@ -1,0 +1,5 @@
+// The numbers in `[[1, 2]]` are Ints from the `let`, at any depth, so a
+// Float can't be written into the inner list.
+// expect-error: mismatched types: found Float but expected Int
+let grid = [[1, 2]];
+grid[0][0] = 0.5;

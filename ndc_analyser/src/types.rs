@@ -433,6 +433,73 @@ impl TypeVars {
         holds_a_number
     }
 
+    /// The unsettled literals in `typ` and those they hold, at any depth,
+    /// each with whether a number literal is among what it holds, at any
+    /// depth, or is it: in `[(1, "a")]`, the list's elements, and the `1`.
+    pub(crate) fn literal_tree(&self, typ: &StaticType) -> Vec<(TypeVar, bool)> {
+        let mut tree = Vec::new();
+        let mut seen = AHashSet::new();
+        let mut unseen = self.unsettled_literals_of(typ);
+        while let Some(var) = unseen.pop() {
+            if !seen.insert(var) {
+                continue;
+            }
+            tree.push(var);
+            for bound in &self.bounds[var.0 as usize] {
+                if let Bound::Holds(held, _, _) = bound {
+                    unseen.extend(self.unsettled_literals_of(held));
+                }
+            }
+        }
+        tree.iter()
+            .map(|&var| (var, self.holds_a_number(var)))
+            .collect()
+    }
+
+    /// The unsettled literals among the parts of `typ`.
+    fn unsettled_literals_of(&self, typ: &StaticType) -> Vec<TypeVar> {
+        self.unsettled(typ)
+            .into_iter()
+            .filter(|&var| self.is_literal(var))
+            .collect()
+    }
+
+    /// Whether the literal `var` is a number literal's type, or holds one
+    /// at any depth.
+    fn holds_a_number(&self, var: TypeVar) -> bool {
+        let mut seen = AHashSet::from_iter([var]);
+        let mut unseen = vec![var];
+        while let Some(var) = unseen.pop() {
+            if self.is_number(var) {
+                return true;
+            }
+            for bound in &self.bounds[var.0 as usize] {
+                if let Bound::Holds(held, _, _) = bound {
+                    for part in self.unsettled_literals_of(held) {
+                        if seen.insert(part) {
+                            unseen.push(part);
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Whether a part of `typ` is the type of a number literal, settled or
+    /// not, as the type of `total` in `let total = 0` is.
+    pub(crate) fn has_number_literal(&self, typ: &StaticType) -> bool {
+        typ.contains(&|part| match part {
+            StaticType::Var(var) => {
+                self.is_number(*var)
+                    || self
+                        .solution(*var)
+                        .is_some_and(|solution| self.has_number_literal(solution))
+            }
+            _ => false,
+        })
+    }
+
     /// Whether `var` is the type of an integer literal.
     pub(crate) fn is_number(&self, var: TypeVar) -> bool {
         self.bounds[var.0 as usize]
