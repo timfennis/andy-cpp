@@ -4,8 +4,7 @@
 //! a program pass the checker and then fail as it runs. Errors about values,
 //! as a division by zero or an index out of bounds, are what values can do.
 
-use ndc_core::StaticType;
-use ndc_interpreter::{Interpreter, InterpreterError};
+use ndc_interpreter::{Interpreter, InterpreterError, StaticType};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Natives this test doesn't call: they print, read files, stop the program,

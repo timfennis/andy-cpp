@@ -4,6 +4,5 @@ edition.workspace = true
 version.workspace = true
 
 [dev-dependencies]
-ndc_core.workspace = true
 ndc_interpreter.workspace = true
 ndc_stdlib.workspace = true
