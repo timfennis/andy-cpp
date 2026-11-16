@@ -434,6 +434,63 @@ impl Value {
         self.conforms_to(target).then(|| self.clone())
     }
 
+    /// The kind of the first container a cast of this value to `target`
+    /// gives a new type that's held by more than `holders` holders, or, deeper
+    /// in, by more than the container holding it: another holder could still
+    /// write what the old type allowed. `None` if there's none.
+    pub fn shared_beyond(&self, target: &StaticType, holders: usize) -> Option<&'static str> {
+        if !target.holds_a_mutable_container() {
+            return None;
+        }
+        let Self::Object(object) = self else {
+            return None;
+        };
+        if Rc::strong_count(object) > holders {
+            return Some(match object.as_ref() {
+                Object::List(_) => "list",
+                Object::Map { .. } => "map",
+                Object::Deque(_) => "deque",
+                Object::MinHeap(_) | Object::MaxHeap(_) => "heap",
+                Object::Some(_) => "option",
+                Object::Tuple(_) => "tuple",
+                _ => "value",
+            });
+        }
+        fn inside<'v>(
+            values: impl IntoIterator<Item = &'v Value>,
+            target: &StaticType,
+        ) -> Option<&'static str> {
+            values
+                .into_iter()
+                .find_map(|value| value.shared_beyond(target, 1))
+        }
+        match (target, object.as_ref()) {
+            (StaticType::List(element), Object::List(values)) => {
+                inside(values.borrow().iter(), element)
+            }
+            (StaticType::Deque(element), Object::Deque(values)) => {
+                inside(values.borrow().iter(), element)
+            }
+            (StaticType::MinHeap(element), Object::MinHeap(values)) => {
+                inside(values.borrow().iter().map(|value| &value.0.0), element)
+            }
+            (StaticType::MaxHeap(element), Object::MaxHeap(values)) => {
+                inside(values.borrow().iter().map(|value| &value.0), element)
+            }
+            (StaticType::Map { key, value }, Object::Map { entries, default }) => {
+                let entries = entries.borrow();
+                inside(entries.keys(), key)
+                    .or_else(|| inside(entries.values().chain(default.iter()), value))
+            }
+            (StaticType::Option(inner), Object::Some(value)) => value.shared_beyond(inner, 1),
+            (StaticType::Tuple(elements), Object::Tuple(values)) => elements
+                .iter()
+                .zip(values)
+                .find_map(|(element, value)| value.shared_beyond(element, 1)),
+            _ => None,
+        }
+    }
+
     /// Check whether this value conforms to `target`, scanning container
     /// elements recursively. Empty containers conform to any element type.
     ///

@@ -3,10 +3,10 @@
 The `as` operator asserts that a value has the given type:
 
 ```ndc
-let values: List<Any> = [1, 2];
+let values: Any = [1, 2];
 
-// values is a List<Any>; the cast recovers the element type so the
-// result works with functions that expect a List<Int>.
+// values is an Any; the cast says it's a list of Ints, so the result
+// works with functions that expect a List<Int>.
 let ints = values as List<Int>;
 print(ints.sum());  // 3
 ```
@@ -72,6 +72,39 @@ The analyser rejects casts between types that cannot share a value:
 // error[analysis]: invalid cast: String can never be Int
 ```
 
+## A container held by another name
+
+A cast gives the value it's given, not a copy. For a list, map, deque or heap
+that means the cast's result and whatever else holds the container share it,
+and a write through one is seen through the other. The cast would give the
+container a second type, and a write that one type allows could break what the
+other says it holds. So a cast to a type with a container in it fails when the
+container is held by something else:
+
+```ndc,fails
+let words = "a b".split(" ");  // a List<String>
+let any: Any = words;
+let anything = any as List<Any>;
+// error[vm]: cannot cast to List<Any>: the list is also held by something else, which would still expect what it held before
+```
+
+Had it worked, `anything.push(1)` would have put an Int in `words`. An `Any`
+the container is read from doesn't count as another holder: nothing writes to
+a container through an `Any` without a cast of its own. A cast that the
+analyser proves, such as one to the type the value already has, gives no new
+type and isn't checked.
+
+Cast a copy instead. `clone` copies the container and `deepcopy` the
+containers in it too, which a cast also needs when it gives those a new type:
+
+```ndc
+let values: List<Any> = [1, 2];
+let ints = values.clone() as List<Int>;
+print(ints.sum());  // 3
+```
+
+`as?` fails the same way, as its `Some` would share the container too.
+
 ## Testing a value's type with `as?`
 
 `value as? T` is the cast that doesn't fail: it is `Some(value)`, as a `T`,
@@ -86,10 +119,10 @@ print(value as? String);  // None
 It checks a value the way `as` does, so a container is checked element by element:
 
 ```ndc
-let values: List<Any> = [1, "a"];
-let mixed: Any = values;
+let mixed: List<Any> = [1, "a"];
 print(mixed as? List<Int>);  // None
-print(mixed as? List<Any>);  // Some([1,"a"])
+let ints: Any = [1, 2];
+print(ints as? List<Int>);   // Some([1,2])
 ```
 
 That makes it the way to ask what a value is:

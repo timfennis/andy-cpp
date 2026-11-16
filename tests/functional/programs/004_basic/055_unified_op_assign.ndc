@@ -15,11 +15,9 @@ assert_eq(sets[0], %{1, 3});
 
 // An Any-typed indexed value takes a cast to be a list. The cast gives the
 // same list, which the op= candidate updates in place.
-let dynamic_alias = [10];
-let dynamic_values: List<Any> = [dynamic_alias];
+let dynamic_values: List<Any> = [[10]];
 let dynamic_element = dynamic_values[0] as List<Int>;
 dynamic_element ++= [20];
-assert_eq(dynamic_alias, [10, 20]);
 assert_eq(dynamic_values[0], [10, 20]);
 
 // Location components, the current-value read, and the rhs execute once in

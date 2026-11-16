@@ -631,6 +631,22 @@ impl StaticType {
         )
     }
 
+    /// Whether a value of this type is, or holds, a container a program can
+    /// write to: a list, map, deque or heap, as `Option<List<Int>>` does. A
+    /// function holds none: what it takes and returns is checked per call.
+    pub fn holds_a_mutable_container(&self) -> bool {
+        match self {
+            Self::List(_)
+            | Self::Map { .. }
+            | Self::Deque(_)
+            | Self::MinHeap(_)
+            | Self::MaxHeap(_) => true,
+            Self::Option(inner) => inner.holds_a_mutable_container(),
+            Self::Tuple(elements) => elements.iter().any(Self::holds_a_mutable_container),
+            _ => false,
+        }
+    }
+
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {
         match self {
             // Any just unpacks to an infinite list of Any

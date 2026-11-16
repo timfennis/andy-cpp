@@ -60,7 +60,8 @@ State the element type with a [cast](../features/casts.md):
 let values: List<Any> = [1, 2, 3];
 
 // values is typed List<Any>; the cast recovers Int so sum can resolve.
-print((values as List<Int>).sum());  // 6
+// values still holds the list, so a copy is cast (see the casts chapter).
+print((values.clone() as List<Int>).sum());  // 6
 ```
 
 Better still, leave out the `Any`: a value keeps the type it was created with unless it's stored as an `Any`, and a parameter without an annotation takes the type of each call's argument.

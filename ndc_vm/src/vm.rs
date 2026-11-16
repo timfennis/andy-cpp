@@ -239,6 +239,22 @@ impl Vm {
                         ));
                     }
                 }
+                OpCode::CheckUnshared(target, holders) => {
+                    // A value that isn't a `target` fails the cast's own test
+                    // instead, whether it's shared or not.
+                    let value = self.stack.last().expect("stack underflow");
+                    if let Some(kind) = value.shared_beyond(target, *holders)
+                        && value.conforms_to(target)
+                    {
+                        return Err(VmError::new(
+                            format!(
+                                "cannot cast to {target}: the {kind} is also held by something else, \
+                                 which would still expect what it held before"
+                            ),
+                            span,
+                        ));
+                    }
+                }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;

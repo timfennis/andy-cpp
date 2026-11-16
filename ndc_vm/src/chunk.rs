@@ -149,6 +149,12 @@ pub enum OpCode {
     Memoize,
     /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
     CheckType(Rc<StaticType>),
+    /// Peeks top; errors if the value is of the type but a container the
+    /// cast would give that type is held anywhere else: by more than the
+    /// given number of holders at the top, the value itself and the place it
+    /// was read from, or by more than one inside it. A value not of the type
+    /// is left to the cast's own test. `[… value → … value]`
+    CheckUnshared(Rc<StaticType>, usize),
     /// Pops a value, pushes `Some(value)` if it conforms to the type and
     /// `None` if it doesn't. `[… value → … option]`
     TryCast(Rc<StaticType>),
@@ -188,6 +194,7 @@ impl OpCode {
             Self::NewCell(_) => "NewCell",
             Self::Memoize => "Memoize",
             Self::CheckType(_) => "CheckType",
+            Self::CheckUnshared(..) => "CheckUnshared",
             Self::TryCast(_) => "TryCast",
         }
     }
@@ -244,7 +251,7 @@ impl OpCode {
             Self::NewCell(_) => 0,
             Self::Memoize => 0,
             // Peeks the value without popping it.
-            Self::CheckType(_) => 0,
+            Self::CheckType(_) | Self::CheckUnshared(..) => 0,
             // Replaces the value with the option holding it.
             Self::TryCast(_) => 0,
         }
@@ -300,6 +307,7 @@ impl std::fmt::Debug for OpCode {
             Self::Unpack(n) => write!(f, "Unpack({n})"),
             Self::Memoize => write!(f, "Memoize"),
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
+            Self::CheckUnshared(typ, holders) => write!(f, "CheckUnshared({typ}, {holders})"),
             Self::TryCast(typ) => write!(f, "TryCast({typ})"),
         }
     }
