@@ -649,9 +649,7 @@ impl StaticType {
 
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {
         match self {
-            // What isn't known yet unpacks to as many parts as it's unpacked
-            // into, each of them not known yet either.
-            Self::Var(_) | Self::Generic(_) => Some(Box::new(std::iter::repeat(&Self::Any))),
+
             Self::Error => Some(Box::new(std::iter::repeat(&Self::Error))),
             Self::List(elem)
             | Self::Iterable(elem)
@@ -661,8 +659,11 @@ impl StaticType {
             | Self::Deque(elem) => Some(Box::new(std::iter::repeat(&**elem))),
             Self::Tuple(types) => Some(Box::new(types.iter())),
             Self::String => Some(Box::new(std::iter::repeat(&Self::String))),
-            // An `Any` could hold anything, which a cast has to say first.
+            // An `Any` could hold anything, which a cast has to say first. What
+            // isn't known yet is unpacked by the analyser once it is.
             Self::Any
+            | Self::Var(_)
+            | Self::Generic(_)
             | Self::Bool
             | Self::Function { .. }
             | Self::Option(_)

@@ -90,14 +90,12 @@ impl AnalysisError {
         }
     }
 
-    pub(crate) fn tuple_arity_mismatch(
-        ident_len: usize,
-        annotation_len: usize,
-        span: Span,
-    ) -> Self {
+    /// A pattern of `names` names for a tuple of `values` values, the value
+    /// or the annotation of `let (a, b): (Int, Int, Int) = …`.
+    pub(crate) fn tuple_arity_mismatch(names: usize, values: usize, span: Span) -> Self {
         Self {
             text: format!(
-                "mismatched tuple arity: found a len={ident_len} identifier and a len={annotation_len} annotation."
+                "mismatched tuple arity: {names} names can't take apart a tuple of {values} values"
             ),
             span,
             help_text: None,

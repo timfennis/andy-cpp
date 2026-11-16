@@ -1,0 +1,12 @@
+// A parameter whose type comes from the call destructures into the parts of
+// the value it's given, annotated or not, in a `let` and in an assignment.
+// expect-output: 3 3 3
+fn annotated(x) { let (a, b): (Int, Int) = x; a + b }
+fn inferred(x) { let (a, b) = x; a + b }
+fn assigned(x) {
+    let a = 0;
+    let b = 0;
+    (a, b) = x;
+    a + b
+}
+print(annotated((1, 2)), inferred((1, 2)), assigned((1, 2)));

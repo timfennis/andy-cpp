@@ -300,10 +300,7 @@ fn assert_one_error_then_any(source: &str, expected: &str) {
 #[test]
 fn a_pattern_that_fails_to_type_check_binds_every_name_as_any() {
     for (source, expected) in [
-        (
-            "let (a, b, c): (Int, Int, Int) = (1, 2); c",
-            "Invalid unpacking",
-        ),
+        ("let (a, b, c) = (1, 2); c", "mismatched tuple arity"),
         (
             "let (a, b, c): (Int, Int) = (1, 2); c",
             "mismatched tuple arity",
@@ -312,6 +309,14 @@ fn a_pattern_that_fails_to_type_check_binds_every_name_as_any() {
     ] {
         assert_one_error_then_any(source, expected);
     }
+}
+
+#[test]
+fn an_annotated_name_the_value_has_no_part_for_keeps_its_annotation() {
+    let (last_type, result) =
+        analyse_with_globals("let (a, b, c): (Int, Int, Int) = (1, 2); c", vec![]);
+    assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
+    assert_eq!(last_type, StaticType::Int);
 }
 
 #[test]
@@ -885,7 +890,7 @@ fn unpacking_waits_until_the_kind_of_value_is_known() {
     );
     assert_eq!(
         errors("let f = fn(p) { let (a, b) = p; a }; f((1, 2, 3));", vec![]),
-        vec!["mismatched tuple arity: found a len=2 identifier and a len=3 annotation."]
+        vec!["mismatched tuple arity: 2 names can't take apart a tuple of 3 values"]
     );
 }
 

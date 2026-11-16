@@ -360,22 +360,9 @@ impl Analyser {
                 let StaticType::Tuple(stored_types) = stored_type else {
                     unreachable!("internal error: a sequence target stores a tuple")
                 };
-                if let StaticType::Tuple(value_types) = value_type
-                    && value_types.len() != targets.len()
-                {
-                    self.emit(AnalysisError::tuple_arity_mismatch(
-                        targets.len(),
-                        value_types.len(),
-                        span,
-                    ));
-                    return;
-                }
-                let Some(value_types) = value_type.unpack() else {
-                    self.emit(AnalysisError::unable_to_unpack_type(value_type, span));
-                    return;
-                };
+                let value_types = self.unpack(value_type, targets.len(), span);
                 for (target, stored_type, value_type) in izip!(targets, stored_types, value_types) {
-                    self.validate_assignment_write(target, stored_type, value_type, span);
+                    self.validate_assignment_write(target, stored_type, &value_type, span);
                 }
             }
             AssignmentTarget::Identifier { .. } => {}
