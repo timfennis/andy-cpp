@@ -83,24 +83,17 @@ impl Analyser {
             .split_off(first_use)
             .into_iter()
             .partition(|generic_use| {
-                generic_use.key.iter().any(|typ| {
-                    self.vars
-                        .unsettled(typ)
-                        .into_iter()
-                        .any(|var| self.vars.is_generalizable(var))
-                })
+                generic_use
+                    .key
+                    .iter()
+                    .any(|typ| !self.vars.generalizable_in(typ).is_empty())
             });
         self.uses.extend(outside);
 
         // Name the type parameters in the order they appear.
         let mut parameters = self.vars.unsettled(signature);
         for waiting in &scheme {
-            for typ in waiting
-                .constraint
-                .inputs()
-                .iter()
-                .chain(waiting.constraint.outputs())
-            {
+            for typ in waiting.constraint.types() {
                 for var in self.vars.unsettled(typ) {
                     if !parameters.contains(&var) {
                         parameters.push(var);
@@ -129,12 +122,7 @@ impl Analyser {
             .into_iter()
             .map(|mut generic_use| {
                 for typ in &generic_use.key {
-                    let unnamed = self
-                        .vars
-                        .unsettled(typ)
-                        .into_iter()
-                        .filter(|&var| self.vars.is_generalizable(var))
-                        .collect::<Vec<_>>();
+                    let unnamed = self.vars.generalizable_in(typ);
                     self.vars.settle_with_fallbacks(&unnamed);
                 }
                 generic_use.key = generic_use
@@ -245,26 +233,21 @@ impl Analyser {
     /// => if xs.len() == 0 { [] } else { f(xs[1..]) }` is what the call's
     /// result is used as.
     fn reached_from_signature(&self, signature: &StaticType) -> AHashSet<TypeVar> {
-        let open = |var: &TypeVar| self.vars.is_generalizable(*var);
         let groups = self
             .generic_constraints()
             .into_iter()
             .map(|serial| {
-                let constraint = &self.waiting[&serial].constraint;
-                constraint
-                    .inputs()
-                    .iter()
-                    .chain(constraint.outputs())
-                    .flat_map(|typ| self.vars.unsettled(typ))
-                    .filter(open)
+                self.waiting[&serial]
+                    .constraint
+                    .types()
+                    .flat_map(|typ| self.vars.generalizable_in(typ))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
         let mut reached = self
             .vars
-            .unsettled(signature)
+            .generalizable_in(signature)
             .into_iter()
-            .filter(open)
             .collect::<AHashSet<_>>();
         loop {
             let mut changed = false;
@@ -314,11 +297,8 @@ impl Analyser {
             .filter(|(_, waiting)| {
                 waiting
                     .constraint
-                    .inputs()
-                    .iter()
-                    .chain(waiting.constraint.outputs())
-                    .flat_map(|typ| self.vars.unsettled(typ))
-                    .any(|var| self.vars.is_generalizable(var))
+                    .types()
+                    .any(|typ| !self.vars.generalizable_in(typ).is_empty())
             })
             .map(|(&serial, _)| serial)
             .collect()
@@ -331,8 +311,8 @@ impl Analyser {
         constraint
             .inputs()
             .iter()
-            .flat_map(|typ| self.vars.unsettled(typ))
-            .filter(|&var| self.vars.is_generalizable(var) && !outputs.contains(&var))
+            .flat_map(|typ| self.vars.generalizable_in(typ))
+            .filter(|var| !outputs.contains(var))
             .collect()
     }
 
@@ -347,9 +327,7 @@ impl Analyser {
             .outputs()
             .iter()
             .chain(&self.passed_functions(constraint))
-            .flat_map(|typ| self.vars.unsettled(typ))
-            .chain(self.returned_by(constraint))
-            .filter(|&var| self.vars.is_generalizable(var))
+            .flat_map(|typ| self.vars.generalizable_in(typ))
             .collect()
     }
 
@@ -366,8 +344,7 @@ impl Analyser {
         };
         waits_on
             .iter()
-            .flat_map(|typ| self.vars.unsettled(typ))
-            .any(|var| self.vars.is_generalizable(var))
+            .any(|typ| !self.vars.generalizable_in(typ).is_empty())
     }
 
     /// The functions passed to `constraint`, if it's a call, whose types
@@ -414,29 +391,19 @@ impl Analyser {
         let serials = self.generic_constraints();
         let mut decided = parameters
             .iter()
-            .flat_map(|typ| self.vars.unsettled(typ))
-            .filter(|&var| self.vars.is_generalizable(var))
+            .flat_map(|typ| self.vars.generalizable_in(typ))
             .collect::<AHashSet<_>>();
         loop {
             let mut changed = false;
             for serial in &serials {
                 let constraint = &self.waiting[serial].constraint;
                 if let Constraint::Join { types, .. } = constraint {
-                    let vars = |typ: &StaticType| {
-                        self.vars
-                            .unsettled(typ)
-                            .into_iter()
-                            .filter(|&var| self.vars.is_generalizable(var))
-                            .collect::<Vec<_>>()
-                    };
                     // The join waits while a branch is wholly unknown, so it
                     // decides nothing about such a branch: the result of
                     // `f(x, n - 1) ++ []` is decided by the `++`.
-                    let waits_on = |typ: &StaticType| match self.vars.resolve(typ) {
-                        StaticType::Var(var) => !self.vars.is_literal(var),
-                        _ => false,
-                    };
-                    let [a, b, result] = types.each_ref().map(vars);
+                    let waits_on = |typ: &StaticType| self.vars.is_unknown(&self.vars.resolve(typ));
+                    let [a, b, result] =
+                        types.each_ref().map(|typ| self.vars.generalizable_in(typ));
                     for (branch, other, other_type) in [(&a, &b, &types[1]), (&b, &a, &types[0])] {
                         if !branch.is_empty()
                             && branch.iter().all(|var| decided.contains(var))

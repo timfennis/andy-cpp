@@ -107,6 +107,12 @@ impl Constraint {
         }
     }
 
+    /// Every type the constraint waits on or settles: its inputs, then its
+    /// outputs.
+    pub(super) fn types(&self) -> impl Iterator<Item = &StaticType> {
+        self.inputs().iter().chain(self.outputs())
+    }
+
     /// The constraint with `replace` applied to each of its types.
     pub(super) fn map_types(&self, replace: &mut impl FnMut(&StaticType) -> StaticType) -> Self {
         match self {
@@ -184,11 +190,8 @@ pub(super) struct Waiting {
 #[derive(Debug)]
 pub(super) enum EarlyPick {
     Call {
-        candidates: Candidates,
-        arguments: Vec<StaticType>,
-        kind: CallKind,
-        name: String,
-        binding: Binding<SymbolId>,
+        call: CallConstraint,
+        picked: SymbolId,
     },
     FunctionValue {
         value: FunctionValue,
@@ -423,12 +426,11 @@ impl Analyser {
     /// { 0 }`, `x` can still be a `String`.
     pub(super) fn join(&mut self, a: &StaticType, b: &StaticType, span: Span) -> StaticType {
         let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
-        let unknown = |this: &Self, typ: &StaticType| matches!(typ, StaticType::Var(var) if !this.vars.is_literal(*var));
         match (&a, &b) {
             (StaticType::Never, _) => b,
             (_, StaticType::Never) => a,
             _ if a == b => a,
-            _ if unknown(self, &a) || unknown(self, &b) => {
+            _ if self.vars.is_unknown(&a) || self.vars.is_unknown(&b) => {
                 let result = self.vars.fresh();
                 self.wait(Constraint::Join {
                     types: [a, b, result.clone()],
@@ -473,17 +475,17 @@ impl Analyser {
             .iter()
             .map(|argument| self.vars.resolve(argument))
             .collect::<Vec<_>>();
-        let binding = Binding::Resolved(Candidate::Scalar(picked));
         if cfg!(debug_assertions) {
             self.early_picks.push(EarlyPick::Call {
-                candidates: call.candidates.clone(),
-                arguments: call.arguments.clone(),
-                kind: call.kind,
-                name: call.name.clone(),
-                binding: binding.clone(),
+                call: call.clone(),
+                picked,
             });
         }
-        self.record_pick(call.site, binding, &arguments);
+        self.record_pick(
+            call.site,
+            Binding::Resolved(Candidate::Scalar(picked)),
+            &arguments,
+        );
         self.flush_copies(Some(call.site), call.span);
         Some(typ)
     }
@@ -497,14 +499,10 @@ impl Analyser {
         let early_picks = std::mem::take(&mut self.early_picks);
         for pick in early_picks {
             match pick {
-                EarlyPick::Call {
-                    candidates,
-                    arguments,
-                    kind,
-                    name,
-                    binding: picked,
-                } => {
-                    let arguments = arguments
+                EarlyPick::Call { call, picked } => {
+                    let picked = Binding::Resolved(Candidate::Scalar(picked));
+                    let arguments = call
+                        .arguments
                         .iter()
                         .map(|argument| self.vars.resolve(argument))
                         .collect::<Vec<_>>();
@@ -514,24 +512,20 @@ impl Analyser {
                         continue;
                     }
                     let binding = self
-                        .resolve_overloads(&candidates, &arguments, kind)
+                        .resolve_overloads(&call.candidates, &arguments, call.kind)
                         .binding;
                     // A call that nothing takes any more is one an error
-                    // was reported for, as an argument whose overload
-                    // couldn't be told then got the fallback `Any`, and a
-                    // program with errors doesn't run.
+                    // was reported for, and a program with errors doesn't
+                    // run.
                     if binding == Binding::None && !self.result.errors.is_empty() {
                         continue;
                     }
                     assert!(
                         binding == picked,
-                        "internal error: `{name}` committed to {picked:?} before its arguments \
+                        "internal error: `{}` committed to {picked:?} before its arguments \
                          were known, but with ({}) it means {binding:?}",
-                        arguments
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(", "),
+                        call.name,
+                        arguments.iter().join(", "),
                     );
                 }
                 EarlyPick::FunctionValue { value, picked } => {
@@ -540,8 +534,8 @@ impl Analyser {
                         continue;
                     }
                     let choice = self.choose_function_value(&value, &expected);
-                    // As for a call: a value nothing fits any more got the
-                    // fallback `Any` from a failed use, which was reported.
+                    // As for a call: a value nothing fits any more is one an
+                    // error was reported for.
                     if choice == Choice::None && !self.result.errors.is_empty() {
                         continue;
                     }
@@ -595,8 +589,6 @@ impl Analyser {
         }
     }
 
-    /// Makes `constraint` wait, in the order it started waiting, until one
-    /// of the variables it waits on is settled.
     /// Marks the result of `constraint`, if it's a join, as the type of an
     /// `if` whose branches aren't known yet, of which an `Any` is expected if
     /// the constraint says so.
@@ -614,6 +606,8 @@ impl Analyser {
         }
     }
 
+    /// Makes `constraint` wait, in the order it started waiting, until one
+    /// of the variables it waits on is settled.
     pub(super) fn wait(&mut self, constraint: Constraint) {
         let origin = self.copied_through.clone();
         self.wait_as(Waiting { constraint, origin });
@@ -809,15 +803,7 @@ impl Analyser {
         let needed_types = self
             .waiting
             .values()
-            .flat_map(|waiting| {
-                waiting
-                    .constraint
-                    .inputs()
-                    .iter()
-                    .chain(waiting.constraint.outputs())
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
+            .flat_map(|waiting| waiting.constraint.types().cloned())
             .chain(
                 self.uses
                     .iter()
@@ -825,16 +811,7 @@ impl Analyser {
             )
             .chain(self.result.analysis.function_types.values().cloned())
             .collect::<Vec<_>>();
-        let mut needed = AHashSet::new();
-        let mut todo = needed_types
-            .iter()
-            .flat_map(|typ| self.vars.unsettled(typ))
-            .collect::<Vec<_>>();
-        while let Some(var) = todo.pop() {
-            if needed.insert(var) && self.vars.is_literal(var) {
-                todo.extend(self.vars.held_vars(var));
-            }
-        }
+        let needed = self.vars.vars_made_from(&needed_types);
         (0..self.vars.count())
             .map(|index| TypeVar(u32::try_from(index).expect("fewer than 2^32 type variables")))
             .filter(|&var| {
@@ -858,16 +835,18 @@ impl Analyser {
         // literals it holds don't.
         // What a literal that's settled holds is settled with it, as the
         // `[2.5]` in `[[1], [2.5]]`.
+        let trees = self
+            .vars
+            .literals_within(typ)
+            .into_iter()
+            .map(|var| (var, self.vars.literals_within(&StaticType::Var(var))))
+            .collect::<Vec<_>>();
         let mut literals = AHashSet::new();
-        for (var, holds_a_number) in self.vars.literal_tree(typ) {
-            if holds_a_number && (self.vars.is_number(var) || !self.vars.holds_unshared_values(var))
+        for (var, tree) in trees {
+            if tree.iter().any(|&held| self.vars.is_number(held))
+                && (self.vars.is_number(var) || !self.vars.holds_unshared_values(var))
             {
-                literals.extend(
-                    self.vars
-                        .literal_tree(&StaticType::Var(var))
-                        .into_iter()
-                        .map(|(held, _)| held),
-                );
+                literals.extend(tree);
             }
         }
         if !literals.is_empty() {
@@ -1014,7 +993,7 @@ impl Analyser {
     /// as a value returns, which the overload its parameters pick says: in
     /// `let f = pick; let g = fn(x) => f(x);`, what `f` returns is what the
     /// `pick` that takes what `x` falls back to returns.
-    pub(super) fn returned_by(&self, constraint: &Constraint) -> Vec<TypeVar> {
+    fn returned_by(&self, constraint: &Constraint) -> Vec<TypeVar> {
         match constraint {
             Constraint::FunctionValue(value) => match self.vars.resolve(value.expected()) {
                 StaticType::Function {
@@ -1114,8 +1093,7 @@ impl Analyser {
                     }
                 }
                 let (a, b) = (self.vars.resolve(&a), self.vars.resolve(&b));
-                let unknown = |typ: &StaticType| matches!(typ, StaticType::Var(var) if !self.vars.is_literal(*var));
-                if unknown(&a) || unknown(&b) {
+                if self.vars.is_unknown(&a) || self.vars.is_unknown(&b) {
                     return false;
                 }
                 let joined = match (&a, &b) {
@@ -1475,7 +1453,8 @@ impl Analyser {
     /// `missing` is reported.
     fn skip_failed_call(&mut self, call: &CallConstraint, arguments: &[StaticType]) -> StaticType {
         for argument in arguments {
-            self.vars.settle_unknowns_as_errors(argument);
+            self.vars
+                .settle_unknowns_but_literals(argument, &StaticType::Error);
         }
         self.record_pick(call.site, Binding::None, arguments);
         StaticType::Error
@@ -1646,17 +1625,24 @@ impl Analyser {
         if unshared.is_empty() {
             return None;
         }
-        Some(
-            arguments
-                .iter()
-                .map(|argument| {
-                    self.vars.resolve(argument).replace(&|part| match part {
-                        StaticType::Var(var) if unshared.contains(var) => Some(StaticType::Any),
-                        _ => None,
-                    })
+        Some(self.as_any(arguments, |var| unshared.contains(&var)))
+    }
+
+    /// `arguments` with each variable that `is_any` picks as `Any`.
+    fn as_any(
+        &self,
+        arguments: &[StaticType],
+        is_any: impl Fn(TypeVar) -> bool,
+    ) -> Vec<StaticType> {
+        arguments
+            .iter()
+            .map(|argument| {
+                self.vars.resolve(argument).replace(&|part| match part {
+                    StaticType::Var(var) if is_any(*var) => Some(StaticType::Any),
+                    _ => None,
                 })
-                .collect(),
-        )
+            })
+            .collect()
     }
 
     /// Whether one of `reachable` other than `except` takes `arguments`
@@ -1667,15 +1653,7 @@ impl Analyser {
         arguments: &[StaticType],
         except: Option<SymbolId>,
     ) -> bool {
-        let as_any = arguments
-            .iter()
-            .map(|argument| {
-                self.vars.resolve(argument).replace(&|part| match part {
-                    StaticType::Var(var) if self.vars.is_literal(*var) => Some(StaticType::Any),
-                    _ => None,
-                })
-            })
-            .collect::<Vec<_>>();
+        let as_any = self.as_any(arguments, |var| self.vars.is_literal(var));
         reachable
             .iter()
             .filter(|&&symbol| Some(symbol) != except)
@@ -1884,13 +1862,11 @@ impl Analyser {
                 parameters: Some(_),
                 ..
             } => {
-                let Some((typ, parameters)) = self.bind_signature(&signature, arguments) else {
+                let typ = self.bind_signature(&signature, arguments);
+                if typ.is_none() {
                     self.pending.truncate(pending);
-                    return None;
-                };
-                let iterations = self.iterations_waited_for(&parameters, arguments);
-                self.pending.iterations.extend(iterations);
-                Some(typ)
+                }
+                typ
             }
             // A function that takes anything, as `print` does, takes each
             // value as the type it is, as a type parameter would, so it
@@ -2036,13 +2012,15 @@ impl Analyser {
 
     /// Passes each argument where `signature` expects its parameter, which
     /// settles what's unknown in either, and returns what the signature
-    /// returns, and its parameters. Returns `None` and settles nothing when
-    /// an argument doesn't fit, or the number of arguments is wrong.
+    /// returns. An argument whose kind of sequence isn't known yet, passed
+    /// for an `Iterable`, waits for it: see [`Self::iterations_waited_for`].
+    /// Returns `None` and settles nothing when an argument doesn't fit, or
+    /// the number of arguments is wrong.
     pub(super) fn bind_signature(
         &mut self,
         signature: &StaticType,
         arguments: &[StaticType],
-    ) -> Option<(StaticType, Vec<StaticType>)> {
+    ) -> Option<StaticType> {
         let StaticType::Function {
             parameters: Some(parameters),
             return_type,
@@ -2055,7 +2033,9 @@ impl Analyser {
             self.vars.rollback(snapshot);
             return None;
         }
-        Some((self.vars.resolve(return_type), parameters.clone()))
+        let iterations = self.iterations_waited_for(parameters, arguments);
+        self.pending.iterations.extend(iterations);
+        Some(self.vars.resolve(return_type))
     }
 
     /// Each argument nothing is known about yet that was passed for an
@@ -2064,7 +2044,7 @@ impl Analyser {
     /// `T` that iterating over it gives once it's known: in `fn total(xs)
     /// => xs.sum()`, what `xs` is waits for a call, and so does `xs` in
     /// `fn flatten(xs) => [0].flat_map(fn(_) => xs)`.
-    pub(super) fn iterations_waited_for(
+    fn iterations_waited_for(
         &self,
         parameters: &[StaticType],
         arguments: &[StaticType],
@@ -2161,7 +2141,7 @@ impl Analyser {
     pub(super) fn could_accept(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
         let function = self.vars.resolve(self.types.get_type(symbol));
         let snapshot = self.vars.snapshot();
-        let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
+        let Some(parameters) = self.vars.instantiate_parameters(&function) else {
             return matches!(
                 function,
                 StaticType::Function { .. }
@@ -2237,9 +2217,6 @@ impl Analyser {
         }
     }
 
-    /// Reports that no overload accepts `call`. Writing `xs[i] += 1` reads
-    /// and writes `xs[i]`, and when the read fails, the write fails the same
-    /// way, which is reported once.
     /// Reports that overloads `tied` take `call` equally well.
     fn report_ambiguous_call(
         &mut self,
@@ -2277,6 +2254,9 @@ impl Analyser {
         ));
     }
 
+    /// Reports that no overload accepts `call`. Writing `xs[i] += 1` reads
+    /// and writes `xs[i]`, and when the read fails, the write fails the same
+    /// way, which is reported once.
     fn report_failed_call(&mut self, call: &CallConstraint, arguments: &[StaticType]) {
         let arguments = &arguments
             .iter()

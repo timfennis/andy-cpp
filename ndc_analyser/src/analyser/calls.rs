@@ -121,9 +121,7 @@ impl Analyser {
                     parameters: Some(_),
                     ..
                 } => {
-                    if let Some((typ, parameters)) = self.bind_signature(&callee, &arguments) {
-                        let iterations = self.iterations_waited_for(&parameters, &arguments);
-                        self.pending.iterations.extend(iterations);
+                    if let Some(typ) = self.bind_signature(&callee, &arguments) {
                         self.flush_copies(None, span);
                         typ
                     } else {
@@ -143,7 +141,8 @@ impl Analyser {
                 // The callee's check failed, which was reported there.
                 StaticType::Error => {
                     for argument in &arguments {
-                        self.vars.settle_unknowns_as_errors(argument);
+                        self.vars
+                            .settle_unknowns_but_literals(argument, &StaticType::Error);
                     }
                     StaticType::Error
                 }
@@ -260,7 +259,7 @@ impl Analyser {
     ) -> Expects {
         let function = self.vars.resolve(self.types.get_type(symbol));
         let first = self.vars.count();
-        let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {
+        let Some(parameters) = self.vars.instantiate_parameters(&function) else {
             return Expects::Anything;
         };
         let takes_known = parameters.len() == known.len()

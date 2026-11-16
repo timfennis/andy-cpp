@@ -34,9 +34,6 @@ impl TypeTable {
     }
 }
 
-/// What each type variable of the analysis stands for once something settled
-/// it. In `let xs = []; xs[0] = 1;`, the element type of `xs` is a variable
-/// that the assignment settles as `Int`.
 /// What [`TypeVars::bind_arguments`] puts off while it passes the arguments.
 #[derive(Debug)]
 struct Deferred {
@@ -47,12 +44,17 @@ struct Deferred {
     passed: Vec<(TypeVar, StaticType)>,
 }
 
+/// What each type variable of the analysis stands for once something settled
+/// it. In `let xs = []; xs[0] = 1;`, the element type of `xs` is a variable
+/// that the assignment settles as `Int`.
 #[derive(Debug, Default)]
 pub(crate) struct TypeVars {
     /// What each variable stands for, once settled.
     solutions: Vec<Option<StaticType>>,
-    /// What each variable becomes if nothing settles it: `Any` for the
-    /// elements of `[]`, which is what `[]` was typed as before.
+    /// What each variable becomes if nothing settles it: `Unknown`, as
+    /// for what `[]` holds, or `Any` for a literal's type whose values
+    /// don't say what it is, or a failed check's type: see
+    /// [`Self::fall_back_as_errors`].
     fallbacks: Vec<StaticType>,
     /// The variables in the order they were settled, so a [`Snapshot`] can
     /// unsettle the ones settled after it, and the solver can tell which
@@ -143,15 +145,16 @@ impl TypeVars {
     /// it: a type parameter or an `Any` takes it, but no other type is. In
     /// `let f = fn(x) => x + 1;` with `f` never called, no `+` takes `x`.
     pub(crate) fn fresh(&mut self) -> StaticType {
-        self.fresh_with(StaticType::Unknown)
+        self.fresh_with(StaticType::Unknown, self.level)
     }
 
-    /// A new variable, which becomes `fallback` if nothing settles it.
-    fn fresh_with(&mut self, fallback: StaticType) -> StaticType {
+    /// A new variable of `level`, which becomes `fallback` if nothing
+    /// settles it.
+    fn fresh_with(&mut self, fallback: StaticType, level: u32) -> StaticType {
         let var = self.next_var();
         self.solutions.push(None);
         self.fallbacks.push(fallback);
-        self.levels.push(self.level);
+        self.levels.push(level);
         self.bounds.push(Vec::new());
         StaticType::Var(var)
     }
@@ -246,7 +249,7 @@ impl TypeVars {
     /// `Int` unless something says otherwise.
     pub(crate) fn fresh_number(&mut self, span: Span) -> StaticType {
         let literal = self.next_var();
-        self.fresh_bounded(StaticType::Int, vec![Bound::Number(literal, span)])
+        self.fresh_bounded(vec![Bound::Number(literal, span)])
     }
 
     /// The variable [`Self::fresh`] makes next.
@@ -267,7 +270,6 @@ impl TypeVars {
         let literal = self.next_var();
         self.literal_spans.insert(literal, span);
         self.fresh_bounded(
-            StaticType::Any,
             held.into_iter()
                 .map(|(typ, span)| Bound::Holds(typ, literal, span))
                 .collect(),
@@ -344,8 +346,11 @@ impl TypeVars {
             .is_some_and(|first| literals.any(|literal| literal != first))
     }
 
-    fn fresh_bounded(&mut self, fallback: StaticType, bounds: Vec<Bound>) -> StaticType {
-        let typ = self.fresh_with(fallback);
+    /// A new literal's type, within `bounds`. If nothing settles it, it's
+    /// the first of its [`Self::literal_defaults`] that fits, or, while
+    /// what it holds doesn't say yet, `Any`, which takes whatever it holds.
+    fn fresh_bounded(&mut self, bounds: Vec<Bound>) -> StaticType {
+        let typ = self.fresh_with(StaticType::Any, self.level);
         let StaticType::Var(var) = typ else {
             unreachable!("a fresh type is a variable");
         };
@@ -447,57 +452,26 @@ impl TypeVars {
         holds_a_number
     }
 
-    /// The unsettled literals in `typ` and those they hold, at any depth,
-    /// each with whether a number literal is among what it holds, at any
-    /// depth, or is it: in `[(1, "a")]`, the list's elements, and the `1`.
-    pub(crate) fn literal_tree(&self, typ: &StaticType) -> Vec<(TypeVar, bool)> {
-        let mut tree = Vec::new();
+    /// The unsettled literals in `typ` and those they hold, at any depth:
+    /// in `[(1, "a")]`, the list's elements, and the `1`.
+    pub(crate) fn literals_within(&self, typ: &StaticType) -> Vec<TypeVar> {
+        let literals_of = |typ: &StaticType| {
+            self.unsettled(typ)
+                .into_iter()
+                .filter(|&var| self.is_literal(var))
+        };
+        let mut within = Vec::new();
         let mut seen = AHashSet::new();
-        let mut unseen = self.unsettled_literals_of(typ);
+        let mut unseen = literals_of(typ).collect::<Vec<_>>();
         while let Some(var) = unseen.pop() {
-            if !seen.insert(var) {
-                continue;
-            }
-            tree.push(var);
-            for bound in &self.bounds[var.0 as usize] {
-                if let Bound::Holds(held, _, _) = bound {
-                    unseen.extend(self.unsettled_literals_of(held));
+            if seen.insert(var) {
+                within.push(var);
+                for held in self.held_types(var) {
+                    unseen.extend(literals_of(&held));
                 }
             }
         }
-        tree.iter()
-            .map(|&var| (var, self.holds_a_number(var)))
-            .collect()
-    }
-
-    /// The unsettled literals among the parts of `typ`.
-    fn unsettled_literals_of(&self, typ: &StaticType) -> Vec<TypeVar> {
-        self.unsettled(typ)
-            .into_iter()
-            .filter(|&var| self.is_literal(var))
-            .collect()
-    }
-
-    /// Whether the literal `var` is a number literal's type, or holds one
-    /// at any depth.
-    fn holds_a_number(&self, var: TypeVar) -> bool {
-        let mut seen = AHashSet::from_iter([var]);
-        let mut unseen = vec![var];
-        while let Some(var) = unseen.pop() {
-            if self.is_number(var) {
-                return true;
-            }
-            for bound in &self.bounds[var.0 as usize] {
-                if let Bound::Holds(held, _, _) = bound {
-                    for part in self.unsettled_literals_of(held) {
-                        if seen.insert(part) {
-                            unseen.push(part);
-                        }
-                    }
-                }
-            }
-        }
-        false
+        within
     }
 
     /// Whether a part of `typ` is the type of a number literal, settled or
@@ -762,6 +736,13 @@ impl TypeVars {
         self.solution(var).is_none() && !self.bounds[var.0 as usize].is_empty()
     }
 
+    /// Whether the resolved type `typ` is a variable nothing is known about
+    /// yet: unsettled, and not a literal's type, whose values say what it
+    /// could be. The parameter `x` of `fn(x) => x` is one.
+    pub(crate) fn is_unknown(&self, typ: &StaticType) -> bool {
+        matches!(typ, StaticType::Var(var) if !self.is_literal(*var))
+    }
+
     /// Whether `typ` has a part that's a literal's type not settled yet.
     pub(crate) fn has_unsettled_literals(&self, typ: &StaticType) -> bool {
         self.unsettled(typ)
@@ -786,12 +767,8 @@ impl TypeVars {
         if held.is_empty() || held.iter().any(|(typ, _)| self.resolve(typ) != own) {
             return false;
         }
-        let plain = self.next_var();
-        self.solutions.push(None);
-        self.fallbacks.push(StaticType::Unknown);
-        self.levels.push(self.levels[var.0 as usize]);
-        self.bounds.push(Vec::new());
-        self.settle_literal(var, &StaticType::Var(plain))
+        let plain = self.fresh_with(StaticType::Unknown, self.levels[var.0 as usize]);
+        self.settle_literal(var, &plain)
     }
 
     /// Starts the body of a generic function: the variables made until
@@ -813,15 +790,30 @@ impl TypeVars {
         self.solution(var).is_none() && self.levels[var.0 as usize] > self.level
     }
 
+    /// The unsettled variables in `typ` that [`Self::is_generalizable`]
+    /// says can become type parameters.
+    pub(crate) fn generalizable_in(&self, typ: &StaticType) -> Vec<TypeVar> {
+        self.unsettled(typ)
+            .into_iter()
+            .filter(|&var| self.is_generalizable(var))
+            .collect()
+    }
+
     /// Makes the unsettled variables in `typ` belong where the code being
     /// analysed now is, so they don't become type parameters of a generic
     /// function whose body made them.
     pub(crate) fn lower_to_current(&mut self, typ: &StaticType) {
+        self.lower(typ, self.level);
+    }
+
+    /// Makes the unsettled variables in `typ` that belong deeper than
+    /// `level` belong at `level`, as [`Self::lower_to_current`] does.
+    fn lower(&mut self, typ: &StaticType, level: u32) {
         for var in self.unsettled(typ) {
-            let level = self.levels[var.0 as usize];
-            if level > self.level {
-                self.lowered.push((var, level));
-                self.levels[var.0 as usize] = self.level;
+            let old = self.levels[var.0 as usize];
+            if old > level {
+                self.lowered.push((var, old));
+                self.levels[var.0 as usize] = level;
             }
         }
     }
@@ -852,17 +844,27 @@ impl TypeVars {
     /// Whether `typ` is made from the unsettled variable `var`, directly or
     /// through what a literal in it holds: `[x]` is made from `x`'s type.
     pub(crate) fn is_made_from(&self, typ: &StaticType, var: TypeVar) -> bool {
-        let mut seen = AHashSet::new();
-        let mut todo = self.unsettled(typ);
-        while let Some(next) = todo.pop() {
-            if next == var {
-                return true;
-            }
-            if seen.insert(next) && self.is_literal(next) {
-                todo.extend(self.held_vars(next));
+        self.vars_made_from(std::slice::from_ref(typ))
+            .contains(&var)
+    }
+
+    /// The unsettled variables in `types` and, through each literal among
+    /// them, in what it holds, at any depth: `x`'s type is one `[x]` is
+    /// made from.
+    pub(crate) fn vars_made_from(&self, types: &[StaticType]) -> AHashSet<TypeVar> {
+        let mut made_from = AHashSet::new();
+        let mut todo = types
+            .iter()
+            .flat_map(|typ| self.unsettled(typ))
+            .collect::<Vec<_>>();
+        while let Some(var) = todo.pop() {
+            if made_from.insert(var) && self.is_literal(var) {
+                for held in self.held_types(var) {
+                    todo.extend(self.unsettled(&held));
+                }
             }
         }
-        false
+        made_from
     }
 
     /// Whether `typ` holds the unsettled variable `var` inside a type, as
@@ -903,17 +905,6 @@ impl TypeVars {
             .collect()
     }
 
-    /// The variables in what the literal type `var` holds: `x`'s in `[x, 1]`.
-    pub(crate) fn held_vars(&self, var: TypeVar) -> Vec<TypeVar> {
-        self.bounds[var.0 as usize]
-            .iter()
-            .flat_map(|bound| match bound {
-                Bound::Holds(held, _, _) => self.unsettled(held),
-                Bound::Number(..) => Vec::new(),
-            })
-            .collect()
-    }
-
     /// How many variables there are, so [`Self::settle_from`] can settle
     /// the ones made after this point.
     pub(crate) fn count(&self) -> usize {
@@ -932,13 +923,7 @@ impl TypeVars {
         // What `var` stands for now belongs where `var` does.
         let level = self.levels[var.0 as usize];
         if level < self.level {
-            for inner in self.unsettled(&typ) {
-                let inner_level = self.levels[inner.0 as usize];
-                if inner_level > level {
-                    self.lowered.push((inner, inner_level));
-                    self.levels[inner.0 as usize] = level;
-                }
-            }
+            self.lower(&typ, level);
         }
         let shallow = self.shallow(&typ);
         self.solutions[var.0 as usize] = Some(typ);
@@ -1196,13 +1181,10 @@ impl TypeVars {
         self.instantiate_with(typ, &mut Vec::new())
     }
 
-    /// The parameters and return type of the function type `typ`, with new
-    /// variables for its type parameters, or `None` when `typ` isn't a
-    /// function whose parameters are known.
-    pub(crate) fn instantiate_signature(
-        &mut self,
-        typ: &StaticType,
-    ) -> Option<(Vec<StaticType>, StaticType)> {
+    /// The parameters of the function type `typ`, with new variables for
+    /// its type parameters, or `None` when `typ` isn't a function whose
+    /// parameters are known.
+    pub(crate) fn instantiate_parameters(&mut self, typ: &StaticType) -> Option<Vec<StaticType>> {
         let StaticType::Function {
             parameters: Some(_),
             ..
@@ -1212,12 +1194,12 @@ impl TypeVars {
         };
         let StaticType::Function {
             parameters: Some(parameters),
-            return_type,
+            ..
         } = self.instantiate(typ)
         else {
             unreachable!("instantiating a function type gives a function type");
         };
-        Some((parameters, *return_type))
+        Some(parameters)
     }
 
     /// Passes each of `arguments` where its parameter is expected, as
@@ -1536,23 +1518,14 @@ impl TypeVars {
         }
     }
 
-    /// Settles every unsettled variable in `typ` but a literal's as `to`.
+    /// Settles every unsettled variable in `typ` as `to`, but for a
+    /// literal's, which takes its default as usual. As [`StaticType::Error`]
+    /// they aren't checked: in `missing(xs).map(fn(x) => x.size)`, the call
+    /// of `map` says nothing about `x`.
     pub(crate) fn settle_unknowns_but_literals(&mut self, typ: &StaticType, to: &StaticType) {
         for var in self.unsettled(typ) {
             if self.solution(var).is_none() && !self.is_literal(var) {
                 self.settle(var, to.clone());
-            }
-        }
-    }
-
-    /// Settles every unsettled variable in `typ` but a literal's as the
-    /// type of a failed check: in `missing(xs).map(fn(x) => x.size)`, the
-    /// call of `map` says nothing about `x`, which then isn't checked.
-    /// Literals take their defaults as usual.
-    pub(crate) fn settle_unknowns_as_errors(&mut self, typ: &StaticType) {
-        for var in self.unsettled(typ) {
-            if self.solution(var).is_none() && !self.is_literal(var) {
-                self.settle(var, StaticType::Error);
             }
         }
     }
