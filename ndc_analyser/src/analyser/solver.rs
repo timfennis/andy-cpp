@@ -516,7 +516,6 @@ impl Analyser {
                     let binding = self
                         .resolve_overloads(&candidates, &arguments, kind)
                         .binding;
-                    let binding = self.call_of_the_only_one(binding);
                     // A call that nothing takes any more is one an error
                     // was reported for, as an argument whose overload
                     // couldn't be told then got the fallback `Any`, and a
@@ -1683,26 +1682,6 @@ impl Analyser {
             .any(|&symbol| self.could_accept(symbol, &as_any))
     }
 
-    /// `binding`, except that a pick left to the program among one function
-    /// whose parameters are known is a call of that function. A pick among
-    /// one candidate whose parameters aren't known, as a variadic function
-    /// or a variable that may not hold a function at all, stays the
-    /// program's.
-    fn call_of_the_only_one(&self, binding: Binding<SymbolId>) -> Binding<SymbolId> {
-        match binding {
-            Binding::Dynamic(only)
-                if let [Candidate::Scalar(only)] = only[..]
-                    && let StaticType::Function {
-                        parameters: Some(_),
-                        ..
-                    } = self.vars.resolve(self.types.get_type(only)) =>
-            {
-                Binding::Resolved(Candidate::Scalar(only))
-            }
-            binding => binding,
-        }
-    }
-
     /// The overload a call with arguments of these types means, which
     /// [`Self::pick_overload`] picks with the same test the calls that are
     /// decided early pass, so one decided early and once its arguments are
@@ -1733,17 +1712,32 @@ impl Analyser {
         if kind == CallKind::Operator
             && let Some(axis) = Overloads::tuple_axis(arguments)
         {
-            let positions = (0..axis)
-                .map(|position| {
-                    let elements = Overloads::at_position(arguments, position);
-                    match self.pick_overload(candidates, &elements) {
-                        Pick::One(symbol) => vec![symbol],
-                        Pick::Tied(tied) => tied,
-                        Pick::None => Vec::new(),
+            // Each position picks its overload as a call of its elements
+            // would, and the call fails or is ambiguous where one does.
+            let mut overloads = Vec::with_capacity(axis);
+            for position in 0..axis {
+                let elements = Overloads::at_position(arguments, position);
+                match self.pick_overload(candidates, &elements) {
+                    Pick::One(symbol) => overloads.push(symbol),
+                    Pick::Tied(tied) => {
+                        return ResolvedCall {
+                            tied,
+                            ..ResolvedCall::none()
+                        };
                     }
-                })
-                .collect();
-            return self.overloads().tuple_call(positions);
+                    Pick::None => return ResolvedCall::none(),
+                }
+            }
+            let binding = if overloads.iter().all_equal() {
+                Binding::Resolved(Candidate::Vec(overloads[0]))
+            } else {
+                Binding::PerPosition(overloads)
+            };
+            return ResolvedCall {
+                binding,
+                return_type: StaticType::Any,
+                tied: Vec::new(),
+            };
         }
         ResolvedCall::none()
     }
@@ -1807,7 +1801,6 @@ impl Analyser {
             self.record_pick(call.site, Binding::None, arguments);
             return StaticType::Error;
         }
-        let binding = self.call_of_the_only_one(binding);
         // `a op= b` with no operator that takes the operands calls an in-place
         // overload if one does, as a set has `-=` but no `-`, which keeps `a`.
         if matches!(binding, Binding::None)
@@ -1840,82 +1833,82 @@ impl Analyser {
     }
 
     /// Settles the types a call's arguments leave unknown from the overload
-    /// it picked, and returns the call's type. The picked signature gets new
-    /// variables for its type parameters, and each argument is passed where
-    /// its parameter is expected: `push(xs, 1)` with `push<T>(List<T>, T)`
-    /// settles `xs` as a `List<Int>`, and `push(xs, "a")` then doesn't fit.
-    /// When the pick is left to the program as it runs, any function may get
-    /// the arguments, so what's unknown in them becomes `Any`. Returns `None`
-    /// when an argument doesn't fit the picked overload after all, which
-    /// settles nothing.
+    /// it picked, and returns the call's type, as [`Self::commit_overload`]
+    /// does for each position of an operator on tuples. Returns `None` when
+    /// an argument doesn't fit the picked overload after all.
     fn commit_call(
         &mut self,
         binding: &Binding<SymbolId>,
         arguments: &[StaticType],
         return_type: StaticType,
     ) -> Option<StaticType> {
-        let picked = match binding {
-            Binding::Resolved(Candidate::Scalar(symbol)) => Some(*symbol),
-            // An operator on tuples applies one overload to each position,
-            // with a scalar operand used at every position.
-            Binding::Resolved(Candidate::Vec(symbol)) => {
-                let Some(length) = arguments.iter().find_map(|argument| match argument {
-                    StaticType::Tuple(elements) => Some(elements.len()),
-                    _ => None,
-                }) else {
-                    return Some(return_type);
-                };
-                let scalar = Binding::Resolved(Candidate::Scalar(*symbol));
-                let mut returns = Vec::with_capacity(length);
-                for position in 0..length {
-                    let arguments = arguments
-                        .iter()
-                        .map(|argument| match argument {
-                            StaticType::Tuple(elements) => elements[position].clone(),
-                            scalar => scalar.clone(),
-                        })
-                        .collect::<Vec<_>>();
-                    returns.push(self.commit_call(&scalar, &arguments, StaticType::Any)?);
-                }
-                return Some(StaticType::Tuple(returns));
+        let overloads = match binding {
+            Binding::Resolved(Candidate::Scalar(symbol)) => {
+                return self.commit_overload(*symbol, arguments, return_type);
             }
-            Binding::Dynamic(_) | Binding::None => None,
+            Binding::Resolved(Candidate::Vec(symbol)) => std::slice::from_ref(symbol),
+            Binding::PerPosition(overloads) => overloads.as_slice(),
+            Binding::None => unreachable!("internal error: a call that picked nothing commits"),
         };
+        // An operator on tuples applies an overload at each position, with a
+        // scalar operand used at every position.
+        let Some(length) = Overloads::tuple_axis(arguments) else {
+            return Some(return_type);
+        };
+        let mut returns = Vec::with_capacity(length);
+        for position in 0..length {
+            let overload = overloads.get(position).unwrap_or(&overloads[0]);
+            let arguments = Overloads::at_position(arguments, position);
+            returns.push(self.commit_overload(*overload, &arguments, StaticType::Any)?);
+        }
+        Some(StaticType::Tuple(returns))
+    }
+
+    /// Settles the types a call's arguments leave unknown from `symbol`,
+    /// the overload it picked, and returns the call's type. The signature
+    /// gets new variables for its type parameters, and each argument is
+    /// passed where its parameter is expected: `push(xs, 1)` with
+    /// `push<T>(List<T>, T)` settles `xs` as a `List<Int>`, and
+    /// `push(xs, "a")` then doesn't fit. Returns `None` when an argument
+    /// doesn't fit, which settles nothing.
+    fn commit_overload(
+        &mut self,
+        symbol: SymbolId,
+        arguments: &[StaticType],
+        return_type: StaticType,
+    ) -> Option<StaticType> {
         let pending = self.pending.len();
-        let signature = picked.map(|symbol| self.instantiate_function(symbol));
-        let Some(
-            signature @ StaticType::Function {
+        let signature = self.instantiate_function(symbol);
+        match signature {
+            StaticType::Function {
                 parameters: Some(_),
                 ..
-            },
-        ) = signature
-        else {
+            } => {
+                let Some((typ, parameters)) = self.bind_signature(&signature, arguments) else {
+                    self.pending.truncate(pending);
+                    return None;
+                };
+                let iterations = self.iterations_waited_for(&parameters, arguments);
+                self.pending.iterations.extend(iterations);
+                Some(typ)
+            }
             // A function that takes anything, as `print` does, takes each
             // value as the type it is, as a type parameter would, so it
-            // settles nothing. What's passed to an overload the program
-            // picks isn't known, but a literal says what it is.
-            let variadic = matches!(
-                signature,
-                Some(StaticType::Function {
-                    parameters: None,
-                    ..
-                })
-            );
-            if !variadic {
+            // settles nothing.
+            StaticType::Function {
+                parameters: None, ..
+            } => Some(return_type),
+            // A callee whose type doesn't say what it takes gets the
+            // arguments as they are: what's unknown in them is an `Any`,
+            // but a literal says what it is.
+            _ => {
                 for argument in arguments {
                     self.vars
                         .settle_unknowns_but_literals(argument, &StaticType::Any);
                 }
+                Some(return_type)
             }
-            return Some(return_type);
-        };
-        let Some((typ, parameters)) = self.bind_signature(&signature, arguments) else {
-            self.pending.truncate(pending);
-            return None;
-        };
-        let iterations = self.iterations_waited_for(&parameters, arguments);
-        self.pending.iterations.extend(iterations);
-        Some(typ)
+        }
     }
 
     /// `symbol`'s type with new variables for its type parameters. For a
@@ -2227,15 +2220,9 @@ impl Analyser {
                     .collect::<Vec<_>>();
                 let candidates = self.resolver.augmented_candidates(id).in_place.clone();
                 let in_place = self.resolve_overloads(&candidates, &arguments, CallKind::Operator);
-                let compatible = Self::augmented_rhs_is_compatible(&arguments[0], &arguments[1]);
-                let binding = match (in_place.binding, binding) {
-                    (Binding::Resolved(candidate), _) => Binding::Resolved(candidate),
-                    // Which one applies is left to the program as it runs,
-                    // which mutates in place where it can.
-                    (Binding::Dynamic(in_place), operators) if compatible => {
-                        Self::in_place_then_operators(in_place, operators)
-                    }
-                    (_, binding) => binding,
+                let binding = match in_place.binding {
+                    Binding::None => binding,
+                    in_place => in_place,
                 };
                 self.record_augmented_pick(id, binding);
             }

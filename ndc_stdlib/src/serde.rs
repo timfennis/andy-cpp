@@ -122,7 +122,7 @@ fn object_to_json(
         Object::MaxHeap(_) | Object::MinHeap(_) => {
             bail!("cannot convert a heap to JSON, convert it to a list first")
         }
-        Object::Function(_) | Object::OverloadSet { .. } => {
+        Object::Function(_) => {
             bail!("cannot convert a function to JSON")
         }
         Object::String(s) => Ok(json!(&*s.borrow())),

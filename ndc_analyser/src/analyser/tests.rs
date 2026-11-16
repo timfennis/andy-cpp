@@ -1104,13 +1104,6 @@ fn an_operator_takes_no_any_operand_that_no_overload_takes() {
     let (_, result) =
         analyse_with_globals("let g = fn(a: Any) => (a as List<Int>) ++ [];", globals);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
-    assert!(
-        result
-            .analysis
-            .bindings
-            .values()
-            .all(|binding| !matches!(binding, Binding::Dynamic(_)))
-    );
 }
 
 #[test]
@@ -1422,15 +1415,6 @@ fn a_generic_function_whose_calls_depend_on_its_types_runs_only_as_instances() {
             .map(Vec::len)
             .collect::<Vec<_>>(),
         [0]
-    );
-    assert!(
-        result
-            .analysis
-            .bindings
-            .values()
-            .all(|binding| !matches!(binding, Binding::Dynamic(_))),
-        "{:?}",
-        result.analysis.bindings
     );
 }
 
@@ -1875,4 +1859,12 @@ fn a_failed_annotation_is_not_reported_again() {
         errors("let x: Int<String> = 1; [x].sum();", globals),
         vec!["type `Int` does not take generic arguments"]
     );
+}
+
+#[test]
+fn a_tie_at_a_tuple_position_is_ambiguous() {
+    let globals = natives(&[("+", "(Int, Any) -> Int"), ("+", "(Any, Int) -> Int")]);
+    let errors = errors("(1, 2) + (3, 4)", globals);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("is ambiguous"), "{errors:?}");
 }

@@ -8,8 +8,6 @@ pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFlo
 pub use numeric::{NumericMode, NumericRef};
 pub use string::VmString;
 
-use ndc_analysis::ResolvedVar;
-
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
@@ -81,16 +79,6 @@ pub enum Object {
     Struct {
         info: Rc<StructInfo>,
         fields: RefCell<Vec<Value>>,
-    },
-    /// A set of overload candidates the runtime narrows per call. Scalars are
-    /// walked first (first-match-wins, same shape as the master baseline);
-    /// `vec_candidates` is only consulted as a fallback for operator-form
-    /// calls when no scalar accepts the args. `vec_candidates` is empty for
-    /// non-operator call sites, so the hot path stays a single `Vec<ResolvedVar>`
-    /// walk identical to scalar-only dispatch.
-    OverloadSet {
-        scalars: Vec<ResolvedVar>,
-        vec_candidates: Vec<ResolvedVar>,
     },
     Iterator(SharedIterator),
     Deque(RefCell<VecDeque<Value>>),
@@ -229,7 +217,7 @@ impl Value {
     /// Creates a shallow copy: scalars are copied by value; mutable collection
     /// types (String, List, Map, Deque, heaps, structs) get new independent
     /// containers with cloned contents; immutable / identity types (Tuple,
-    /// Function, Iterator, Some, `OverloadSet`) share the Rc.
+    /// Function, Iterator, Some) share the Rc.
     pub fn shallow_clone(&self) -> Self {
         match self {
             Self::Object(obj) => match obj.as_ref() {
@@ -317,82 +305,6 @@ impl Value {
     /// and never allocates, whereas `static_type()` on containers is O(n).
     pub fn is_number(&self) -> bool {
         self.numeric_ref().is_some()
-    }
-
-    /// Check whether this value satisfies a function parameter type at runtime,
-    /// avoiding full container iteration for common cases.
-    ///
-    /// When `param` is a container type whose inner types are all `Any` (e.g.
-    /// `Iterable(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
-    /// checked — no element iteration occurs. Typed container parameters are
-    /// rejected rather than scanned; the remaining cases are checked as
-    /// [`Value::is_a`] does.
-    pub fn matches_param(&self, param: &StaticType) -> bool {
-        match param {
-            // A type parameter like `T` in `push<T>(List<T>, T)` takes any value.
-            param if param.is_unknown() => true,
-            StaticType::Int => {
-                matches!(self, Self::Int(_))
-            }
-            StaticType::Float => matches!(self, Self::Float(_)),
-            StaticType::Bool => matches!(self, Self::Bool(_)),
-            StaticType::Number => matches!(self, Self::Number(_)),
-            StaticType::String => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::String(_)))
-            }
-            StaticType::List(t) if t.is_unknown() => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::List(_)))
-            }
-            StaticType::Deque(t) if t.is_unknown() => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Deque(_)))
-            }
-            StaticType::Map { key, value } if key.is_unknown() && value.is_unknown() => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Map { .. }))
-            }
-            StaticType::MinHeap(t) if t.is_unknown() => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::MinHeap(_)))
-            }
-            StaticType::MaxHeap(t) if t.is_unknown() => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::MaxHeap(_)))
-            }
-            // Unit, the empty tuple, is checked as cheaply as a scalar.
-            StaticType::Tuple(elements) if elements.is_empty() => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Tuple(values) if values.is_empty()))
-            }
-            // An option holds at most one value, which is cheap to check.
-            StaticType::Option(t) => match self {
-                Self::None => true,
-                Self::Object(o) => match o.as_ref() {
-                    Object::Some(value) => value.matches_param(t),
-                    _ => false,
-                },
-                _ => false,
-            },
-            StaticType::Iterable(t) if t.is_unknown() => {
-                matches!(self, Self::Object(o) if matches!(
-                    o.as_ref(),
-                    Object::List(_)
-                        | Object::Tuple(_)
-                        | Object::String(_)
-                        | Object::Deque(_)
-                        | Object::Map { .. }
-                        | Object::Iterator(_)
-                        | Object::MinHeap(_)
-                        | Object::MaxHeap(_)
-                ))
-            }
-            // These container params require element-type scanning to verify — skip to
-            // avoid O(N) cost. The analyser should resolve typed container params at
-            // compile time; if it falls through to dynamic dispatch, return false.
-            StaticType::List(_)
-            | StaticType::Deque(_)
-            | StaticType::Iterable(_)
-            | StaticType::Map { .. }
-            | StaticType::Tuple(_)
-            | StaticType::MinHeap(_)
-            | StaticType::MaxHeap(_) => false,
-            _ => self.is_a(param),
-        }
     }
 
     /// Whether this value is a `target`, a type that holds no other values
@@ -518,9 +430,8 @@ impl Value {
     /// Check whether this value conforms to `target`, scanning container
     /// elements recursively. Empty containers conform to any element type.
     ///
-    /// Unlike [`Value::matches_param`] this scans the value by design: it backs
-    /// the runtime check of `as` casts, where the caller explicitly opted into
-    /// the scan. Shared container aliases are memoized by object and target
+    /// It backs the runtime check of `as` casts, where the caller explicitly
+    /// opted into the scan. Shared container aliases are memoized by object and target
     /// type. Iterators can't be inspected without consuming them, so they only
     /// conform to targets with `Any` elements.
     pub fn conforms_to(&self, target: &StaticType) -> bool {
@@ -821,8 +732,8 @@ impl Object {
                     Self::Iterator(Rc::clone(shared))
                 }
             }
-            // Immutable / identity types: clone the Rc via Object's derive.
-            other => other.clone(),
+            // A function is shared.
+            function @ Self::Function(_) => function.clone(),
         }
     }
 
@@ -918,7 +829,6 @@ impl Object {
                 }
             }
             Self::Function(f) => f.static_type(),
-            Self::OverloadSet { .. } => StaticType::Any,
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
             Self::Deque(elements) => {
                 if depth == 0 {
@@ -1033,14 +943,6 @@ fn display_contents(object: &Object, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "}}")
         }
         Object::Function(func) => write!(f, "{func}"),
-        Object::OverloadSet {
-            scalars,
-            vec_candidates,
-        } => write!(
-            f,
-            "<overload set ({} candidates)>",
-            scalars.len() + vec_candidates.len()
-        ),
         Object::Iterator(iter) => match iter.borrow().len() {
             Some(n) => write!(f, "<iterator (len={n})>"),
             None => write!(f, "<iterator>"),
@@ -1094,14 +996,6 @@ impl fmt::Debug for Object {
                 .field("default", default)
                 .finish(),
             Self::Function(func) => write!(f, "{func:?}"),
-            Self::OverloadSet {
-                scalars,
-                vec_candidates,
-            } => f
-                .debug_struct("OverloadSet")
-                .field("scalars", scalars)
-                .field("vec_candidates", vec_candidates)
-                .finish(),
             Self::Iterator(iter) => match iter.borrow().len() {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
@@ -1268,9 +1162,6 @@ impl PartialEq for Object {
                     fields: b_fields,
                 },
             ) => Rc::ptr_eq(a_info, b_info) && a_fields.borrow().eq(&*b_fields.borrow()),
-            (Self::OverloadSet { .. }, Self::OverloadSet { .. }) => {
-                panic!("OverloadSet cannot be used as a map key")
-            }
             (Self::Iterator(a), Self::Iterator(b)) => {
                 // Compare iterators by pointer identity
                 std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
@@ -1357,9 +1248,6 @@ impl Hash for Object {
                     }
                     Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
                 }
-            }
-            Self::OverloadSet { .. } => {
-                panic!("OverloadSet cannot be used as a map key")
             }
             Self::Iterator(iter) => {
                 state.write_u8(11);
@@ -1470,22 +1358,6 @@ mod tests {
 
         // Break the reference cycle so the test does not leak its allocations.
         elements.borrow_mut().clear();
-    }
-
-    #[test]
-    fn runtime_parameter_matching_does_not_scan_lists() {
-        let list = Rc::new(Object::List(RefCell::new(vec![Value::Int(1)])));
-        let value = Value::Object(Rc::clone(&list));
-        let Object::List(elements) = list.as_ref() else {
-            unreachable!();
-        };
-
-        // Holding a mutable borrow makes any attempted element scan panic.
-        // Dynamic dispatch must only inspect the outer container kind.
-        let _borrow = elements.borrow_mut();
-        assert!(value.matches_param(&StaticType::List(Box::new(StaticType::Any))));
-        assert!(value.matches_param(&StaticType::Iterable(Box::new(StaticType::Any,))));
-        assert!(!value.matches_param(&StaticType::List(Box::new(StaticType::Int,))));
     }
 
     #[test]

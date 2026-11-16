@@ -3,7 +3,7 @@ use super::solver::{CallSite, Origin};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall};
 use itertools::izip;
-use ndc_analysis::{Binding, Candidate};
+use ndc_analysis::Binding;
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{AssignmentTarget, AssignmentTargetLocation, ExpressionLocation};
@@ -78,26 +78,6 @@ impl Analyser {
         }
         self.record_augmented_pick(id, binding);
         left_type.clone()
-    }
-
-    /// What `a op= b` does when the program picks as it runs: the in-place
-    /// overloads `in_place` first, so it mutates in place where it can, and
-    /// then the operators `operators` picks that aren't among them.
-    pub(super) fn in_place_then_operators(
-        mut in_place: Vec<Candidate<SymbolId>>,
-        operators: Binding<SymbolId>,
-    ) -> Binding<SymbolId> {
-        let operators = match operators {
-            Binding::Resolved(operator) => vec![operator],
-            Binding::Dynamic(operators) => operators,
-            Binding::None => Vec::new(),
-        };
-        for operator in operators {
-            if !in_place.contains(&operator) {
-                in_place.push(operator);
-            }
-        }
-        Binding::Dynamic(in_place)
     }
 
     /// Records where an assignment stores its value, and returns the type of
@@ -178,28 +158,6 @@ impl Analyser {
     /// a slice of the container rather than a single element.
     pub(super) fn index_type_is_slice(index_type: &StaticType) -> bool {
         index_type.fits(&StaticType::Iterator(Box::new(StaticType::Int)))
-    }
-
-    /// Specialized `op=` implementations mutate the left operand in place and
-    /// keep its concrete type, so the right operand must provably fit it: the
-    /// operator copies values across without inspecting them, and nothing
-    /// downstream re-checks. A merely overlapping right operand is not enough —
-    /// `List<Int> ++= List<Number>` would leave the target holding a `Float`.
-    ///
-    /// A tuple left-hand side represents vector dispatch, so a scalar right
-    /// operand must be compatible with every concrete tuple element.
-    pub(super) fn augmented_rhs_is_compatible(
-        left_type: &StaticType,
-        right_type: &StaticType,
-    ) -> bool {
-        match (left_type, right_type) {
-            (StaticType::Tuple(left), StaticType::Tuple(right)) => {
-                left.len() == right.len()
-                    && right.iter().zip(left).all(|(right, left)| right.fits(left))
-            }
-            (StaticType::Tuple(left), right) => left.iter().all(|left| right.fits(left)),
-            (left, right) => right.fits(left),
-        }
     }
 
     /// Whether a value of `value_type` can be stored where values of

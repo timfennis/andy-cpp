@@ -81,11 +81,10 @@ impl std::fmt::Debug for JumpTarget {
 pub enum OpCode {
     /// Pops callee and `n` arguments, pushes result. `[… callee a1…an → … result]`
     Call(usize),
-    /// Vec-dispatches the callee on top of the stack across tuple arguments.
-    /// The callee is a single scalar `Function` (loaded directly, not wrapped
-    /// in an `OverloadSet`): the analyser pinned it at compile time.
-    /// `[… callee a1…an → … tuple]` where each `ai` is either a tuple of the
-    /// shared axis length or a scalar that broadcasts unchanged.
+    /// Calls the callee for each element position of tuple arguments. The
+    /// callee is the function for every position, or a tuple of one function
+    /// for each. `[… callee a1…an → … tuple]` where each `ai` is either a
+    /// tuple of the shared axis length or a scalar used at every position.
     CallVec(usize),
     /// Pops top of stack. `[… value → …]`
     Pop,

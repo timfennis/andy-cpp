@@ -7,7 +7,7 @@ use crate::iterator::{
 };
 use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{ClosureFunction, Object, Value};
-use ndc_analysis::{CaptureSource, ResolvedVar};
+use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
@@ -349,79 +349,65 @@ impl Vm {
                 }
                 OpCode::Call(args) => {
                     let args = *args;
-                    if let Some(func) = self
+                    let func = self
                         .resolve_callee(args)
-                        .map_err(|msg| VmError::new(msg, span))?
-                    {
-                        if let Err(mut e) = self.dispatch_call(func, args) {
-                            e.span.get_or_insert(span);
-                            return Err(e);
-                        }
-                    } else if let Some((overload_set, axis_len)) = self.try_vec_dispatch(args) {
-                        if let Err(mut e) =
-                            self.dispatch_vec_call_dynamic(&overload_set, args, axis_len, span)
-                        {
-                            e.span.get_or_insert(span);
-                            return Err(e);
-                        }
-                    } else {
-                        let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
-                            .iter()
-                            .map(Value::static_type)
-                            .collect();
-                        let callee_name = self.callee_name(args);
-                        return Err(VmError::new(
-                            format!(
-                                "no function called '{}' found matches the arguments: ({})",
-                                callee_name.as_deref().unwrap_or("?"),
-                                arg_types
-                                    .iter()
-                                    .map(|t| t.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(", "),
-                            ),
-                            span,
-                        ));
+                        .map_err(|msg| VmError::new(msg, span))?;
+                    if let Err(mut e) = self.dispatch_call(func, args) {
+                        e.span.get_or_insert(span);
+                        return Err(e);
                     }
                 }
                 OpCode::CallVec(args) => {
                     let args = *args;
-                    // The analyser picked the scalar function, which the
-                    // compiler loaded directly: no overload set to probe.
-                    let scalar = {
-                        let callee = &self.stack[self.stack.len() - args - 1];
-                        let Value::Object(obj) = callee else {
+                    // The analyser picked the function for each position: one
+                    // for all of them, or a tuple with one for each.
+                    let callee = match &self.stack[self.stack.len() - args - 1] {
+                        Value::Object(obj) => Rc::clone(obj),
+                        callee => {
                             return Err(VmError::new(
                                 format!("Unable to invoke {} as a function.", callee.static_type()),
                                 span,
                             ));
-                        };
-                        let Object::Function(f) = obj.as_ref() else {
-                            return Err(VmError::new(
-                                format!(
-                                    "Unable to invoke {} as a function.",
-                                    obj.as_ref().static_type()
-                                ),
-                                span,
-                            ));
-                        };
-                        f.clone()
-                    };
-                    let axis_len = match vec_axis_len(&self.stack[self.stack.len() - args..]) {
-                        Some(n) => n,
-                        None => {
-                            return Err(VmError::new(
-                                format!(
-                                    "vec call '{}' requires tuple arguments of equal non-zero length",
-                                    scalar.name().unwrap_or("?")
-                                ),
-                                span,
-                            ));
                         }
                     };
+                    let at_position = |i: usize| -> Option<&Function> {
+                        match callee.as_ref() {
+                            Object::Function(f) => Some(f),
+                            Object::Tuple(overloads) => match overloads.get(i)? {
+                                Value::Object(obj) => match obj.as_ref() {
+                                    Object::Function(f) => Some(f),
+                                    _ => None,
+                                },
+                                _ => None,
+                            },
+                            _ => None,
+                        }
+                    };
+                    let Some(first) = at_position(0) else {
+                        return Err(VmError::new(
+                            format!(
+                                "Unable to invoke {} as a function.",
+                                callee.as_ref().static_type()
+                            ),
+                            span,
+                        ));
+                    };
+                    let name = first.name();
+                    let Some(axis_len) = vec_axis_len(&self.stack[self.stack.len() - args..])
+                    else {
+                        return Err(VmError::new(
+                            format!(
+                                "vec call '{}' requires tuple arguments of equal non-zero length",
+                                name.unwrap_or("?")
+                            ),
+                            span,
+                        ));
+                    };
                     if let Err(mut e) =
-                        self.call_elementwise(args, axis_len, scalar.name(), span, |_, _, _| {
-                            Ok(scalar.clone())
+                        self.call_elementwise(args, axis_len, name, span, |_, _, i| {
+                            at_position(i).cloned().ok_or_else(|| {
+                                VmError::new(format!("no function for tuple position {i}"), span)
+                            })
                         })
                     {
                         e.span.get_or_insert(span);
@@ -839,24 +825,11 @@ impl Vm {
         self.globals
     }
 
-    /// Resolves the callee on the stack to a scalar `Function`. Direct
-    /// `Object::Function` and `OverloadSet` scalars both go through this
-    /// path — for an `OverloadSet`, the scalar list is walked first-match-
-    /// wins (no vec dispatch yet). `Ok(None)` means no scalar matched; the
-    /// caller falls through to vec dispatch.
-    ///
-    /// Returns `Option<Function>` (not the wider `Callable` enum) so the
-    /// arm body in the dispatch loop stays the same shape as master — that
-    /// matters: earlier drafts that widened the return type or split this
-    /// into two helpers regressed numerics-heavy benches by ~10%.
-    fn resolve_callee(&self, args: usize) -> Result<Option<Function>, String> {
+    /// The function on the stack below the `args` arguments of a call.
+    fn resolve_callee(&self, args: usize) -> Result<Function, String> {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
-                Object::Function(f) => Ok(Some(f.clone())),
-                Object::OverloadSet { scalars, .. } => {
-                    let start = self.stack.len() - args;
-                    Ok(self.find_scalar_overload(scalars, &self.stack[start..]))
-                }
+                Object::Function(f) => Ok(f.clone()),
                 other => Err(format!(
                     "Unable to invoke {} as a function.",
                     other.static_type()
@@ -867,136 +840,6 @@ impl Vm {
                 callee.static_type()
             )),
         }
-    }
-
-    /// Probes `OpCode::Call`'s callee for vec dispatch eligibility without
-    /// allocating: returns the `OverloadSet` Rc and broadcast axis length
-    /// when vec applies. `dispatch_vec_call_dynamic` resolves the candidates
-    /// lazily from there, avoiding a per-call `Vec<Function>` allocation.
-    fn try_vec_dispatch(&self, args: usize) -> Option<(Rc<Object>, usize)> {
-        let Value::Object(obj) = &self.stack[self.stack.len() - args - 1] else {
-            return None;
-        };
-        match obj.as_ref() {
-            Object::OverloadSet { vec_candidates, .. } if !vec_candidates.is_empty() => {
-                let start = self.stack.len() - args;
-                let axis_len = vec_axis_len(&self.stack[start..])?;
-                Some((Rc::clone(obj), axis_len))
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the name of the callee at the given stack position, if known.
-    /// For a direct `Function` this is its own name; for an `OverloadSet` it
-    /// reads the name off the first scalar (or vec) candidate.
-    fn callee_name(&self, args: usize) -> Option<String> {
-        let frame_pointer = self.frames.last()?.frame_pointer;
-        match &self.stack[self.stack.len() - args - 1] {
-            Value::Object(obj) => match obj.as_ref() {
-                Object::Function(f) => f.name().map(str::to_string),
-                Object::OverloadSet {
-                    scalars,
-                    vec_candidates,
-                } => {
-                    let first = scalars.first().or_else(|| vec_candidates.first())?;
-                    let value = self.resolve_var(first, frame_pointer);
-                    let Value::Object(obj) = value else {
-                        return None;
-                    };
-                    let Object::Function(f) = obj.as_ref() else {
-                        return None;
-                    };
-                    f.name().map(str::to_string)
-                }
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    /// Walks the `OverloadSet`'s scalar candidates in priority order,
-    /// returning the first whose parameter types accept `args`. Mirrors
-    /// master's `find_overload` body so the hot path on numerics-heavy
-    /// code stays at the same shape and footprint.
-    fn find_scalar_overload(&self, scalars: &[ResolvedVar], args: &[Value]) -> Option<Function> {
-        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-        scalars.iter().find_map(|var| {
-            let value = self.resolve_var(var, frame_pointer);
-            let Value::Object(obj) = value else {
-                return None;
-            };
-            let Object::Function(f) = obj.as_ref() else {
-                return None;
-            };
-            f.matches_value_args(args).then(|| f.clone())
-        })
-    }
-
-    /// Vec dispatch for `Binding::Dynamic` operator calls: the program picks
-    /// the scalar overload for each element position, trying the one the
-    /// previous position used first, so a tuple whose elements all have one
-    /// type picks once.
-    fn dispatch_vec_call_dynamic(
-        &mut self,
-        overload_set: &Rc<Object>,
-        args: usize,
-        axis_len: usize,
-        span: Span,
-    ) -> Result<(), VmError> {
-        let Object::OverloadSet { vec_candidates, .. } = overload_set.as_ref() else {
-            unreachable!("dispatch_vec_call_dynamic invoked with non-OverloadSet callee");
-        };
-        debug_assert!(!vec_candidates.is_empty());
-        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-
-        // Resolve one candidate up front so the error paths can borrow its name
-        // as `&str` instead of allocating a `String` on every successful call.
-        let callee_fn: Option<Rc<Object>> =
-            vec_candidates
-                .first()
-                .and_then(|var| match self.resolve_var(var, frame_pointer) {
-                    Value::Object(obj) if matches!(obj.as_ref(), Object::Function(_)) => Some(obj),
-                    _ => None,
-                });
-        let callee_name: Option<&str> = callee_fn.as_ref().and_then(|obj| {
-            let Object::Function(f) = obj.as_ref() else {
-                return None;
-            };
-            f.name()
-        });
-
-        let mut last_match: Option<Function> = None;
-        self.call_elementwise(args, axis_len, callee_name, span, |vm, elements, i| {
-            if let Some(f) = &last_match
-                && f.matches_value_args(elements)
-            {
-                return Ok(f.clone());
-            }
-            let found = vec_candidates.iter().find_map(|var| {
-                let Value::Object(obj) = vm.resolve_var(var, frame_pointer) else {
-                    return None;
-                };
-                let Object::Function(f) = obj.as_ref() else {
-                    return None;
-                };
-                f.matches_value_args(elements).then(|| f.clone())
-            });
-            let Some(f) = found else {
-                let element_types = elements
-                    .iter()
-                    .map(|v| v.static_type().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let name = callee_name.unwrap_or("?");
-                return Err(VmError::new(
-                    format!("no overload of '{name}' accepts element {i}: ({element_types})"),
-                    span,
-                ));
-            };
-            last_match = Some(f.clone());
-            Ok(f)
-        })
     }
 
     /// Calls the function `pick` gives for each element position of the
@@ -1143,24 +986,6 @@ impl Vm {
             }
         }
         Ok(())
-    }
-
-    fn resolve_var(&self, var: &ResolvedVar, frame_pointer: usize) -> Value {
-        match var {
-            ResolvedVar::Global { slot } => self.globals[*slot].clone(),
-            ResolvedVar::Local { slot } => self.stack[frame_pointer + slot].clone(),
-            ResolvedVar::Cell { slot } => {
-                let value = &self.stack[frame_pointer + slot];
-                match value.as_cell() {
-                    Some(cell) => cell.borrow().clone(),
-                    None => value.clone(),
-                }
-            }
-            ResolvedVar::Upvalue { slot } => {
-                let frame = self.frames.last().expect("no frame");
-                frame.closure.upvalues[*slot].borrow().clone()
-            }
-        }
     }
 }
 
