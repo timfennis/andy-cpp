@@ -451,7 +451,13 @@ impl Analyser {
                 let found = self.vars.resolve(&found);
                 let unknown = matches!(found, StaticType::Var(var) if !self.vars.is_literal(var));
                 let literal = matches!(found, StaticType::Var(var) if self.vars.is_literal(var));
-                if found.has_vars() && !unknown && (!*optional || literal) {
+                // Any value is an `Any`, so `(1 + 2) as Any` says nothing
+                // about what the `1` and `2` are.
+                if found.has_vars()
+                    && !unknown
+                    && (!*optional || literal)
+                    && target != StaticType::Any
+                {
                     self.vars.try_unify(&found, &target);
                 }
                 let found = self.vars.resolve(&found);
@@ -478,6 +484,9 @@ impl Analyser {
                 let annotated_type = self.lower_annotation(annotated_type.as_ref());
                 let value_span = value.span;
                 let found_type = self.analyse_expr(value);
+                if annotated_type.is_none() {
+                    self.settle_number_literals(&found_type);
+                }
 
                 self.declare_binding_pattern(
                     l_value,
@@ -719,6 +728,7 @@ impl Analyser {
             ForIteration::Iteration { l_value, sequence } => {
                 let sequence_span = sequence.span;
                 let sequence_type = self.analyse_expr(sequence);
+                self.settle_number_literals(&sequence_type);
 
                 let found_type = self.constrain_iteration(sequence_type, sequence_span);
 

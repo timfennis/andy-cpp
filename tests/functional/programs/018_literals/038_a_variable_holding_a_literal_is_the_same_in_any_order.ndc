@@ -1,0 +1,9 @@
+// `n` is an Int from where it's declared, so `half(n)` is an Int division
+// and `n * 0.5` a Float whichever comes first, and `0..n` is a range.
+// expect-output: 3 3.5 [0,1,2,3,4,5,6]
+// expect-output: 3.5 3 [0,1,2,3,4,5,6]
+fn half(x) => x / 2;
+let n = 7;
+print(half(n), n * 0.5, [i for i in 0..n]);
+let m = 7;
+print(m * 0.5, half(m), [i for i in 0..m]);

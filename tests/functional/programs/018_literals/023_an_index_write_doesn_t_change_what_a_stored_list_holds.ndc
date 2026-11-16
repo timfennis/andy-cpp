@@ -1,0 +1,4 @@
+// `xs` holds Ints, so adding 0.5 to one gives a Float it can't hold.
+// expect-error: mismatched types: found Float but expected Int
+let xs = [1, 2];
+xs[0] += 0.5;

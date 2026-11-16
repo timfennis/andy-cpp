@@ -433,6 +433,63 @@ impl TypeVars {
         holds_a_number
     }
 
+    /// The unsettled types of the number literals in `typ`, and of the
+    /// literals in it that hold only numbers, as the elements of `[1, 2.5]`
+    /// do, with the literals they hold. A literal that also holds what isn't
+    /// a number, as `if c { 1 } else { "a" }` does, isn't among them.
+    pub(crate) fn number_literals_in(&self, typ: &StaticType) -> AHashSet<TypeVar> {
+        let mut found = AHashSet::new();
+        let mut unseen = self
+            .unsettled(typ)
+            .into_iter()
+            .filter(|&var| self.is_literal(var))
+            .collect::<Vec<_>>();
+        while let Some(var) = unseen.pop() {
+            if self.holds_only_numbers(var) && found.insert(var) {
+                unseen.extend(self.held_literals(var));
+            }
+        }
+        found
+    }
+
+    /// Whether the literal `var` holds only numbers, written or of a number
+    /// type, through the literals it holds.
+    fn holds_only_numbers(&self, var: TypeVar) -> bool {
+        let mut seen = AHashSet::from_iter([var]);
+        let mut unseen = vec![var];
+        while let Some(var) = unseen.pop() {
+            for bound in &self.bounds[var.0 as usize] {
+                let Bound::Holds(held, _, _) = bound else {
+                    continue;
+                };
+                match self.resolve(held) {
+                    StaticType::Var(held) if self.is_literal(held) => {
+                        if seen.insert(held) {
+                            unseen.push(held);
+                        }
+                    }
+                    StaticType::Int | StaticType::Float | StaticType::Number => {}
+                    _ => return false,
+                }
+            }
+        }
+        true
+    }
+
+    /// Whether a part of `typ` is the type of a number literal, settled or
+    /// not, as the type of `total` in `let total = 0` is.
+    pub(crate) fn has_number_literal(&self, typ: &StaticType) -> bool {
+        typ.contains(&|part| match part {
+            StaticType::Var(var) => {
+                self.is_number(*var)
+                    || self
+                        .solution(*var)
+                        .is_some_and(|solution| self.has_number_literal(solution))
+            }
+            _ => false,
+        })
+    }
+
     /// Whether `var` is the type of an integer literal.
     pub(crate) fn is_number(&self, var: TypeVar) -> bool {
         self.bounds[var.0 as usize]

@@ -50,12 +50,13 @@ n = 2;                // fine
 n = 3.14;             // error: mismatched types: found Float but expected Int
 ```
 
-A number literal takes the type its uses need, so a variable that starts at `1` and is later given `3.14` is a `Float` from the start:
+A variable that starts at a number literal is what the literal is: `1` makes an `Int`, and `1.0` a `Float`. Later uses don't change it, so its type is the same wherever it's used:
 
-```ndc
-let x = 1;
-x = 3.14;
-print(x);  // 3.14
+```ndc,fails
+let x = 1.0;
+x = 3.14;  // fine
+let y = 1;
+y = 3.14;  // error: mismatched types: found Float but expected Int
 ```
 
 Augmented assignment is checked the same way, against the result of the operation:
@@ -81,7 +82,7 @@ xs.push(1);       // xs is List<Int> from here on
 xs.push("two");   // error: No function called 'push' found that matches the arguments 'List<Int>, String'
 ```
 
-When nothing settles them, they stay `Any`, which takes a [cast](../features/casts.md) to be used as anything else.
+When nothing settles them, they're `Unknown`, which only a function taking any type takes, so a use that needs to know asks for an annotation (see [Types](./types.md)).
 
 A variable that only gets its real value later holds an `Option`:
 

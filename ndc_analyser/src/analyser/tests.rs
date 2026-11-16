@@ -1143,12 +1143,14 @@ fn a_write_that_does_not_fit_a_number_default_is_the_mismatch() {
 }
 
 #[test]
-fn a_number_default_takes_the_type_the_map_s_writes_need() {
+fn a_number_default_is_settled_where_the_map_is_stored() {
+    // `m` is a map of Ints from its `let`, so a Float written later is an
+    // error rather than what makes the `0` a Float.
     assert_eq!(
-        analyse_last_type_with_globals("let m = %{:0}; m[\"a\"] = 0.5; m", index_natives()),
+        analyse_last_type_with_globals("let m = %{:0}; m[\"a\"] = 1; m", index_natives()),
         StaticType::Map {
             key: Box::new(StaticType::String),
-            value: Box::new(StaticType::Float),
+            value: Box::new(StaticType::Int),
         },
     );
 }

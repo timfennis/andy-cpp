@@ -105,6 +105,14 @@ impl AnalysisError {
         }
     }
 
+    /// This error with `help` as its help.
+    pub(crate) fn with_help(self, help: &str) -> Self {
+        Self {
+            help_text: Some(help.to_string()),
+            ..self
+        }
+    }
+
     pub(crate) fn mismatched_types(found: &StaticType, expected: &StaticType, span: Span) -> Self {
         Self {
             text: format!("mismatched types: found {found} but expected {expected}"),

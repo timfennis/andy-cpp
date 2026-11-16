@@ -226,7 +226,7 @@ let players = [Player("ann", 3), Player("bob", 5)];
 players.map(fn(p) => p.size);    // error: p is a Player, which has no size
 ```
 
-A lambda stored in a variable has one type, like any variable, so unlike a function declared with `fn` it can't take an `Int` in one call and a `Float` in the next. A lambda parameter that nothing gives a type is `Any`, which its body then has to work with: in `let f = fn(x) => x + 1;` with nothing calling `f`, no `+` takes `x`, so annotate it as `fn(x: Int)`.
+A lambda stored in a variable has one type, like any variable, so unlike a function declared with `fn` it can't take an `Int` in one call and a `Float` in the next. A lambda parameter that nothing gives a type is `Unknown`, which its body then has to work with: in `let f = fn(x) => x + 1;` with nothing calling `f`, no `+` takes `x`, so annotate it as `fn(x: Int)`.
 
 ## Generic functions
 

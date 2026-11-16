@@ -719,6 +719,20 @@ impl Analyser {
         self.solve_waiting();
     }
 
+    /// Gives the number literals in `typ` their defaults, as what a variable
+    /// is given: in `let n = 7`, `n` is an Int, whatever its uses are, so
+    /// `n * 0.5` is a Float and `0..n` a range of Ints in any order. A literal
+    /// list of numbers takes the type they share, as in `let xs = [1, 2.5]`.
+    /// Within one expression a literal still takes its operand's type, as
+    /// the `2` in `x / 2` with a Float `x` does.
+    pub(super) fn settle_number_literals(&mut self, typ: &StaticType) {
+        let literals = self.vars.number_literals_in(typ);
+        if !literals.is_empty() {
+            self.default_literals(|_, var| literals.contains(&var));
+            self.solve_waiting();
+        }
+    }
+
     /// Settles the types of the literals that `belongs` says to that nothing
     /// settled, and returns whether it settled any. Each takes its first
     /// default, which depends only on the literal, never on the calls

@@ -1,0 +1,5 @@
+// `let total = 0` makes `total` an Int, as `0` is, whatever is done with
+// it later, so `total += 2.5` can't write the Float back.
+// expect-error: A number written without a `.` is an Int
+let total = 0;
+total += 2.5;
