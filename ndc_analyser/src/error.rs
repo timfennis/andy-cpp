@@ -193,17 +193,24 @@ impl AnalysisError {
         }
     }
 
-    /// A call that makes the `pure fn` `function` take `typ`, which holds
-    /// `part`: a function, an iterator or an `Any`.
+    /// A use of a generic function whose types make `parameter` of the
+    /// `pure fn` `function`, which is or is in it, take `typ`, which holds
+    /// `part`: a function, an iterator or an `Any`. `function` is `None` for
+    /// a lambda.
     pub(crate) fn pure_fn_given_more_than_data(
-        function: &str,
+        function: Option<&str>,
+        parameter: &str,
         typ: &StaticType,
         part: &StaticType,
         span: Span,
     ) -> Self {
+        let function = function.map_or_else(
+            || "A `pure fn`".to_string(),
+            |name| format!("`{name}` is a `pure fn`, which"),
+        );
         Self {
             text: format!(
-                "`{function}` is a `pure fn`, which only takes data, but this call passes it a value of type `{typ}`"
+                "{function} only takes data, but here its parameter `{parameter}` would have type `{typ}`"
             ),
             span,
             help_text: Some(Self::pure_fn_takes_data(part)),

@@ -11,6 +11,7 @@ use super::generics::named_in_order;
 use super::solver::{CallSite, Constraint, Origin, Waiting};
 use crate::error::AnalysisError;
 use ahash::AHashMap;
+use itertools::izip;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType};
 use ndc_layout::InstancePicks;
@@ -36,8 +37,6 @@ pub(super) struct Scheme {
     pub(super) uses: Rc<[GenericUse]>,
     /// The function's declaration.
     pub(super) declaration: NodeId,
-    /// Whether it's a `pure fn`, which takes only data.
-    pub(super) pure: bool,
     /// The calls its body makes of itself, which have its own types.
     pub(super) recursive_calls: Rc<[NodeId]>,
     /// The functions its body declares, with the types they're declared
@@ -338,29 +337,7 @@ impl Analyser {
         for (node, declared) in std::iter::once(own).chain(scheme.functions.iter().cloned()) {
             let declared = self.vars.resolve(&declared);
             let typ = self.vars.instantiate_with(&declared, &mut made);
-            if scheme.pure
-                && node == scheme.declaration
-                && let StaticType::Function {
-                    parameters: Some(parameters),
-                    ..
-                } = &typ
-                && let Some((typ, part)) = parameters
-                    .iter()
-                    .find_map(|typ| self.not_data(typ).map(|part| (typ, part)))
-            {
-                // Pushed rather than emitted: `emit` leaves out what the
-                // instance's body reports, which its calls report, while
-                // this is the instance's own.
-                let name = self.resolver.symbol_name(function).to_string();
-                self.result
-                    .errors
-                    .push(AnalysisError::pure_fn_given_more_than_data(
-                        &name,
-                        &self.vars.shown(typ),
-                        &part,
-                        span,
-                    ));
-            }
+            self.check_pure_instance(node, &declared, &typ, span);
             if let Some(picks) = self.picks.instances.get_mut(&instance) {
                 picks.function_types.insert(node, typ);
             }
@@ -389,6 +366,57 @@ impl Analyser {
         }
         self.settle_waiting(first);
         self.recording = outer;
+    }
+
+    /// Reports the parameter of the function `node` declares, if it's a
+    /// `pure fn`, that the types of an instance, `typ` in place of
+    /// `declared`, make more than data. `span` is the use that needs the
+    /// instance. What the declaration itself says was reported there, see
+    /// [`Self::check_pure_functions`].
+    fn check_pure_instance(
+        &mut self,
+        node: NodeId,
+        declared: &StaticType,
+        typ: &StaticType,
+        span: Span,
+    ) {
+        let Some(function) = self.pure_functions.get(&node) else {
+            return;
+        };
+        let (
+            StaticType::Function {
+                parameters: Some(declared),
+                ..
+            },
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            },
+        ) = (declared, typ)
+        else {
+            return;
+        };
+        let found = izip!(&function.parameters, declared, parameters).find_map(
+            |((name, _, _), declared, typ)| {
+                if self.not_data(declared).is_some() {
+                    return None;
+                }
+                self.not_data(typ).map(|part| (name, typ, part))
+            },
+        );
+        if let Some((parameter, typ, part)) = found {
+            // Pushed rather than emitted: `emit` leaves out what the
+            // instance's body reports, which its calls report, while this is
+            // the instance's own.
+            let error = AnalysisError::pure_fn_given_more_than_data(
+                function.name.as_deref(),
+                parameter,
+                &self.vars.shown(typ),
+                &part,
+                span,
+            );
+            self.result.errors.push(error);
+        }
     }
 
     /// Copies into the schemes of the generic functions the batch declares

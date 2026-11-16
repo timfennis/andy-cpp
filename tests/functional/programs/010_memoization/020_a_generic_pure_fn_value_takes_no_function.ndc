@@ -1,0 +1,3 @@
+// expect-error: `same` is a `pure fn`, which only takes data, but here its parameter `x` would have type `Fn(Int) -> Int`
+pure fn same(x) => x;
+let f: Fn(Fn(Int) -> Int) -> Fn(Int) -> Int = same;

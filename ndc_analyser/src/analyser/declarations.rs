@@ -26,11 +26,12 @@ pub(super) struct FunctionDeclaration<'a> {
     pub span: Span,
 }
 
-/// A `pure fn` the batch declares, whose parameters are checked to take only
-/// data once the batch has settled their types.
+/// A `pure fn`, whose parameters are checked to take only data: what its
+/// declaration says once the batch has settled their types, and what each
+/// instance of a generic function it's in or is gives them.
 #[derive(Debug)]
 pub(super) struct PureFunction {
-    pub(super) declaration: NodeId,
+    /// `None` for a lambda.
     pub(super) name: Option<String>,
     /// Each parameter's name, type and span.
     pub(super) parameters: Vec<(String, StaticType, Span)>,
@@ -80,17 +81,20 @@ impl Analyser {
             .collect::<Vec<_>>();
         let annotated_return = self.lower_annotation(return_annotation);
         if pure {
-            self.pure_functions.push(PureFunction {
-                declaration: id,
-                name: name.map(str::to_string),
-                parameters: parameters
-                    .iter()
-                    .zip(&param_types)
-                    .map(|(parameter, typ)| {
-                        (parameter.name().to_string(), typ.clone(), parameter.span)
-                    })
-                    .collect(),
-            });
+            self.pure_in_batch.push(id);
+            self.pure_functions.insert(
+                id,
+                PureFunction {
+                    name: name.map(str::to_string),
+                    parameters: parameters
+                        .iter()
+                        .zip(&param_types)
+                        .map(|(parameter, typ)| {
+                            (parameter.name().to_string(), typ.clone(), parameter.span)
+                        })
+                        .collect(),
+                },
+            );
         }
         // A function's value takes what its parameters turn out to be.
         let runtime_parameters = Some(param_types.clone());
@@ -439,31 +443,30 @@ impl Analyser {
         None
     }
 
-    /// Reports the `pure fn`s the batch declares that take more than data.
-    /// One that runs as instances is checked as each is made instead, for
-    /// the types its calls give it, see [`Self::solve_instance`].
+    /// Reports the `pure fn`s the batch declares whose parameters are said
+    /// to be more than data. What a type parameter of a generic function
+    /// stands for is checked in each instance, see
+    /// [`Self::check_pure_instance`].
     pub(super) fn check_pure_functions(&mut self) {
-        for function in std::mem::take(&mut self.pure_functions) {
-            if self
-                .result
-                .analysis
-                .instances
-                .contains_key(&function.declaration)
-            {
-                continue;
-            }
-            for (parameter, typ, span) in &function.parameters {
-                let typ = self.vars.resolve(typ);
-                if let Some(part) = self.not_data(&typ) {
-                    self.emit(AnalysisError::pure_fn_parameter_takes_more_than_data(
-                        function.name.as_deref(),
-                        parameter,
-                        &self.vars.shown(&typ),
-                        &part,
-                        *span,
-                    ));
-                    break;
-                }
+        for declaration in std::mem::take(&mut self.pure_in_batch) {
+            let function = &self.pure_functions[&declaration];
+            let found = function
+                .parameters
+                .iter()
+                .find_map(|(parameter, typ, span)| {
+                    let typ = self.vars.resolve(typ);
+                    self.not_data(&typ).map(|part| {
+                        AnalysisError::pure_fn_parameter_takes_more_than_data(
+                            function.name.as_deref(),
+                            parameter,
+                            &self.vars.shown(&typ),
+                            &part,
+                            *span,
+                        )
+                    })
+                });
+            if let Some(error) = found {
+                self.emit(error);
             }
         }
     }

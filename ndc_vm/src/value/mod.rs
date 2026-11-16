@@ -1351,8 +1351,14 @@ impl Object {
                 state.write_u8(8);
                 // The default isn't part of a map's identity as a key, but a
                 // lookup of a missing key gives it.
-                if exact && let Some(default) = default {
-                    default.hash_as(state, exact);
+                if exact {
+                    match default {
+                        Some(default) => {
+                            state.write_u8(1);
+                            default.hash_as(state, exact);
+                        }
+                        None => state.write_u8(0),
+                    }
                 }
                 let entries = entries.borrow();
                 state.write_usize(entries.len());

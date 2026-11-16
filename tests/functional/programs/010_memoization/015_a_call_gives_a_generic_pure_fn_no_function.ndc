@@ -1,4 +1,4 @@
-// expect-error: `same` is a `pure fn`, which only takes data, but this call passes it a value of type `Fn(Int) -> Int`
+// expect-error: `same` is a `pure fn`, which only takes data, but here its parameter `x` would have type `Fn(Int) -> Int`
 pure fn same(x) => x;
 fn inc(n: Int) => n + 1;
 same(inc);

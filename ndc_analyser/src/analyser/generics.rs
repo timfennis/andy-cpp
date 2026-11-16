@@ -160,17 +160,26 @@ impl Analyser {
         // instance, and a cache, of its own: the parameters' types, as `1`
         // and `1.0` are equal arguments, and the return type's, as
         // `pure fn mk() => []` would otherwise give one list to calls that
-        // want a `List<Int>` and calls that want a `List<String>`.
-        let parameters = match self.vars.resolve(signature) {
-            StaticType::Function {
-                parameters: Some(mut parameters),
+        // want a `List<Int>` and calls that want a `List<String>`. The same
+        // goes for each `pure fn` its body declares, which also takes only
+        // data, as each instance is checked to give it.
+        let own = pure.then(|| self.vars.resolve(signature));
+        let declared_pure = self.declared_functions[first_function..]
+            .iter()
+            .filter(|node| self.pure_functions.contains_key(node))
+            .map(|&node| self.vars.resolve(self.result.analysis.function_type(node)))
+            .collect::<Vec<_>>();
+        let mut parameters = Vec::new();
+        for typ in own.into_iter().chain(declared_pure) {
+            if let StaticType::Function {
+                parameters: Some(types),
                 return_type,
-            } if pure => {
+            } = typ
+            {
+                parameters.extend(types);
                 parameters.push(*return_type);
-                parameters
             }
-            _ => Vec::new(),
-        };
+        }
         let mut key: Vec<Box<str>> = Vec::new();
         for typ in scheme
             .iter()
@@ -201,7 +210,6 @@ impl Analyser {
                 key: key.into(),
                 uses: uses.into(),
                 declaration,
-                pure,
                 recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
                 functions: self.declared_functions[first_function..]
                     .iter()
