@@ -78,7 +78,13 @@ print(("a", "b") ++ ("c", "d"));  // ("ac","bd")
 
 Vectorization only kicks in for operator syntax (`a + b`, `-x`, `a ++ b`).
 Regular function calls never broadcast, so `f((1, 2, 3))` passes the whole
-tuple to `f` and does not call `f` once per element.
+tuple to `f` and does not call `f` once per element. Neither do comparisons
+(`<`, `<=`, `>`, `>=`, `<=>`, `>=<`): they compare two tuples of the same
+length as a whole, element by element from the first, and give one result:
+
+```ndc
+print((1, 2) < (1, 3), (2, 0) <=> (1, 9));  // true 1
+```
 
 Mixed-element tuples or length mismatches error at compile time rather than
 silently producing wrong results:

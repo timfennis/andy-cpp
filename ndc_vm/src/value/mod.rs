@@ -694,8 +694,10 @@ impl Value {
     /// Returns `None` for non-iterable types (`Int`, `Float`, `Bool`, `None`,
     /// functions, numbers, …).
     ///
-    /// For `Map`, yields `(key, value)` tuples — the same behaviour as
-    /// iterating a map in a for-loop.
+    /// For `Map`, yields `(key, value)` tuples, and for a heap the elements
+    /// in the order the heap gives them, smallest first for a `MinHeap` and
+    /// largest first for a `MaxHeap`: the same behaviour as iterating them
+    /// in a for-loop.
     ///
     /// Uses `Rc::unwrap_or_clone` so no extra clone occurs when this value
     /// holds the sole reference to its object.
@@ -717,6 +719,27 @@ impl Value {
                 Some(ValueIter::List(chars.into_iter()))
             }
             Object::Map { entries, .. } => Some(ValueIter::Map(entries.into_inner().into_iter())),
+            Object::MinHeap(heap) => {
+                // Sorted by `Reverse`, so the largest first.
+                let mut values: Vec<Self> = heap
+                    .into_inner()
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|Reverse(OrdValue(value))| value)
+                    .collect();
+                values.reverse();
+                Some(ValueIter::List(values.into_iter()))
+            }
+            Object::MaxHeap(heap) => {
+                let mut values: Vec<Self> = heap
+                    .into_inner()
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|OrdValue(value)| value)
+                    .collect();
+                values.reverse();
+                Some(ValueIter::List(values.into_iter()))
+            }
             _ => None,
         }
     }

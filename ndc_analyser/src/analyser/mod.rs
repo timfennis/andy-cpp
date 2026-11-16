@@ -639,7 +639,13 @@ impl Analyser {
             Expression::OperatorCall {
                 function,
                 arguments,
-            } => self.analyse_call(function, arguments, CallKind::Operator, *span),
+            } => {
+                let kind = match &function.expression {
+                    Expression::Identifier { name, .. } => CallKind::of_operator(name),
+                    _ => CallKind::Operator,
+                };
+                self.analyse_call(function, arguments, kind, *span)
+            }
             Expression::MemberAccess {
                 receiver,
                 member,

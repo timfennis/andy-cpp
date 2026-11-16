@@ -24,10 +24,10 @@ mod inner {
         list.contains(&elem)
     }
 
-    /// Returns `true` if the list contains the given subsequence.
+    /// Returns `true` if the list contains the given subsequence. Every list contains the empty one.
     #[function(signature = "<T>(List<T>, List<T>) -> Bool")]
     pub fn contains_subsequence(list: &[Value], subsequence: &[Value]) -> bool {
-        list.windows(subsequence.len()).contains(&subsequence)
+        subsequence.is_empty() || list.windows(subsequence.len()).contains(&subsequence)
     }
 
     /// Returns the starting index of the first occurrence of `subsequence` in `list`, or produces an error if there is none.

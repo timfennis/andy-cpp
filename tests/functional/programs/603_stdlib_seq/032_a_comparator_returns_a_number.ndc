@@ -1,0 +1,5 @@
+// A comparator says how two elements compare with an Int, a Float or a
+// Number, as `<=>` does; a Bool such as `a < b` doesn't say it.
+// expect-error: No function called 'sorted_by' found
+print([3, 1, 2].sorted_by(fn(a, b) => a <=> b), [1.5, 0.5].sorted_by(fn(a, b) => a - b));
+[3, 1, 2].sorted_by(fn(a, b) => a < b);

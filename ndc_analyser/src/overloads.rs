@@ -5,13 +5,30 @@ use ndc_resolver::{BindingKind, Candidates, SymbolId, SymbolTable};
 use std::borrow::Cow;
 
 /// Whether a call site can fall back to element-wise tuple broadcast when no
-/// scalar overload matches the argument types directly. Set by the parser:
-/// operator desugars (`a + b`, `-x`, `op=`) produce `Operator`; everything
-/// else (`f(x)`, dot calls, indexing) produces `Regular`.
+/// scalar overload matches the argument types directly. Operator syntax
+/// (`a + b`, `-x`, `op=`) is an `Operator`, but for a comparison, and
+/// everything else (`f(x)`, dot calls, indexing) is `Regular`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallKind {
     Regular,
     Operator,
+    /// A comparison, `<`, `<=`, `>`, `>=`, `<=>` or `>=<`, which compares
+    /// whole values and never applies to each element of a tuple: two tuples
+    /// no overload compares, as tuples of two kinds of number, are a type
+    /// error, not a tuple of what each pair of elements gives.
+    Comparison,
+}
+
+impl CallKind {
+    /// The kind of a call written with the operator `name`.
+    #[must_use]
+    pub fn of_operator(name: &str) -> Self {
+        if matches!(name, "<" | "<=" | ">" | ">=" | "<=>" | ">=<") {
+            Self::Comparison
+        } else {
+            Self::Operator
+        }
+    }
 }
 
 /// What picking a call's overload hands back: the binding the analyser will

@@ -1,0 +1,2 @@
+// expect-output: true true
+print([1, 2].contains_subsequence([]), [].contains_subsequence([]));

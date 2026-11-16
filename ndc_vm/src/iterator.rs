@@ -282,8 +282,8 @@ impl VmIterator for MapIter {
     }
 }
 
-/// Iterates over a heap snapshot, yielding pre-collected elements in order.
-/// Used for both min-heaps (sorted ascending) and max-heaps (arbitrary order).
+/// Iterates over a heap snapshot in the order the heap gives its elements:
+/// a min-heap's smallest first, a max-heap's largest first.
 pub struct HeapIter {
     entries: Vec<Value>,
     index: usize,
@@ -297,9 +297,10 @@ impl HeapIter {
         Self { entries, index: 0 }
     }
 
-    /// Creates an iterator over a max-heap, yielding elements in arbitrary heap order.
+    /// Creates an iterator over a max-heap, yielding elements in sorted descending order.
     pub fn new_max(heap: &RefCell<BinaryHeap<OrdValue>>) -> Self {
-        let entries: Vec<Value> = heap.borrow().iter().map(|v| v.0.clone()).collect();
+        let mut entries: Vec<Value> = heap.borrow().iter().map(|v| v.0.clone()).collect();
+        entries.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
         Self { entries, index: 0 }
     }
 }

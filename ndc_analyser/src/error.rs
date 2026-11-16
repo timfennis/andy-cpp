@@ -399,7 +399,10 @@ impl AnalysisError {
         Self {
             text: format!("Invalid unpacking of {typ}"),
             span,
-            help_text: None,
+            help_text: (*typ == StaticType::Any).then(|| {
+                "An `Any` could hold anything. Cast it to say what it holds, as in `value as (Int, Int)`"
+                    .to_string()
+            }),
             notes: Vec::new(),
         }
     }

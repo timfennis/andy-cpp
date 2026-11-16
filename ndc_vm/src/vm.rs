@@ -1103,11 +1103,31 @@ impl Vm {
                 chars.reverse();
                 self.stack.append(&mut chars);
             }
+            // A deque, heap or iterator unpacks the elements it gives, one
+            // past the variables at most, as an iterator may not end.
             _ => {
-                return Err(VmError::new(
-                    "cannot unpack: expected a list, tuple, or string",
-                    span,
-                ));
+                let Some(iter) = Value::Object(obj).try_into_iter() else {
+                    return Err(VmError::new(
+                        "cannot unpack: expected a list, tuple, string, deque, heap or iterator",
+                        span,
+                    ));
+                };
+                let mut elements: Vec<Value> = iter.take(size + 1).collect();
+                if elements.len() != size {
+                    return Err(VmError::new(
+                        if elements.len() > size {
+                            format!("cannot unpack more than {size} values into {size} variables")
+                        } else {
+                            format!(
+                                "cannot unpack {} values into {size} variables",
+                                elements.len()
+                            )
+                        },
+                        span,
+                    ));
+                }
+                elements.reverse();
+                self.stack.append(&mut elements);
             }
         }
         Ok(())

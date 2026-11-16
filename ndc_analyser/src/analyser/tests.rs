@@ -1727,8 +1727,11 @@ fn an_instance_calls_the_instances_its_types_need() {
 
 #[test]
 fn an_instance_calls_itself_where_its_body_recurses() {
+    // `n < 2` compares with an Int whatever `n` is, so `fib` is generic
+    // only if `<` compares an Int with more than an Int, as it does.
     let globals = natives(&[
         ("<", "(Int, Int) -> Bool"),
+        ("<", "(Float, Int) -> Bool"),
         ("-", "(Int, Int) -> Int"),
         ("+", "(Int, Int) -> Int"),
     ]);

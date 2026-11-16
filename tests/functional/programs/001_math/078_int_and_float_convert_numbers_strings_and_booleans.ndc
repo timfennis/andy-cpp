@@ -1,0 +1,3 @@
+// expect-error: No function called 'int' found that matches the arguments 'List<Int>'
+print(int(2.7), int("42"), int(true), float(3), float("1.5"));
+print(int([1]));
