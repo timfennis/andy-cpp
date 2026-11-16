@@ -423,8 +423,8 @@ mod inner {
     }
 
     /// Returns the number of elements of a collection whose size is known: a list, deque, map or
-    /// heap, a tuple, or a string, for which it's the number of UTF-8 characters. An iterator's
-    /// length isn't known without reading it.
+    /// heap, or a string, for which it's the number of UTF-8 characters. A tuple's is declared
+    /// with `first` and `last`. An iterator's length isn't known without reading it.
     #[function(name = "len", signature = "<T>(List<T>) -> Int")]
     pub fn len_list(seq: Value) -> anyhow::Result<i64> {
         length(&seq)
@@ -457,66 +457,6 @@ mod inner {
     /// [`len`] of a max heap.
     #[function(name = "len", signature = "<T>(MaxHeap<T>) -> Int")]
     pub fn len_max_heap(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a tuple.
-    #[function(name = "len", signature = "<A>(Tuple<A>) -> Int")]
-    pub fn len_tuple1(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a tuple.
-    #[function(name = "len", signature = "<A, B>(Tuple<A, B>) -> Int")]
-    pub fn len_tuple2(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a tuple.
-    #[function(name = "len", signature = "<A, B, C>(Tuple<A, B, C>) -> Int")]
-    pub fn len_tuple3(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a tuple.
-    #[function(name = "len", signature = "<A, B, C, D>(Tuple<A, B, C, D>) -> Int")]
-    pub fn len_tuple4(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a tuple.
-    #[function(
-        name = "len",
-        signature = "<A, B, C, D, E>(Tuple<A, B, C, D, E>) -> Int"
-    )]
-    pub fn len_tuple5(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a tuple.
-    #[function(
-        name = "len",
-        signature = "<A, B, C, D, E, F>(Tuple<A, B, C, D, E, F>) -> Int"
-    )]
-    pub fn len_tuple6(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a tuple.
-    #[function(
-        name = "len",
-        signature = "<A, B, C, D, E, F, G>(Tuple<A, B, C, D, E, F, G>) -> Int"
-    )]
-    pub fn len_tuple7(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a tuple.
-    #[function(
-        name = "len",
-        signature = "<A, B, C, D, E, F, G, H>(Tuple<A, B, C, D, E, F, G, H>) -> Int"
-    )]
-    pub fn len_tuple8(seq: Value) -> anyhow::Result<i64> {
         length(&seq)
     }
 
@@ -1161,6 +1101,23 @@ pub mod extra {
         let names = |count: usize| {
             ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"][..count].to_vec()
         };
+        // Every tuple, the empty one too, has a length.
+        let tuple_len = |args: &[Value]| match args {
+            [Value::Object(object)] => match object.as_ref() {
+                Object::Tuple(values) => Ok(Value::Int(values.len() as i64)),
+                _ => Err(VmError::native("len of a tuple takes a tuple")),
+            },
+            _ => Err(VmError::native("len of a tuple takes a tuple")),
+        };
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "len".to_string(),
+            documentation: Some("Returns the number of elements of a tuple.".to_string()),
+            static_type: StaticType::Function {
+                parameters: Some(vec![StaticType::unit()]),
+                return_type: Box::new(StaticType::Int),
+            },
+            func: NativeFunc::Simple(Box::new(tuple_len)),
+        }));
         for length in 1..=LONGEST {
             let names = names(length);
             let parameters = names.join(", ");
@@ -1169,6 +1126,13 @@ pub mod extra {
             } else {
                 format!("({parameters})")
             };
+            env.declare_global_fn(Rc::new(NativeFunction {
+                name: "len".to_string(),
+                documentation: Some("Returns the number of elements of a tuple.".to_string()),
+                static_type: StaticType::signature(&format!("<{parameters}>({tuple}) -> Int"))
+                    .expect("valid signature"),
+                func: NativeFunc::Simple(Box::new(tuple_len)),
+            }));
             for (name, returns, documentation) in [
                 ("first", names[0], "Returns the first element of a tuple."),
                 (

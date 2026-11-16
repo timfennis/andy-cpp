@@ -1,0 +1,7 @@
+// A tuple compares as a whole with one of the same length, the empty tuple
+// too, up to twelve elements, as `first`, `last` and `zip` take.
+// expect-output: true -1 0 false 9 0 12
+let nine = (1, 2, 3, 4, 5, 6, 7, 8, 9);
+let other = (1, 2, 3, 4, 5, 6, 7, 8, 10);
+let twelve = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, "z");
+print(nine < other, nine <=> other, () <=> (), () < (), len(nine), len(()), len(twelve));

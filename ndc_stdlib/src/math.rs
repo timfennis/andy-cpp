@@ -523,10 +523,12 @@ fn compare_operands(args: &[Value]) -> Result<Ordering, VmError> {
 
 /// The parameter lists of the comparisons, for the values that have an
 /// order: numbers of any kind, against each other, strings, booleans, and
-/// lists and tuples of what has an order. Maps, deques, options, structs and
-/// functions have none, and neither do values of two different kinds. A list
-/// or tuple of what has no order still passes as one: that needs a constraint
-/// on the type parameter.
+/// lists and tuples of what has an order, a tuple of each length up to
+/// twelve, as `first` and `last` take, with one of the same length. The empty
+/// tuple's is declared apart, as a signature can't spell it. Maps, deques,
+/// options, structs and functions have none, and neither do values of two
+/// different kinds. A list or tuple of what has no order still passes as one:
+/// that needs a constraint on the type parameter.
 fn orderable_parameters() -> Vec<String> {
     let numbers = ["Int", "Float", "Number"];
     let mut parameters = Vec::new();
@@ -538,7 +540,7 @@ fn orderable_parameters() -> Vec<String> {
     parameters.push("(String, String)".to_string());
     parameters.push("(Bool, Bool)".to_string());
     parameters.push("<T>(List<T>, List<T>)".to_string());
-    for arity in 1..=8 {
+    for arity in 1..=12 {
         let names = (0..arity)
             .map(|index| char::from(b'A' + index).to_string())
             .collect::<Vec<_>>()
@@ -571,15 +573,19 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             "Returns whether the left value is less than or equal to the right.",
         ),
     ] {
+        let compare = move |args: &[Value]| Ok(Value::Bool(predicate(compare_operands(args)?)));
         for parameters in orderable_parameters() {
-            declare_signature(
-                env,
-                name,
-                &format!("{parameters} -> Bool"),
-                docs,
-                move |args| Ok(Value::Bool(predicate(compare_operands(args)?))),
-            );
+            declare_signature(env, name, &format!("{parameters} -> Bool"), docs, compare);
         }
+        let unit = StaticType::unit();
+        declare(
+            env,
+            name,
+            vec![unit.clone(), unit],
+            StaticType::Bool,
+            docs,
+            compare,
+        );
     }
 
     declare_signature(
@@ -607,22 +613,26 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         ("<=>", false, "Performs a three-way comparison."),
         (">=<", true, "Performs a reverse three-way comparison."),
     ] {
+        let compare = move |args: &[Value]| {
+            let result = match compare_operands(args)? {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1,
+            };
+            Ok(Value::Int(if reverse { -result } else { result }))
+        };
         for parameters in orderable_parameters() {
-            declare_signature(
-                env,
-                name,
-                &format!("{parameters} -> Int"),
-                docs,
-                move |args| {
-                    let result = match compare_operands(args)? {
-                        Ordering::Less => -1,
-                        Ordering::Equal => 0,
-                        Ordering::Greater => 1,
-                    };
-                    Ok(Value::Int(if reverse { -result } else { result }))
-                },
-            );
+            declare_signature(env, name, &format!("{parameters} -> Int"), docs, compare);
         }
+        let unit = StaticType::unit();
+        declare(
+            env,
+            name,
+            vec![unit.clone(), unit],
+            StaticType::Int,
+            docs,
+            compare,
+        );
     }
 }
 
