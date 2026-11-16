@@ -1,5 +1,5 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
-use crate::value::{CompiledFunction, Function};
+use crate::value::{CompiledFunction, Function, unique_id};
 use crate::{Object, Value};
 use ahash::AHashMap;
 use ndc_analysis::{Analysis, Binding, Candidate, Instance, ResolvedVar};
@@ -281,6 +281,7 @@ impl Compiler {
             body: self.ir.into_chunk(),
             num_locals,
             num_globals: self.analysis.global_count,
+            id: unique_id(),
         }
     }
 
@@ -1188,6 +1189,7 @@ impl Compiler {
                 body: fn_compiler.ir.into_chunk(),
                 num_locals,
                 num_globals: 0,
+                id: unique_id(),
             },
             used_instance,
         ))

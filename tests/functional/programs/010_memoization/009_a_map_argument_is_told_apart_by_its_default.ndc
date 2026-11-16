@@ -1,0 +1,5 @@
+// The maps hold the same entries, but a missing key gives each its default.
+// expect-output: 1 2 1 2
+pure fn missing(m: Map<Int, Int>) => m[0];
+fn defaulting_to(n) => %{: fn() => n};
+print(missing(%{: 1}), missing(%{: 2}), missing(defaulting_to(1)), missing(defaulting_to(2)));

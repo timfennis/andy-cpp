@@ -75,6 +75,9 @@ pub struct CompiledFunction {
     /// a declaration that never runs still has its slot; 0 for any other
     /// function.
     pub(crate) num_globals: usize,
+    /// Tells this function's code apart from every other's, as an address
+    /// can't: another function may get it once this one is freed.
+    pub(crate) id: u64,
 }
 
 #[derive(Clone)]

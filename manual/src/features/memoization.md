@@ -19,9 +19,40 @@ print(multiply(4, 5));  // 20
 
 > **Note:** The interpreter does not check whether a function is actually pure. You must avoid side effects yourself.
 
+### Which calls share a result
+
+A call gives what an earlier call returned when its arguments are the same
+values of the same types:
+
+- Numbers are told apart by kind as well as value: `1` and `1.0` are equal, but
+  `f(1)` and `f(1.0)` are different calls.
+- Containers are compared by what they hold, and a map by its default too. Heaps
+  with the same elements are the same, whatever order they were pushed in.
+- A function is its code and the values of the variables it captured, so two
+  closures made by one `fn` expression are the same argument only when they
+  captured equal values.
+- An iterator is only ever the same as itself.
+
+A `pure fn` called with values of different types has a cache for each set of
+types, and for each type it returns:
+
+```ndc
+pure fn same(x) => x;
+print(same(1), same(1.0));  // 1 1.0
+```
+
+The cached value is what the later call gets, not a copy of it. A change to a
+list it returned is in what the next call with the same arguments returns:
+
+```ndc
+pure fn empty() -> List<Int> => [];
+empty().push(1);
+print(empty());  // [1]
+```
+
 ### Performance: keep memoization keys small
 
-The cache key is computed by hashing **all arguments**. For container types like maps and lists this
+The cache key is computed by hashing **all arguments**, and for a function argument the values of the variables it captured. For container types like maps and lists this
 is an O(n) operation proportional to the number of elements. Passing large containers as arguments
 to a `pure fn` therefore adds hashing overhead on every call, even on cache hits.
 

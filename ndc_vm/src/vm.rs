@@ -11,7 +11,7 @@ use ndc_analysis::{CaptureSource, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 use std::io::Write;
 use std::rc::Rc;
 
@@ -464,7 +464,7 @@ impl Vm {
                     let val = self.stack.pop().expect("stack underflow");
 
                     // Check if already an iterator
-                    if matches!(val, Value::Object(ref obj) if matches!(**obj, Object::Iterator(_)))
+                    if matches!(val, Value::Object(ref obj) if matches!(**obj, Object::Iterator(..)))
                     {
                         self.stack.push(val);
                         continue;
@@ -508,7 +508,7 @@ impl Vm {
                     let Value::Object(obj) = top else {
                         panic!("IterNext expects an iterator on the stack")
                     };
-                    let Object::Iterator(iter_rc) = &**obj else {
+                    let Object::Iterator(iter_rc, _) = &**obj else {
                         panic!("IterNext expects an iterator on the stack")
                     };
                     let next = iter_rc.borrow_mut().next();
@@ -669,15 +669,7 @@ impl Vm {
             let start = self.stack.len() - args;
             let mut hasher = DefaultHasher::default();
             for arg in &self.stack[start..] {
-                arg.hash(&mut hasher);
-                // A function checked as another function type is the same
-                // function, but a call may return it, so the cache tells
-                // them apart.
-                if let Value::Object(object) = arg
-                    && let Object::Function(Function::Checked { typ, .. }) = object.as_ref()
-                {
-                    typ.hash(&mut hasher);
-                }
+                arg.hash_exact(&mut hasher);
             }
             let key = hasher.finish();
 

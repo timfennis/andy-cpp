@@ -1,0 +1,12 @@
+// Heaps with the same elements are the same argument, whatever order they
+// were pushed in.
+// expect-output: 1 1 2 2
+let calls = 0;
+pure fn smallest(h: MinHeap<Int>) {
+    calls += 1;
+    h.pop()
+}
+let a = MinHeap(); a.push(3); a.push(1);
+let b = MinHeap(); b.push(1); b.push(3);
+let c = MinHeap(); c.push(2);
+print(smallest(a), smallest(b), smallest(c), calls);

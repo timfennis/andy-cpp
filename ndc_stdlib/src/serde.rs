@@ -46,7 +46,7 @@ fn value_to_json(
                     | Object::Map { .. }
                     | Object::MaxHeap(_)
                     | Object::MinHeap(_)
-                    | Object::Iterator(_)
+                    | Object::Iterator(..)
                     | Object::Struct { .. }
             );
             if cycle_guard && !active.insert(Rc::as_ptr(obj)) {
@@ -97,7 +97,7 @@ fn object_to_json(
     match obj.as_ref() {
         Object::Some(inner) if lossy => value_to_json(inner, lossy, active),
         Object::Some(_) => bail!("cannot convert an option to JSON, unwrap it first"),
-        Object::Iterator(i) if lossy => {
+        Object::Iterator(i, _) if lossy => {
             let mut out = Vec::new();
             let mut iter = i.borrow_mut();
             while let Some(v) = iter.next() {
@@ -105,7 +105,7 @@ fn object_to_json(
             }
             Ok(JsonValue::Array(out))
         }
-        Object::Iterator(_) => {
+        Object::Iterator(..) => {
             bail!("cannot convert an iterator to JSON, collect it into a list first")
         }
         Object::MaxHeap(h) if lossy => {

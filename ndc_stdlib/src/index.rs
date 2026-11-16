@@ -205,7 +205,7 @@ fn char_index_to_byte_offset(string: &str, index: usize) -> usize {
 
 fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmError> {
     if let Value::Object(obj) = index_value
-        && let Object::Iterator(iter) = obj.as_ref()
+        && let Object::Iterator(iter, _) = obj.as_ref()
     {
         let iter_ref = iter.borrow();
         if let Some((start, end, inclusive)) = iter_ref.range_bounds() {
@@ -284,7 +284,7 @@ fn vm_get_at_index(container: &Value, index_value: &Value, vm: &mut Vm) -> Resul
             Object::Map { entries, default } => {
                 if matches!(
                     index_value,
-                    Value::Object(o) if matches!(o.as_ref(), Object::Iterator(_))
+                    Value::Object(o) if matches!(o.as_ref(), Object::Iterator(..))
                 ) {
                     return Err(VmError::native(
                         "cannot use range expression as index in map",
@@ -509,7 +509,7 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
             Object::Map { entries, .. } => {
                 if matches!(
                     index_value,
-                    Value::Object(o) if matches!(o.as_ref(), Object::Iterator(_))
+                    Value::Object(o) if matches!(o.as_ref(), Object::Iterator(..))
                 ) {
                     return Err(VmError::native("cannot use range expression as index"));
                 }

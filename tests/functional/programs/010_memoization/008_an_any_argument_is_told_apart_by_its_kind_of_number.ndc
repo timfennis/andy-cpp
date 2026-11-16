@@ -1,0 +1,4 @@
+// `1` and `1.0` are equal, but not the same argument: `f` gives each back.
+// expect-output: 1 1.0 [1] [1.0]
+pure fn f(x: Any) => x;
+print(f(1), f(1.0), f([1]), f([1.0]));

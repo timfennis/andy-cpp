@@ -22,6 +22,7 @@ use std::fmt;
 use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 thread_local! {
     static UNIT: Value = Value::Object(Rc::new(Object::Tuple(vec![])));
@@ -67,6 +68,13 @@ pub enum Value {
     Cell(Rc<RefCell<Self>>),
 }
 
+/// A number no other call gives, for what's told apart by identity rather
+/// than by an address, which another value may get once it's freed.
+pub(crate) fn unique_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+}
+
 #[derive(Clone)]
 pub enum Object {
     Some(Value),
@@ -92,7 +100,8 @@ pub enum Object {
         scalars: Vec<ResolvedVar>,
         vec_candidates: Vec<ResolvedVar>,
     },
-    Iterator(SharedIterator),
+    /// An iterator, and the [`unique_id`] it's told apart from others by.
+    Iterator(SharedIterator, u64),
     Deque(RefCell<VecDeque<Value>>),
     MinHeap(RefCell<BinaryHeap<Reverse<OrdValue>>>),
     MaxHeap(RefCell<BinaryHeap<OrdValue>>),
@@ -195,7 +204,7 @@ impl Value {
     }
 
     pub fn iterator(iter: SharedIterator) -> Self {
-        Self::Object(Rc::new(Object::Iterator(iter)))
+        Self::Object(Rc::new(Object::Iterator(iter, unique_id())))
     }
 
     pub fn list(values: Vec<Self>) -> Self {
@@ -376,7 +385,7 @@ impl Value {
                         | Object::String(_)
                         | Object::Deque(_)
                         | Object::Map { .. }
-                        | Object::Iterator(_)
+                        | Object::Iterator(..)
                         | Object::MinHeap(_)
                         | Object::MaxHeap(_)
                 ))
@@ -656,7 +665,7 @@ impl Value {
                         .borrow()
                         .iter()
                         .all(|OrdValue(value)| value.conforms_to_cached(element, cache)),
-                    Object::Iterator(_) => matches!(element.as_ref(), StaticType::Any),
+                    Object::Iterator(..) => matches!(element.as_ref(), StaticType::Any),
                     _ => false,
                 },
                 _ => false,
@@ -707,7 +716,7 @@ impl Value {
             Object::List(l) => Some(ValueIter::List(l.into_inner().into_iter())),
             Object::Tuple(t) => Some(ValueIter::List(t.into_iter())),
             Object::Deque(d) => Some(ValueIter::Deque(d.into_inner().into_iter())),
-            Object::Iterator(i) => Some(ValueIter::Shared(i)),
+            Object::Iterator(i, _) => Some(ValueIter::Shared(i)),
             Object::String(s) => {
                 let chars: Vec<Self> = s
                     .borrow()
@@ -791,11 +800,11 @@ impl Object {
                 fields: RefCell::new(fields.borrow().iter().map(Value::deep_copy).collect()),
             },
             // Iterator: deep_copy if supported, otherwise share the Rc.
-            Self::Iterator(shared) => {
+            Self::Iterator(shared, id) => {
                 if let Some(copy) = shared.borrow().deep_copy() {
-                    Self::Iterator(copy)
+                    Self::Iterator(copy, unique_id())
                 } else {
-                    Self::Iterator(Rc::clone(shared))
+                    Self::Iterator(Rc::clone(shared), *id)
                 }
             }
             // Immutable / identity types: clone the Rc via Object's derive.
@@ -896,7 +905,7 @@ impl Object {
             }
             Self::Function(f) => f.static_type(),
             Self::OverloadSet { .. } => StaticType::Any,
-            Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
+            Self::Iterator(..) => StaticType::Iterator(Box::new(StaticType::Any)),
             Self::Deque(elements) => {
                 if depth == 0 {
                     return StaticType::Deque(Box::new(StaticType::Any));
@@ -992,7 +1001,7 @@ impl fmt::Display for Object {
                 "<overload set ({} candidates)>",
                 scalars.len() + vec_candidates.len()
             ),
-            Self::Iterator(iter) => match iter.borrow().len() {
+            Self::Iterator(iter, _) => match iter.borrow().len() {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
             },
@@ -1054,7 +1063,7 @@ impl fmt::Debug for Object {
                 .field("scalars", scalars)
                 .field("vec_candidates", vec_candidates)
                 .finish(),
-            Self::Iterator(iter) => match iter.borrow().len() {
+            Self::Iterator(iter, _) => match iter.borrow().len() {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
             },
@@ -1157,8 +1166,65 @@ impl Eq for Value {}
 
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        self.hash_as(state, &mut Hashing::MapKey);
+    }
+}
+
+/// What [`Value::hash_as`] hashes a value as.
+enum Hashing {
+    /// A map key: values `==` says are equal hash the same.
+    MapKey,
+    /// An argument of a `pure fn`, see [`Value::hash_exact`]. Holds the
+    /// closures whose captures are being hashed, outermost first, so that one
+    /// that captures itself hashes as how far out it is.
+    Exact(Vec<*const ClosureFunction>),
+}
+
+impl Hashing {
+    fn is_exact(&self) -> bool {
+        matches!(self, Self::Exact(_))
+    }
+}
+
+/// Hashes `hashes` as one value whatever their order, as a map's entries and
+/// a heap's elements have no order that tells two of them apart.
+fn hash_unordered<H: Hasher>(state: &mut H, hashes: impl Iterator<Item = u64>) {
+    let mut sum = 0u64;
+    let mut sum_of_squares = 0u64;
+    for hash in hashes {
+        sum = sum.wrapping_add(hash);
+        sum_of_squares = sum_of_squares.wrapping_add(hash.wrapping_mul(hash));
+    }
+    state.write_u64(sum);
+    state.write_u64(sum_of_squares);
+}
+
+impl Value {
+    /// Hashes what tells two arguments of a `pure fn` apart: calls with
+    /// arguments that hash the same share a result. [`Hash`] hashes a value
+    /// as a map key, the same as every value `==` says is equal. This tells
+    /// `1` from `1.0`, and maps by their default, and hashes what's otherwise
+    /// told apart by its address by what it is: a function by its code and
+    /// the values of the variables it captured, a heap by its elements, an
+    /// iterator by an id of its own.
+    pub fn hash_exact<H: Hasher>(&self, state: &mut H) {
+        self.hash_as(state, &mut Hashing::Exact(Vec::new()));
+    }
+
+    fn hash_as<H: Hasher>(&self, state: &mut H, hashing: &mut Hashing) {
         if let Some(number) = self.numeric_ref() {
-            state.write_u8(1);
+            // Exactly, each kind of number gets a tag of its own, written in
+            // the place of the one tag all numbers share as map keys.
+            state.write_u8(if hashing.is_exact() {
+                match number {
+                    NumericRef::Int(_) | NumericRef::Number(AdvancedNumber::Int(_)) => 16,
+                    NumericRef::Float(_) | NumericRef::Number(AdvancedNumber::Float(_)) => 17,
+                    NumericRef::Number(AdvancedNumber::Rational(_)) => 18,
+                    NumericRef::Number(AdvancedNumber::Complex(_)) => 19,
+                }
+            } else {
+                1
+            });
             number.hash(state);
             return;
         }
@@ -1169,11 +1235,18 @@ impl Hash for Value {
             Self::None => state.write_u8(5),
             Self::Object(o) => {
                 state.write_u8(6);
-                o.hash(state);
+                o.hash_as(state, hashing);
             }
             Self::Cell(_) => unreachable!("internal error: a cell is never hashed"),
             Self::Int(_) | Self::Float(_) | Self::Number(_) => unreachable!("handled above"),
         }
+    }
+
+    /// The hash of `self` alone, to combine with others in any order.
+    fn hash_alone(&self, hashing: &mut Hashing) -> u64 {
+        let mut hasher = DefaultHasher::default();
+        self.hash_as(&mut hasher, hashing);
+        hasher.finish()
     }
 }
 
@@ -1223,7 +1296,7 @@ impl PartialEq for Object {
             (Self::OverloadSet { .. }, Self::OverloadSet { .. }) => {
                 panic!("OverloadSet cannot be used as a map key")
             }
-            (Self::Iterator(a), Self::Iterator(b)) => {
+            (Self::Iterator(a, _), Self::Iterator(b, _)) => {
                 // Compare iterators by pointer identity
                 std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
             }
@@ -1242,10 +1315,17 @@ impl Eq for Object {}
 
 impl Hash for Object {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        self.hash_as(state, &mut Hashing::MapKey);
+    }
+}
+
+impl Object {
+    /// [`Value::hash_as`] for what a [`Value::Object`] holds.
+    fn hash_as<H: Hasher>(&self, state: &mut H, hashing: &mut Hashing) {
         match self {
             Self::Some(v) => {
                 state.write_u8(1);
-                v.hash(state);
+                v.hash_as(state, hashing);
             }
             Self::String(s) => {
                 state.write_u8(5);
@@ -1254,83 +1334,158 @@ impl Hash for Object {
             Self::List(vs) => {
                 state.write_u8(6);
                 for v in vs.borrow().iter() {
-                    v.hash(state);
+                    v.hash_as(state, hashing);
                 }
             }
             Self::Tuple(vs) => {
                 state.write_u8(7);
                 for v in vs.iter() {
-                    v.hash(state);
+                    v.hash_as(state, hashing);
                 }
             }
-            Self::Map { entries, .. } => {
+            Self::Map { entries, default } => {
                 state.write_u8(8);
-                // Order-independent hash: XOR-fold of pair hashes
-                // NOTE: the default value is not part of the identity of the map
-                let mut acc = 0u64;
-                let mut cube_acc = 0u64;
-                for (key, value) in entries.borrow().iter() {
-                    let mut hasher = DefaultHasher::default();
-                    key.hash(&mut hasher);
-                    value.hash(&mut hasher);
-
-                    let f = hasher.finish();
-                    acc = acc.wrapping_add(f);
-                    cube_acc = cube_acc.wrapping_add(f.wrapping_mul(f));
+                // The default isn't part of a map's identity as a key, but a
+                // lookup of a missing key gives it.
+                if hashing.is_exact()
+                    && let Some(default) = default
+                {
+                    default.hash_as(state, hashing);
                 }
-                state.write_u64(acc);
-                state.write_u64(cube_acc);
+                let entries = entries.borrow();
+                let hashes = entries.iter().map(|(key, value)| {
+                    let mut hasher = DefaultHasher::default();
+                    key.hash_as(&mut hasher, hashing);
+                    value.hash_as(&mut hasher, hashing);
+                    hasher.finish()
+                });
+                hash_unordered(state, hashes);
             }
             Self::Function(f) => {
                 state.write_u8(9);
-                match f.unchecked() {
-                    Function::Compiled(func) => {
-                        state.write_u8(1);
-                        Rc::as_ptr(func).hash(state);
-                    }
-                    Function::Native(native) => {
-                        state.write_u8(2);
-                        Rc::as_ptr(native).hash(state);
-                    }
-                    Function::Closure(closure) => {
-                        state.write_u8(3);
-                        Rc::as_ptr(&closure.prototype).hash(state);
-                    }
-                    Function::Memoized { cache, .. } => {
-                        state.write_u8(4);
-                        Rc::as_ptr(cache).hash(state);
-                    }
-                    Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
-                }
+                Self::hash_function(f, state, hashing);
             }
-            Self::OverloadSet { .. } => {
-                panic!("OverloadSet cannot be used as a map key")
+            Self::OverloadSet {
+                scalars,
+                vec_candidates,
+            } => {
+                assert!(
+                    hashing.is_exact(),
+                    "OverloadSet cannot be used as a map key"
+                );
+                state.write_u8(10);
+                scalars.hash(state);
+                vec_candidates.hash(state);
             }
-            Self::Iterator(iter) => {
+            Self::Iterator(iter, id) => {
                 state.write_u8(11);
-                Rc::as_ptr(iter).hash(state);
+                if hashing.is_exact() {
+                    id.hash(state);
+                } else {
+                    Rc::as_ptr(iter).hash(state);
+                }
             }
             Self::Deque(d) => {
                 state.write_u8(12);
                 for v in d.borrow().iter() {
-                    v.hash(state);
+                    v.hash_as(state, hashing);
                 }
             }
+            // As a map key a heap is told apart by its address: the RefCell
+            // lives inside the Rc<Object> allocation, so this is equivalent
+            // to hashing the outer Rc pointer.
             Self::MinHeap(h) => {
                 state.write_u8(13);
-                // Hash by address: the RefCell lives inside the Rc<Object> allocation,
-                // so this is equivalent to hashing the outer Rc pointer.
-                (h as *const RefCell<BinaryHeap<Reverse<OrdValue>>>).hash(state);
+                if hashing.is_exact() {
+                    let heap = h.borrow();
+                    let hashes = heap
+                        .iter()
+                        .map(|Reverse(value)| value.0.hash_alone(hashing));
+                    hash_unordered(state, hashes);
+                } else {
+                    (h as *const RefCell<BinaryHeap<Reverse<OrdValue>>>).hash(state);
+                }
             }
             Self::MaxHeap(h) => {
                 state.write_u8(14);
-                (h as *const RefCell<BinaryHeap<OrdValue>>).hash(state);
+                if hashing.is_exact() {
+                    let heap = h.borrow();
+                    let hashes = heap.iter().map(|value| value.0.hash_alone(hashing));
+                    hash_unordered(state, hashes);
+                } else {
+                    (h as *const RefCell<BinaryHeap<OrdValue>>).hash(state);
+                }
             }
             Self::Struct { info, fields } => {
                 state.write_u8(15);
-                Rc::as_ptr(info).hash(state);
+                if hashing.is_exact() {
+                    info.id.hash(state);
+                } else {
+                    Rc::as_ptr(info).hash(state);
+                }
                 for v in fields.borrow().iter() {
-                    v.hash(state);
+                    v.hash_as(state, hashing);
+                }
+            }
+        }
+    }
+
+    /// [`Self::hash_as`] for a function. As a map key, a function is told
+    /// apart by its address, and a checked one is the function it checks.
+    fn hash_function<H: Hasher>(function: &Function, state: &mut H, hashing: &mut Hashing) {
+        match function {
+            Function::Checked { function, typ } => {
+                if hashing.is_exact() {
+                    state.write_u8(5);
+                    typ.hash(state);
+                }
+                Self::hash_function(function, state, hashing);
+            }
+            Function::Compiled(func) => {
+                state.write_u8(1);
+                if hashing.is_exact() {
+                    func.id.hash(state);
+                } else {
+                    Rc::as_ptr(func).hash(state);
+                }
+            }
+            Function::Native(native) => {
+                state.write_u8(2);
+                if hashing.is_exact() {
+                    native.name.hash(state);
+                    native.static_type.hash(state);
+                } else {
+                    Rc::as_ptr(native).hash(state);
+                }
+            }
+            Function::Closure(closure) => {
+                state.write_u8(3);
+                let Hashing::Exact(outer) = hashing else {
+                    Rc::as_ptr(&closure.prototype).hash(state);
+                    return;
+                };
+                closure.prototype.id.hash(state);
+                let this = std::ptr::from_ref(closure);
+                if let Some(at) = outer.iter().rposition(|&other| other == this) {
+                    state.write_u8(1);
+                    state.write_usize(outer.len() - at);
+                    return;
+                }
+                state.write_u8(0);
+                outer.push(this);
+                for upvalue in &closure.upvalues {
+                    upvalue.borrow().hash_as(state, hashing);
+                }
+                if let Hashing::Exact(outer) = hashing {
+                    outer.pop();
+                }
+            }
+            Function::Memoized { cache, function } => {
+                state.write_u8(4);
+                if hashing.is_exact() {
+                    Self::hash_function(function, state, hashing);
+                } else {
+                    Rc::as_ptr(cache).hash(state);
                 }
             }
         }

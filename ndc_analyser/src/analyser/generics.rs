@@ -155,14 +155,20 @@ impl Analyser {
         // An instance is for the types of the type parameters that what it
         // compiles differently depends on: the constraints and uses it
         // picks for.
-        // A `pure fn` caches its results by its arguments' values, which can
-        // be equal across types, as `1` and `1.0` are, so each set of types
-        // gets an instance, and a cache, of its own.
+        // A `pure fn` gives every call with the same arguments what the first
+        // one returned, so each set of types it's called with gets an
+        // instance, and a cache, of its own: the parameters' types, as `1`
+        // and `1.0` are equal arguments, and the return type's, as
+        // `pure fn mk() => []` would otherwise give one list to calls that
+        // want a `List<Int>` and calls that want a `List<String>`.
         let parameters = match self.vars.resolve(signature) {
             StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } if pure => parameters,
+                parameters: Some(mut parameters),
+                return_type,
+            } if pure => {
+                parameters.push(*return_type);
+                parameters
+            }
             _ => Vec::new(),
         };
         let mut key: Vec<Box<str>> = Vec::new();
