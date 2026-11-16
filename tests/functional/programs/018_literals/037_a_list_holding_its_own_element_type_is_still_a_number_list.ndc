@@ -1,0 +1,10 @@
+// `x = xs.pop()` makes the type of what `xs` holds the type of `x`, which
+// is what `xs` holds: the literal holds its own type, which says nothing
+// about whether it holds numbers.
+// expect-output: -1
+fn f(x) {
+    let xs = [x];
+    x = xs.pop();
+    -x
+}
+print(f(1));

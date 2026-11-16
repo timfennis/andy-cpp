@@ -394,21 +394,36 @@ impl TypeVars {
     }
 
     /// Whether `var` is the unsettled type of a number literal, or of a
-    /// literal that holds only those, as the elements of `[1, 2]` are.
+    /// literal that holds only those, as the elements of `[1, 2]` are. A
+    /// literal can hold its own type, as `xs` holds `x` in
+    /// `let xs = [x]; x = xs.pop();`, which says nothing either way.
     pub(crate) fn is_number_literal(&self, var: TypeVar) -> bool {
         if self.solution(var).is_some() || !self.is_literal(var) {
             return false;
         }
-        let bounds = &self.bounds[var.0 as usize];
-        self.is_number(var)
-            || (!bounds.is_empty()
-                && bounds.iter().all(|bound| match bound {
-                    Bound::Holds(held, _, _) => matches!(
-                        self.resolve(held),
-                        StaticType::Var(held) if self.is_number_literal(held)
-                    ),
-                    Bound::Number(..) => true,
-                }))
+        let mut seen = AHashSet::from_iter([var]);
+        let mut unseen = vec![var];
+        let mut holds_a_number = false;
+        while let Some(var) = unseen.pop() {
+            if self.is_number(var) {
+                holds_a_number = true;
+                continue;
+            }
+            for bound in &self.bounds[var.0 as usize] {
+                let Bound::Holds(held, _, _) = bound else {
+                    continue;
+                };
+                match self.resolve(held) {
+                    StaticType::Var(held) if self.is_literal(held) => {
+                        if seen.insert(held) {
+                            unseen.push(held);
+                        }
+                    }
+                    _ => return false,
+                }
+            }
+        }
+        holds_a_number
     }
 
     /// Whether `var` is the type of an integer literal.
