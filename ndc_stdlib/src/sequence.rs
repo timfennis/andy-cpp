@@ -357,13 +357,33 @@ mod inner {
         let mut current = cell
             .try_borrow_mut()
             .map_err(|_in_use| anyhow::anyhow!("the list is in use"))?;
-        if *current != original {
+        if current.len() != original.len()
+            || current
+                .iter()
+                .zip(&original)
+                .any(|(now, before)| !is_the_same(now, before))
+        {
             return Err(anyhow::anyhow!(
                 "the list changed while `sort_by` sorted it"
             ));
         }
         *current = sorted;
         Ok(())
+    }
+
+    /// Whether `now` is the value `before` was, not only an equal one: the
+    /// same object for a container, which an equal copy isn't, and the same
+    /// kind and bits of number, as `1` and `1.0` are equal.
+    fn is_the_same(now: &Value, before: &Value) -> bool {
+        match (now, before) {
+            (Value::Object(now), Value::Object(before)) => Rc::ptr_eq(now, before),
+            (Value::Number(now), Value::Number(before)) => Rc::ptr_eq(now, before),
+            (Value::Float(now), Value::Float(before)) => now.to_bits() == before.to_bits(),
+            (Value::Int(now), Value::Int(before)) => now == before,
+            (Value::Bool(now), Value::Bool(before)) => now == before,
+            (Value::None, Value::None) => true,
+            _ => false,
+        }
     }
 
     /// Sorts `values` by what `comp` says of each pair of them.
