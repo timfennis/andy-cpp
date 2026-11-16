@@ -112,7 +112,7 @@ impl AnalysisError {
             help_text: if *found == StaticType::Any {
                 Some(cast_out_of_any(&expected.to_string()))
             } else {
-                has_unknown(std::slice::from_ref(found)).then(say_what_it_holds)
+                has_unknown(std::slice::from_ref(found)).then(annotate_the_unknown)
             },
             notes: Vec::new(),
         }
@@ -367,7 +367,7 @@ impl AnalysisError {
         span: Span,
     ) -> Self {
         Self {
-            help_text: Some(say_what_it_holds()),
+            help_text: Some(annotate_the_unknown()),
             ..Self::function_not_found(ident, types, span)
         }
     }
@@ -487,11 +487,12 @@ pub(crate) fn has_unknown(types: &[StaticType]) -> bool {
         .any(|typ| typ.contains(&|part| *part == StaticType::Unknown))
 }
 
-fn say_what_it_holds() -> String {
+fn annotate_the_unknown() -> String {
     concat!(
-        "`Unknown` is what an empty `[]`, `%{}` or `None` holds when nothing stores anything in it, ",
-        "which only a type parameter or an `Any` takes. ",
-        "Say what it holds where it's made, as in `let xs: List<Int> = []`",
+        "`Unknown` is the type of what nothing in the program says the type of, such as a parameter ",
+        "of a function that's never called or what an empty `[]`, `%{}` or `None` holds. ",
+        "Only a type parameter or an `Any` takes it. ",
+        "Annotate it, as in `fn(x: Int) => x + 1` or `let xs: List<Int> = []`",
     )
     .to_string()
 }

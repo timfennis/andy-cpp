@@ -50,7 +50,7 @@ xs.push(1);
 xs.push("two");  // error: No function called 'push' found that matches the arguments 'List<Int>, String'
 ```
 
-When nothing says what an empty `[]`, `%{}` or `None` holds, it holds `Unknown`: a type that's no other type and has no values. A function that takes any type takes it, so `print([])` prints `[]`, but an overload that takes lists of a particular type doesn't, not even one that takes a `List<Any>`. Where that would pick one, an annotation has to say what it holds:
+When nothing in the program says what type something is, its type is `Unknown`: a type that's no other type and has no values. That's what an empty `[]`, `%{}` or `None` holds when nothing stores anything in it, what `Deque()` holds when nothing is pushed onto it, and the parameter of a function that's never called. A function that takes any type takes it, so `print([])` prints `[]`, but an overload that takes lists of a particular type doesn't, not even one that takes a `List<Any>`. Where that would pick one, an annotation has to say what the type is:
 
 ```ndc,fails
 fn describe(xs: List<Int>) => "ints";
@@ -188,7 +188,7 @@ used before (or inside) its own declaration, and it goes out of scope together w
 block or function that declared it. See [Struct](./types/struct.md) for the scoping
 rules.
 
-> **Note:** every value fits `Any`, so an `Any`-annotated binding will accept anything. When a value has no annotation and the analyser can't infer a type, it falls back to `Any`, which then takes a cast to be used as anything else (see below), except what an empty literal holds, which is `Unknown` (see above), and values of different types are an error (see [Values of different types](#values-of-different-types)). A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
+> **Note:** every value fits `Any`, so an `Any`-annotated binding will accept anything. A value is never an `Any` because its type couldn't be inferred: what nothing says the type of is `Unknown` (see above), and values of different types are an error (see [Values of different types](#values-of-different-types)). A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
 
 ### Getting a value out of an `Any`
 

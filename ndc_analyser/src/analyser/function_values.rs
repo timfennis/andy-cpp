@@ -77,7 +77,7 @@ impl Analyser {
         let symbol = self.resolver.innermost_reference(id);
         let groups = self.overloaded_function_groups(id, symbol);
         if groups.iter().map(Vec::len).sum::<usize>() > 1 {
-            let expected = self.vars.fresh(StaticType::Any);
+            let expected = self.vars.fresh();
             let value = FunctionValue {
                 id,
                 name: name.to_string(),
@@ -279,8 +279,9 @@ impl Analyser {
                 true
             }
             // The other values of a literal can't say which overload is
-            // meant, as the literal could hold `Any`s: `[len, abs]`.
-            Choice::None if value.in_literal => {
+            // meant, as the literal could hold `Any`s: `[len, abs]`. Nor can
+            // a type nothing says, as in `let f = split;`.
+            Choice::None if value.in_literal || expected == StaticType::Unknown => {
                 let example = self.overload_example(value, &StaticType::Any);
                 self.emit(AnalysisError::ambiguous_function_value(
                     &value.name,

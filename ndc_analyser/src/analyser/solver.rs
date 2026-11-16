@@ -286,7 +286,7 @@ impl Analyser {
         if let Some(typ) = self.try_call(&call) {
             return typ;
         }
-        call.result = self.vars.fresh(StaticType::Any);
+        call.result = self.vars.fresh();
         let result = call.result.clone();
         // Arithmetic on literals gives a literal of their type: `-1` and
         // `1 + 1` are Floats in `if c { 2.5 } else { -1 }`.
@@ -301,7 +301,7 @@ impl Analyser {
     /// until the kind of sequence is known.
     pub(super) fn constrain_iteration(&mut self, sequence: StaticType, span: Span) -> StaticType {
         if self.vars.waits_to_iterate(&sequence) {
-            let element = self.vars.fresh(StaticType::Any);
+            let element = self.vars.fresh();
             self.wait(Constraint::Iterate {
                 sequence,
                 element: element.clone(),
@@ -336,9 +336,7 @@ impl Analyser {
         count: usize,
         span: Span,
     ) -> Vec<StaticType> {
-        let parts = (0..count)
-            .map(|_| self.vars.fresh(StaticType::Any))
-            .collect::<Vec<_>>();
+        let parts = (0..count).map(|_| self.vars.fresh()).collect::<Vec<_>>();
         self.wait(Constraint::Unpack {
             value,
             parts: parts.clone(),
@@ -364,7 +362,7 @@ impl Analyser {
             (_, StaticType::Never) => a,
             _ if a == b => a,
             _ if unknown(self, &a) || unknown(self, &b) => {
-                let result = self.vars.fresh(StaticType::Any);
+                let result = self.vars.fresh();
                 self.wait(Constraint::Join {
                     types: [a, b, result.clone()],
                     expects_any: false,
@@ -519,7 +517,7 @@ impl Analyser {
             // of a String is the mismatch, not the `0`.
             StaticType::Var(var) if self.vars.is_number(var) => default,
             StaticType::Var(_) => {
-                let value = self.vars.fresh(StaticType::Any);
+                let value = self.vars.fresh();
                 self.wait(Constraint::MapDefault {
                     default,
                     value: value.clone(),
@@ -818,16 +816,35 @@ impl Analyser {
 
     /// The unsettled variables made since `first` that the waiting
     /// constraint `serial` waits on, if it's still waiting.
+    /// What it settles itself isn't among them: see [`Self::returned_by`].
     fn waits_on_vars_since(&self, serial: u64, first: usize) -> Vec<TypeVar> {
         self.waiting.get(&serial).map_or_else(Vec::new, |waiting| {
+            let returned = self.returned_by(&waiting.constraint);
             waiting
                 .constraint
                 .inputs()
                 .iter()
                 .flat_map(|input| self.vars.unsettled(input))
-                .filter(|var| var.0 as usize >= first)
+                .filter(|var| var.0 as usize >= first && !returned.contains(var))
                 .collect()
         })
+    }
+
+    /// The unsettled variables of what an overloaded function's name used
+    /// as a value returns, which the overload its parameters pick says: in
+    /// `let f = pick; let g = fn(x) => f(x);`, what `f` returns is what the
+    /// `pick` that takes what `x` falls back to returns.
+    pub(super) fn returned_by(&self, constraint: &Constraint) -> Vec<TypeVar> {
+        match constraint {
+            Constraint::FunctionValue(value) => match self.vars.resolve(value.expected()) {
+                StaticType::Function {
+                    parameters: Some(_),
+                    return_type,
+                } => self.vars.unsettled(&return_type),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        }
     }
 
     /// Solves `constraint` if what it waits on is known, and returns whether
@@ -1850,7 +1867,7 @@ impl Analyser {
         callee: &StaticType,
         arguments: Vec<StaticType>,
     ) -> StaticType {
-        let returns = self.vars.fresh(StaticType::Any);
+        let returns = self.vars.fresh();
         let function = StaticType::Function {
             parameters: Some(arguments),
             return_type: Box::new(returns.clone()),

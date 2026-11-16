@@ -57,8 +57,9 @@ pub enum StaticType {
     /// Bottom type for diverging expressions (`return`, `break`, `continue`).
     /// A value of it fits anywhere, and it joins with any type as that type.
     Never,
-    /// What an empty `[]`, `%{}` or `None` holds when nothing says what: a
-    /// type no other type is, which has no values. A type parameter or an
+    /// The type of what nothing in the program says the type of, as what an
+    /// empty `[]`, `%{}` or `None` holds, or the parameter of a function
+    /// that's never called: a type no other type is, which has no values. A type parameter or an
     /// `Any` takes it, but a `List<Int>` or a `List<Any>` isn't a
     /// `List<Unknown>`, so which overload `pick([])` means isn't decided by
     /// it. Only the analyser makes it.

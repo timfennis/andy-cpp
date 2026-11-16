@@ -64,7 +64,7 @@ impl Analyser {
                 annotation
                     .clone()
                     .or_else(|| expected.get(position).cloned().flatten())
-                    .unwrap_or_else(|| self.vars.fresh(StaticType::Any))
+                    .unwrap_or_else(|| self.vars.fresh())
             })
             .collect::<Vec<_>>();
         let annotated_return = self.lower_annotation(return_annotation);
@@ -85,7 +85,7 @@ impl Analyser {
         // returns, which the recursive calls share. A redefinition is
         // reported but still bound, since the resolver declared it.
         let recursive_return = match (&declared, &annotated_return) {
-            (Some(_), None) => Some(self.vars.fresh(StaticType::Any)),
+            (Some(_), None) => Some(self.vars.fresh()),
             _ => None,
         };
         if let Some((name, symbol)) = declared {

@@ -129,7 +129,7 @@ impl Analyser {
                         "[]",
                         span,
                     ),
-                    None => self.vars.fresh(StaticType::Any),
+                    None => self.vars.fresh(),
                 };
                 // `xs[i] = v` is the call `[]=(xs, i, v)`, which waits for
                 // the value's type when nothing else picks the overload.
