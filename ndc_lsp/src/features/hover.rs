@@ -31,7 +31,7 @@ pub fn hover(
     let node = node_at_offset(&state.ast, offset)?;
     let markdown = match &node.expression {
         Expression::Identifier { .. } => {
-            native_hover(&binding_at(&state.analysis, node.id), functions)
+            native_hover(&overloads_at(&state.analysis, node.id), functions)
                 .or_else(|| type_hover(state, node.id))
         }
         _ => type_hover(state, node.id),
@@ -40,66 +40,54 @@ pub fn hover(
     Some(markup(state, node.span, markdown))
 }
 
-/// What the identifier `id` refers to. In the body of a generic function
-/// whose instances pick for their own types, as `abs` in
+/// The functions the identifier `id` refers to: the overload it picked, or
+/// one for each position of tuple arguments. In the body of a generic
+/// function whose instances pick for their own types, as `abs` in
 /// `fn f(x) { abs(x) } f(1); f(2.5);` does, that's every overload they pick:
 /// `abs(Int)` and `abs(Float)`.
-fn binding_at(analysis: &Analysis, id: NodeId) -> Binding {
+fn overloads_at(analysis: &Analysis, id: NodeId) -> Vec<ResolvedVar> {
     let binding = analysis.binding(id);
-    if *binding != Binding::None {
-        return binding.clone();
-    }
+    let bindings: Vec<&Binding> = if *binding == Binding::None {
+        analysis
+            .instances
+            .values()
+            .flatten()
+            .filter_map(|instance| instance.bindings.get(&id))
+            .collect()
+    } else {
+        vec![binding]
+    };
     let mut picked = Vec::new();
-    for binding in analysis
-        .instances
-        .values()
-        .flatten()
-        .filter_map(|instance| instance.bindings.get(&id))
-    {
-        let candidates = match binding {
-            Binding::Resolved(candidate) => std::slice::from_ref(candidate),
-            Binding::Dynamic(candidates) => candidates.as_slice(),
-            Binding::None => &[],
+    for binding in bindings {
+        let overloads = match binding {
+            Binding::None => Vec::new(),
+            Binding::Resolved(candidate) => vec![candidate.var()],
+            Binding::PerPosition(overloads) => overloads.clone(),
         };
-        for candidate in candidates {
-            if !picked.contains(candidate) {
-                picked.push(*candidate);
+        for overload in overloads {
+            if !picked.contains(&overload) {
+                picked.push(overload);
             }
         }
     }
-    if picked.is_empty() {
-        Binding::None
-    } else {
-        Binding::Dynamic(picked)
-    }
+    picked
 }
 
 /// Markdown for an identifier the analyser resolved to built-in functions: the
-/// signature and documentation of the overload it picked, or of each one it
-/// leaves to runtime dispatch. `None` unless every candidate is a built-in, so a
-/// local that shadows one (e.g. `let len = 1; len`) shows the local's type.
-fn native_hover(binding: &Binding, functions: &[FunctionInfo]) -> Option<String> {
-    let candidates = match binding {
-        Binding::Resolved(candidate) => std::slice::from_ref(candidate),
-        Binding::Dynamic(candidates) => candidates.as_slice(),
-        Binding::None => return None,
-    };
+/// signature and documentation of each overload it picked. `None` unless every
+/// one is a built-in, so a local that shadows one (e.g. `let len = 1; len`)
+/// shows the local's type.
+fn native_hover(overloads: &[ResolvedVar], functions: &[FunctionInfo]) -> Option<String> {
     // A built-in's global slot is its position in the registry, which is the
     // order of `functions`.
-    let mut slots = candidates
+    let markdown = overloads
         .iter()
-        .map(|candidate| match candidate.var() {
-            ResolvedVar::Global { slot } => Some(slot),
+        .map(|overload| match overload {
+            ResolvedVar::Global { slot } => functions.get(*slot).map(function_markdown),
             _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
-    // A broadcast candidate names the same overload as the scalar one.
-    slots.dedup();
-    let overloads = slots
-        .into_iter()
-        .map(|slot| functions.get(slot).map(function_markdown))
-        .collect::<Option<Vec<_>>>()?;
-    (!overloads.is_empty()).then(|| overloads.join("\n\n---\n\n"))
+    (!markdown.is_empty()).then(|| markdown.join("\n\n---\n\n"))
 }
 
 fn markup(state: &DocumentState, span: Span, value: String) -> Hover {

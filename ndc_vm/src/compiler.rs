@@ -1,6 +1,6 @@
+use crate::Value;
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
-use crate::{Object, Value};
 use ahash::AHashMap;
 use ndc_analysis::{Analysis, Binding, Candidate, Instance, ResolvedVar};
 use ndc_core::NodeId;
@@ -783,51 +783,29 @@ impl Compiler {
             .cloned()
     }
 
-    /// Emit code that puts the resolved callee on top of the stack.
-    ///
-    /// * `Resolved(Scalar(var))` and `Resolved(Vec(scalar))` both emit a
-    ///   direct `GetVar`; the call-site picks `Call` vs `CallVec` based on
-    ///   which one the analyser chose (see [`Self::call_opcode_for`]).
-    /// * `Dynamic(candidates)` pushes the candidate list as an `OverloadSet`
-    ///   constant; the VM dispatcher narrows at runtime.
+    /// Emit code that puts the resolved callee on top of the stack: the
+    /// function, or for an operator whose tuple positions take different
+    /// overloads, the tuple of them, which `CallVec` applies position by
+    /// position.
     fn compile_binding(&mut self, resolved: &Binding, span: Span) -> Result<(), CompileError> {
         match resolved {
             Binding::None => return Err(CompileError::unresolved_binding(span)),
             Binding::Resolved(candidate) => self.emit_get_var(candidate.var(), span),
-            Binding::Dynamic(candidates) => {
-                // Split candidates by kind: scalars walked first (hot path),
-                // vec candidates only consulted as fallback. Keeps the
-                // scalar-only call site cost identical to master.
-                let (scalars, vec_candidates) =
-                    candidates
-                        .iter()
-                        .fold((Vec::new(), Vec::new()), |mut acc, c| {
-                            match *c {
-                                Candidate::Scalar(v) => acc.0.push(v),
-                                Candidate::Vec(v) => acc.1.push(v),
-                            }
-                            acc
-                        });
-                let idx = self
-                    .ir
-                    .add_constant(Value::Object(Rc::new(Object::OverloadSet {
-                        scalars,
-                        vec_candidates,
-                    })));
-                self.ir.write(OpCode::Constant(idx), span);
+            Binding::PerPosition(overloads) => {
+                for &overload in overloads {
+                    self.emit_get_var(overload, span);
+                }
+                self.ir.write(OpCode::MakeTuple(overloads.len()), span);
             }
         }
-
         Ok(())
     }
 
-    /// Pick the call opcode for a given binding: `CallVec(args)` when the
-    /// analyser pinned a single vec candidate at compile time, else
-    /// `Call(args)`. Dynamic bindings always use `Call` and let the VM's
-    /// `find_overload` route to scalar vs vec dispatch.
+    /// `CallVec(args)` for an operator applied to each element of tuple
+    /// arguments, `Call(args)` for any other call.
     fn call_opcode_for(binding: &Binding, args: usize) -> OpCode {
         match binding {
-            Binding::Resolved(Candidate::Vec(_)) => OpCode::CallVec(args),
+            Binding::Resolved(Candidate::Vec(_)) | Binding::PerPosition(_) => OpCode::CallVec(args),
             _ => OpCode::Call(args),
         }
     }

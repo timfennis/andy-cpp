@@ -312,8 +312,7 @@ impl Function {
     }
 
     /// Whether this function accepts the given arguments, checking every
-    /// element of a container argument against a parameter like
-    /// `List<Int>`, which [`Self::matches_value_args`] doesn't.
+    /// element of a container argument against a parameter like `List<Int>`.
     pub fn conforms_value_args(&self, args: &[Value]) -> bool {
         match self.signature() {
             StaticType::Function {
@@ -330,24 +329,6 @@ impl Function {
                 parameters: None, ..
             } => true,
             _ => false,
-        }
-    }
-
-    /// Returns true if this function accepts the given arguments, without
-    /// allocating a `StaticType` for each of them.
-    pub fn matches_value_args(&self, args: &[Value]) -> bool {
-        let StaticType::Function { parameters, .. } = self.signature() else {
-            return false;
-        };
-        match parameters {
-            None => true,
-            Some(params) => {
-                params.len() == args.len()
-                    && params
-                        .iter()
-                        .zip(args.iter())
-                        .all(|(param, arg)| arg.matches_param(param))
-            }
         }
     }
 }

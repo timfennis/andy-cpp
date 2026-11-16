@@ -197,21 +197,21 @@ impl Analysis {
 pub enum Binding<V = ResolvedVar> {
     None,
     Resolved(Candidate<V>),
-    Dynamic(Vec<Candidate<V>>), // figure it out at runtime
+    /// An operator applied to each element of tuple arguments whose positions
+    /// take different overloads: the one at index `i` applies to the elements
+    /// at index `i`, as `(1, 2.5) + (3, 4)` adds two Ints, then two Floats.
+    PerPosition(Vec<V>),
 }
 
 impl<V> Binding<V> {
     /// The same binding with each candidate's target mapped by `f`.
-    pub fn map<W>(self, mut f: impl FnMut(V) -> W) -> Binding<W> {
+    pub fn map<W>(self, f: impl FnMut(V) -> W) -> Binding<W> {
         match self {
             Self::None => Binding::None,
             Self::Resolved(candidate) => Binding::Resolved(candidate.map(f)),
-            Self::Dynamic(candidates) => Binding::Dynamic(
-                candidates
-                    .into_iter()
-                    .map(|candidate| candidate.map(&mut f))
-                    .collect(),
-            ),
+            Self::PerPosition(overloads) => {
+                Binding::PerPosition(overloads.into_iter().map(f).collect())
+            }
         }
     }
 }
