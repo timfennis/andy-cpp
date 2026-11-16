@@ -816,16 +816,35 @@ impl Analyser {
 
     /// The unsettled variables made since `first` that the waiting
     /// constraint `serial` waits on, if it's still waiting.
+    /// What it settles itself isn't among them: see [`Self::returned_by`].
     fn waits_on_vars_since(&self, serial: u64, first: usize) -> Vec<TypeVar> {
         self.waiting.get(&serial).map_or_else(Vec::new, |waiting| {
+            let returned = self.returned_by(&waiting.constraint);
             waiting
                 .constraint
                 .inputs()
                 .iter()
                 .flat_map(|input| self.vars.unsettled(input))
-                .filter(|var| var.0 as usize >= first)
+                .filter(|var| var.0 as usize >= first && !returned.contains(var))
                 .collect()
         })
+    }
+
+    /// The unsettled variables of what an overloaded function's name used
+    /// as a value returns, which the overload its parameters pick says: in
+    /// `let f = pick; let g = fn(x) => f(x);`, what `f` returns is what the
+    /// `pick` that takes what `x` falls back to returns.
+    pub(super) fn returned_by(&self, constraint: &Constraint) -> Vec<TypeVar> {
+        match constraint {
+            Constraint::FunctionValue(value) => match self.vars.resolve(value.expected()) {
+                StaticType::Function {
+                    parameters: Some(_),
+                    return_type,
+                } => self.vars.unsettled(&return_type),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        }
     }
 
     /// Solves `constraint` if what it waits on is known, and returns whether

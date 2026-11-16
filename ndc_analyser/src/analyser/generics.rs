@@ -316,6 +316,7 @@ impl Analyser {
             .iter()
             .chain(&self.passed_functions(constraint))
             .flat_map(|typ| self.vars.unsettled(typ))
+            .chain(self.returned_by(constraint))
             .filter(|&var| self.vars.is_generalizable(var))
             .collect()
     }
