@@ -11,7 +11,7 @@ use ndc_analysis::{CaptureSource, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::rc::Rc;
 
@@ -668,8 +668,11 @@ impl Vm {
         if let Function::Memoized { cache, function } = func {
             let start = self.stack.len() - args;
             let mut hasher = DefaultHasher::default();
+            // Arguments `==` calls equal share a result: a `pure fn` takes
+            // only values it compares by what they are, which hash alike when
+            // they're equal.
             for arg in &self.stack[start..] {
-                arg.hash_exact(&mut hasher);
+                arg.hash(&mut hasher);
             }
             let key = hasher.finish();
 

@@ -245,13 +245,18 @@ impl AnalysisError {
     fn pure_fn_takes_data(part: &StaticType) -> String {
         let why = match part {
             StaticType::Function { .. } => {
-                "A function's result can depend on what it uses from outside, which isn't part of the arguments."
+                "`==` says two functions are equal only when they're the same one."
             }
-            StaticType::Iterator(_) => "An iterator changes as it's read.",
-            _ => "An `Any` could hold a function or an iterator.",
+            StaticType::Iterator(_) => {
+                "`==` says two iterators are equal only when they're the same one."
+            }
+            StaticType::MinHeap(_) | StaticType::MaxHeap(_) => {
+                "`==` says two heaps are equal only when they're the same one."
+            }
+            _ => "An `Any` could hold a function, an iterator or a heap.",
         };
         format!(
-            "A `pure fn` gives a call the result of an earlier one with the same arguments, so it only takes data. {why}"
+            "A `pure fn` gives a call the result of an earlier one with equal arguments, so it only takes values `==` compares by what they hold. {why}"
         )
     }
 

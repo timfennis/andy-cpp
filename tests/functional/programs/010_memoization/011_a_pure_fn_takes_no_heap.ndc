@@ -1,0 +1,3 @@
+// `==` says two heaps are equal only when they're the same heap.
+// expect-error: `smallest` is a `pure fn`, which only takes data, but its parameter `h` has type `MinHeap<Int>`
+pure fn smallest(h: MinHeap<Int>) => h.min();

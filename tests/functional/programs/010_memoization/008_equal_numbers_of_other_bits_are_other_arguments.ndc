@@ -1,4 +1,0 @@
-// `0.0` and `-0.0` are equal, but `1.0 / x` tells them apart.
-// expect-output: Inf -Inf
-pure fn inverse(x: Float) => 1.0 / x;
-print(inverse(0.0), inverse(-0.0));

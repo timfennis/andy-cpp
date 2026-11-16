@@ -19,13 +19,26 @@ print(multiply(4, 5));  // 20
 
 > **Note:** The interpreter does not check whether a function is actually pure. You must avoid side effects yourself.
 
+### Which calls share a result
+
+A call gets an earlier call's result when `==` says their arguments are equal.
+Marking a function `pure` promises that it gives equal results for equal
+arguments. A function that tells apart values `==` calls equal breaks that
+promise: `0.0 == -0.0`, and a map's default isn't part of what `==` compares,
+so these calls share a result:
+
+```ndc
+pure fn inverse(x: Float) => 1.0 / x;
+print(inverse(0.0), inverse(-0.0));  // Inf Inf
+```
+
 ### A `pure fn` takes data
 
-A `pure fn` gives a call the result of an earlier one with the same arguments,
-so its arguments must be values it can compare. Its parameters can't be, or
-hold, a function, whose result can depend on what it uses from outside; an
-iterator, which changes as it's read; or an `Any`, which could hold either.
-That includes the fields of a struct:
+A `pure fn` only takes values `==` compares by what they hold: numbers,
+strings, booleans, `None`, and lists, tuples, options, deques, maps and
+structs of those. `==` says two functions, iterators or heaps are equal only
+when they're the same one, and an `Any` could hold any of them, so a
+parameter can't be or hold one, nor can a struct's field:
 
 ```ndc,fails
 pure fn call(f: Fn(Int) -> Int, n: Int) => f(n);
@@ -34,23 +47,7 @@ pure fn call(f: Fn(Int) -> Int, n: Int) => f(n);
 
 A `pure fn` without annotations is checked for the types each call gives it.
 
-### Which calls share a result
-
-A call gets an earlier call's result when its arguments are the same values:
-lists, tuples and deques with the same elements in the same order, and maps
-with the same entries and the same default. Two heaps are the same when they
-keep the same elements in the same order, which heaps built by the same pushes
-do. Numbers that are equal but different, as `0.0` and `-0.0` are, are
-different arguments:
-
-```ndc
-pure fn inverse(x: Float) => 1.0 / x;
-print(inverse(0.0), inverse(-0.0));  // Inf -Inf
-```
-
-A map's default can be a function, as in `%{: fn() => []}`, which the map's
-type doesn't show. It's told apart by its code: like the `pure fn` itself,
-what it uses from outside isn't part of the arguments.
+### Results are shared
 
 A `pure fn` called with values of different types has a cache for each set of
 types, and for each type it returns. The cached value is what the later call

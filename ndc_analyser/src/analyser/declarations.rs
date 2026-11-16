@@ -400,11 +400,12 @@ impl Analyser {
         }
     }
 
-    /// The part of `typ` a `pure fn` can't take: a function, an iterator or
-    /// an `Any`, in `typ` or in the fields of a struct in it. A `pure fn`
-    /// gives a call the result of an earlier one with the same arguments,
-    /// and a function's result can depend on what it uses from outside, an
-    /// iterator changes as it's read, and an `Any` may hold either.
+    /// The part of `typ` a `pure fn` can't take: a function, an iterator, a
+    /// heap or an `Any`, in `typ` or in the fields of a struct in it. A
+    /// `pure fn` gives a call the result of an earlier one whose arguments
+    /// `==` says are equal, and it says that of functions, iterators and
+    /// heaps only when they're the same one, while an `Any` may hold any of
+    /// them.
     pub(super) fn not_data(&self, typ: &StaticType) -> Option<StaticType> {
         self.not_data_beyond(typ, &mut Vec::new())
     }
@@ -415,7 +416,11 @@ impl Analyser {
         let found = RefCell::new(None);
         let structs = RefCell::new(Vec::new());
         typ.contains(&|part| match part {
-            StaticType::Any | StaticType::Function { .. } | StaticType::Iterator(_) => {
+            StaticType::Any
+            | StaticType::Function { .. }
+            | StaticType::Iterator(_)
+            | StaticType::MinHeap(_)
+            | StaticType::MaxHeap(_) => {
                 *found.borrow_mut() = Some(part.clone());
                 true
             }
