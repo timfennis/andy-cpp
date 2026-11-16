@@ -32,11 +32,9 @@ pub fn export_module(_attr: TokenStream, item: TokenStream) -> TokenStream {
     for item in items {
         match item {
             Item::Fn(f) if matches!(f.vis, syn::Visibility::Public(_)) => match wrap_function(&f) {
-                Ok(fns) => {
-                    for fun in fns {
-                        declarations.push(fun.function_declaration);
-                        registrations.push(fun.function_registration);
-                    }
+                Ok(wrapped) => {
+                    declarations.push(wrapped.function_declaration);
+                    registrations.extend(wrapped.function_registrations);
                 }
                 Err(e) => return e.to_compile_error().into(),
             },

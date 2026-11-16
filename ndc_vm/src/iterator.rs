@@ -349,14 +349,6 @@ impl RepeatIter {
             remaining: Some(count),
         }
     }
-
-    pub fn value(&self) -> &Value {
-        &self.value
-    }
-
-    pub fn remaining(&self) -> Option<usize> {
-        self.remaining
-    }
 }
 
 impl VmIterator for RepeatIter {

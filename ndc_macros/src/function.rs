@@ -8,12 +8,14 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::fmt::Write;
 
+/// A native's body, once, and its registration under each of its names and
+/// signatures.
 pub struct WrappedFunction {
     pub function_declaration: TokenStream,
-    pub function_registration: TokenStream,
+    pub function_registrations: Vec<TokenStream>,
 }
 
-pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>> {
+pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<WrappedFunction> {
     let original_identifier = function.sig.ident.clone();
 
     let mut function_names = vec![proc_macro2::Literal::string(
@@ -21,7 +23,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
     )];
 
     let mut return_type = None;
-    let mut signature: Option<syn::LitStr> = None;
+    let mut signatures: Vec<syn::LitStr> = Vec::new();
 
     let mut documentation_buffer = String::new();
     for attr in &function.attrs {
@@ -39,8 +41,9 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
                     return_type = Some(map_type(&value)?);
                     Ok(())
                 } else if meta.path.is_ident("signature") {
-                    // #[function(signature = "<T>(List<T>, T) -> Option<T>")]
-                    signature = Some(meta.value()?.parse()?);
+                    // #[function(signature = "<T>(List<T>, T) -> Option<T>")], once
+                    // for each overload the one body serves.
+                    signatures.push(meta.value()?.parse()?);
                     Ok(())
                 } else {
                     Err(meta.error("unsupported property on function"))
@@ -56,7 +59,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
         }
     }
 
-    if let Some(signature) = &signature {
+    for signature in &signatures {
         if return_type.is_some() {
             return Err(syn::Error::new_spanned(
                 signature,
@@ -78,21 +81,41 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
         ));
     }
 
-    function_names
+    let inner_ident = format_ident!("{original_identifier}_inner");
+    let inner = {
+        let mut inner = function.clone();
+        inner.attrs.clear();
+        inner.vis = syn::Visibility::Public(syn::token::Pub::default());
+        inner.sig.ident = inner_ident.clone();
+        inner
+    };
+
+    let signatures: Vec<Option<&syn::LitStr>> = if signatures.is_empty() {
+        vec![None]
+    } else {
+        signatures.iter().map(Some).collect()
+    };
+    let function_registrations = function_names
         .iter()
-        .enumerate()
-        .map(|(i, function_name)| {
-            let ident = format_ident!("{original_identifier}_{i}");
-            wrap_single(
+        .flat_map(|name| signatures.iter().map(move |signature| (name, *signature)))
+        .map(|(function_name, signature)| {
+            register(
                 function,
-                &ident,
+                &inner_ident,
                 function_name,
                 &return_type,
-                signature.as_ref(),
+                signature,
                 &documentation_buffer,
             )
         })
-        .collect()
+        .collect::<syn::Result<_>>()?;
+    Ok(WrappedFunction {
+        function_declaration: quote! {
+            #[inline]
+            #inner
+        },
+        function_registrations,
+    })
 }
 
 fn map_return_type(output: &syn::ReturnType) -> syn::Result<TokenStream> {
@@ -280,13 +303,7 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
             )),
         },
         "AdvancedNumber" => Ok(quote! { ndc_core::StaticType::Number }),
-        "MapValue" => Ok(quote! {
-            ndc_core::StaticType::Map {
-                key: Box::new(ndc_core::StaticType::Any),
-                value: Box::new(ndc_core::StaticType::Any),
-            }
-        }),
-        "Value" | "EvaluationResult" | "SeqValue" => Ok(quote! { ndc_core::StaticType::Any }),
+        "Value" | "EvaluationResult" => Ok(quote! { ndc_core::StaticType::Any }),
         unmatched => Err(syn::Error::new_spanned(
             segment,
             format!("cannot map type '{unmatched}' to StaticType"),
@@ -322,26 +339,18 @@ fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<()> 
     }
 }
 
-fn wrap_single(
+/// Registers the native `inner_ident` as `register_as_function_name`.
+fn register(
     function: &syn::ItemFn,
-    identifier: &syn::Ident,
+    inner_ident: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     return_type: &TokenStream,
     signature: Option<&syn::LitStr>,
     docs: &str,
-) -> syn::Result<WrappedFunction> {
-    let inner_ident = format_ident!("{}_inner", identifier);
-    let inner = {
-        let mut inner = function.clone();
-        inner.attrs.clear();
-        inner.vis = syn::Visibility::Public(syn::token::Pub::default());
-        inner.sig.ident = inner_ident.clone();
-        inner
-    };
-
-    let vm = try_generate_vm_native(
+) -> syn::Result<TokenStream> {
+    let native_let = try_generate_vm_native(
         function,
-        &inner_ident,
+        inner_ident,
         register_as_function_name,
         docs,
         return_type,
@@ -353,43 +362,14 @@ fn wrap_single(
             "unsupported parameter or return type for VM native",
         )
     })?;
-
-    let function_declaration = quote! {
-        #[inline]
-        #inner
-    };
-
-    let VmNativeTokens {
-        native_let,
-        param_types: _,
-        param_names: _,
-    } = vm;
-
-    let function_registration = quote! {
+    Ok(quote! {
         #native_let
         env.declare_global_fn(native);
-    };
-    Ok(WrappedFunction {
-        function_declaration,
-        function_registration,
     })
 }
 
-/// Tokens emitted by `try_generate_vm_native` when `vm_native` is possible.
-#[allow(dead_code)]
-struct VmNativeTokens {
-    /// `let native: Rc<NativeFunction> = Rc::new(NativeFunction { ... });`
-    native_let: TokenStream,
-    /// `StaticType` expressions for each parameter
-    param_types: Vec<TokenStream>,
-    /// Parameter name strings
-    param_names: Vec<TokenStream>,
-}
-
-/// Attempt to generate `vm_native` tokens for a function.
-///
-/// Returns `None` when any parameter or the return type cannot be expressed in
-/// VM-native terms.
+/// `let native: Rc<NativeFunction> = …;` for a function, or `None` when a
+/// parameter or the return type can't be expressed in VM-native terms.
 fn try_generate_vm_native(
     function: &syn::ItemFn,
     inner_ident: &syn::Ident,
@@ -397,13 +377,12 @@ fn try_generate_vm_native(
     docs: &str,
     return_type_override: &TokenStream,
     signature: Option<&syn::LitStr>,
-) -> Option<VmNativeTokens> {
+) -> Option<TokenStream> {
     use crate::vm_convert::{Borrow, try_vm_input, try_vm_return};
 
     let mut extracts = Vec::new();
     let mut passes = Vec::new();
     let mut param_types = Vec::new();
-    let mut param_names = Vec::new();
     let mut has_vm_callable = false;
     let raw_args: Vec<_> = (0..function.sig.inputs.len())
         .map(|i| format_ident!("vm_raw{i}"))
@@ -422,11 +401,6 @@ fn try_generate_vm_native(
         extracts.push((conv.borrow, conv.extract));
         passes.push(conv.pass);
         param_types.push(conv.static_type);
-        let name = match &*pat_ty.pat {
-            syn::Pat::Ident(ident) => ident.ident.to_string(),
-            _ => format!("arg{i}"),
-        };
-        param_names.push(quote! { #name });
     }
 
     // Every argument that's only read is taken before any that's changed,
@@ -450,11 +424,7 @@ fn try_generate_vm_native(
             "{}: a native that takes a callback can't borrow its other arguments; take them as `Value`s and copy what it needs",
             function.sig.ident
         );
-        return Some(VmNativeTokens {
-            native_let: quote! { compile_error!(#message); },
-            param_types,
-            param_names,
-        });
+        return Some(quote! { compile_error!(#message); });
     }
 
     let func_variant = if has_vm_callable {
@@ -501,7 +471,7 @@ fn try_generate_vm_native(
             }
         }
     };
-    let native_let = quote! {
+    Some(quote! {
         let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
             std::rc::Rc::new(ndc_vm::value::NativeFunction {
                 name: String::from(#fn_name),
@@ -509,11 +479,5 @@ fn try_generate_vm_native(
                 static_type: #static_type,
                 func: #func_variant,
             });
-    };
-
-    Some(VmNativeTokens {
-        native_let,
-        param_types,
-        param_names,
     })
 }

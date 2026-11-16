@@ -1,5 +1,5 @@
 use ndc_macros::export_module;
-use ndc_vm::value::{Object, SeqValue, Value};
+use ndc_vm::value::{Object, Value};
 
 #[export_module]
 mod inner {
@@ -8,7 +8,7 @@ mod inner {
 
     /// Counts the occurrences of each item in a sequence and returns a map with the frequencies.
     #[function(signature = "<T>(Iterable<T>) -> Map<T, Int>")]
-    pub fn frequencies(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn frequencies(seq: Value) -> anyhow::Result<Value> {
         let mut counts: HashMap<Value, i64> = HashMap::new();
 
         for item in seq

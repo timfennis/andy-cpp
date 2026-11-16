@@ -146,7 +146,7 @@ macro_rules! declare_typed {
 /// wrapper, so it needs its own arm.
 macro_rules! wrap_payload {
     (Number, $payload:expr) => {
-        Value::from_number($payload)
+        Value::number($payload)
     };
     ($variant:ident, $payload:expr) => {
         Value::$variant($payload)
@@ -183,21 +183,6 @@ fn native_error(error: impl std::fmt::Display) -> VmError {
     VmError::native(error.to_string())
 }
 
-/// Runtime overload candidates are inspected in reverse registration order.
-/// Keep homogeneous primitive pairs first in that runtime order: dynamic code
-/// usually preserves one numeric representation across repeated operations.
-const NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY: [(NumericMode, NumericMode); 9] = [
-    (NumericMode::Int, NumericMode::Int),
-    (NumericMode::Float, NumericMode::Float),
-    (NumericMode::Number, NumericMode::Number),
-    (NumericMode::Int, NumericMode::Float),
-    (NumericMode::Float, NumericMode::Int),
-    (NumericMode::Int, NumericMode::Number),
-    (NumericMode::Number, NumericMode::Int),
-    (NumericMode::Float, NumericMode::Number),
-    (NumericMode::Number, NumericMode::Float),
-];
-
 fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     const OPERATIONS: [BinaryOperation; 8] = [
         BinaryOperation::Add,
@@ -211,7 +196,15 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     ];
 
     for operation in OPERATIONS {
-        for (left_mode, right_mode) in NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY.into_iter().rev() {
+        // A call that never happens, as `(return 5) + 1`, is typed by the
+        // overload declared last that takes the other operand. Declaring the
+        // Int operands last makes that the other operand's kind: an Int here.
+        for (left_mode, right_mode) in NumericMode::ALL.into_iter().rev().flat_map(|left| {
+            NumericMode::ALL
+                .map(|right| (left, right))
+                .into_iter()
+                .rev()
+        }) {
             let output_mode = left_mode.promote(right_mode);
             let parameters = vec![left_mode.static_type(), right_mode.static_type()];
             let (name, documentation) = (operation.name(), operation.documentation());
@@ -330,7 +323,7 @@ fn eval_number_operands(
     let right = numeric_ref(right_mode, right)?.to_advanced_number();
 
     eval_number_binary(operation, left, right)
-        .map(Value::from_number)
+        .map(Value::number)
         .map_err(native_error)
 }
 
@@ -512,13 +505,7 @@ fn compare_operands(args: &[Value]) -> Result<Ordering, VmError> {
         return Err(wrong_arity(args));
     };
 
-    left.partial_cmp(right).ok_or_else(|| {
-        VmError::native(format!(
-            "cannot compare {} and {}",
-            left.diagnostic_type(),
-            right.diagnostic_type()
-        ))
-    })
+    left.try_cmp(right).map_err(VmError::native)
 }
 
 /// The parameter lists of the comparisons, for the values that have an
@@ -749,7 +736,7 @@ fn register_constructors(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             "Wraps a primitive numeric value as a Number.",
             move |args| {
                 arity(args, 1)?;
-                Ok(Value::from_number(
+                Ok(Value::number(
                     numeric_ref(mode, &args[0])?.to_advanced_number(),
                 ))
             },
@@ -852,7 +839,7 @@ where
                 }
                 .map_err(native_error)
             })?;
-            Ok(Value::from_number(value))
+            Ok(Value::number(value))
         }
     }
 }
@@ -1028,7 +1015,7 @@ fn unary_preserving(
                 PreservingUnary::Round => value.round(),
                 PreservingUnary::Abs => value.abs(),
             };
-            Ok(Value::from_number(result))
+            Ok(Value::number(result))
         }
         _ => Err(VmError::native(format!(
             "expected {}, got {}",
@@ -1128,7 +1115,7 @@ fn exact_integer(value: &Value) -> Result<BigInt, VmError> {
 }
 
 fn bigint_number(value: BigInt) -> Value {
-    Value::from_number(AdvancedNumber::Int(value))
+    Value::number(AdvancedNumber::Int(value))
 }
 
 fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
@@ -1182,7 +1169,7 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                         let right = right.to_f64().ok_or_else(|| {
                             VmError::native("atan2 requires real Number operands".to_string())
                         })?;
-                        Ok(Value::from_number(AdvancedNumber::Float(left.atan2(right))))
+                        Ok(Value::number(AdvancedNumber::Float(left.atan2(right))))
                     } else {
                         let left = left
                             .to_primitive_float()
@@ -1474,35 +1461,6 @@ mod tests {
                     }));
                 }
             }
-        }
-    }
-
-    #[test]
-    fn arithmetic_registration_prefers_homogeneous_dynamic_operands() {
-        let mut registry = FunctionRegistry::default();
-        register(&mut registry);
-
-        for operator in ["+", "-", "*", "/", "\\", "%", "%%", "^"] {
-            let dynamic_order = registry
-                .iter()
-                .filter(|function| function.name == operator)
-                .filter_map(|function| match &function.static_type {
-                    StaticType::Function {
-                        parameters: Some(parameters),
-                        ..
-                    } if parameters.len() == 2 && parameters.iter().all(StaticType::is_number) => {
-                        Some((parameters[0].clone(), parameters[1].clone()))
-                    }
-                    _ => None,
-                })
-                .rev()
-                .collect::<Vec<_>>();
-            let expected = NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY
-                .iter()
-                .map(|(left, right)| (left.static_type(), right.static_type()))
-                .collect::<Vec<_>>();
-
-            assert_eq!(dynamic_order, expected, "unexpected {operator} priority");
         }
     }
 
