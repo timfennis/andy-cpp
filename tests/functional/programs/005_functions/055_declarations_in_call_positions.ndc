@@ -6,6 +6,6 @@ print(r);
 // expect-output: 6
 
 let ys = [[0], [0]];
-{ fn get() { ys } get() }[(fn one() { 1 }, one)[1]()] = [7];
+({ fn get() { ys } get() })[(fn one() { 1 }, one)[1]()] = [7];
 print(ys);
 // expect-output: [[0],[7]]
