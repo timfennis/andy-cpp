@@ -166,6 +166,18 @@ fn bad() -> Int { "hello" }   // ERROR: mismatched types
 
 A return-type annotation also helps the analyser understand recursive calls — without it, a recursive call resolves against an unknown return type and you can lose precision.
 
+## Recursion
+
+A function can call itself. Calls can go a million deep. A program that goes
+deeper stops with an error, as that usually means a function calls itself
+without end:
+
+```ndc,fails
+fn forever(n) => forever(n + 1);
+forever(0)
+// error[vm]: calls go more than 1000000 deep, which usually means a function calls itself without end
+```
+
 ## Function overloading
 
 A name can refer to several functions, called overloads, as long as they differ in their number of parameters, their parameter types, or both:
