@@ -135,6 +135,7 @@ Test crates live under `tests/`:
   // expect-error: divide   ← assert error message contains this substring
   ```
   It also generates one test per ` ```ndc ` block in the manual (`manual_<page>_<line>`), run by `tests/manual.rs`; see [Manual](#manual).
+  `tests/stdlib_signatures.rs` calls every native with sample values of the types its signature takes and fails on a runtime error about types, as the type checker trusts the signatures: a native whose signature promises more than it handles fails it.
 - `tests/compiler/` (`compiler_tests`) — validates the bytecode compiler by asserting exact `OpCode` sequences. Use when adding new VM instructions.
 - `ndc_bin/tests/repl.rs` — feeds lines to the built `ndc` binary's REPL (Unix only) and checks what it prints, e.g. that a failed line leaves no trace.
 - `tests/proptest/` (`proptest_tests`) — property-based panic fuzzer over random token streams. The fresh-fuzz test is `#[ignore]`d; regression replay (from `panic.regressions`) runs by default. See [CONTRIBUTING.md](CONTRIBUTING.md) for run commands.

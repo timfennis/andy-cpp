@@ -1,6 +1,9 @@
 use ndc_analyser::Analyser;
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
+/// The type of a value as the analyser sees it, which each of
+/// [`Interpreter::functions`] has as its `static_type`.
+pub use ndc_core::StaticType;
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
 use ndc_vm::compiler::{Compiler, Session};
