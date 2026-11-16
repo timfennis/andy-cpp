@@ -1,0 +1,6 @@
+// With the return type written, the recursive call's type is known, and
+// each call of `fac` picks which `fac` it calls.
+// expect-output: 120 x
+fn fac(s: String) => s;
+fn fac(n) -> Int => if n <= 1 { 1 } else { n * fac(n - 1) };
+print(fac(5), fac("x"));

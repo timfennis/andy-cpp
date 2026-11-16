@@ -237,6 +237,14 @@ impl CallConstraint {
         &self.arguments
     }
 
+    pub(super) fn span(&self) -> Span {
+        self.span
+    }
+
+    pub(super) fn candidates(&self) -> &Candidates {
+        &self.candidates
+    }
+
     pub(super) fn result(&self) -> &StaticType {
         &self.result
     }
@@ -2064,7 +2072,7 @@ impl Analyser {
 
     /// Whether `symbol` can accept arguments of these types, where each part
     /// not known yet fits anything.
-    fn could_accept(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+    pub(super) fn could_accept(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
         let function = self.vars.resolve(self.types.get_type(symbol));
         let snapshot = self.vars.snapshot();
         let Some((parameters, _)) = self.vars.instantiate_signature(&function) else {

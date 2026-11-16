@@ -342,6 +342,24 @@ fn pair(x: Any, y: Int) { "second" }
 pair(1, 2);  // error: The call pair(Int, Int) is ambiguous
 ```
 
+A generic function that calls itself while an earlier overload of its name is in scope has to say what it returns. Here `fac(n - 1)` could be either `fac`, and which one is only known when `fac` is called, so its body can't tell what `fac` returns:
+
+```ndc,fails
+fn fac(s: String) => s;
+fn fac(n) => if n <= 1 { 1 } else { n * fac(n - 1) };
+// error[analysis]: `fac` calls itself here, where another `fac` could be meant too, so its return type has to be written
+```
+
+Writing the return type, or the parameters' types, fixes it:
+
+```ndc
+fn fac(s: String) => s;
+fn fac(n) -> Int => if n <= 1 { 1 } else { n * fac(n - 1) };
+print(fac(5), fac("x"));  // 120 x
+```
+
+A recursive call the body decides on its own needs neither, and neither does one when no other overload is in scope yet.
+
 ## An overloaded function as a value
 
 A function's name can be used as a value, as in `xs.map(abs)`. When the name has several overloads, the type expected where it's used picks one. `map` passes each element, so over a list of Floats `abs` is `abs(Float)`, and over strings `split` is `split(String)` rather than `split(String, String)`. A function type annotation picks one too, and so do a variable's uses:
