@@ -1,4 +1,4 @@
-use ndc_vm::value::{Object, SeqValue, Value};
+use ndc_vm::value::{Object, Value};
 
 #[ndc_macros::export_module]
 mod inner {
@@ -10,7 +10,7 @@ mod inner {
 
     /// Converts any sequence into a list
     #[function(signature = "<T>(Iterable<T>) -> List<T>")]
-    pub fn list(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn list(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("list requires a sequence"))?
@@ -272,11 +272,29 @@ pub mod ops {
     use ndc_core::{FunctionRegistry, StaticType};
     use ndc_vm::error::VmError;
     use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
+    use std::cell::RefCell;
     use std::rc::Rc;
 
     pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         register_list_concat(env);
         register_list_append(env);
+    }
+
+    /// The list object and the elements of the `side` operand of `operator`.
+    fn list_operand<'a>(
+        operator: &str,
+        side: &str,
+        value: &'a Value,
+    ) -> Result<(&'a Rc<Object>, &'a RefCell<Vec<Value>>), VmError> {
+        if let Value::Object(object) = value
+            && let Object::List(elements) = object.as_ref()
+        {
+            return Ok((object, elements));
+        }
+        Err(VmError::native(format!(
+            "{operator} {side} requires a list, got {}",
+            value.static_type()
+        )))
     }
 
     fn register_list_concat(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
@@ -292,30 +310,8 @@ pub mod ops {
                         args.len()
                     )));
                 };
-                let Value::Object(left_obj) = left else {
-                    return Err(VmError::native(format!(
-                        "++ left requires a list, got {}",
-                        left.static_type()
-                    )));
-                };
-                let Value::Object(right_obj) = right else {
-                    return Err(VmError::native(format!(
-                        "++ right requires a list, got {}",
-                        right.static_type()
-                    )));
-                };
-                let Object::List(left_cell) = left_obj.as_ref() else {
-                    return Err(VmError::native(format!(
-                        "++ left requires a list, got {}",
-                        left.static_type()
-                    )));
-                };
-                let Object::List(right_cell) = right_obj.as_ref() else {
-                    return Err(VmError::native(format!(
-                        "++ right requires a list, got {}",
-                        right.static_type()
-                    )));
-                };
+                let (left_obj, left_cell) = list_operand("++", "left", left)?;
+                let (_, right_cell) = list_operand("++", "right", right)?;
 
                 if Rc::strong_count(left_obj) == 1 {
                     left_cell
@@ -351,30 +347,8 @@ pub mod ops {
                         args.len()
                     )));
                 };
-                let Value::Object(left_obj) = left else {
-                    return Err(VmError::native(format!(
-                        "++= left requires a list, got {}",
-                        left.static_type()
-                    )));
-                };
-                let Value::Object(right_obj) = right else {
-                    return Err(VmError::native(format!(
-                        "++= right requires a list, got {}",
-                        right.static_type()
-                    )));
-                };
-                let Object::List(left_cell) = left_obj.as_ref() else {
-                    return Err(VmError::native(format!(
-                        "++= left requires a list, got {}",
-                        left.static_type()
-                    )));
-                };
-                let Object::List(right_cell) = right_obj.as_ref() else {
-                    return Err(VmError::native(format!(
-                        "++= right requires a list, got {}",
-                        right.static_type()
-                    )));
-                };
+                let (left_obj, left_cell) = list_operand("++=", "left", left)?;
+                let (right_obj, right_cell) = list_operand("++=", "right", right)?;
 
                 if Rc::ptr_eq(left_obj, right_obj) {
                     left_cell.borrow_mut().extend_from_within(..);

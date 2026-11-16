@@ -45,10 +45,6 @@ pub enum NdcType {
     MutStringRepr,
     /// `ndc_vm::value::Value`
     VmValue,
-    /// `ndc_vm::value::SeqValue`
-    SeqValue,
-    /// `ndc_vm::value::MapValue`
-    MapValue,
     /// `&[ndc_vm::value::Value]`
     SliceOfValue,
     /// `&mut Vec<ndc_vm::value::Value>`
@@ -123,8 +119,6 @@ fn classify_owned(ty: &syn::Type) -> Option<NdcType> {
         "BigInt" => Some(NdcType::BigInt),
         "BigRational" => Some(NdcType::BigRational),
         "Value" => Some(NdcType::VmValue),
-        "SeqValue" => Some(NdcType::SeqValue),
-        "MapValue" => Some(NdcType::MapValue),
         _ => None,
     }
 }

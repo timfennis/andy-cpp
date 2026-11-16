@@ -6,7 +6,7 @@ use rand::distr::uniform::SampleUniform;
 use rand::seq::SliceRandom;
 use tap::Tap;
 
-use ndc_vm::value::{SeqValue, Value};
+use ndc_vm::value::Value;
 
 pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
     lower: N,
@@ -19,10 +19,17 @@ pub fn random_n<N: SampleUniform + std::fmt::Display + Copy>(
     Ok(rng.sample(side))
 }
 
+/// A bound of `randf`, any real number, as a Float.
+fn float_bound(value: &Value) -> anyhow::Result<f64> {
+    value
+        .numeric_ref()
+        .and_then(|number| number.to_f64())
+        .ok_or_else(|| anyhow::anyhow!("{value} can't be a bound of randf"))
+}
+
 #[export_module]
 mod inner {
     use itertools::Itertools;
-    use ndc_vm::value::AdvancedNumber;
 
     /// Randomly shuffles the elements of the list in place.
     #[function(signature = "<T>(List<T>)")]
@@ -34,7 +41,7 @@ mod inner {
     ///
     /// Note: this currently does consume iterators
     #[function(signature = "<T>(Iterable<T>) -> List<T>")]
-    pub fn shuffled(list: SeqValue) -> anyhow::Result<Value> {
+    pub fn shuffled(list: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             list.try_into_iter()
                 .ok_or_else(|| anyhow::anyhow!("shuffled requires a sequence"))?
@@ -49,79 +56,26 @@ mod inner {
         random_n(0.0, 1.0)
     }
 
-    #[function(name = "randf")]
     /// Generate a random Float between 0 (inclusive) and `upper` (exclusive)
-    pub fn randf_upper_int(upper: i64) -> anyhow::Result<f64> {
-        random_n(0.0, upper as f64)
+    #[function(name = "randf", signature = "(Int) -> Float")]
+    #[function(name = "randf", signature = "(Float) -> Float")]
+    #[function(name = "randf", signature = "(Number) -> Float")]
+    pub fn randf_upper(upper: Value) -> anyhow::Result<f64> {
+        random_n(0.0, float_bound(&upper)?)
     }
 
-    #[function(name = "randf")]
-    /// Generate a random Float between 0 (inclusive) and `upper` (exclusive)
-    pub fn randf_upper_float(upper: f64) -> anyhow::Result<f64> {
-        random_n(0.0, upper)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between 0 (inclusive) and `upper` (exclusive)
-    pub fn randf_upper_number(upper: &AdvancedNumber) -> anyhow::Result<f64> {
-        random_n(0.0, upper.try_into()?)
-    }
-
-    #[function(name = "randf")]
     /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_int_int(lower: i64, upper: i64) -> anyhow::Result<f64> {
-        random_n(lower as f64, upper as f64)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_int_float(lower: i64, upper: f64) -> anyhow::Result<f64> {
-        random_n(lower as f64, upper)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_float_int(lower: f64, upper: i64) -> anyhow::Result<f64> {
-        random_n(lower, upper as f64)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_float_float(lower: f64, upper: f64) -> anyhow::Result<f64> {
-        random_n(lower, upper)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_int_number(lower: i64, upper: &AdvancedNumber) -> anyhow::Result<f64> {
-        random_n(lower as f64, upper.try_into()?)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_number_int(lower: &AdvancedNumber, upper: i64) -> anyhow::Result<f64> {
-        random_n(lower.try_into()?, upper as f64)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_float_number(lower: f64, upper: &AdvancedNumber) -> anyhow::Result<f64> {
-        random_n(lower, upper.try_into()?)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_number_float(lower: &AdvancedNumber, upper: f64) -> anyhow::Result<f64> {
-        random_n(lower.try_into()?, upper)
-    }
-
-    #[function(name = "randf")]
-    /// Generate a random Float between `lower` (inclusive) and `upper` (exclusive)
-    pub fn randf_number_number(
-        lower: &AdvancedNumber,
-        upper: &AdvancedNumber,
-    ) -> anyhow::Result<f64> {
-        random_n(lower.try_into()?, upper.try_into()?)
+    #[function(signature = "(Int, Int) -> Float")]
+    #[function(signature = "(Int, Float) -> Float")]
+    #[function(signature = "(Int, Number) -> Float")]
+    #[function(signature = "(Float, Int) -> Float")]
+    #[function(signature = "(Float, Float) -> Float")]
+    #[function(signature = "(Float, Number) -> Float")]
+    #[function(signature = "(Number, Int) -> Float")]
+    #[function(signature = "(Number, Float) -> Float")]
+    #[function(signature = "(Number, Number) -> Float")]
+    pub fn randf(lower: Value, upper: Value) -> anyhow::Result<f64> {
+        random_n(float_bound(&lower)?, float_bound(&upper)?)
     }
 
     #[function(name = "randi")]

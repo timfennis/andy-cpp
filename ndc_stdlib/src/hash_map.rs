@@ -1,7 +1,22 @@
 use ndc_vm::hash_map::HashMap;
-use ndc_vm::value::{MapValue, Object, SeqValue, Value};
+use ndc_vm::value::{Object, Value};
+use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
+
+/// What a map holds.
+type Entries = HashMap<Value, Value>;
+
+/// The entries and the default of a map.
+fn map_parts(value: &Value) -> Option<(&RefCell<Entries>, &Option<Value>)> {
+    let Value::Object(object) = value else {
+        return None;
+    };
+    match object.as_ref() {
+        Object::Map { entries, default } => Some((entries, default)),
+        _ => None,
+    }
+}
 
 #[ndc_macros::export_module]
 mod inner {
@@ -63,7 +78,7 @@ mod inner {
         name = "&=",
         signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
     )]
-    pub fn intersect_assign(lhs: MapValue, rhs: MapValue) -> anyhow::Result<MapValue> {
+    pub fn intersect_assign(lhs: Value, rhs: Value) -> anyhow::Result<Value> {
         change_with(&lhs, &rhs, "&=", |entries, other| {
             entries.retain(|key, _| other.contains_key(key));
         })?;
@@ -72,7 +87,7 @@ mod inner {
 
     /// Union-assign: adds all elements from the right map or set into the left.
     #[function(name = "|=", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
-    pub fn union_assign(lhs: MapValue, rhs: MapValue) -> anyhow::Result<MapValue> {
+    pub fn union_assign(lhs: Value, rhs: Value) -> anyhow::Result<Value> {
         change_with(&lhs, &rhs, "|=", |entries, other| {
             for (key, value) in other {
                 entries.insert(key.clone(), value.clone());
@@ -86,7 +101,7 @@ mod inner {
         name = "-=",
         signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
     )]
-    pub fn difference_assign(lhs: MapValue, rhs: MapValue) -> anyhow::Result<MapValue> {
+    pub fn difference_assign(lhs: Value, rhs: Value) -> anyhow::Result<Value> {
         change_with(&lhs, &rhs, "-=", |entries, other| {
             entries.retain(|key, _| !other.contains_key(key));
         })?;
@@ -95,7 +110,7 @@ mod inner {
 
     /// Symmetric-difference-assign: retains only elements present in exactly one of the two maps or sets.
     #[function(name = "~=", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
-    pub fn symmetric_difference_assign(lhs: MapValue, rhs: MapValue) -> anyhow::Result<MapValue> {
+    pub fn symmetric_difference_assign(lhs: Value, rhs: Value) -> anyhow::Result<Value> {
         change_with(&lhs, &rhs, "~=", |entries, other| {
             *entries = symmetric_difference(entries, other);
         })?;
@@ -111,16 +126,7 @@ mod inner {
         operator: &str,
         change: impl FnOnce(&mut HashMap<Value, Value>, &HashMap<Value, Value>),
     ) -> anyhow::Result<()> {
-        fn entries_of(value: &Value) -> Option<&std::cell::RefCell<HashMap<Value, Value>>> {
-            match value {
-                Value::Object(object) => match object.as_ref() {
-                    Object::Map { entries, .. } => Some(entries),
-                    _ => None,
-                },
-                _ => None,
-            }
-        }
-        let (Some(entries), Some(other)) = (entries_of(target), entries_of(other)) else {
+        let (Some((entries, _)), Some((other, _))) = (map_parts(target), map_parts(other)) else {
             anyhow::bail!("{operator} requires two maps");
         };
         let copy;
@@ -140,22 +146,8 @@ mod inner {
     ///
     /// This is the same as evaluating the expression `left | right`.
     #[function(alias = "|", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
-    pub fn union(left: MapValue, right: &HashMap<Value, Value>) -> anyhow::Result<MapValue> {
-        let Value::Object(ref obj) = left else {
-            anyhow::bail!("| requires a map on the left side");
-        };
-        let Object::Map {
-            ref entries,
-            ref default,
-        } = *obj.as_ref()
-        else {
-            anyhow::bail!("| requires a map on the left side");
-        };
-        let new_entries = union(&*entries.borrow(), right);
-        Ok(Value::Object(Rc::new(Object::map(
-            new_entries,
-            default.clone(),
-        ))))
+    pub fn union(left: Value, right: &HashMap<Value, Value>) -> anyhow::Result<Value> {
+        combine(&left, right, "|", union)
     }
 
     /// Returns the intersection (elements that are in both `left` and `right`) of two maps or sets.
@@ -165,22 +157,8 @@ mod inner {
         alias = "&",
         signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
     )]
-    pub fn intersection(left: MapValue, right: &HashMap<Value, Value>) -> anyhow::Result<MapValue> {
-        let Value::Object(ref obj) = left else {
-            anyhow::bail!("& requires a map on the left side");
-        };
-        let Object::Map {
-            ref entries,
-            ref default,
-        } = *obj.as_ref()
-        else {
-            anyhow::bail!("& requires a map on the left side");
-        };
-        let new_entries = intersection(&*entries.borrow(), right);
-        Ok(Value::Object(Rc::new(Object::map(
-            new_entries,
-            default.clone(),
-        ))))
+    pub fn intersection(left: Value, right: &HashMap<Value, Value>) -> anyhow::Result<Value> {
+        combine(&left, right, "&", intersection)
     }
 
     /// Returns the symmetric difference (elements that are either in `left` or `right` but not both) of two maps or sets.
@@ -188,29 +166,33 @@ mod inner {
     /// This is the same as evaluating the expression `left ~ right`.
     #[function(alias = "~", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
     pub fn symmetric_difference(
-        left: MapValue,
+        left: Value,
         right: &HashMap<Value, Value>,
-    ) -> anyhow::Result<MapValue> {
-        let Value::Object(ref obj) = left else {
-            anyhow::bail!("~ requires a map on the left side");
+    ) -> anyhow::Result<Value> {
+        combine(&left, right, "~", symmetric_difference)
+    }
+
+    /// A new map of what `combine` makes of the entries of `left` and `right`,
+    /// with the default of `left`.
+    fn combine(
+        left: &Value,
+        right: &HashMap<Value, Value>,
+        operator: &str,
+        combine: fn(&Entries, &Entries) -> Entries,
+    ) -> anyhow::Result<Value> {
+        let Some((entries, default)) = map_parts(left) else {
+            anyhow::bail!("{operator} requires a map on the left side");
         };
-        let Object::Map {
-            ref entries,
-            ref default,
-        } = *obj.as_ref()
-        else {
-            anyhow::bail!("~ requires a map on the left side");
-        };
-        let new_entries = symmetric_difference(&*entries.borrow(), right);
+        let entries = combine(&entries.borrow(), right);
         Ok(Value::Object(Rc::new(Object::map(
-            new_entries,
+            entries,
             default.clone(),
         ))))
     }
 
     /// Converts the given sequence to set.
     #[function(signature = "<T>(Iterable<T>) -> Map<T, ()>")]
-    pub fn set(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn set(seq: Value) -> anyhow::Result<Value> {
         use ndc_vm::hash_map::HashMap;
 
         let entries: HashMap<Value, Value> = seq

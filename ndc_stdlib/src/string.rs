@@ -1,5 +1,5 @@
 use ndc_macros::export_module;
-use ndc_vm::value::{Object, SeqValue, Value, VmString};
+use ndc_vm::value::{Object, Value, VmString};
 
 use std::rc::Rc;
 
@@ -7,7 +7,7 @@ type StringRepr = Rc<VmString>;
 
 use anyhow::{Context, anyhow};
 
-pub fn join_to_string(list: SeqValue, sep: &str) -> anyhow::Result<String> {
+pub fn join_to_string(list: Value, sep: &str) -> anyhow::Result<String> {
     use std::fmt::Write;
     let mut iter = list
         .try_into_iter()
@@ -126,7 +126,7 @@ mod inner {
 
     /// Joins elements of the sequence into a single string using `sep` as the separator.
     #[function(signature = "<T>(Iterable<T>, String) -> String")]
-    pub fn join(list: SeqValue, sep: &str) -> anyhow::Result<String> {
+    pub fn join(list: Value, sep: &str) -> anyhow::Result<String> {
         join_to_string(list, sep)
     }
 
@@ -138,7 +138,7 @@ mod inner {
 
     /// Joins paragraphs into a single string, inserting blank lines between them.
     #[function(signature = "<T>(Iterable<T>) -> String")]
-    pub fn unparagraphs(list: SeqValue) -> anyhow::Result<String> {
+    pub fn unparagraphs(list: Value) -> anyhow::Result<String> {
         join_to_string(list, "\n\n")
     }
 
@@ -150,7 +150,7 @@ mod inner {
 
     /// Joins lines into a single string, inserting newline characters between them.
     #[function(signature = "<T>(Iterable<T>) -> String")]
-    pub fn unlines(list: SeqValue) -> anyhow::Result<String> {
+    pub fn unlines(list: Value) -> anyhow::Result<String> {
         join_to_string(list, "\n")
     }
 
@@ -162,7 +162,7 @@ mod inner {
 
     /// Joins words into a single string, separating them with spaces.
     #[function(signature = "<T>(Iterable<T>) -> String")]
-    pub fn unwords(list: SeqValue) -> anyhow::Result<String> {
+    pub fn unwords(list: Value) -> anyhow::Result<String> {
         join_to_string(list, " ")
     }
 

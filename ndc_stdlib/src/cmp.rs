@@ -70,26 +70,16 @@ mod inner {
     }
 
     fn larger(left: Value, right: Value) -> anyhow::Result<Value> {
-        match left.partial_cmp(&right) {
-            Some(Ordering::Equal | Ordering::Greater) => Ok(left),
-            Some(Ordering::Less) => Ok(right),
-            None => Err(incomparable(&left, &right)),
+        match left.try_cmp(&right).map_err(|e| anyhow!(e))? {
+            Ordering::Equal | Ordering::Greater => Ok(left),
+            Ordering::Less => Ok(right),
         }
     }
 
     fn smaller(left: Value, right: Value) -> anyhow::Result<Value> {
-        match left.partial_cmp(&right) {
-            Some(Ordering::Equal | Ordering::Less) => Ok(left),
-            Some(Ordering::Greater) => Ok(right),
-            None => Err(incomparable(&left, &right)),
+        match left.try_cmp(&right).map_err(|e| anyhow!(e))? {
+            Ordering::Equal | Ordering::Less => Ok(left),
+            Ordering::Greater => Ok(right),
         }
-    }
-
-    fn incomparable(left: &Value, right: &Value) -> anyhow::Error {
-        anyhow!(
-            "cannot compare {} and {}",
-            left.static_type(),
-            right.static_type()
-        )
     }
 }

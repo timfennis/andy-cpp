@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use ndc_macros::export_module;
 use ndc_vm::VmCallable;
-use ndc_vm::value::{Object, SeqValue, Value};
+use ndc_vm::value::{Object, Value};
 use ndc_vm::{CombinationsIter, EnumerateIter, TakeIter};
 use std::cmp::Ordering;
 
@@ -30,31 +30,35 @@ fn try_sort_by<E>(
     Ok(())
 }
 
-fn vm_try_max(mut iter: impl Iterator<Item = Value>) -> anyhow::Result<Value> {
+/// The element of `iter` that compares `better` (`Greater` for the largest)
+/// than the others, the first of equal ones.
+fn vm_try_extreme(
+    mut iter: impl Iterator<Item = Value>,
+    better: Ordering,
+) -> anyhow::Result<Value> {
     iter.try_fold(None::<Value>, |acc, b| match acc {
         None => Ok(Some(b)),
         Some(a) => a
             .try_cmp(&b)
             .map_err(|e: String| anyhow!(e))
-            .map(|o| Some(if o == Ordering::Less { b } else { a })),
+            .map(|o| Some(if o == better.reverse() { b } else { a })),
     })
-    .and_then(|x: Option<Value>| x.ok_or_else(|| anyhow!("empty input to max")))
+    .and_then(|x: Option<Value>| {
+        x.ok_or_else(|| anyhow!("empty input to {}", extreme_name(better)))
+    })
 }
 
-fn vm_try_min(mut iter: impl Iterator<Item = Value>) -> anyhow::Result<Value> {
-    iter.try_fold(None::<Value>, |acc, b| match acc {
-        None => Ok(Some(b)),
-        Some(a) => a
-            .try_cmp(&b)
-            .map_err(|e: String| anyhow!(e))
-            .map(|o| Some(if o == Ordering::Greater { b } else { a })),
-    })
-    .and_then(|x: Option<Value>| x.ok_or_else(|| anyhow!("empty input to min")))
+fn extreme_name(better: Ordering) -> &'static str {
+    if better == Ordering::Greater {
+        "max"
+    } else {
+        "min"
+    }
 }
 
 #[export_module]
 mod inner {
-    use super::{try_sort_by, vm_try_max, vm_try_min};
+    use super::{extreme_name, try_sort_by, vm_try_extreme};
     use itertools::Itertools;
     use ndc_vm::VmCallable;
     use std::cmp::Ordering;
@@ -62,7 +66,7 @@ mod inner {
 
     /// Returns `true` if the element is contained in the sequence.
     #[function(name = "in", signature = "<T>(T, Iterable<T>) -> Bool")]
-    pub fn op_contains(elem: Value, seq: SeqValue) -> bool {
+    pub fn op_contains(elem: Value, seq: Value) -> bool {
         contains(&elem, &seq)
     }
 
@@ -120,217 +124,124 @@ mod inner {
 
     /// Returns `true` if the map contains the given key.
     #[function(name = "in", signature = "<K, V>(K, Map<K, V>) -> Bool")]
-    pub fn op_contains_key(key: Value, map: SeqValue) -> bool {
+    pub fn op_contains_key(key: Value, map: Value) -> bool {
         contains(&key, &map)
     }
 
     /// Returns the highest key in the map.
     #[function(name = "max", signature = "<K, V>(Map<K, V>) -> K")]
-    pub fn max_key(map: SeqValue) -> anyhow::Result<Value> {
-        highest(map)
+    pub fn max_key(map: Value) -> anyhow::Result<Value> {
+        extreme(&map, Ordering::Greater)
     }
 
     /// Returns the lowest key in the map.
     #[function(name = "min", signature = "<K, V>(Map<K, V>) -> K")]
-    pub fn min_key(map: SeqValue) -> anyhow::Result<Value> {
-        lowest(map)
+    pub fn min_key(map: Value) -> anyhow::Result<Value> {
+        extreme(&map, Ordering::Less)
     }
 
     /// Returns the highest element in the sequence.
     #[function(signature = "<T>(Iterable<T>) -> T")]
-    pub fn max(seq: SeqValue) -> anyhow::Result<Value> {
-        highest(seq)
+    pub fn max(seq: Value) -> anyhow::Result<Value> {
+        extreme(&seq, Ordering::Greater)
     }
 
-    fn highest(seq: Value) -> anyhow::Result<Value> {
-        match seq {
-            Value::Object(obj) => match Rc::unwrap_or_clone(obj) {
-                Object::String(s) => {
-                    let chars: Vec<Value> = s
-                        .borrow()
-                        .chars()
-                        .map(|c| Value::string(c.to_string()))
-                        .collect();
-                    vm_try_max(chars.into_iter())
-                }
-                Object::Map { entries, .. } => vm_try_max(entries.into_inner().into_keys()),
-                Object::MaxHeap(h) => h
+    /// The largest element of `seq` for `better` `Greater`, the smallest for
+    /// `Less`: a map's key, a string's character, the top of a heap that
+    /// keeps that end on top.
+    fn extreme(seq: &Value, better: Ordering) -> anyhow::Result<Value> {
+        let name = extreme_name(better);
+        let Value::Object(obj) = seq else {
+            return Err(anyhow!("cannot find {name} of non-sequence"));
+        };
+        let top = match obj.as_ref() {
+            Object::String(s) => {
+                let chars = s
                     .borrow()
-                    .peek()
-                    .map(|v| v.0.clone())
-                    .ok_or_else(|| anyhow!("empty input to max")),
-                obj => vm_try_max(
-                    Value::Object(Rc::new(obj))
-                        .try_into_iter()
-                        .ok_or_else(|| anyhow!("cannot find max of non-sequence"))?,
-                ),
-            },
-            _ => Err(anyhow!("cannot find max of non-sequence")),
-        }
+                    .chars()
+                    .map(|c| Value::string(c.to_string()))
+                    .collect_vec();
+                return vm_try_extreme(chars.into_iter(), better);
+            }
+            Object::Map { entries, .. } => {
+                return vm_try_extreme(entries.borrow().keys().cloned(), better);
+            }
+            Object::MaxHeap(h) if better == Ordering::Greater => {
+                h.borrow().peek().map(|v| v.0.clone())
+            }
+            Object::MinHeap(h) if better == Ordering::Less => {
+                h.borrow().peek().map(|v| v.0.0.clone())
+            }
+            _ => {
+                let iter = seq
+                    .clone()
+                    .try_into_iter()
+                    .ok_or_else(|| anyhow!("cannot find {name} of non-sequence"))?;
+                return vm_try_extreme(iter, better);
+            }
+        };
+        top.ok_or_else(|| anyhow!("empty input to {name}"))
     }
 
     /// Returns the element for which the key function returns the highest value.
     #[function(signature = "<T, U>(Iterable<T>, Fn(T) -> U) -> T")]
-    pub fn max_by_key(seq: SeqValue, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn max_by_key(seq: Value, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_key(seq, func, Ordering::Greater)
     }
 
     /// Returns the element for which the key function returns the lowest value.
     #[function(signature = "<T, U>(Iterable<T>, Fn(T) -> U) -> T")]
-    pub fn min_by_key(seq: SeqValue, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn min_by_key(seq: Value, func: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_key(seq, func, Ordering::Less)
     }
 
     /// Returns the maximum element using a comparator function.
     ///
-    /// The comparator function takes two elements and returns an Int, as `<=>` does. A positive
+    /// The comparator function takes two elements and returns a number, as `<=>` does. A positive
     /// result means the first argument is greater than the second, a negative result means the
     /// first argument is less than the second, and zero means they are equal.
     #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Int) -> T")]
-    pub fn max_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
-        by_comp(seq, comp, Ordering::Greater)
-    }
-
-    /// [`max_by`] with a comparator that returns a Float.
-    #[function(
-        name = "max_by",
-        signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> T"
-    )]
-    pub fn max_by_float(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
-        by_comp(seq, comp, Ordering::Greater)
-    }
-
-    /// [`max_by`] with a comparator that returns a Number.
-    #[function(
-        name = "max_by",
-        signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> T"
-    )]
-    pub fn max_by_number(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> T")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> T")]
+    pub fn max_by(seq: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Greater)
     }
 
     /// Returns the minimum element using a comparator function.
     ///
-    /// The comparator function takes two elements and returns an Int, as `<=>` does. A positive
+    /// The comparator function takes two elements and returns a number, as `<=>` does. A positive
     /// result means the first argument is greater than the second, a negative result means the
     /// first argument is less than the second, and zero means they are equal.
     #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Int) -> T")]
-    pub fn min_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
-        by_comp(seq, comp, Ordering::Less)
-    }
-
-    /// [`min_by`] with a comparator that returns a Float.
-    #[function(
-        name = "min_by",
-        signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> T"
-    )]
-    pub fn min_by_float(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
-        by_comp(seq, comp, Ordering::Less)
-    }
-
-    /// [`min_by`] with a comparator that returns a Number.
-    #[function(
-        name = "min_by",
-        signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> T"
-    )]
-    pub fn min_by_number(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> T")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> T")]
+    pub fn min_by(seq: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Less)
     }
 
     /// Returns the lowest element in the sequence.
     #[function(signature = "<T>(Iterable<T>) -> T")]
-    pub fn min(seq: SeqValue) -> anyhow::Result<Value> {
-        lowest(seq)
-    }
-
-    fn lowest(seq: Value) -> anyhow::Result<Value> {
-        match seq {
-            Value::Object(obj) => match Rc::unwrap_or_clone(obj) {
-                Object::String(s) => {
-                    let chars: Vec<Value> = s
-                        .borrow()
-                        .chars()
-                        .map(|c| Value::string(c.to_string()))
-                        .collect();
-                    vm_try_min(chars.into_iter())
-                }
-                Object::Map { entries, .. } => vm_try_min(entries.into_inner().into_keys()),
-                Object::MinHeap(h) => h
-                    .borrow()
-                    .peek()
-                    .map(|v| v.0.0.clone())
-                    .ok_or_else(|| anyhow!("empty input to min")),
-                obj => vm_try_min(
-                    Value::Object(Rc::new(obj))
-                        .try_into_iter()
-                        .ok_or_else(|| anyhow!("cannot find min of non-sequence"))?,
-                ),
-            },
-            _ => Err(anyhow!("cannot find min of non-sequence")),
-        }
+    pub fn min(seq: Value) -> anyhow::Result<Value> {
+        extreme(&seq, Ordering::Less)
     }
 
     /// Sorts the list in place.
     #[function(signature = "<T>(List<T>)")]
     pub fn sort(list: &mut Vec<Value>) -> anyhow::Result<()> {
-        let mut err: Option<String> = None;
-        list.sort_by(|a, b| {
-            if let Some(ord) = a.partial_cmp(b) {
-                ord
-            } else {
-                err = Some(format!(
-                    "cannot compare {} and {}",
-                    a.static_type(),
-                    b.static_type()
-                ));
-                Ordering::Equal
-            }
-        });
-        if let Some(e) = err {
-            return Err(anyhow::anyhow!(e));
-        }
-        Ok(())
-    }
-
-    /// [`sort_by`] with a comparator that returns a Float.
-    #[function(name = "sort_by", signature = "<T>(List<T>, Fn(T, T) -> Float)")]
-    pub fn sort_by_float(list: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
-        sort_with(&list, comp)
-    }
-
-    /// [`sorted_by`] with a comparator that returns a Float.
-    #[function(
-        name = "sorted_by",
-        signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> List<T>"
-    )]
-    pub fn sorted_by_float(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
-        sorted_with(seq, comp)
-    }
-
-    /// [`sort_by`] with a comparator that returns a Number.
-    #[function(name = "sort_by", signature = "<T>(List<T>, Fn(T, T) -> Number)")]
-    pub fn sort_by_number(list: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
-        sort_with(&list, comp)
-    }
-
-    /// [`sorted_by`] with a comparator that returns a Number.
-    #[function(
-        name = "sorted_by",
-        signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> List<T>"
-    )]
-    pub fn sorted_by_number(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
-        sorted_with(seq, comp)
+        try_sort_by(list, |a, b| a.try_cmp(b).map_err(|e| anyhow!(e)))
     }
 
     /// Sorts the given sequence using a comparing function in place.
     ///
-    /// The result of the comparing function is compared to the number `0` to determine the relative ordering such that:
+    /// The comparing function returns an Int, a Float or a Number, which is compared to `0` to determine the relative ordering such that:
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
     #[function(signature = "<T>(List<T>, Fn(T, T) -> Int)")]
+    #[function(signature = "<T>(List<T>, Fn(T, T) -> Float)")]
+    #[function(signature = "<T>(List<T>, Fn(T, T) -> Number)")]
     pub fn sort_by(list: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
         sort_with(&list, comp)
     }
@@ -415,7 +326,7 @@ mod inner {
 
     /// Returns a sorted copy of the input sequence as a list.
     #[function(signature = "<T>(Iterable<T>) -> List<T>")]
-    pub fn sorted(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn sorted(seq: Value) -> anyhow::Result<Value> {
         let mut list: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("sorted requires a sequence"))?
@@ -428,17 +339,14 @@ mod inner {
 
     /// Sorts the given sequence using a comparing function, returning a new list with the elements in the sorted order.
     ///
-    /// The result of the comparing function is compared to the number `0` to determine the relative ordering such that:
+    /// The comparing function returns an Int, a Float or a Number, which is compared to `0` to determine the relative ordering such that:
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
     #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Int) -> List<T>")]
-    pub fn sorted_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
-        sorted_with(seq, comp)
-    }
-
-    /// The elements of `seq` in a new list, sorted by what `comp` says of each pair.
-    fn sorted_with(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> List<T>")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> List<T>")]
+    pub fn sorted_by(seq: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut list: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("sorted_by requires a sequence"))?
@@ -455,58 +363,26 @@ mod inner {
     /// Returns the number of elements of a collection whose size is known: a list, deque, map or
     /// heap, or a string, for which it's the number of UTF-8 characters. A tuple's is declared
     /// with `first` and `last`. An iterator's length isn't known without reading it.
-    #[function(name = "len", signature = "<T>(List<T>) -> Int")]
-    pub fn len_list(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a string.
-    #[function(name = "len", signature = "(String) -> Int")]
-    pub fn len_string(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a map.
-    #[function(name = "len", signature = "<K, V>(Map<K, V>) -> Int")]
-    pub fn len_map(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a deque.
-    #[function(name = "len", signature = "<T>(Deque<T>) -> Int")]
-    pub fn len_deque(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a min heap.
-    #[function(name = "len", signature = "<T>(MinHeap<T>) -> Int")]
-    pub fn len_min_heap(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    /// [`len`] of a max heap.
-    #[function(name = "len", signature = "<T>(MaxHeap<T>) -> Int")]
-    pub fn len_max_heap(seq: Value) -> anyhow::Result<i64> {
-        length(&seq)
-    }
-
-    fn length(seq: &Value) -> anyhow::Result<i64> {
-        let length = match seq {
-            Value::Object(obj) => match obj.as_ref() {
-                Object::List(l) => l.borrow().len(),
-                Object::Tuple(t) => t.len(),
-                Object::Deque(d) => d.borrow().len(),
-                Object::String(s) => s.char_count(),
-                Object::Map { entries, .. } => entries.borrow().len(),
-                Object::MinHeap(h) => h.borrow().len(),
-                Object::MaxHeap(h) => h.borrow().len(),
-                _ => {
-                    return Err(anyhow!(
-                        "cannot determine the length of {}",
-                        seq.static_type()
-                    ));
-                }
-            },
+    #[function(signature = "<T>(List<T>) -> Int")]
+    #[function(signature = "(String) -> Int")]
+    #[function(signature = "<K, V>(Map<K, V>) -> Int")]
+    #[function(signature = "<T>(Deque<T>) -> Int")]
+    #[function(signature = "<T>(MinHeap<T>) -> Int")]
+    #[function(signature = "<T>(MaxHeap<T>) -> Int")]
+    pub fn len(seq: Value) -> anyhow::Result<i64> {
+        let Value::Object(obj) = &seq else {
+            return Err(anyhow!(
+                "cannot determine the length of {}",
+                seq.static_type()
+            ));
+        };
+        let length = match obj.as_ref() {
+            Object::List(l) => l.borrow().len(),
+            Object::Deque(d) => d.borrow().len(),
+            Object::String(s) => s.char_count(),
+            Object::Map { entries, .. } => entries.borrow().len(),
+            Object::MinHeap(h) => h.borrow().len(),
+            Object::MaxHeap(h) => h.borrow().len(),
             _ => {
                 return Err(anyhow!(
                     "cannot determine the length of {}",
@@ -519,7 +395,7 @@ mod inner {
 
     /// Returns a lazy iterator yielding `(index, value)` tuples for each element of `seq`.
     #[function(signature = "<T>(Iterable<T>) -> Iterator<(Int, T)>")]
-    pub fn enumerate(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn enumerate(seq: Value) -> anyhow::Result<Value> {
         let iter =
             EnumerateIter::new(seq).ok_or_else(|| anyhow!("enumerate requires a sequence"))?;
         Ok(Value::iterator(iter.into_shared()))
@@ -528,7 +404,7 @@ mod inner {
     /// Reduces/folds the given sequence using the given combining function and a custom initial value.
     #[function(signature = "<T, A>(Iterable<T>, A, Fn(A, T) -> A) -> A")]
     pub fn fold(
-        seq: SeqValue,
+        seq: Value,
         initial: Value,
         function: &mut VmCallable<'_>,
     ) -> anyhow::Result<Value> {
@@ -542,7 +418,7 @@ mod inner {
 
     /// Reduces/folds the given sequence using the given combining function.
     #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> T) -> T")]
-    pub fn reduce(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn reduce(seq: Value, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut iterator = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("reduce requires a sequence"))?;
@@ -554,7 +430,7 @@ mod inner {
 
     /// Filters the given sequence using the `predicate`.
     #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> List<T>")]
-    pub fn filter(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn filter(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for element in seq
             .try_into_iter()
@@ -574,7 +450,7 @@ mod inner {
 
     /// Returns the number of elements in the input sequence for which the given `predicate` returns `true`.
     #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Int")]
-    pub fn count(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn count(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = 0i64;
         for element in seq
             .try_into_iter()
@@ -591,7 +467,7 @@ mod inner {
 
     /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
     #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> T")]
-    pub fn find(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn find(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for element in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("find requires a sequence"))?
@@ -610,7 +486,7 @@ mod inner {
 
     /// Returns the first index of the element for which the `predicate` is true in the input sequence.
     #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Int")]
-    pub fn locate(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn locate(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for (idx, element) in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("locate requires a sequence"))?
@@ -627,7 +503,7 @@ mod inner {
 
     /// Returns the first index of the element or produces an error
     #[function(name = "locate", signature = "<T>(Iterable<T>, T) -> Int")]
-    pub fn locate_element(seq: SeqValue, element: Value) -> anyhow::Result<Value> {
+    pub fn locate_element(seq: Value, element: Value) -> anyhow::Result<Value> {
         for (idx, el) in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("locate requires a sequence"))?
@@ -642,7 +518,7 @@ mod inner {
 
     /// Returns `true` if the `predicate` is true for none of the elements in `seq`.
     #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Bool")]
-    pub fn none(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn none(seq: Value, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("none requires a sequence"))?
@@ -663,7 +539,7 @@ mod inner {
 
     /// Returns `true` if the `predicate` is true for all the elements in `seq`.
     #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Bool")]
-    pub fn all(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn all(seq: Value, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("all requires a sequence"))?
@@ -684,7 +560,7 @@ mod inner {
 
     /// Returns `true` if the `predicate` is true for any of the elements in `seq`.
     #[function(signature = "<T>(Iterable<T>, Fn(T) -> Bool) -> Bool")]
-    pub fn any(seq: SeqValue, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn any(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         for item in seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("any requires a sequence"))?
@@ -705,7 +581,7 @@ mod inner {
 
     /// Applies the function to each element in a sequence returning the result as a list.
     #[function(signature = "<T, U>(Iterable<T>, Fn(T) -> U) -> List<U>")]
-    pub fn map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn map(seq: Value, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
             .try_into_iter()
@@ -718,7 +594,7 @@ mod inner {
 
     /// Applies a function to each item in a sequence, flattens the resulting sequences, and returns a single combined sequence.
     #[function(signature = "<T, U>(Iterable<T>, Fn(T) -> Iterable<U>) -> List<U>")]
-    pub fn flat_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn flat_map(seq: Value, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut out = Vec::new();
         for item in seq
             .try_into_iter()
@@ -735,7 +611,7 @@ mod inner {
 
     /// Returns the first element of the sequence or the `default` value otherwise.
     #[function(signature = "<T>(Iterable<T>, T) -> T")]
-    pub fn first_or(seq: SeqValue, default: Value) -> Value {
+    pub fn first_or(seq: Value, default: Value) -> Value {
         seq.try_into_iter()
             .and_then(|mut i| i.next())
             .unwrap_or(default)
@@ -743,7 +619,7 @@ mod inner {
 
     /// Returns the first element of the sequence or the return value of the given function.
     #[function(signature = "<T>(Iterable<T>, Fn() -> T) -> T")]
-    pub fn first_or_else(seq: SeqValue, default: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn first_or_else(seq: Value, default: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         if let Some(item) = seq.try_into_iter().and_then(|mut i| i.next()) {
             return Ok(item);
         }
@@ -752,7 +628,7 @@ mod inner {
 
     /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of lists.
     #[function(signature = "<T>(Iterable<T>, Int) -> Iterator<List<T>>")]
-    pub fn combinations(seq: SeqValue, k: usize) -> anyhow::Result<Value> {
+    pub fn combinations(seq: Value, k: usize) -> anyhow::Result<Value> {
         let iter = CombinationsIter::new(seq, k)
             .ok_or_else(|| anyhow!("combinations requires a sequence"))?;
         Ok(Value::iterator(iter.into_shared()))
@@ -760,14 +636,14 @@ mod inner {
 
     /// Returns a lazy iterator yielding the first `n` elements of `seq`.
     #[function(signature = "<T>(Iterable<T>, Int) -> Iterator<T>")]
-    pub fn take(seq: SeqValue, n: usize) -> anyhow::Result<Value> {
+    pub fn take(seq: Value, n: usize) -> anyhow::Result<Value> {
         let iter = TakeIter::new(seq, n).ok_or_else(|| anyhow!("take requires a sequence"))?;
         Ok(Value::iterator(iter.into_shared()))
     }
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of lists.
     #[function(signature = "<T>(Iterable<T>, Int) -> List<List<T>>")]
-    pub fn permutations(seq: SeqValue, k: usize) -> anyhow::Result<Value> {
+    pub fn permutations(seq: Value, k: usize) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("permutations requires a sequence"))?
@@ -792,7 +668,7 @@ mod inner {
 
     /// Returns all prefixes of a sequence, each as a list.
     #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
-    pub fn prefixes(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn prefixes(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("prefixes requires a sequence"))?
@@ -816,7 +692,7 @@ mod inner {
 
     /// Returns all suffixes of a sequence, each as a list.
     #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
-    pub fn suffixes(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn suffixes(seq: Value) -> anyhow::Result<Value> {
         let out: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("suffixes requires a sequence"))?
@@ -828,30 +704,17 @@ mod inner {
         ))
     }
 
-    /// Transposes a sequence of sequences, turning rows into columns, and returns the result as a list of lists.
+    /// Transposes a sequence of sequences, or of strings, turning rows into columns, and returns the result as a list of lists.
     #[function(signature = "<T>(Iterable<List<T>>) -> List<List<T>>")]
-    pub fn transposed(seq: SeqValue) -> anyhow::Result<Value> {
-        transpose(seq)
-    }
-
-    /// Transposes a sequence of strings, turning rows of characters into columns.
-    #[function(
-        name = "transposed",
-        signature = "(Iterable<String>) -> List<List<String>>"
-    )]
-    pub fn transposed_strings(seq: SeqValue) -> anyhow::Result<Value> {
-        transpose(seq)
-    }
-
-    /// Transposes a sequence of sequences whose elements have different types.
-    #[function(name = "transposed", signature = "(Iterable<Any>) -> List<List<Any>>")]
-    pub fn transposed_any(seq: SeqValue) -> anyhow::Result<Value> {
+    #[function(signature = "(Iterable<String>) -> List<List<String>>")]
+    #[function(signature = "(Iterable<Any>) -> List<List<Any>>")]
+    pub fn transposed(seq: Value) -> anyhow::Result<Value> {
         transpose(seq)
     }
 
     /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
     #[function(signature = "<T>(Iterable<T>) -> List<(T, T)>")]
-    pub fn circular_tuple_windows(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn circular_tuple_windows(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("circular_tuple_windows requires a sequence"))?
@@ -865,7 +728,7 @@ mod inner {
 
     /// Returns a list of all size-2 windows in `seq`.
     #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
-    pub fn pairwise(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn pairwise(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("pairwise requires a sequence"))?
@@ -881,7 +744,7 @@ mod inner {
         name = "pairwise",
         signature = "<T, U>(Iterable<T>, Fn(T, T) -> U) -> List<U>"
     )]
-    pub fn pairwise_map(seq: SeqValue, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+    pub fn pairwise_map(seq: Value, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let main: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("pairwise requires a sequence"))?
@@ -895,7 +758,7 @@ mod inner {
 
     /// Returns a list of all contiguous windows of `length` size. The windows overlap. If the `seq` is shorter than size, the iterator returns no values.
     #[function(signature = "<T>(Iterable<T>, Int) -> List<List<T>>")]
-    pub fn windows(seq: SeqValue, length: usize) -> anyhow::Result<Value> {
+    pub fn windows(seq: Value, length: usize) -> anyhow::Result<Value> {
         if length == 0 {
             return Err(anyhow!("window size must be non-zero"));
         }
@@ -914,7 +777,7 @@ mod inner {
     /// The powerset of a set contains all subsets including the empty set and the full input set. A powerset has length `2^n` where `n` is the length of the input set.
     /// Each list produced by this function represents a subset of the elements in the source sequence.
     #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
-    pub fn subsequences(seq: SeqValue) -> anyhow::Result<Value> {
+    pub fn subsequences(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("subsequences requires a sequence"))?
@@ -929,7 +792,7 @@ mod inner {
         name = "subsequences",
         signature = "<T>(Iterable<T>, Int) -> List<List<T>>"
     )]
-    pub fn subsequences_len(seq: SeqValue, length: usize) -> anyhow::Result<Value> {
+    pub fn subsequences_len(seq: Value, length: usize) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("subsequences requires a sequence"))?
@@ -967,23 +830,15 @@ mod inner {
     /// ]
     /// ```
     #[function(signature = "<T>(Iterable<List<T>>) -> List<List<T>>")]
-    pub fn multi_cartesian_product(seq: SeqValue) -> anyhow::Result<Value> {
-        cartesian_product(seq)
-    }
-
-    /// The cartesian product of sequences whose elements have different types.
-    #[function(
-        name = "multi_cartesian_product",
-        signature = "(Iterable<Any>) -> List<List<Any>>"
-    )]
-    pub fn multi_cartesian_product_any(seq: SeqValue) -> anyhow::Result<Value> {
+    #[function(signature = "(Iterable<Any>) -> List<List<Any>>")]
+    pub fn multi_cartesian_product(seq: Value) -> anyhow::Result<Value> {
         cartesian_product(seq)
     }
 
     /// Split the input sequence into evenly sized chunks. If the input length of the sequence
     /// is not dividable by the chunk_size the last chunk will contain fewer elements.
     #[function(signature = "<T>(Iterable<T>, Int) -> List<List<T>>")]
-    pub fn chunks(seq: SeqValue, chunk_size: usize) -> anyhow::Result<Value> {
+    pub fn chunks(seq: Value, chunk_size: usize) -> anyhow::Result<Value> {
         if chunk_size == 0 {
             return Err(anyhow!("chunk size must be non-zero"));
         }
@@ -1014,7 +869,7 @@ mod inner {
     }
 }
 
-fn transpose(seq: SeqValue) -> anyhow::Result<Value> {
+fn transpose(seq: Value) -> anyhow::Result<Value> {
     let main: Vec<Value> = seq
         .try_into_iter()
         .ok_or_else(|| anyhow!("transposed requires a sequence"))?
@@ -1035,7 +890,7 @@ fn transpose(seq: SeqValue) -> anyhow::Result<Value> {
     }
 }
 
-fn cartesian_product(seq: SeqValue) -> anyhow::Result<Value> {
+fn cartesian_product(seq: Value) -> anyhow::Result<Value> {
     let mut iterators = Vec::new();
     for elem in seq
         .try_into_iter()

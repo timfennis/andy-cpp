@@ -416,25 +416,6 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             borrow: Borrow::None,
         },
 
-        NdcType::SeqValue => VmInputArg {
-            extract: quote! {},
-            pass: quote! { #raw.clone() },
-            static_type: quote! { ndc_core::StaticType::Iterable(Box::new(ndc_core::StaticType::Any)) },
-            borrow: Borrow::None,
-        },
-
-        NdcType::MapValue => VmInputArg {
-            extract: quote! {},
-            pass: quote! { #raw.clone() },
-            static_type: quote! {
-                ndc_core::StaticType::Map {
-                    key: Box::new(ndc_core::StaticType::Any),
-                    value: Box::new(ndc_core::StaticType::Any),
-                }
-            },
-            borrow: Borrow::None,
-        },
-
         NdcType::SliceOfValue => {
             let vec = format_ident!("{temp}_vec");
             let err = arg_error(position, "list");
@@ -538,20 +519,9 @@ fn try_vm_return_inner(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
 fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)> {
     let ndc_type = classify(ty)?;
     match ndc_type {
-        NdcType::VmValue | NdcType::SeqValue => {
-            Some((quote! { Ok(result) }, quote! { ndc_core::StaticType::Any }))
-        }
-        NdcType::MapValue => Some((
-            quote! { Ok(result) },
-            quote! {
-                ndc_core::StaticType::Map {
-                    key: Box::new(ndc_core::StaticType::Any),
-                    value: Box::new(ndc_core::StaticType::Any),
-                }
-            },
-        )),
+        NdcType::VmValue => Some((quote! { Ok(result) }, quote! { ndc_core::StaticType::Any })),
         NdcType::Number | NdcType::NumberRef => Some((
-            quote! { Ok(ndc_vm::value::Value::from_number(result)) },
+            quote! { Ok(ndc_vm::value::Value::number(result)) },
             quote! { ndc_core::StaticType::Number },
         )),
         NdcType::F64 => Some((
@@ -580,7 +550,7 @@ fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)
         )),
         NdcType::BigInt => Some((
             quote! {
-                Ok(ndc_vm::value::Value::from_number(
+                Ok(ndc_vm::value::Value::number(
                     ndc_vm::value::AdvancedNumber::Int(result)
                 ))
             },
@@ -588,7 +558,7 @@ fn vm_return_for_classified(ty: &syn::Type) -> Option<(TokenStream, TokenStream)
         )),
         NdcType::BigRational => Some((
             quote! {
-                Ok(ndc_vm::value::Value::from_number(
+                Ok(ndc_vm::value::Value::number(
                     ndc_vm::value::AdvancedNumber::rational(result)
                 ))
             },

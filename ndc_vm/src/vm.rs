@@ -315,13 +315,7 @@ impl Vm {
                             frame.ip = offset.apply(frame.ip);
                         }
                         Value::Bool(true) => {}
-                        value => {
-                            let type_str = value.static_type().to_string();
-                            return Err(VmError::new(
-                                format!("mismatched types: expected Bool, found {type_str}"),
-                                span,
-                            ));
-                        }
+                        value => return Err(VmError::new(not_a_bool(value), span)),
                     }
                 }
                 OpCode::JumpIfTrue(offset) => {
@@ -332,13 +326,7 @@ impl Vm {
                             frame.ip = offset.apply(frame.ip);
                         }
                         Value::Bool(false) => {}
-                        value => {
-                            let type_str = value.static_type().to_string();
-                            return Err(VmError::new(
-                                format!("mismatched types: expected Bool, found {type_str}"),
-                                span,
-                            ));
-                        }
+                        value => return Err(VmError::new(not_a_bool(value), span)),
                     }
                 }
                 OpCode::Jump(offset) => {
@@ -1049,17 +1037,20 @@ impl VmCallable<'_> {
     }
 }
 
-/// Explain why a range bound was rejected. Only an integer too big for an
-/// `Int` is a size problem; every other non-`Int` bound is a type problem, and
-/// since `n` literals are the only way to write a big integer, a small
-/// `Number` bound is now the common case.
+/// The analyser makes a condition a `Bool`; this is what a VM that's given
+/// something else says.
+#[cold]
+fn not_a_bool(value: &Value) -> String {
+    format!(
+        "mismatched types: expected Bool, found {}",
+        value.diagnostic_type()
+    )
+}
+
+/// The analyser makes a range bound an `Int`; this is what a VM that's
+/// given something else says.
+#[cold]
 fn bad_range_bound(value: &Value) -> String {
-    if let Some(number) = value.as_number()
-        && matches!(number, crate::value::AdvancedNumber::Int(_))
-        && number.as_exact_i64().is_none()
-    {
-        return "Integer too large for range bounds".to_string();
-    }
     format!("range bounds must be Int, got {}", value.diagnostic_type())
 }
 
