@@ -438,55 +438,82 @@ impl Value {
     /// gives a new type that's held by more than `holders` holders, or, deeper
     /// in, by more than the container holding it: another holder could still
     /// write what the old type allowed. `None` if there's none.
+    ///
+    /// A tuple or option can't be written to, so sharing one is harmless by
+    /// itself; what's in a shared one is reachable from elsewhere, though.
+    /// `(1, None)` held twice passes as a `(Int, Option<List<Int>>)`, and
+    /// `(1, Some([2]))` held twice doesn't.
     pub fn shared_beyond(&self, target: &StaticType, holders: usize) -> Option<&'static str> {
+        self.shared_container(target, holders, false)
+    }
+
+    /// [`Self::shared_beyond`], for a value that's `reached_elsewhere` when a
+    /// tuple or option holding it is shared.
+    fn shared_container(
+        &self,
+        target: &StaticType,
+        holders: usize,
+        reached_elsewhere: bool,
+    ) -> Option<&'static str> {
+        /// The first of `values` with a shared container, looked for only when
+        /// `target`, the type of each, can hold one.
+        fn inside<'v>(
+            values: impl IntoIterator<Item = &'v Value>,
+            target: &StaticType,
+            reached_elsewhere: bool,
+        ) -> Option<&'static str> {
+            if !target.holds_a_mutable_container() {
+                return None;
+            }
+            values
+                .into_iter()
+                .find_map(|value| value.shared_container(target, 1, reached_elsewhere))
+        }
         if !target.holds_a_mutable_container() {
             return None;
         }
         let Self::Object(object) = self else {
             return None;
         };
-        if Rc::strong_count(object) > holders {
-            return Some(match object.as_ref() {
-                Object::List(_) => "list",
-                Object::Map { .. } => "map",
-                Object::Deque(_) => "deque",
-                Object::MinHeap(_) | Object::MaxHeap(_) => "heap",
-                Object::Some(_) => "option",
-                Object::Tuple(_) => "tuple",
-                _ => "value",
-            });
+        let shared = reached_elsewhere || Rc::strong_count(object) > holders;
+        let container = match object.as_ref() {
+            Object::List(_) => Some("list"),
+            Object::Map { .. } => Some("map"),
+            Object::Deque(_) => Some("deque"),
+            Object::MinHeap(_) | Object::MaxHeap(_) => Some("heap"),
+            _ => None,
+        };
+        if shared && container.is_some() {
+            return container;
         }
-        fn inside<'v>(
-            values: impl IntoIterator<Item = &'v Value>,
-            target: &StaticType,
-        ) -> Option<&'static str> {
-            values
-                .into_iter()
-                .find_map(|value| value.shared_beyond(target, 1))
-        }
+        // Past here, `shared` only holds for a tuple or option.
         match (target, object.as_ref()) {
             (StaticType::List(element), Object::List(values)) => {
-                inside(values.borrow().iter(), element)
+                inside(values.borrow().iter(), element, false)
             }
             (StaticType::Deque(element), Object::Deque(values)) => {
-                inside(values.borrow().iter(), element)
+                inside(values.borrow().iter(), element, false)
             }
-            (StaticType::MinHeap(element), Object::MinHeap(values)) => {
-                inside(values.borrow().iter().map(|value| &value.0.0), element)
-            }
+            (StaticType::MinHeap(element), Object::MinHeap(values)) => inside(
+                values.borrow().iter().map(|value| &value.0.0),
+                element,
+                false,
+            ),
             (StaticType::MaxHeap(element), Object::MaxHeap(values)) => {
-                inside(values.borrow().iter().map(|value| &value.0), element)
+                inside(values.borrow().iter().map(|value| &value.0), element, false)
             }
             (StaticType::Map { key, value }, Object::Map { entries, default }) => {
                 let entries = entries.borrow();
-                inside(entries.keys(), key)
-                    .or_else(|| inside(entries.values().chain(default.iter()), value))
+                inside(entries.keys(), key, false)
+                    .or_else(|| inside(entries.values().chain(default.iter()), value, false))
             }
-            (StaticType::Option(inner), Object::Some(value)) => value.shared_beyond(inner, 1),
+            (StaticType::Option(inner), Object::Some(value)) => {
+                value.shared_container(inner, 1, shared)
+            }
             (StaticType::Tuple(elements), Object::Tuple(values)) => elements
                 .iter()
                 .zip(values)
-                .find_map(|(element, value)| value.shared_beyond(element, 1)),
+                .find_map(|(element, value)| value.shared_container(element, 1, shared)),
             _ => None,
         }
     }
