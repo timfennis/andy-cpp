@@ -155,16 +155,31 @@ impl Analyser {
         // An instance is for the types of the type parameters that what it
         // compiles differently depends on: the constraints and uses it
         // picks for.
-        // A `pure fn` caches its results by its arguments' values, which can
-        // be equal across types, as `1` and `1.0` are, so each set of types
-        // gets an instance, and a cache, of its own.
-        let parameters = match self.vars.resolve(signature) {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } if pure => parameters,
-            _ => Vec::new(),
-        };
+        // A `pure fn` gives every call with the same arguments what the first
+        // one returned, so each set of types it's called with gets an
+        // instance, and a cache, of its own: the parameters' types, as `1`
+        // and `1.0` are equal arguments, and the return type's, as
+        // `pure fn mk() => []` would otherwise give one list to calls that
+        // want a `List<Int>` and calls that want a `List<String>`. The same
+        // goes for each `pure fn` its body declares, which also takes only
+        // data, as each instance is checked to give it.
+        let own = pure.then(|| self.vars.resolve(signature));
+        let declared_pure = self.declared_functions[first_function..]
+            .iter()
+            .filter(|node| self.pure_functions.contains_key(node))
+            .map(|&node| self.vars.resolve(self.result.analysis.function_type(node)))
+            .collect::<Vec<_>>();
+        let mut parameters = Vec::new();
+        for typ in own.into_iter().chain(declared_pure) {
+            if let StaticType::Function {
+                parameters: Some(types),
+                return_type,
+            } = typ
+            {
+                parameters.extend(types);
+                parameters.push(*return_type);
+            }
+        }
         let mut key: Vec<Box<str>> = Vec::new();
         for typ in scheme
             .iter()

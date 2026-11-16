@@ -1,0 +1,9 @@
+// `outer` is compiled for each type of `g`, as it makes the type of what its
+// `pure fn` takes, which this call makes a function.
+// expect-error: `inner` is a `pure fn`, which only takes data, but here its parameter `x` would have type `Fn(Int) -> Int`
+fn inc(n: Int) => n + 1;
+fn outer(g) {
+    pure fn inner(x) => 1;
+    inner(g)
+}
+print(outer(inc));

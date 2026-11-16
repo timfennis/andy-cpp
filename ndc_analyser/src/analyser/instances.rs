@@ -11,6 +11,7 @@ use super::generics::named_in_order;
 use super::solver::{CallSite, Constraint, Origin, Waiting};
 use crate::error::AnalysisError;
 use ahash::AHashMap;
+use itertools::izip;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType};
 use ndc_layout::InstancePicks;
@@ -41,6 +42,15 @@ pub(super) struct Scheme {
     /// The functions its body declares, with the types they're declared
     /// with, which an instance makes what its own types make them.
     pub(super) functions: Rc<[(NodeId, StaticType)]>,
+}
+
+/// An instance [`Analyser::instance_for`] made, which waits to be solved.
+pub(super) struct NewInstance {
+    instance: SymbolId,
+    function: SymbolId,
+    key: Vec<StaticType>,
+    /// The use that needs it.
+    span: Span,
 }
 
 /// A call of a generic function, or its name used as a value, which needs
@@ -134,10 +144,16 @@ impl Analyser {
             for generic_use in uses {
                 self.point_at_instance(&generic_use, &mut new);
             }
-            let Some((instance, function, key)) = new.pop() else {
+            let Some(NewInstance {
+                instance,
+                function,
+                key,
+                span,
+            }) = new.pop()
+            else {
                 break;
             };
-            self.solve_instance(instance, function, &key);
+            self.solve_instance(instance, function, &key, span);
         }
     }
 
@@ -146,11 +162,7 @@ impl Analyser {
     /// function value is one instance, so its key must be known:
     /// `let f: Any = inc` doesn't say which `inc` it is, while
     /// `let f: Fn(Any) -> Any = inc` is the one for `Any`.
-    fn point_at_instance(
-        &mut self,
-        generic_use: &GenericUse,
-        new: &mut Vec<(SymbolId, SymbolId, Vec<StaticType>)>,
-    ) {
+    fn point_at_instance(&mut self, generic_use: &GenericUse, new: &mut Vec<NewInstance>) {
         let key = generic_use
             .key
             .iter()
@@ -176,7 +188,7 @@ impl Analyser {
             self.report_unknown_instance(generic_use);
             return;
         }
-        let instance = self.instance_for(generic_use.function, key, new);
+        let instance = self.instance_for(generic_use.function, key, generic_use.span, new);
         if instance == generic_use.function {
             return;
         }
@@ -257,7 +269,8 @@ impl Analyser {
         &mut self,
         function: SymbolId,
         key: Vec<StaticType>,
-        new: &mut Vec<(SymbolId, SymbolId, Vec<StaticType>)>,
+        span: Span,
+        new: &mut Vec<NewInstance>,
     ) -> SymbolId {
         if let Some(&instance) = self.instances.get(&(function, key.clone())) {
             return instance;
@@ -278,13 +291,26 @@ impl Analyser {
             .instances
             .insert(instance, InstancePicks::new(declaration));
         self.instances.insert((function, key.clone()), instance);
-        new.push((instance, function, key));
+        new.push(NewInstance {
+            instance,
+            function,
+            key,
+            span,
+        });
         instance
     }
 
     /// Solves the constraints of `function` for the instance whose key has
     /// these types, recording the picks they make in the instance's picks.
-    fn solve_instance(&mut self, instance: SymbolId, function: SymbolId, key: &[StaticType]) {
+    /// `span` is the use that needs it, where a `pure fn` that this instance
+    /// makes take more than data is reported.
+    fn solve_instance(
+        &mut self,
+        instance: SymbolId,
+        function: SymbolId,
+        key: &[StaticType],
+        span: Span,
+    ) {
         let scheme = self.schemes[&function].clone();
         let mut made = scheme
             .key
@@ -311,6 +337,7 @@ impl Analyser {
         for (node, declared) in std::iter::once(own).chain(scheme.functions.iter().cloned()) {
             let declared = self.vars.resolve(&declared);
             let typ = self.vars.instantiate_with(&declared, &mut made);
+            self.check_pure_instance(node, &declared, &typ, span);
             if let Some(picks) = self.picks.instances.get_mut(&instance) {
                 picks.function_types.insert(node, typ);
             }
@@ -339,6 +366,57 @@ impl Analyser {
         }
         self.settle_waiting(first);
         self.recording = outer;
+    }
+
+    /// Reports the parameter of the function `node` declares, if it's a
+    /// `pure fn`, that the types of an instance, `typ` in place of
+    /// `declared`, make more than data. `span` is the use that needs the
+    /// instance. What the declaration itself says was reported there, see
+    /// [`Self::check_pure_functions`].
+    fn check_pure_instance(
+        &mut self,
+        node: NodeId,
+        declared: &StaticType,
+        typ: &StaticType,
+        span: Span,
+    ) {
+        let Some(function) = self.pure_functions.get(&node) else {
+            return;
+        };
+        let (
+            StaticType::Function {
+                parameters: Some(declared),
+                ..
+            },
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            },
+        ) = (declared, typ)
+        else {
+            return;
+        };
+        let found = izip!(&function.parameters, declared, parameters).find_map(
+            |((name, _, _), declared, typ)| {
+                if self.not_data(declared).is_some() {
+                    return None;
+                }
+                self.not_data(typ).map(|part| (name, typ, part))
+            },
+        );
+        if let Some((parameter, typ, part)) = found {
+            // Pushed rather than emitted: `emit` leaves out what the
+            // instance's body reports, which its calls report, while this is
+            // the instance's own.
+            let error = AnalysisError::pure_fn_given_more_than_data(
+                function.name.as_deref(),
+                parameter,
+                &self.vars.shown(typ),
+                &part,
+                span,
+            );
+            self.result.errors.push(error);
+        }
     }
 
     /// Copies into the schemes of the generic functions the batch declares

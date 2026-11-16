@@ -1240,6 +1240,8 @@ impl PartialEq for Object {
 
 impl Eq for Object {}
 
+/// A sequence hashes its length first, so that `[[[]]]` and `[[], []]` hash
+/// apart.
 impl Hash for Object {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
@@ -1253,13 +1255,16 @@ impl Hash for Object {
             }
             Self::List(vs) => {
                 state.write_u8(6);
-                for v in vs.borrow().iter() {
+                let vs = vs.borrow();
+                state.write_usize(vs.len());
+                for v in vs.iter() {
                     v.hash(state);
                 }
             }
             Self::Tuple(vs) => {
                 state.write_u8(7);
-                for v in vs.iter() {
+                state.write_usize(vs.len());
+                for v in vs {
                     v.hash(state);
                 }
             }
@@ -1267,9 +1272,11 @@ impl Hash for Object {
                 state.write_u8(8);
                 // Order-independent hash: XOR-fold of pair hashes
                 // NOTE: the default value is not part of the identity of the map
+                let entries = entries.borrow();
+                state.write_usize(entries.len());
                 let mut acc = 0u64;
                 let mut cube_acc = 0u64;
-                for (key, value) in entries.borrow().iter() {
+                for (key, value) in entries.iter() {
                     let mut hasher = DefaultHasher::default();
                     key.hash(&mut hasher);
                     value.hash(&mut hasher);
@@ -1312,7 +1319,9 @@ impl Hash for Object {
             }
             Self::Deque(d) => {
                 state.write_u8(12);
-                for v in d.borrow().iter() {
+                let d = d.borrow();
+                state.write_usize(d.len());
+                for v in d.iter() {
                     v.hash(state);
                 }
             }

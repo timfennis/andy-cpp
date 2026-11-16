@@ -668,16 +668,11 @@ impl Vm {
         if let Function::Memoized { cache, function } = func {
             let start = self.stack.len() - args;
             let mut hasher = DefaultHasher::default();
+            // Arguments `==` calls equal share a result: a `pure fn` takes
+            // only values it compares by what they are, which hash alike when
+            // they're equal.
             for arg in &self.stack[start..] {
                 arg.hash(&mut hasher);
-                // A function checked as another function type is the same
-                // function, but a call may return it, so the cache tells
-                // them apart.
-                if let Value::Object(object) = arg
-                    && let Object::Function(Function::Checked { typ, .. }) = object.as_ref()
-                {
-                    typ.hash(&mut hasher);
-                }
             }
             let key = hasher.finish();
 
