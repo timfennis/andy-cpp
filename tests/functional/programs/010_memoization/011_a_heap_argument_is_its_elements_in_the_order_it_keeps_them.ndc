@@ -1,0 +1,11 @@
+// `0.0` and `-0.0` compare equal, so a heap gives the one pushed first: the
+// heaps hold the same elements, but `min` gives each a different one.
+// expect-output: Inf -Inf
+pure fn inverse_min(h: MinHeap<Float>) => 1.0 / h.min();
+let a = MinHeap();
+a.push(0.0);
+a.push(-0.0);
+let b = MinHeap();
+b.push(-0.0);
+b.push(0.0);
+print(inverse_min(a), inverse_min(b));

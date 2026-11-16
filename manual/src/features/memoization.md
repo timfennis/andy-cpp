@@ -37,10 +37,11 @@ A `pure fn` without annotations is checked for the types each call gives it.
 ### Which calls share a result
 
 A call gets an earlier call's result when its arguments are the same values:
-lists, tuples and deques with the same elements in the same order, maps with
-the same entries and the same default, heaps with the same elements whatever
-order they were pushed in. Numbers that are equal but different, as `0.0` and
-`-0.0` are, are different arguments:
+lists, tuples and deques with the same elements in the same order, and maps
+with the same entries and the same default. Two heaps are the same when they
+keep the same elements in the same order, which heaps built by the same pushes
+do. Numbers that are equal but different, as `0.0` and `-0.0` are, are
+different arguments:
 
 ```ndc
 pure fn inverse(x: Float) => 1.0 / x;

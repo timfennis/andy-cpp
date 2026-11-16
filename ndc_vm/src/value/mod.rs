@@ -1169,8 +1169,9 @@ impl Hash for Value {
     }
 }
 
-/// Hashes `hashes` as one value whatever their order, as a map's entries and
-/// a heap's elements have no order that tells two of them apart.
+/// Hashes `hashes` as one value whatever their order, as a map's entries
+/// have none a program can rely on: two maps with the same entries list them
+/// in an order of their own, which differs from run to run.
 fn hash_unordered<H: Hasher>(state: &mut H, hashes: impl Iterator<Item = u64>) {
     let mut sum = 0u64;
     let mut sum_of_squares = 0u64;
@@ -1187,7 +1188,8 @@ impl Value {
     /// arguments that hash the same share a result. [`Hash`] hashes a value
     /// as a map key, the same as every value `==` says is equal. This also
     /// tells `1` from `1.0` and `0.0` from `-0.0`, maps by their default and
-    /// heaps by their elements. A function, which only a map's default can
+    /// heaps by the order they keep their elements in. A function, which only
+    /// a map's default can
     /// be here, is told apart by its code: like the `pure fn` itself, what it
     /// uses from outside isn't part of the key.
     pub fn hash_exact<H: Hasher>(&self, state: &mut H) {
@@ -1239,14 +1241,6 @@ impl Value {
             Self::Cell(_) => unreachable!("internal error: a cell is never hashed"),
             Self::Int(_) | Self::Float(_) | Self::Number(_) => unreachable!("handled above"),
         }
-    }
-
-    /// [`Self::hash_exact`] of `self` alone, to combine with others in any
-    /// order.
-    fn hash_alone(&self) -> u64 {
-        let mut hasher = DefaultHasher::default();
-        self.hash_exact(&mut hasher);
-        hasher.finish()
     }
 }
 
@@ -1391,14 +1385,18 @@ impl Object {
             }
             // As a map key a heap is told apart by its address: the RefCell
             // lives inside the Rc<Object> allocation, so this is equivalent
-            // to hashing the outer Rc pointer.
+            // to hashing the outer Rc pointer. Exactly, by its elements in the
+            // order it keeps them, which is all that what it does depends on:
+            // of elements that compare equal, as `0.0` and `-0.0` do, the one
+            // pushed first is the one `min` gives.
             Self::MinHeap(h) => {
                 state.write_u8(13);
                 if exact {
                     let heap = h.borrow();
                     state.write_usize(heap.len());
-                    let hashes = heap.iter().map(|Reverse(value)| value.0.hash_alone());
-                    hash_unordered(state, hashes);
+                    for Reverse(value) in heap.iter() {
+                        value.0.hash_as(state, exact);
+                    }
                 } else {
                     (h as *const RefCell<BinaryHeap<Reverse<OrdValue>>>).hash(state);
                 }
@@ -1408,8 +1406,9 @@ impl Object {
                 if exact {
                     let heap = h.borrow();
                     state.write_usize(heap.len());
-                    let hashes = heap.iter().map(|value| value.0.hash_alone());
-                    hash_unordered(state, hashes);
+                    for value in heap.iter() {
+                        value.0.hash_as(state, exact);
+                    }
                 } else {
                     (h as *const RefCell<BinaryHeap<OrdValue>>).hash(state);
                 }
