@@ -18,7 +18,7 @@ let element = my_list.pop();
 print(element, my_list);  // 99 [1,2,4]
 ```
 
-The values of a list share one type. A list of values of different types, like `[1, "a"]`, has to say that it holds `Any`s, as `let xs: List<Any> = [1, "a"]` does (see [Values of different types](../types.md#values-of-different-types)). Number literals take the type of the other numbers: `[1, 2.5]` is a `List<Float>`.
+The values of a list share one type. To put values of different types in one list, like `[1, "a"]`, annotate it: `let xs: List<Any> = [1, "a"];` (see [Values of different types](../types.md#values-of-different-types)).
 
 ## Indexing
 
@@ -51,11 +51,8 @@ print(my_list.index(-1));   // 30
 print(my_list.index?(-9));  // None
 ```
 
-`get?(9)` is `None` because 9 is a valid index type but past the end, and
-`index(-1)` wraps from the end like `[]`.
-
-`index` behaves like the `[]` operator (wrap + error on out of bounds);
-`index?` is its non-throwing counterpart.
+`index` works like the `[]` operator, and `index?` gives `None` instead of an
+error.
 
 ## Slicing
 

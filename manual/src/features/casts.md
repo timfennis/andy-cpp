@@ -1,21 +1,8 @@
 # Casts
 
-The `as` operator asserts that a value has the given type:
-
-```ndc
-let values: Any = [1, 2];
-
-// values is an Any; the cast says it's a list of Ints, so the result
-// works with functions that expect a List<Int>. values still holds the
-// list, so a copy is cast (see "A container held by another name" below).
-let ints = values.clone() as List<Int>;
-print(ints.sum());  // 3
-```
-
-A cast is the way a value comes out of an `Any`. Anything goes into an
-`Any`, but an `Any` doesn't go where another type is expected, and no
-operator or function takes it unless it takes an `Any` (see [Getting a value
-out of an `Any`](../reference/types.md#getting-a-value-out-of-an-any)):
+A cast is how you get a value back out of an `Any`. Anything can go into an
+`Any`, but an `Any` can't be used where another type is expected (see
+[Getting a value out of an `Any`](../reference/types.md#getting-a-value-out-of-an-any)):
 
 ```ndc,fails
 let value: Any = 5;
@@ -23,111 +10,65 @@ value + 1
 // error[analysis]: No function called '+' found that matches the arguments 'Any, Int'
 ```
 
+The `as` operator says what type the value has. It checks that while the
+program runs:
+
 ```ndc
 let value: Any = 5;
 print((value as Int) + 1);  // 6
 ```
 
-A cast checks the value without converting it. `n as Float` is an error
-when `n` is an `Int`; use conversion functions like `float(n)` to change a
-value's type. A number literal takes the type the cast says, so `5 as Float`
-is the Float `5.0`.
-
-## Checking
-
-When the compiler can already prove the cast from the value's static type,
-the cast is free: no runtime check is emitted. Otherwise the value is
-checked at runtime, and a failed check raises an error at the cast site:
+A cast that turns out to be wrong stops the program with an error:
 
 ```ndc,fails
-let value: Any = ["a"];
-value as List<Int>
-// error[vm]: cannot cast List<String> to List<Int>
+let value: Any = "five";
+value as Int
+// error[vm]: cannot cast String to Int
 ```
 
-Checking a container inspects every element (and recurses into nested
-containers), so a cast costs one pass over the value. Empty containers
-conform to any element type: `[] as List<Int>` succeeds.
+A cast only checks the value, it doesn't convert it, so `n as Float` is an
+error when `n` is an `Int`. To turn one type into another, use functions like
+`float(n)`, `int(x)` and `string(x)`.
 
-A map's default value is checked against the value type too, since a
-missing-key lookup inserts it. A default *function*'s results can't be
-verified without calling it, so such a map only conforms when the value
-type is `Any`.
+## Casting a list or a map
 
-A function is checked against what its own type says: one that takes a
-`String` can't be a `Fn(Int) -> Int`. When what it returns isn't known until
-it runs, each call's result is checked:
-
-```ndc,fails
-fn text(x) => "s";             // its value takes and returns anything
-let value: Any = text;
-let f = value as Fn(Int) -> Int;
-f(1)
-// error[vm]: expected the function to return Int but it returned String
-```
-
-The analyser rejects casts between types that cannot share a value:
-
-```ndc,fails
-"foo" as Int
-// error[analysis]: invalid cast: String can never be Int
-```
-
-## A container held by another name
-
-A cast gives the value it's given, not a copy. For a list, map, deque or heap
-that means the cast's result and whatever else holds the container share it,
-and a write through one is seen through the other. The cast would give the
-container a second type, and a write that one type allows could break what the
-other says it holds. So a cast to a type with a container in it fails when the
-container is held by something else:
-
-```ndc,fails
-let words = "a b".split(" ");  // a List<String>
-let any: Any = words;
-let anything = any as List<Any>;
-// error[vm]: cannot cast to List<Any>: the list is also held by something else, which would still expect what it held before
-```
-
-Had it worked, `anything.push(1)` would have put an Int in `words`. A cast that
-the analyser proves, such as one to the type the value already has, gives no
-new type and isn't checked.
-
-The check counts what holds the container as the program runs, so it's
-conservative: anything else that holds it counts, even an `Any`, which couldn't
-write to it without a cast of its own, and a variable of a block that has
-ended. A cast straight out of a variable therefore takes a copy. A container
-that nothing else holds, such as what a call returns, needs none.
-
-Cast a copy instead. `clone` copies the container and `deepcopy` the
-containers in it too, which a cast also needs when it gives those a new type:
+A cast checks every element of a list, map or other container. It also gives
+the container a new type, so it refuses a container that a variable still
+holds: the variable would still expect the old type. Cast a copy instead, made
+with `clone`:
 
 ```ndc
-let values: List<Any> = [1, 2];
+let values: Any = [1, 2];
 let ints = values.clone() as List<Int>;
 print(ints.sum());  // 3
 ```
 
-`as?` fails the same way, as its `Some` would share the container too.
+```ndc,fails
+let values: Any = [1, 2];
+values as List<Int>
+// error[vm]: cannot cast to List<Int>: the list is also held by something else, which would still expect what it held before
+```
+
+A container that nothing else holds, such as what a function returns, can be
+cast without a copy.
+
+A list of `Any`s needs a cast too before you use a function that wants a list
+of something more specific, like `sum`:
+
+```ndc
+let values: List<Any> = [1, 2, 3];
+print((values.clone() as List<Int>).sum());  // 6
+```
 
 ## Testing a value's type with `as?`
 
-`value as? T` is the cast that doesn't fail: it is `Some(value)`, as a `T`,
-when the value is a `T`, and `None` when it isn't. Its type is `Option<T>`.
+`value as? T` is the cast that doesn't fail: it gives `Some(value)` when the
+value is a `T`, and `None` when it isn't.
 
 ```ndc
 let value: Any = 5;
 print(value as? Int);     // Some(5)
 print(value as? String);  // None
-```
-
-It checks a value the way `as` does, so a container is checked element by element:
-
-```ndc
-let mixed: List<Any> = [1, "a"];
-print(mixed as? List<Int>);  // None
-let ints: Any = [1, 2];
-print(ints.clone() as? List<Int>);  // Some([1,2])
 ```
 
 That makes it the way to ask what a value is:
@@ -149,18 +90,6 @@ print(describe([1]));  // something else
 
 ## Precedence
 
-`as` and `as?` bind tighter than binary operators and looser than unary operators
-and calls, so `a + b as Int` means `a + (b as Int)`. Method calls bind
-tighter than the cast: recovering an element type before a method call
-needs parentheses, as in `(values.keys as List<Int>).max()`. An `as?` cast
-needs them too before a method call on the option: `(value as? Int).is_some()`.
-
-A `<` after the cast type is read as a type argument list when the tokens
-that follow form one, and as a less-than comparison otherwise, so
-`n as Int < 10` compares while `xs as List<Int>` casts.
-
-## Limitations
-
-Checking an iterator's elements would consume it, so a runtime check against
-an element type other than `Any` fails. Cast a value into a typed collection
-before turning it into an iterator.
+`as` and `as?` bind tighter than binary operators, so `a + b as Int` means
+`a + (b as Int)`. Method calls bind tighter than the cast, so a method call on
+the result of a cast needs parentheses: `(value as? Int).is_some()`.

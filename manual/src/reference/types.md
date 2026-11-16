@@ -1,28 +1,10 @@
 # Types
 
-Values in Andy C++ carry their types at runtime, but you rarely have to write one down: the analyser works out the type of every expression before the program runs, and rejects code that can't work. Annotations on variables, parameters and return values are optional.
+Every value in Andy C++ has a type, but you rarely have to write one down. Before the program runs, Andy C++ works out the type of everything in it and reports code that can't work. Annotations on variables, parameters and return values are optional.
 
-## What the analyser works out
+## Mistakes found before the program runs
 
-Functions declared with `fn` are generic without saying so. Here the analyser works out that `compose` takes a function from some `B` to some `C` and a function from that `C` onwards:
-
-```ndc
-fn compose(f, g) => fn(x) => g(f(x));
-let shout = compose(to_upper, fn(s) => s ++ "!");
-let half = compose(len, fn(n) => n / 2.0);
-print(shout("hi"), half("four"));  // HI! 2.0
-```
-
-So it knows `len` and `to_upper` don't compose, without running anything:
-
-```ndc,fails
-fn compose(f, g) => fn(x) => g(f(x));
-compose(len, to_upper);
-// error: No function called 'compose' found that matches the arguments 'Fn(Iterable<Any>) -> Int, Fn(String) -> String'
-//   `compose` takes (Fn(B) -> C, Fn(C) -> A)
-```
-
-A mistake is found even in code that never runs, and the error leads you through the calls to the line that can't work. This program prints nothing:
+A mistake is found even in code that never runs, and the error points through the calls to the line that can't work. This program prints nothing:
 
 ```ndc,fails
 fn inc(x) => x + 1;
@@ -30,10 +12,10 @@ fn shout(s) => inc(s) ++ "!";
 print("hello");
 if false {
     shout("a");  // error: No function called '+' found that matches the arguments 'String, Int'
-}                //   `shout` calls `inc` here, and `inc` needs `x + 1`
+}
 ```
 
-A lambda knows what it's given:
+An anonymous function knows the types of its parameters:
 
 ```ndc,fails
 struct Player { name: String, score: Int }
@@ -42,7 +24,7 @@ players.map(fn(p) => p.score ++ " points");
 // error: No function called '++' found that matches the arguments 'Int, String'
 ```
 
-An empty list learns what it holds from how it's used:
+An empty list gets its type from what you put in it:
 
 ```ndc,fails
 let xs = [];
@@ -50,32 +32,7 @@ xs.push(1);
 xs.push("two");  // error: No function called 'push' found that matches the arguments 'List<Int>, String'
 ```
 
-When nothing in the program says what type something is, its type is `Unknown`: a type that's no other type and has no values. That's what an empty `[]`, `%{}` or `None` holds when nothing stores anything in it, what `Deque()` holds when nothing is pushed onto it, and the parameter of a function that's never called. A function that takes any type takes it, so `print([])` prints `[]`, but an overload that takes lists of a particular type doesn't, not even one that takes a `List<Any>`. Where that would pick one, an annotation has to say what the type is:
-
-```ndc,fails
-fn describe(xs: List<Int>) => "ints";
-fn describe(xs: List<String>) => "strings";
-let ints: List<Int> = [];
-describe(ints);  // fine: "ints"
-describe([]);    // error: No function called 'describe' found that matches the arguments 'List<Unknown>'
-```
-
-An error also shows a type that nothing has said yet as `Unknown`, so `Any` in an error is always one the program wrote:
-
-```ndc,fails
-let xs = [];
-let n: Int = xs;
-// error[analysis]: mismatched types: found List<Unknown> but expected Int
-```
-
-And the types pick which overload of a function is meant. A generic function is compiled once for each set of types it's called with, so `signum` below is the `Int` version in one call and the `Float` version in the other:
-
-```ndc
-print(["a b", "c d"].map(split));  // [["a","b"],["c","d"]]
-
-fn signs(xs) => xs.map(signum);
-print(signs([3, -2]), signs([0.5, -1.5]));  // [1,-1] [1.0,-1.0]
-```
+If nothing is put in it, annotate it: `let xs: List<Int> = [];`.
 
 ## The types
 
@@ -107,92 +64,12 @@ let table: Map<String, Int> = %{"a": 1, "b": 2};
 let maybe: Option<String> = Some("hi");
 let pair: Tuple<Int, String> = (1, "hi");
 let pair2: (Int, String) = (1, "hi");  // tuple shorthand
-
-print(maybe, pair2);  // Some("hi") (1,"hi")
-```
-
-Nested generics work too — the parser handles the `>>` ambiguity for you:
-
-```ndc
 let grid: List<List<Int>> = [[1, 2], [3, 4]];
-print(grid);  // [[1,2],[3,4]]
+
+print(maybe, pair2, grid);  // Some("hi") (1,"hi") [[1,2],[3,4]]
 ```
 
-### Any kind of sequence
-
-A parameter without an annotation takes any kind of sequence its body can iterate. The function is compiled once for each kind it's called with:
-
-```ndc
-fn total(xs) {
-    let sum = 0;
-    for x in xs {
-        sum += x;
-    }
-    sum
-}
-print(total([1, 2]), total((3, 4)), total(1..4));   // 3 7 6
-```
-
-### Element types are exact
-
-A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options and the other containers. To change a container's element type, cast a copy of it. A cast refuses a container that something else still holds, for the same reason (see [Casts](../features/casts.md#a-container-held-by-another-name)):
-
-```ndc,fails
-let words = "a b".split(" ");               // List<String>
-let anything = words.clone() as List<Any>;  // fine: checked as the program runs
-let wrong: List<Any> = words;               // error: found List<String> but expected List<Any>
-```
-
-A function type is exact too, with one exception for `Any`: a function that takes an `Any` can be used where one that takes something narrower is expected, as it takes whatever it's given, and any function fits where one returning `Any` is expected:
-
-```ndc
-fn show(x: Any) => "?";
-print(["a", "b"].map(show));        // ["?","?"]
-let inc: Fn(Int) -> Any = fn(x: Int) => x + 1;
-print(inc(1));                      // 2
-```
-
-### Values that have an order
-
-`<`, `<=`, `>`, `>=`, `<=>` and `>=<` compare two values of the same kind that has an order: numbers of any kind, an `Int` with a `Float` too, strings, booleans, and lists and tuples of those. Values of two different kinds have no order, and neither do maps, deques, options, structs and functions:
-
-```ndc,fails
-print(1 < 1.5, "a" < "b", (1, "b") < (1, "c"));
-print(1 < "a");
-// error[analysis]: No function called '<' found that matches the arguments 'Int, String'
-```
-
-A list or tuple of values without an order, such as a list of maps, still passes as one, and comparing two of them is an error when the program runs.
-
-### Values of different types
-
-The elements of a list, the keys and the values of a map (its default too), the branches of an `if` and the values a function returns have one type. Number literals take the type of the numbers next to them, and an empty list the type of what's next to it:
-
-```ndc
-let a = if true { 1 } else { 2.5 };   // Float
-let c = if true { [] } else { [1] };  // List<Int>
-let d = [1, 2.5];                     // List<Float>
-print(a, c, d);                       // 1.0 [] [1.0,2.5]
-```
-
-Values that share no type can only be `Any`s, and that has to be said where they meet:
-
-```ndc,fails
-let mixed = [1, "a"];  // error: values of different types: Int and String share no type
-```
-
-An annotation that says `Any` there, or a parameter that does, makes them `Any`s:
-
-```ndc
-let b: Any = if true { 1 } else { "a" };
-let xs: List<Any> = [1, "a"];
-let m: Map<String, Any> = %{"a": 1, "b": "two"};
-print(b, xs, m["b"]);  // 1 [1,"a"] two
-```
-
-An `Any` around the whole value doesn't say what the elements are, so `let x: Any = [1, "a"]` is still an error: write `List<Any>`. An `if` without an `else` is `()`, whatever its branch is, and a branch that never finishes, like one that reaches a `return`, `break` or `panic(…)`, takes the other branch's type.
-
-[Struct](./types/struct.md) names are type names like any other, including inside generics:
+[Struct](./types/struct.md) names are type names like any other:
 
 ```ndc
 struct Point { x: Int, y: Int }
@@ -202,16 +79,28 @@ let points: List<Point> = [Point(1, 2), Point(3, 4)];
 print(points.map(manhattan));  // [3,7]
 ```
 
-A struct name refers to the struct declared earlier in an enclosing scope; it cannot be
-used before (or inside) its own declaration, and it goes out of scope together with the
-block or function that declared it. See [Struct](./types/struct.md) for the scoping
-rules.
+## Values of different types
 
-> **Note:** every value fits `Any`, so an `Any`-annotated binding will accept anything. A value is never an `Any` because its type couldn't be inferred: what nothing says the type of is `Unknown` (see above), and values of different types are an error (see [Values of different types](#values-of-different-types)). A parameter of a function declared in the program gets the type of each call's argument instead (see [Generic functions](./types/function.md#generic-functions)). There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
+The elements of a list, the keys and values of a map, the branches of an `if`, and the values a function returns all share one type. Numbers mix: `[1, 2.5]` is a list of Floats. Values that share no type are an error:
 
-### Getting a value out of an `Any`
+```ndc,fails
+let mixed = [1, "a"];  // error: values of different types: Int and String share no type
+```
 
-Anything goes into an `Any`, but getting a value back out takes a [cast](../features/casts.md): `value as Int` checks as the program runs that the value is an Int, and `value as? Int` gives an `Option<Int>`. An `Any` doesn't go where another type is expected without one:
+To mix them, say that they are `Any`s:
+
+```ndc
+let b: Any = if true { 1 } else { "a" };
+let xs: List<Any> = [1, "a"];
+let m: Map<String, Any> = %{"a": 1, "b": "two"};
+print(b, xs, m["b"]);  // 1 [1,"a"] two
+```
+
+Write the `Any` where the list or map is made: a list made as a `List<String>` can't be used as a `List<Any>` later.
+
+## Getting a value out of an `Any`
+
+Anything can go into an `Any`, but to get a value back out you need a [cast](../features/casts.md). `value as Int` checks that the value is an Int, and `value as? Int` gives an `Option<Int>`:
 
 ```ndc,fails
 let a: Any = 5;
@@ -220,32 +109,9 @@ let n: Int = a;  // error: mismatched types: found Any but expected Int
 
 ```ndc
 let a: Any = 5;
-let n: Int = a as Int;  // checked: a holds an Int
+let n: Int = a as Int;
 print(n + 1);           // 6
 print(a as? String);    // None
 ```
 
-The same goes for assigning it, passing it to a function, returning it from one, iterating over it, calling it, and using an operator on it: each needs something that takes an `Any`, or a cast.
-
-```ndc,fails
-let a: Any = 5;
-a + 1  // error: No function called '+' found that matches the arguments 'Any, Int'
-```
-
-A call with an `Any` argument only uses an overload that takes an `Any` there: one whose parameter is `Any`, or has no annotation, which is then an `Any` in its body. A cast picks another:
-
-```ndc
-fn describe(x: Int) => "an int";
-fn describe(x: Any) => "something";
-let a: Any = 5;
-print(describe(a), describe(a as Int));  // something an int
-```
-
-Functions like `print`, `string` and `==` take a value of any type as it is, so they take an `Any` too.
-
-Indexing a value with `[]` looks the index up in it, so the index has the type its keys or positions have: a key of another type is an error rather than a lookup that would store a map's default under it.
-
-```ndc,fails
-let counts: Map<String, Int> = %{:fn() => 0};
-counts[5] += 1;  // error: No function called '[]' found that matches the arguments 'Map<String, Int>, Int'
-```
+The same goes for operators and functions: `a + 1` needs `(a as Int) + 1`. Functions that take any value, like `print`, `string` and `==`, take an `Any` as it is.

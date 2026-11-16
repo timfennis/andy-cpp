@@ -1,6 +1,6 @@
 # Tuple
 
-Tuples are similar to [lists](../list.md), but you cannot change their elements after you create them.
+Tuples are similar to [lists](./list.md), but you cannot change their elements after you create them.
 
 ```ndc
 let my_tuple = (1,2,3);
@@ -21,7 +21,7 @@ let my_tuple = (1,2,3);
 my_tuple[0] = 99; // ERROR
 ```
 
-An index written as a number, like `t[1]` or `t[-1]`, picks one element, and has that element's type. One past the end is an error before the program runs:
+The elements of a tuple can have different types. An index written as a number, like `t[1]` or `t[-1]`, gives that element with its own type. An index in a variable, like `t[i]`, could pick any of them, so it gives an `Any` that you have to [cast](../../features/casts.md): `t[i] as Int`.
 
 ```ndc
 let point = ("origin", 0, 0);
@@ -30,39 +30,16 @@ let y: Int = point[-1];
 print(name, y);  // origin 0
 ```
 
-```ndc,fails
-let point = ("origin", 0, 0);
-print(point[3]);  // error: Index 3 is out of bounds for a tuple of 3 elements
-```
-
-An index computed as the program runs, like `t[i]`, could pick any element, so it gives `Any`, which takes a [cast](../../features/casts.md) to say what it is: `t[i] as Int`.
-
 Create a 1-element tuple by adding a trailing comma:
 
 ```ndc
 print((1,).len());  // 1
 ```
 
-## Copy-on-write
-
-Tuples use copy-on-write. If an operation looks like it modifies a tuple, such as appending elements, Andy C++ keeps the original tuple and creates a new one for the updated value.
-
-
-```ndc,fails
-let a = (1,2,3);
-let b = a;
-b ++= (4,5);
-
-// A remains the same
-assert_eq(a, (1,2,3));
-
-// B was copied and (4,5) was appended
-assert_eq(b, (1,2,3,4,5));
-```
-
 ## Operators
 
-{{#include ../../snippets/list-operators.md}}
+Like lists, tuples support `in`, `not in`, `==`, `!=`, `<>` and the comparisons `<`, `<=`, `>` and `>=`. Other
+operators work on each element, as described below.
 
 ## Vectorization
 
@@ -76,23 +53,16 @@ print((1, 2) + 5);                // (6,7)
 print(("a", "b") ++ ("c", "d"));  // ("ac","bd")
 ```
 
-Vectorization only kicks in for operator syntax (`a + b`, `-x`, `a ++ b`).
-Regular function calls never broadcast, so `f((1, 2, 3))` passes the whole
-tuple to `f` and does not call `f` once per element. Neither do comparisons
-(`<`, `<=`, `>`, `>=`, `<=>`, `>=<`): they compare two tuples of the same
-length as a whole, element by element from the first, and give one result:
+This only works for operators, not for function calls: `f((1, 2, 3))` passes
+the whole tuple to `f`. Comparisons like `<` and `<=>` don't work element by
+element either: they compare two tuples as a whole and give one result:
 
 ```ndc
 print((1, 2) < (1, 3), (2, 0) <=> (1, 9));  // true 1
 ```
 
-Mixed-element tuples or length mismatches error at compile time rather than
-silently producing wrong results:
+Tuples of different lengths are an error:
 
 ```ndc,fails
 (1, 2, 3) + (4, 5)  // ERROR: no overload accepts those argument types
-```
-
-```ndc,fails
-(1, "a") + (2, "b")  // ERROR: no `+(String, String)` overload
 ```

@@ -20,9 +20,7 @@ values[0] += 10;
 print(values);  // [11,2,3]
 ```
 
-This works even when reading the location produces a new value rather than a
-reference, such as a character of a string or a slice of a list. The updated
-value is always stored back into the container:
+This works for a character of a string and for a slice of a list too:
 
 ```ndc
 let text = "ab";
@@ -34,41 +32,21 @@ items[0..1] ++= [3];
 print(items);  // [1,3,2]
 ```
 
-The target, index, and right-hand side are each evaluated exactly once, in
-source order. The augmented assignment expression itself evaluates to `()`.
+## Types
 
-## Type checking
-
-`a op= b` is checked like `a = a op b`: the operator has to take both operands,
-and what it returns has to fit `a`:
+`a op= b` is checked like `a = a op b`: the operator has to take both values, and its result has to fit the type of `a`:
 
 ```ndc,fails
 let values = [1];
 values ++= ["two"]; // error: No function called '++' found that matches the arguments 'List<Int>, List<String>'
 ```
 
-Annotate the target with `Any` to opt into mixed contents:
+Annotate the target with `Any` to allow mixed contents:
 
 ```ndc
 let mixed: List<Any> = [1];
 mixed ++= ["two"];
 print(mixed);  // [1,"two"]
-```
-
-An operand of type `Any` takes a [cast](./casts.md) like anywhere else, as
-the operator has to take it:
-
-```ndc,fails
-fn opaque(x) -> Any => x;
-let values = [1];
-values ++= opaque([2]); // error: No function called '++' found that matches the arguments 'List<Int>, Any'
-```
-
-```ndc
-fn opaque(x) -> Any => x;
-let values = [1];
-values ++= opaque([2]) as List<Int>;
-print(values);  // [1,2]
 ```
 
 ## Optimization
