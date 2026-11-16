@@ -196,15 +196,10 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     ];
 
     for operation in OPERATIONS {
-        // A call that never happens, as `(return 5) + 1`, is typed by the
-        // overload declared last that takes the other operand. Declaring the
-        // Int operands last makes that the other operand's kind: an Int here.
-        for (left_mode, right_mode) in NumericMode::ALL.into_iter().rev().flat_map(|left| {
-            NumericMode::ALL
-                .map(|right| (left, right))
-                .into_iter()
-                .rev()
-        }) {
+        for (left_mode, right_mode) in NumericMode::ALL
+            .into_iter()
+            .flat_map(|left| NumericMode::ALL.map(|right| (left, right)))
+        {
             let output_mode = left_mode.promote(right_mode);
             let parameters = vec![left_mode.static_type(), right_mode.static_type()];
             let (name, documentation) = (operation.name(), operation.documentation());

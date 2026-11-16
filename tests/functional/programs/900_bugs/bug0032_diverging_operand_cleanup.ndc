@@ -1,16 +1,18 @@
 // `break`/`continue` inside a partially evaluated expression used to leak
 // the pending operands on the stack (unboundedly for `continue`, corrupting
 // the iterator in for loops). They now pop back to the loop's level first.
+// `add` has one overload, which what `break` gives can pick.
+fn add(a: Int, b: Int) -> Int { a + b }
 let n = 0;
 for x in [1, 2, 3] {
     n += 1;
-    let y = x + continue;
+    let y = add(x, continue);
 }
 assert_eq(n, 3);
 
 // Callee and arguments are discarded; print is never called.
 while true {
-    print(1 + break);
+    print(add(1, break));
 }
 
 // Collection literal elements are discarded; push is never called.
@@ -23,7 +25,7 @@ assert_eq(acc, []);
 // Index-assignment scaffolding (setter, container, index) is discarded.
 let map = %{};
 while true {
-    map[1 + break] = 9;
+    map[add(1, break)] = 9;
 }
 assert_eq(map.len(), 0);
 

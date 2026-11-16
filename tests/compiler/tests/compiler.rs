@@ -563,14 +563,16 @@ fn member_assignment_calls_the_setter_with_the_receiver_and_the_value() {
     );
 }
 
-// while true { print(1 + break); }
+// fn add(a: Int, b: Int) -> Int { a + b } while true { print(add(1, break)); }
 //
-// The break sits inside a partially compiled call (`print` and `+` callees
+// The break sits inside a partially compiled call (`print` and `add` callees
 // and the constant `1` are already on the stack), so it pops those three
 // pending operands before jumping out of the loop.
 #[test]
 fn break_pops_the_operands_pending_in_its_expression() {
-    let ops = compile_with_stdlib_unoptimized("while true { print(1 + break); }");
+    let ops = compile_with_stdlib_unoptimized(
+        "fn add(a: Int, b: Int) -> Int { a + b } while true { print(add(1, break)); }",
+    );
     assert!(
         ops.windows(4)
             .any(|w| matches!(w, [Pop, Pop, Pop, Jump(_)])),

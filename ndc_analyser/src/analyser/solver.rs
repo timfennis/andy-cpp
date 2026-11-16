@@ -1725,8 +1725,9 @@ impl Analyser {
     /// says, the one more specific than the others. A variadic overload is
     /// the least specific. Overloads none of which is more specific than the
     /// others tie, and the call is ambiguous, unless they take the same
-    /// parameters, as a redefinition does. A call that never happens, as one
-    /// given what `return` gives, takes the first.
+    /// parameters, as a redefinition does. What `return` gives fits any
+    /// parameter, so it doesn't pick between overloads: `(return 5) + 1`
+    /// is ambiguous, as it is in Rust.
     fn pick_overload(&mut self, candidates: &Candidates, arguments: &[StaticType]) -> Pick {
         for group in self.overloads().reachable_groups(candidates) {
             let viable = group
@@ -1736,9 +1737,6 @@ impl Analyser {
             let Some(&first) = viable.first() else {
                 continue;
             };
-            if arguments.contains(&StaticType::Never) {
-                return Pick::One(first);
-            }
             let fixed = viable
                 .iter()
                 .copied()
