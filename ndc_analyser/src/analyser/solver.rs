@@ -1414,7 +1414,7 @@ impl Analyser {
     /// Whether `call` is an arithmetic operator or a comparison, whose
     /// operands are numbers of one type.
     fn is_number_operator(call: &CallConstraint) -> bool {
-        call.kind == CallKind::Operator
+        matches!(call.kind, CallKind::Operator | CallKind::Comparison)
             && match call.arguments.len() {
                 1 => call.name == "-",
                 2 => matches!(

@@ -1,0 +1,7 @@
+// A comparison compares whole values: tuples it has no overload for, as
+// tuples of two kinds of number, are a type error, not a tuple of what each
+// pair of elements gives, as `+` would be.
+// expect-error: No function called '<' found that matches the arguments 'Tuple<Int, Int>, Tuple<Float, Float>'
+let a: (Int, Int) = (2, 0);
+let b: (Float, Float) = (1.0, 1.0);
+print(a < b);
