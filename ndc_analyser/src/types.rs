@@ -433,47 +433,57 @@ impl TypeVars {
         holds_a_number
     }
 
-    /// The unsettled types of the number literals in `typ`, and of the
-    /// literals in it that hold only numbers, as the elements of `[1, 2.5]`
-    /// do, with the literals they hold. A literal that also holds what isn't
-    /// a number, as `if c { 1 } else { "a" }` does, isn't among them.
-    pub(crate) fn number_literals_in(&self, typ: &StaticType) -> AHashSet<TypeVar> {
-        let mut found = AHashSet::new();
-        let mut unseen = self
-            .unsettled(typ)
-            .into_iter()
-            .filter(|&var| self.is_literal(var))
-            .collect::<Vec<_>>();
+    /// The unsettled literals in `typ` and those they hold, at any depth,
+    /// each with whether a number literal is among what it holds, at any
+    /// depth, or is it: in `[(1, "a")]`, the list's elements, and the `1`.
+    pub(crate) fn literal_tree(&self, typ: &StaticType) -> Vec<(TypeVar, bool)> {
+        let mut tree = Vec::new();
+        let mut seen = AHashSet::new();
+        let mut unseen = self.unsettled_literals_of(typ);
         while let Some(var) = unseen.pop() {
-            if self.holds_only_numbers(var) && found.insert(var) {
-                unseen.extend(self.held_literals(var));
+            if !seen.insert(var) {
+                continue;
             }
-        }
-        found
-    }
-
-    /// Whether the literal `var` holds only numbers, written or of a number
-    /// type, through the literals it holds.
-    fn holds_only_numbers(&self, var: TypeVar) -> bool {
-        let mut seen = AHashSet::from_iter([var]);
-        let mut unseen = vec![var];
-        while let Some(var) = unseen.pop() {
+            tree.push(var);
             for bound in &self.bounds[var.0 as usize] {
-                let Bound::Holds(held, _, _) = bound else {
-                    continue;
-                };
-                match self.resolve(held) {
-                    StaticType::Var(held) if self.is_literal(held) => {
-                        if seen.insert(held) {
-                            unseen.push(held);
-                        }
-                    }
-                    StaticType::Int | StaticType::Float | StaticType::Number => {}
-                    _ => return false,
+                if let Bound::Holds(held, _, _) = bound {
+                    unseen.extend(self.unsettled_literals_of(held));
                 }
             }
         }
-        true
+        tree.iter()
+            .map(|&var| (var, self.holds_a_number(var)))
+            .collect()
+    }
+
+    /// The unsettled literals among the parts of `typ`.
+    fn unsettled_literals_of(&self, typ: &StaticType) -> Vec<TypeVar> {
+        self.unsettled(typ)
+            .into_iter()
+            .filter(|&var| self.is_literal(var))
+            .collect()
+    }
+
+    /// Whether the literal `var` is a number literal's type, or holds one
+    /// at any depth.
+    fn holds_a_number(&self, var: TypeVar) -> bool {
+        let mut seen = AHashSet::from_iter([var]);
+        let mut unseen = vec![var];
+        while let Some(var) = unseen.pop() {
+            if self.is_number(var) {
+                return true;
+            }
+            for bound in &self.bounds[var.0 as usize] {
+                if let Bound::Holds(held, _, _) = bound {
+                    for part in self.unsettled_literals_of(held) {
+                        if seen.insert(part) {
+                            unseen.push(part);
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Whether a part of `typ` is the type of a number literal, settled or

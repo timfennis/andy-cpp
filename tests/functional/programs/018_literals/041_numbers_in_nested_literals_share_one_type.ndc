@@ -1,0 +1,6 @@
+// The numbers of lists and tuples written together in one literal share
+// one type, at any depth, when they're stored.
+// expect-output: [[1.0],[2.5]] [(1.0,"a"),(2.5,"b")]
+let grid = [[1], [2.5]];
+let pairs = [(1, "a"), (2.5, "b")];
+print(grid, pairs);
