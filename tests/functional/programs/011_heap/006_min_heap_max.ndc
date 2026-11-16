@@ -1,7 +1,0 @@
-// A heap's elements are iterable, so `max` finds a min-heap's largest.
-// expect-output: 6
-let heap = MinHeap();
-heap.push(5);
-heap.push(4);
-heap.push(6);
-print(heap.max);

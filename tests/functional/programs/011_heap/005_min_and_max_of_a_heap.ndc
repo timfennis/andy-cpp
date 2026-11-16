@@ -1,0 +1,10 @@
+// `min` and `max` find a heap's smallest and largest element, whichever
+// end the heap keeps on top.
+// expect-output: 4 6 4 6
+let min_heap = MinHeap();
+let max_heap = MaxHeap();
+for x in [5, 4, 6] {
+    min_heap.push(x);
+    max_heap.push(x);
+}
+print(min_heap.min, min_heap.max, max_heap.min, max_heap.max);

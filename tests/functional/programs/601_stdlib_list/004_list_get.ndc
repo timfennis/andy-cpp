@@ -1,6 +1,8 @@
 let list = [10, 20, 30];
 
-// in-bounds returns Some
+// `get` returns the element, `get?` an Option
+assert_eq(list.get(0), 10);
+assert_eq(list.get(2), 30);
 assert_eq(list.get?(0), Some(10));
 assert_eq(list.get?(2), Some(30));
 
