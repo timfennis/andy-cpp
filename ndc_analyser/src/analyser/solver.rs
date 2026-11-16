@@ -7,7 +7,6 @@ use super::function_values::{Choice, FunctionValue};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
 use crate::types::TypeVars;
-use ahash::{AHashMap, AHashSet};
 use itertools::Itertools;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
@@ -15,16 +14,6 @@ use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
 use std::collections::BTreeSet;
 use std::rc::Rc;
-
-/// Whether a waiting call can still take its arguments.
-enum Fit {
-    /// Its overload is known and takes them.
-    Picked,
-    /// Some overload might.
-    Maybe,
-    /// None can.
-    No,
-}
 
 /// What a call can commit to before its arguments are fully known.
 pub(super) enum EarlyOverload {
@@ -206,6 +195,17 @@ pub(super) enum EarlyPick {
     },
 }
 
+/// What [`Analyser::type_literal_operands`] did with an operator's operands.
+enum LiteralOperands {
+    /// None is a number literal it types.
+    None,
+    /// It gave a literal the other operand's type: the call can be tried
+    /// again.
+    Typed,
+    /// They're literals whose type isn't known yet: the call waits for it.
+    Wait,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct CallConstraint {
     site: CallSite,
@@ -288,6 +288,11 @@ impl Analyser {
         }
         call.result = self.vars.fresh(StaticType::Any);
         let result = call.result.clone();
+        // Arithmetic on literals gives a literal of their type: `-1` and
+        // `1 + 1` are Floats in `if c { 2.5 } else { -1 }`.
+        if let Some(literal) = self.literal_arithmetic(&call) {
+            self.vars.unify(&result, &literal);
+        }
         self.wait(Constraint::Call(call));
         result
     }
@@ -623,11 +628,13 @@ impl Analyser {
 
     /// Solves what waits on the variables made since `first`, which nothing
     /// outside the code they were made in can settle. Literals take their
-    /// defaults first. Then what a default rule can decide is decided by it:
-    /// a call commits to its narrowest overload, `a op= b` keeps the type of
-    /// `b`, and a branch of an `if` takes the other branch's type. What's
-    /// left gets its fallbacks, oldest constraint first. Constraints that wait only on
-    /// older variables keep waiting.
+    /// defaults first. A branch of an `if` that's still unknown is the other
+    /// branch's type. Then what empty literals hold takes its default, all
+    /// at once: each default depends only on the value it's for, so the
+    /// order the calls are solved in can't change it. What's left gets its
+    /// fallbacks,
+    /// oldest constraint first. Constraints that wait only on older
+    /// variables keep waiting.
     pub(super) fn settle_waiting(&mut self, first: usize) {
         // Each constraint is checked for a default rule once, and again only
         // after something it waits on changed.
@@ -644,13 +651,15 @@ impl Analyser {
             }
             while let Some(serial) = unchecked.pop_first() {
                 let vars = self.waits_on_vars_since(serial, first);
-                if !vars.is_empty()
-                    && (self.default_to_narrowest(serial)
-                        || self.default_to_operand(serial)
-                        || self.default_to_branch(serial, &vars))
-                {
+                if !vars.is_empty() && self.default_to_branch(serial, &vars) {
                     unchecked.extend(self.solve_waiting_and_report());
                 }
+            }
+            let contents = self.vars.unsettled_contents(first);
+            if !contents.is_empty() {
+                self.vars.settle_contents(&contents);
+                unchecked.extend(self.solve_waiting_and_report());
+                continue;
             }
             let next = self
                 .waiting
@@ -679,10 +688,9 @@ impl Analyser {
     }
 
     /// Settles the types of the literals that `belongs` says to that nothing
-    /// settled, and returns whether it settled any. Each takes the first of
-    /// its defaults that every waiting call it's in can still take: in
-    /// `let total = 0; total += 2.5`, `+` with a Float can't give an Int
-    /// back to `total`, so `0` is a Float.
+    /// settled, and returns whether it settled any. Each takes its first
+    /// default, which depends only on the literal, never on the calls
+    /// waiting on it: `1` is an Int, and `[1, 2.5]` holds Floats.
     pub(super) fn default_literals(
         &mut self,
         belongs: impl Fn(&TypeVars, TypeVar) -> bool,
@@ -698,14 +706,7 @@ impl Analyser {
                 let Some(defaults) = self.vars.literal_defaults(var) else {
                     continue;
                 };
-                let fits = defaults.iter().position(|default| {
-                    let snapshot = self.vars.snapshot();
-                    let fits = self.literal_fits_as(var, default, &holders);
-                    self.vars.rollback(snapshot);
-                    fits
-                });
-                // When none fits, the first one says best what's wrong.
-                let default = &defaults[fits.unwrap_or(0)];
+                let default = &defaults[0];
                 let holders_of_var = holders
                     .get(&var)
                     .into_iter()
@@ -776,52 +777,6 @@ impl Analyser {
         self.vars.settle_literal(var, default);
     }
 
-    /// Settles the literal `var` as `default`, and returns whether the
-    /// waiting calls on it still fit, and those on the literals that hold
-    /// it, `holders` says which, with each settled as one of its own
-    /// defaults: in `let x = n[0]; x = 0.5` on `n = [1]`, `n`'s element type
-    /// holds the `1`, and `[]` gives a Float only if it's a Float. The
-    /// other values those hold take the same type, as the values of a
-    /// literal have one type when they can: `[1, 2]` holds Ints or Floats,
-    /// not one of each.
-    fn literal_fits_as(
-        &mut self,
-        var: TypeVar,
-        default: &StaticType,
-        holders: &AHashMap<TypeVar, Vec<TypeVar>>,
-    ) -> bool {
-        let holders_of_var = holders
-            .get(&var)
-            .into_iter()
-            .flatten()
-            .copied()
-            .filter(|&holder| self.vars.is_literal(holder))
-            .collect::<Vec<_>>();
-        let Some(settled) = self.settle_with_fellows(var, default, &holders_of_var) else {
-            return false;
-        };
-        if !self.calls_still_fit(&settled) {
-            return false;
-        }
-        holders_of_var.into_iter().all(|holder| {
-            if !self.vars.is_literal(holder) {
-                return true;
-            }
-            // One that still waits for another literal is checked with it.
-            let Some(defaults) = self.vars.literal_defaults(holder) else {
-                return true;
-            };
-            defaults.iter().any(|default| {
-                let snapshot = self.vars.snapshot();
-                let fits = self.literal_fits_as(holder, default, holders);
-                if !fits {
-                    self.vars.rollback(snapshot);
-                }
-                fits
-            })
-        })
-    }
-
     /// Settles the literal `var` as `default`, and the other literals that
     /// `holders` hold too where they can take it, as the values of `[1, 2]`
     /// have one type. Returns the literals it settled, or `None` if `var`
@@ -849,198 +804,6 @@ impl Analyser {
         Some(settled)
     }
 
-    /// Whether the waiting calls that wait on `vars` can still take their
-    /// arguments, and give back what's expected of them, together: in
-    /// `let x = xs[0] + 0.5; xs.push(x)` on `xs = [1]`, `+` gives a Float
-    /// when the `1` is an Int, which `push` then can't take. A call whose
-    /// overload is known says what it gives back, so the calls that wait
-    /// on that are checked too, and the others again.
-    fn calls_still_fit(&mut self, vars: &[TypeVar]) -> bool {
-        let mut serials = Vec::new();
-        let mut seen = AHashSet::new();
-        for var in vars {
-            for &watcher in self.watchers.get(var).into_iter().flatten() {
-                if seen.insert(watcher) {
-                    serials.push(watcher);
-                }
-            }
-        }
-        let mut picked = AHashSet::new();
-        loop {
-            let mut learned = false;
-            let mut next = 0;
-            while let Some(&serial) = serials.get(next) {
-                next += 1;
-                if picked.contains(&serial) {
-                    continue;
-                }
-                let Some(Waiting { constraint, .. }) = self.waiting.get(&serial).cloned() else {
-                    continue;
-                };
-                let reached = constraint
-                    .inputs()
-                    .iter()
-                    .chain(constraint.outputs())
-                    .flat_map(|typ| self.vars.unsettled(typ))
-                    .collect::<Vec<_>>();
-                let fit = match &constraint {
-                    Constraint::Call(call) => self.call_still_fits(call),
-                    Constraint::Join { types, .. } => self.join_still_fits(types),
-                    _ => continue,
-                };
-                match fit {
-                    Fit::No => return false,
-                    Fit::Maybe => {}
-                    Fit::Picked => {
-                        picked.insert(serial);
-                        learned = true;
-                        for var in reached {
-                            for &watcher in self.watchers.get(&var).into_iter().flatten() {
-                                if seen.insert(watcher) {
-                                    serials.push(watcher);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if !learned {
-                return true;
-            }
-        }
-    }
-
-    /// Whether some overload of `call` takes its arguments, as far as
-    /// they're known, and returns what fits its result. Once they're
-    /// known, the call gets the overload that resolution picks, scope by
-    /// scope, so only that one counts, and what it binds is kept:
-    /// `[](Any, Any)` takes `xs[0]` but loses to `[](List<T>, Int) -> T`.
-    fn call_still_fits(&mut self, call: &CallConstraint) -> Fit {
-        let arguments = call
-            .arguments
-            .iter()
-            .map(|argument| self.vars.resolve(argument))
-            .collect::<Vec<_>>();
-        if Self::operand_could_be_a_tuple(call.kind, &arguments) {
-            return Fit::Maybe;
-        }
-        if arguments.iter().all(|argument| !argument.has_vars())
-            && let Binding::Resolved(Candidate::Scalar(symbol)) = self
-                .overloads()
-                .resolve_call(&call.candidates, &arguments, call.kind)
-                .binding
-        {
-            if self.takes_a_number_as_a_fallback(symbol, &call.candidates, &arguments) {
-                return Fit::No;
-            }
-            let snapshot = self.vars.snapshot();
-            if self.overload_fits(symbol, &arguments, &call.result) {
-                return Fit::Picked;
-            }
-            self.vars.rollback(snapshot);
-            return Fit::No;
-        }
-        let reachable = self.overloads().reachable_symbols(&call.candidates);
-        let fits = reachable.into_iter().any(|symbol| {
-            let snapshot = self.vars.snapshot();
-            let fits = self.overload_fits(symbol, &arguments, &call.result);
-            self.vars.rollback(snapshot);
-            fits
-        });
-        if fits { Fit::Maybe } else { Fit::No }
-    }
-
-    /// Whether the branches of a waiting join, `[a, b, result]`, can still
-    /// be one type: in `if c { 2.5 } else { -1 }`, the `-` gives an Int
-    /// when the `1` is an Int, which the Float can't join. Branches of
-    /// different types are an `Any` where one is expected.
-    fn join_still_fits(&mut self, [a, b, result]: &[StaticType; 3]) -> Fit {
-        let (a, b) = (self.vars.resolve(a), self.vars.resolve(b));
-        let unknown =
-            |typ: &StaticType| matches!(typ, StaticType::Var(var) if !self.vars.is_literal(*var));
-        if unknown(&a)
-            || unknown(&b)
-            || matches!(a, StaticType::Never)
-            || matches!(b, StaticType::Never)
-            || self.vars.resolve(result) == StaticType::Any
-        {
-            return Fit::Maybe;
-        }
-        if self.vars.unify(&a, &b) && self.vars.bind_argument(result, &a) {
-            Fit::Picked
-        } else {
-            Fit::No
-        }
-    }
-
-    /// Whether `symbol` takes a number among `arguments` through an `Any`
-    /// parameter where another of `candidates` in its scope takes a number
-    /// type or a type parameter, which makes `symbol` a fallback that a
-    /// literal doesn't take a type to reach: `[](List<T>, Any)` takes the
-    /// Float index `0.0`, but `[](List<T>, Int)` is what takes an index.
-    /// Where nothing else in that scope takes a number, as for `print`, the
-    /// `Any` says nothing about what the literal is.
-    fn takes_a_number_as_a_fallback(
-        &self,
-        symbol: SymbolId,
-        candidates: &Candidates,
-        arguments: &[StaticType],
-    ) -> bool {
-        let parameters_of = |symbol: SymbolId| {
-            self.overloads()
-                .parameters_of(symbol)
-                .filter(|parameters| parameters.len() == arguments.len())
-        };
-        let is_number = |typ: &StaticType| {
-            matches!(
-                typ,
-                StaticType::Int | StaticType::Float | StaticType::Number
-            )
-        };
-        let Some(parameters) = parameters_of(symbol) else {
-            return false;
-        };
-        let fallbacks = parameters
-            .iter()
-            .zip(arguments)
-            .enumerate()
-            .filter(|(_, (parameter, argument))| {
-                **parameter == StaticType::Any && is_number(argument)
-            })
-            .map(|(position, _)| position)
-            .collect::<Vec<_>>();
-        !fallbacks.is_empty()
-            && self
-                .overloads()
-                .same_scope_symbols(candidates, symbol)
-                .into_iter()
-                .filter(|&other| other != symbol)
-                .filter_map(parameters_of)
-                .any(|parameters| {
-                    fallbacks.iter().any(|&position| {
-                        is_number(&parameters[position])
-                            || matches!(parameters[position], StaticType::Generic(_))
-                    })
-                })
-    }
-
-    /// Whether `symbol` takes `arguments` and returns what fits `result`,
-    /// binding the types on the way. One whose parameters aren't known
-    /// takes anything.
-    fn overload_fits(
-        &mut self,
-        symbol: SymbolId,
-        arguments: &[StaticType],
-        result: &StaticType,
-    ) -> bool {
-        let function = self.vars.resolve(self.types.get_type(symbol));
-        let Some((parameters, return_type)) = self.vars.instantiate_signature(&function) else {
-            return true;
-        };
-        self.vars.bind_arguments(&parameters, arguments)
-            && self.vars.bind_argument(result, &return_type)
-    }
-
     /// Tries the waiting constraint `serial` again, if it's still waiting.
     /// A call can wait although its arguments are known: a variable's type
     /// might have settled since, which nothing watches.
@@ -1065,26 +828,6 @@ impl Analyser {
                 .filter(|var| var.0 as usize >= first)
                 .collect()
         })
-    }
-
-    /// What nothing else settled in the waiting `a op= b` keeps the type it
-    /// already had, so it's taken from `b`: in `m["k"] += 3` on an empty
-    /// map, the values are Ints. Returns whether that settled anything.
-    pub(super) fn default_to_operand(&mut self, serial: u64) -> bool {
-        let Some(Waiting {
-            constraint: Constraint::Call(call),
-            ..
-        }) = self.waiting.get(&serial)
-        else {
-            return false;
-        };
-        let (CallSite::OpAssignment(_), [target, operand]) = (call.site, &call.arguments[..])
-        else {
-            return false;
-        };
-        let (target, operand) = (target.clone(), operand.clone());
-        let before = self.vars.settled_count();
-        self.vars.try_unify(&target, &operand) && self.vars.settled_count() > before
     }
 
     /// Solves `constraint` if what it waits on is known, and returns whether
@@ -1241,6 +984,11 @@ impl Analyser {
             .collect::<Vec<_>>();
         if arguments.iter().any(StaticType::has_errors) {
             return Some(self.skip_failed_call(call, &arguments));
+        }
+        match self.type_literal_operands(call, &arguments) {
+            LiteralOperands::Typed => return self.try_call(call),
+            LiteralOperands::Wait => return None,
+            LiteralOperands::None => {}
         }
         // A tuple indexed by a number written in the code gives that
         // element, of its own type: `(1, "a")[1]` is a String, and
@@ -1432,6 +1180,113 @@ impl Analyser {
         }
     }
 
+    /// Types the number literals among an operator's operands the way the
+    /// operator's other operand says, without trying overloads, as numbers
+    /// are in Haskell: in `total + 2.5`, with `total` from `let total = 0`,
+    /// the `0` is a Float, and the two literals of `1 + 2` have one type.
+    /// It looks only at the operator's own operands, so the order calls are
+    /// solved in doesn't change it.
+    fn type_literal_operands(
+        &mut self,
+        call: &CallConstraint,
+        arguments: &[StaticType],
+    ) -> LiteralOperands {
+        if !Self::is_number_operator(call) {
+            return LiteralOperands::None;
+        }
+        let literal = |vars: &TypeVars, typ: &StaticType| matches!(typ, StaticType::Var(var) if vars.is_number_literal(*var));
+        let number = |typ: &StaticType| {
+            matches!(
+                typ,
+                StaticType::Int | StaticType::Float | StaticType::Number
+            )
+        };
+        match arguments {
+            [a, b] => {
+                let (a_literal, b_literal) = (literal(&self.vars, a), literal(&self.vars, b));
+                let known = match (a_literal, b_literal) {
+                    (true, false) if number(b) => Some(b),
+                    (false, true) if number(a) => Some(a),
+                    _ => None,
+                };
+                // Only where the operator takes two of that type, as `+`
+                // takes two Floats, is that the literal's type.
+                if let Some(known) = known
+                    && self
+                        .overloads()
+                        .reachable_symbols(&call.candidates)
+                        .into_iter()
+                        .any(|symbol| {
+                            self.overloads()
+                                .parameters_of(symbol)
+                                .is_some_and(|parameters| {
+                                    parameters == [known.clone(), known.clone()]
+                                })
+                        })
+                {
+                    return if self.vars.try_unify(a, b) {
+                        LiteralOperands::Typed
+                    } else {
+                        LiteralOperands::None
+                    };
+                }
+                if a_literal && b_literal {
+                    self.vars.try_unify(a, b);
+                    return LiteralOperands::Wait;
+                }
+                LiteralOperands::None
+            }
+            [a] if literal(&self.vars, a) => LiteralOperands::Wait,
+            _ => LiteralOperands::None,
+        }
+    }
+
+    /// The literal type that `call`, arithmetic on number literals only, as
+    /// `-1` or `1 + 2` is, gives.
+    fn literal_arithmetic(&self, call: &CallConstraint) -> Option<StaticType> {
+        if !Self::is_number_operator(call)
+            || matches!(&*call.name, "==" | "!=" | "<" | ">" | "<=" | ">=")
+        {
+            return None;
+        }
+        let operands = call
+            .arguments
+            .iter()
+            .map(|argument| self.vars.resolve(argument))
+            .collect::<Vec<_>>();
+        operands
+            .iter()
+            .all(|operand| matches!(operand, StaticType::Var(var) if self.vars.is_number_literal(*var)))
+            .then(|| operands.first().cloned())
+            .flatten()
+    }
+
+    /// Whether `call` is an arithmetic operator or a comparison, whose
+    /// operands are numbers of one type.
+    fn is_number_operator(call: &CallConstraint) -> bool {
+        call.kind == CallKind::Operator
+            && match call.arguments.len() {
+                1 => call.name == "-",
+                2 => matches!(
+                    &*call.name,
+                    "+" | "-"
+                        | "*"
+                        | "/"
+                        | "\\"
+                        | "%"
+                        | "%%"
+                        | "^"
+                        | "=="
+                        | "!="
+                        | "<"
+                        | ">"
+                        | "<="
+                        | ">="
+                ),
+                _ => false,
+            }
+    }
+
     /// Skips a call that's passed a value whose check failed, or that calls
     /// one, as that was reported where it failed: the call picks nothing,
     /// settles what only it could have said about its arguments as failed
@@ -1446,13 +1301,13 @@ impl Analyser {
     }
 
     /// Whether an operator might still apply to each element of a tuple: an
-    /// operand that isn't known yet can be one, but an `Any` takes a cast
-    /// to be one.
-    fn operand_could_be_a_tuple(kind: CallKind, arguments: &[StaticType]) -> bool {
+    /// operand that isn't known yet can be one, but a number literal can't,
+    /// and an `Any` takes a cast to be one.
+    fn operand_could_be_a_tuple(&self, kind: CallKind, arguments: &[StaticType]) -> bool {
         kind == CallKind::Operator
-            && arguments
-                .iter()
-                .any(|argument| matches!(argument, StaticType::Var(_)))
+            && arguments.iter().any(|argument| {
+                matches!(argument, StaticType::Var(var) if !self.vars.is_number_literal(*var))
+            })
     }
 
     /// The overload a call of `candidates` with arguments of these types
@@ -1491,7 +1346,7 @@ impl Analyser {
             }
             [] => EarlyOverload::NoneFits,
             [only]
-                if !Self::operand_could_be_a_tuple(kind, arguments)
+                if !self.operand_could_be_a_tuple(kind, arguments)
                     && self.iterables_known(only, arguments)
                     && !(literals && self.fits_once_any(&reachable, arguments, Some(only))) =>
             {
@@ -1522,7 +1377,7 @@ impl Analyser {
         arguments: &[StaticType],
         kind: CallKind,
     ) -> Option<SymbolId> {
-        if Self::operand_could_be_a_tuple(kind, arguments)
+        if self.operand_could_be_a_tuple(kind, arguments)
             || arguments
                 .iter()
                 .any(|argument| matches!(argument, StaticType::Var(_)))
@@ -1800,7 +1655,13 @@ impl Analyser {
     /// [`Self::flush_copies`] knows which call they're for.
     pub(super) fn instantiate_function(&mut self, symbol: SymbolId) -> StaticType {
         let declared = self.vars.resolve(self.types.get_type(symbol));
-        let mut made = Vec::new();
+        let mut made = self.schemes.get(&symbol).map_or_else(Vec::new, |scheme| {
+            scheme
+                .contents
+                .iter()
+                .map(|name| (name.clone(), self.vars.fresh_contents()))
+                .collect()
+        });
         let typ = self.vars.instantiate_with(&declared, &mut made);
         // A copy of a function's own constraint that calls the function
         // again, as a recursive call its body couldn't decide does, is
@@ -2015,83 +1876,6 @@ impl Analyser {
         fits
     }
 
-    /// Commits the waiting call `serial` to the narrowest overload that
-    /// fits it, once nothing else can settle its arguments, and returns
-    /// whether it did. That's the overload the call would pick if the
-    /// arguments' unknown parts were whatever that overload needs: in
-    /// `m["k"]` on an empty map, `[](Map<K, V>, K)` is narrower than
-    /// `[](Any, Any)`, so the map's keys are Strings. It only commits when
-    /// every overload that fits is in the same scope, as a nearer one would
-    /// otherwise win, and when each unknown is inside an argument whose kind
-    /// is known: an argument nothing at all is known about is `Any`, which
-    /// the overloads taking `Any` take.
-    pub(super) fn default_to_narrowest(&mut self, serial: u64) -> bool {
-        let Some(Waiting {
-            constraint: Constraint::Call(call),
-            ..
-        }) = self.waiting.get(&serial)
-        else {
-            return false;
-        };
-        let arguments = call
-            .arguments
-            .iter()
-            .map(|argument| self.vars.resolve(argument))
-            .collect::<Vec<_>>();
-        if arguments
-            .iter()
-            .any(|argument| matches!(argument, StaticType::Var(_)))
-            || Self::operand_could_be_a_tuple(call.kind, &arguments)
-        {
-            return false;
-        }
-        let groups = self.overloads().reachable_groups(&call.candidates);
-        let mut fitting = Vec::new();
-        for group in groups {
-            let fits = group
-                .into_iter()
-                .filter(|&symbol| self.could_accept(symbol, &arguments))
-                .collect::<Vec<_>>();
-            if !fits.is_empty() {
-                fitting.push(fits);
-            }
-        }
-        let [group] = &fitting[..] else {
-            return false;
-        };
-        let Some(narrowest) = self
-            .most_specific(group)
-            .filter(|&narrowest| self.fits_without_any(narrowest, &arguments))
-        else {
-            return false;
-        };
-        let Some(Waiting {
-            constraint: Constraint::Call(call),
-            origin,
-        }) = self.waiting.remove(&serial)
-        else {
-            unreachable!("the call was waiting a moment ago");
-        };
-        let outer = std::mem::replace(&mut self.copied_through, origin.clone());
-        let committed = self.commit_early(&call, &arguments, narrowest);
-        if let Some(typ) = &committed {
-            let result = call.result.clone();
-            self.check_write(&result, typ, call.span);
-        }
-        self.copied_through = outer;
-        if committed.is_none() {
-            self.wait_again(
-                serial,
-                Waiting {
-                    constraint: Constraint::Call(call),
-                    origin,
-                },
-            );
-            return false;
-        }
-        true
-    }
-
     /// The one of `symbols` whose parameters are narrower than every other
     /// one's, as `[](Map<K, V>, K)` is than `[](Any, Any)`, if there is one.
     /// A single function is the narrowest of one.
@@ -2107,32 +1891,6 @@ impl Analyser {
                 .all(|(j, wider)| i == j || is_strictly_more_specific(narrower, wider))
         })?;
         Some(symbols[narrowest])
-    }
-
-    /// Whether `symbol` is a function whose parameters take these arguments
-    /// as the types they are. An `Any` parameter standing in for an argument
-    /// of another type is a fallback that only wins over the overloads
-    /// taking exact types once the arguments are known, so a waiting call
-    /// doesn't commit to it: `xs[0] = []` on a `List<Int>` leaves only
-    /// `[]=(List<T>, Any, Any)` taking the empty list, but it's still an
-    /// error once the list's type is known. An `Iterable<T>` parameter takes
-    /// any kind of sequence, so it can't tell what an argument nothing is
-    /// known about is, and the call waits for it as `for x in xs` does.
-    fn fits_without_any(&self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
-        self.overloads()
-            .parameters_of(symbol)
-            .is_some_and(|parameters| {
-                parameters
-                    .iter()
-                    .zip(arguments)
-                    .all(|(parameter, argument)| match (parameter, argument) {
-                        (StaticType::Any, argument) => *argument == StaticType::Any,
-                        (StaticType::Iterable(_), argument) => {
-                            !self.vars.waits_to_iterate(argument)
-                        }
-                        _ => true,
-                    })
-            })
     }
 
     /// Whether `symbol` can accept arguments of these types, where each part

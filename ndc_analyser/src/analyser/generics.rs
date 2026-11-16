@@ -44,7 +44,7 @@ impl Analyser {
     ) -> StaticType {
         self.solve_waiting();
         self.default_literals(TypeVars::is_generalizable);
-        let connected = self.reached_from_parameters(signature);
+        let connected = self.reached_from_signature(signature);
         self.settle_ambiguous(signature, &connected);
         self.merge_copies();
         self.keep_outer_constraints_outside();
@@ -92,9 +92,14 @@ impl Analyser {
             }
         }
         let mut named = 0;
+        let mut contents = Vec::new();
         for var in parameters {
             if self.vars.is_generalizable(var) {
-                self.vars.generalize(var, &type_parameter_name(named));
+                let name = type_parameter_name(named);
+                if self.vars.is_contents(var) {
+                    contents.push(name.as_str().into());
+                }
+                self.vars.generalize(var, &name);
                 named += 1;
             }
         }
@@ -186,6 +191,7 @@ impl Analyser {
             symbol,
             Scheme {
                 constraints: scheme.into(),
+                contents: contents.into(),
                 key: key.into(),
                 uses: uses.into(),
                 declaration,
@@ -200,11 +206,13 @@ impl Analyser {
     }
 
     /// The generic function's variables that its constraints connect to its
-    /// parameters, which each call settles. Unlike the `[]` of `fn f(x) {
-    /// [].push(x) }`, which no call decides, the inner `%{}` of `fn f(data,
-    /// k) { let m = %{:fn() => %{}}; m[k].insert(data) }` is what `data` is
-    /// once `m[k]` is picked.
-    fn reached_from_parameters(&self, signature: &StaticType) -> AHashSet<TypeVar> {
+    /// parameters or what it returns, which each call settles. Unlike the
+    /// `[]` of `fn f(x) { [].push(x) }`, which no call decides, the inner
+    /// `%{}` of `fn f(data, k) { let m = %{:fn() => %{}}; m[k].insert(data)
+    /// }` is what `data` is once `m[k]` is picked, and the `[]` of `fn f(xs)
+    /// => if xs.len() == 0 { [] } else { f(xs[1..]) }` is what the call's
+    /// result is used as.
+    fn reached_from_signature(&self, signature: &StaticType) -> AHashSet<TypeVar> {
         let open = |var: &TypeVar| self.vars.is_generalizable(*var);
         let groups = self
             .generic_constraints()
@@ -220,16 +228,10 @@ impl Analyser {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-        let parameters = match signature {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } => parameters.as_slice(),
-            _ => &[],
-        };
-        let mut reached = parameters
-            .iter()
-            .flat_map(|typ| self.vars.unsettled(typ))
+        let mut reached = self
+            .vars
+            .unsettled(signature)
+            .into_iter()
             .filter(open)
             .collect::<AHashSet<_>>();
         loop {
@@ -462,16 +464,9 @@ impl Analyser {
             if ambiguous.is_empty() {
                 return;
             }
-            let decided_by_default = ambiguous.iter().any(|(serial, vars)| {
-                let only_ambiguous = self.waiting.get(serial).is_some_and(|waiting| {
-                    self.generic_inputs(&waiting.constraint)
-                        .iter()
-                        .all(|var| vars.contains(var))
-                });
-                (only_ambiguous
-                    && (self.default_to_narrowest(*serial) || self.default_to_operand(*serial)))
-                    || self.default_to_branch(*serial, vars)
-            });
+            let decided_by_default = ambiguous
+                .iter()
+                .any(|(serial, vars)| self.default_to_branch(*serial, vars));
             if !decided_by_default {
                 let Some(vars) = ambiguous.iter().find_map(|(_, vars)| {
                     let unconnected = vars
@@ -483,7 +478,11 @@ impl Analyser {
                 }) else {
                     return;
                 };
-                self.vars.settle_with_fallbacks(&vars);
+                let contents = self.vars.unsettled_contents(0);
+                let (contents, others): (Vec<_>, Vec<_>) =
+                    vars.into_iter().partition(|var| contents.contains(var));
+                self.vars.settle_contents(&contents);
+                self.vars.settle_with_fallbacks(&others);
             }
             self.solve_waiting();
         }

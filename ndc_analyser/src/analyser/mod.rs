@@ -393,9 +393,7 @@ impl Analyser {
         match expression {
             Expression::BoolLiteral(_) => StaticType::Bool,
             // What `None`, `[]` and `%{}` hold is only known from later uses.
-            Expression::NoneLiteral => {
-                StaticType::Option(Box::new(self.vars.fresh(StaticType::Any)))
-            }
+            Expression::NoneLiteral => StaticType::Option(Box::new(self.vars.fresh_contents())),
             Expression::StringLiteral(_) => StaticType::String,
             Expression::NumericLiteral(NumericLiteral::Int64(_)) => self.vars.fresh_number(*span),
             Expression::NumericLiteral(NumericLiteral::Float64(_)) => StaticType::Float,
@@ -622,7 +620,7 @@ impl Analyser {
             }
             Expression::List { values } => {
                 let element_type = if values.is_empty() {
-                    self.vars.fresh(StaticType::Any)
+                    self.vars.fresh_contents()
                 } else {
                     let values = values
                         .iter()
@@ -660,7 +658,7 @@ impl Analyser {
                 }
 
                 let key_type = if keys.is_empty() {
-                    self.vars.fresh(StaticType::Any)
+                    self.vars.fresh_contents()
                 } else {
                     self.holding(keys, *span)
                 };
@@ -668,7 +666,7 @@ impl Analyser {
                 let value_type = if !held.is_empty() {
                     self.holding(held, *span)
                 } else if values.is_empty() {
-                    self.vars.fresh(StaticType::unit())
+                    self.vars.fresh_contents()
                 } else {
                     StaticType::unit()
                 };
