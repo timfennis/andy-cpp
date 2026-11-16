@@ -209,23 +209,20 @@ fn call(name: &str, arguments: &[String]) -> Option<String> {
     })
 }
 
-/// Every combination of one value from each of `pools`, at most `limit`.
-fn combinations(pools: &[Vec<String>], limit: usize) -> Vec<Vec<String>> {
-    let mut out = vec![Vec::new()];
-    for pool in pools {
-        out = out
-            .into_iter()
-            .flat_map(|prefix| {
-                pool.iter().map(move |value| {
-                    let mut next = prefix.clone();
-                    next.push(value.clone());
-                    next
-                })
-            })
-            .take(limit)
-            .collect();
-    }
-    out
+/// Combinations of one value from each of `pools` that use every value of
+/// every pool: the `i`th takes each pool's `i`th value, from the start again
+/// in a pool that has fewer. `take(Iterable<T>, Int)` gets a list, a deque,
+/// a heap, an iterator and a range, each with one of the Ints.
+fn covering(pools: &[Vec<String>]) -> Vec<Vec<String>> {
+    let longest = pools.iter().map(Vec::len).max().unwrap_or(0);
+    (0..longest)
+        .map(|index| {
+            pools
+                .iter()
+                .map(|pool| pool[index % pool.len()].clone())
+                .collect()
+        })
+        .collect()
 }
 
 /// Whether `message`, an error from a call of `name` whose signature is
@@ -291,7 +288,7 @@ fn every_native_takes_what_its_signature_says() {
             if pools.iter().any(Vec::is_empty) {
                 continue;
             }
-            for arguments in combinations(&pools, 4) {
+            for arguments in covering(&pools) {
                 let Some(expression) = call(name, &arguments) else {
                     continue;
                 };
