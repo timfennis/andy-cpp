@@ -1,0 +1,9 @@
+// A call commits to an overload early only when nothing learned later can
+// change the pick. `d(1)` in `run2` could be either `d` until `d(2.5)` makes
+// the nested one take Floats; the `1` is then an Int, which only the outer
+// `d` takes. In `run`, the nested `d` takes the `1` as it is.
+// expect-output: inner outer
+fn d(x: Int) => "outer";
+fn run() { fn d(x) => "inner"; d(1) }
+fn run2() { fn d(x) => "inner"; let r = d(1); d(2.5); r }
+print(run(), run2());
