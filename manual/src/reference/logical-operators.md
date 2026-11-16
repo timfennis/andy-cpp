@@ -27,7 +27,7 @@ print(x);  // 2
 
 `false and ...` stops at `false`, and `true or ...` stops at `true`.
 
-Both sides are Bools. There's no truthiness: a number, a list or an `Option` in their place is an error, as it is in the condition of an `if` or a `while`. An `Any` takes a cast first, as in `value as Bool`.
+Both sides have to be Bools. A number, a list or an `Option` isn't true or false by itself, so using one there is an error, just like in the condition of an `if` or a `while`:
 
 ```ndc,fails
 let count = 3;

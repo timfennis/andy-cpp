@@ -13,5 +13,3 @@ for x in [2, 3, 1] {
 }
 print(heap.list(), heap.len(), heap.pop());  // [3,2,1] 3 3
 ```
-
-> **Note:** a `MinHeap<Any>` can hold values of different kinds, like an `Int` and a `String`, which have no order. The heap treats them as equal.

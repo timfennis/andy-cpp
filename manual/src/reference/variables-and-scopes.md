@@ -42,55 +42,25 @@ print(x); // 3
 
 ## Reassignment
 
-The `=` operator assigns a new value to an existing variable. A variable keeps the type its first value gave it, so a new value has to fit that type:
+The `=` operator assigns a new value to an existing variable. A variable keeps the type of the value it starts with, so a new value has to have that type too:
 
 ```ndc,fails
-let n = "abc".len();  // n is Int
-n = 2;                // fine
-n = 3.14;             // error: mismatched types: found Float but expected Int
+let n = 1;   // n is an Int
+n = 2;       // fine
+n = 3.14;    // error: mismatched types: found Float but expected Int
 ```
 
-A variable that starts at a number literal is what the literal is: `1` makes an `Int`, and `1.0` a `Float`. Later uses don't change it, so its type is the same wherever it's used:
+So to keep a running total of Floats, start it at `0.0` rather than `0`. The same goes for [augmented assignment](../features/augmented-assignment.md), like `n += 0.5`.
+
+An empty list or map gets its type from the first thing you put in it:
 
 ```ndc,fails
-let x = 1.0;
-x = 3.14;  // fine
-let y = 1;
-y = 3.14;  // error: mismatched types: found Float but expected Int
-```
-
-Augmented assignment is checked the same way, against the result of the operation:
-
-```ndc,fails
-let total = "abc".len();
-total += 0.5;  // error: Int + Float is a Float, which doesn't fit in Int
-```
-
-What an empty list or map holds, or what `None` will hold, isn't known yet. The first assignment that stores something settles it, and later ones have to fit:
-
-```ndc,fails
-let counts = %{};     // key and value types not known yet
-counts["a"] = 1;      // counts is Map<String, Int> from here on
+let counts = %{};
+counts["a"] = 1;      // counts is a Map<String, Int> from here on
 counts["b"] = "two";  // error: mismatched types: found String but expected Int
 ```
 
-Calls settle them too, through the types the called function takes. `push` takes a `List<T>` and a `T`, so pushing an `Int` makes the list a `List<Int>`, and later pushes have to fit:
-
-```ndc,fails
-let xs = [];
-xs.push(1);       // xs is List<Int> from here on
-xs.push("two");   // error: No function called 'push' found that matches the arguments 'List<Int>, String'
-```
-
-When nothing settles them, they're `Unknown`, which only a function taking any type takes, so a use that needs to know asks for an annotation (see [Types](./types.md)).
-
-In the REPL, a later line settles what a value holds as later code in a program does: `let xs = [];` on one line and `xs.push(1);` on the next make `xs` a `List<Int>`. A line runs before the next one is typed, though, so the functions it makes, and what its own code needs, are settled when it runs:
-
-- `let double = fn(x) => x * 2;` has to know which `*` it calls, so on its own line `x` is `Unknown` and the line is an error. Annotate it as `fn(x: Int)`.
-- `let identity = fn(x) => x;` is made as a function that takes an `Unknown`, so a later `identity(1)` is an error. Annotate it as `fn(x: Int)` too.
-- A function whose type mentions what an empty list holds, as `fn() => xs` does, settles that with it, and so does passing the list to a generic function.
-
-A variable that only gets its real value later holds an `Option`:
+A variable that only gets its real value later can hold an `Option`:
 
 ```ndc
 let pos = None;
@@ -108,7 +78,7 @@ print(x);      // text
 
 ## Type annotations
 
-You can pin a variable's type by adding `: Type` after the name. The initialiser still has to fit, the analyser just checks it for you up front.
+You can give a variable a type by adding `: Type` after its name. The value has to fit it:
 
 ```ndc
 let count: Int = 0;
@@ -117,45 +87,19 @@ let xs: List<Int> = [1, 2, 3];
 print(count, name, xs);  // 0 world [1,2,3]
 ```
 
-Every value fits where `Any` is requested:
-
-```ndc
-let n: Number = 3n;
-let x: Any = "anything";  // every value fits Any
-print(n, x);              // 3 anything
-```
-
-A mismatch is rejected with a `mismatched types` error:
-
 ```ndc,fails
 let x: Int = "hello";   // ERROR: mismatched types: found String but expected Int
 ```
 
-An empty container literal adopts the annotated type — there are no elements to infer
-from, so the annotation decides:
+An annotation is the way to say what an empty list or map will hold:
 
 ```ndc
-let xs: List<Int> = [];        // xs is List<Int>, not List<Any>
-let m: Map<Int, Int> = %{};    // m is Map<Int, Int>
-let nested: List<List<Int>> = [[]];
-print(xs, m, nested);          // [] %{} [[]]
+let xs: List<Int> = [];
+let m: Map<String, Int> = %{};
+print(xs, m);          // [] %{}
 ```
 
-An annotated variable keeps its annotated type, just as an inferred one keeps the type of its first value:
-
-```ndc,fails
-let x: Int = 5;
-x = "test";   // ERROR: mismatched types
-```
-
-```ndc,fails
-let x: Int = 5;
-x += 0.5;     // ERROR: the Float result doesn't fit in Int
-```
-
-The same syntax shows up on function parameters and return types — see the [Function](./types/function.md) page.
-
-See [Types](./types.md) for the full list of names you can use, including generics like `List<T>`, `Map<K, V>`, and tuple shorthand `(Int, String)`.
+The same syntax works on function parameters and return types (see [Function](./types/function.md)). See [Types](./types.md) for the names you can use.
 
 ## Destructuring
 
@@ -178,7 +122,7 @@ let [a, (b, c)] = (1, [2, 3]);
 print(a, b, c);  // 1 2 3
 ```
 
-A deque, a heap, a range or another iterator destructures too, into as many of its elements as there are names, and it's an error when it has more or fewer. A value of type `Any` has to be cast first, to say what it holds:
+Ranges and deques destructure too, as long as they have exactly as many elements as there are names:
 
 ```ndc
 let low, high = 0..2;

@@ -2,13 +2,11 @@
 
 Andy C++ exposes three sibling numeric types:
 
-* `Int` stores a signed 64-bit integer. Checked arithmetic reports overflow. The remainder
-  operators `%` and `%%` are the exception: once the divisor is non-zero the result always
-  fits, even where the quotient it implies would not.
+* `Int` stores a signed 64-bit integer. Arithmetic that overflows is an error.
 * `Float` stores an IEEE 754 `f64`.
 * `Number` supports arbitrary-size integers, exact rational values, floats, and complex values.
 
-`Int`, `Float`, and `Number` are separate types, which have only `Any` in common. An `Int` value does not satisfy a `Number` annotation. Use an `n` literal or the `Number` constructor when you need the advanced mode:
+`Int`, `Float`, and `Number` are separate types: an `Int` doesn't fit a `Number` annotation. Use an `n` literal or the `Number` constructor when you need a `Number`:
 
 ```ndc
 let count: Int = 42;
@@ -37,18 +35,15 @@ print(binary, octal, hexadecimal);  // 42 42 42
 
 An integer literal without `n` must fit in `i64`. The lexer reports an error and suggests the suffixed form when it does not fit.
 
-An integer literal without a suffix is an `Int`, unless the expression it's written in says otherwise: an annotation, the other operand of an operator, or the other numbers of a list. Then it's a `Float` or a `Number`:
+A whole number like `7` is an `Int`, but where a `Float` is expected, such as after a `Float` annotation or in a list of Floats, it is a `Float`:
 
 ```ndc
-print(7 / 2);          // 3
+print(7 / 2);            // 3
 let f: Float = 7;
-print(f / 2);          // 3.5
-print(f + 1, [1, 2.5]);  // 8.0 [1.0,2.5]
-
-print([1.5, 2.25].fold(0, fn(acc, x) => acc + x));  // 3.75
+print(f / 2, [1, 2.5]);  // 3.5 [1.0,2.5]
 ```
 
-A variable is what it's declared with, so one that starts at `0` is an `Int`, whatever is done with it later. To keep a running total of Floats, start it at `0.0`:
+A variable keeps the type it starts with, so one that starts at `0` stays an `Int`. To keep a running total of Floats, start it at `0.0`:
 
 ```ndc,fails
 let total = 0.0;
@@ -56,8 +51,6 @@ total += 2.5;          // fine: total is a Float
 let count = 0;
 count += 2.5;          // error: mismatched types: found Float but expected Int
 ```
-
-A value that's already an `Int`, like the result of `len`, stays one.
 
 Arbitrary-radix literals such as `16r2a` remain `Int` literals and do not accept `n`. The `i` and `j` suffixes create complex `Number` values:
 
@@ -114,11 +107,6 @@ let nan = 0n / 0n;
 print(nan);         // NaN
 print(nan == nan);  // true
 ```
-
-Both remainder operators follow the same rule, so `5n % 0n` and `5n %% 0n` are
-`NaN` where `5 % 0` and `5 %% 0` are errors. Moving an accumulator from `Int`
-to `Number` therefore trades the zero-divisor diagnostic for a value that
-propagates.
 
 ## Equality, hashing, and ordering
 

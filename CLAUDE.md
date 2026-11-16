@@ -63,6 +63,8 @@ perf report -i /tmp/out.perf --stdio --no-children --percent-limit=1
 
 User-facing language documentation lives in `manual/src/`. It is an mdBook project. The entry point is `manual/src/SUMMARY.md`.
 
+The manual introduces people to the language and teaches the most common ways to use it, with examples and plain English. It does not document every edge case of the compiler or analyser: leave out corner cases, internal rules and exact error conditions that a newcomer won't run into. Edge cases belong in tests, and in the error messages and help texts that explain them when someone does run into one.
+
 When making changes that affect language behaviour or runtime semantics, update the relevant manual page.
 
 The published manual highlights ` ```ndc ` code blocks and gives them a Run button, running them on the interpreter compiled to WebAssembly (`manual/theme/ndc.js`). Mark a block that can't run on its own, such as a fragment that uses names from an earlier block, as ` ```ndc,norun `. Write examples so running them shows the result: `print(-7 / 2);  // -3` rather than `assert_eq(-7 / 2, -3);`, with the exact printed output in the comment. A block that demonstrates a runtime error ends with it, as nothing after the first error runs, and is marked ` ```ndc,fails `. `tests/functional/tests/manual.rs` runs every block that isn't `norun` and checks all of this: blocks fail exactly when marked `fails`, the others show something, and print comments match the output (`cargo test -p functional_tests --test manual`). The playground page and the code it shares with the manual live in `manual/src/playground/`.
