@@ -1,0 +1,5 @@
+// A function that calls itself without end stops at a million calls deep
+// instead of taking memory until the system stops the program.
+// expect-error: calls go more than 1000000 deep, which usually means a function calls itself without end
+fn forever(n) => forever(n + 1);
+forever(0);

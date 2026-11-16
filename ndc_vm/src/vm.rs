@@ -66,6 +66,10 @@ enum Dispatch {
     Completed,
 }
 
+/// How many calls deep a program can go. A frame takes about a hundred
+/// bytes, so this is about 100 MB of frames.
+pub const MAX_CALL_DEPTH: usize = 1_000_000;
+
 pub struct CallFrame {
     closure: ClosureFunction,
     ip: usize,
@@ -775,6 +779,14 @@ impl Vm {
                 )
             }
         };
+        // The frames live on the heap, so without a limit a function that
+        // calls itself without end would take memory until the system stops
+        // the program.
+        if self.frames.len() >= MAX_CALL_DEPTH {
+            return Err(VmError::native(format!(
+                "calls go more than {MAX_CALL_DEPTH} deep, which usually means a function calls itself without end"
+            )));
+        }
         let num_locals = closure.prototype.num_locals;
         self.frames.push(CallFrame {
             closure,

@@ -283,6 +283,18 @@ let a: Any = 1;
 inc(a);  // error: No function called '+' found that matches the arguments 'Any, Int'
 ```
 
+## Recursion
+
+A function can call itself. Calls can go a million deep. A program that goes
+deeper stops with an error, as that usually means a function calls itself
+without end:
+
+```ndc,fails
+fn forever(n) => forever(n + 1);
+forever(0)
+// error[vm]: calls go more than 1000000 deep, which usually means a function calls itself without end
+```
+
 ## Function overloading
 
 A name can refer to several functions, called overloads, as long as they differ in their number of parameters, their parameter types, or both:
