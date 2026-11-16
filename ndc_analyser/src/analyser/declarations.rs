@@ -1,3 +1,4 @@
+use super::generics::Generalizing;
 use super::{Analyser, Returns};
 use crate::error::AnalysisError;
 use itertools::izip;
@@ -183,8 +184,12 @@ impl Analyser {
                 self.vars.leave_level();
                 self.declaring = None;
                 self.declared_in_batch.insert(symbol);
+                let flags = Generalizing {
+                    pure,
+                    return_annotated: annotated_return.is_some(),
+                };
                 let typ =
-                    self.generalize(symbol, &signature, id, pure, [first_use, first_function]);
+                    self.generalize(symbol, &signature, id, flags, [first_use, first_function]);
                 self.within_size_limit(symbol, name, typ, span)
             }
             _ => signature,

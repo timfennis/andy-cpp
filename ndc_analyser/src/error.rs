@@ -150,6 +150,22 @@ impl AnalysisError {
         }
     }
 
+    /// A call in the body of the generic function `function` that could be
+    /// the function itself or another overload of its name, while its
+    /// return type isn't written.
+    pub(crate) fn overloaded_recursion_needs_return_type(function: &str, span: Span) -> Self {
+        Self {
+            text: format!(
+                "`{function}` calls itself here, where another `{function}` could be meant too, so its return type has to be written"
+            ),
+            span,
+            help_text: Some(format!(
+                "Which `{function}` this call is depends on types that are only known when `{function}` is called, so what `{function}` returns can't be worked out from its body. Write what it returns, as in `fn {function}(...) -> Int`, or the types of its parameters, so the call is decided in the body"
+            )),
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn recursion_changes_types(function: &str, span: Span) -> Self {
         Self {
             text: format!(

@@ -16,6 +16,16 @@ use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{ScopeKind, SymbolId};
 
+/// What [`Analyser::generalize`] needs to know about a function besides its
+/// types.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Generalizing {
+    /// Whether it's a `pure fn`.
+    pub(super) pure: bool,
+    /// Whether its return type is written.
+    pub(super) return_annotated: bool,
+}
+
 impl Analyser {
     /// Whether the function declared as `symbol` is generic, which a `fn`
     /// declared in the program scope is. One declared in a function or a
@@ -39,9 +49,13 @@ impl Analyser {
         symbol: SymbolId,
         signature: &StaticType,
         declaration: NodeId,
-        pure: bool,
+        flags: Generalizing,
         [first_use, first_function]: [usize; 2],
     ) -> StaticType {
+        let Generalizing {
+            pure,
+            return_annotated,
+        } = flags;
         self.solve_waiting();
         self.default_literals(TypeVars::is_generalizable);
         let connected = self.reached_from_signature(signature);
@@ -58,6 +72,9 @@ impl Analyser {
                     .expect("the constraint is waiting")
             })
             .collect::<Vec<_>>();
+        if !return_annotated {
+            self.report_overloaded_recursion(symbol, &scheme);
+        }
 
         // The generic functions the body calls with types that depend on
         // its type parameters are the instance's to pick.
@@ -573,6 +590,36 @@ impl Analyser {
             }
         }
         self.solve_waiting();
+    }
+
+    /// Reports each call in the body of the generic function `symbol` that
+    /// still waits while it could be `symbol` itself or another overload of
+    /// its name, as `fac(n - 1)` in `fn fac(n)` after `fn fac(s: String)`.
+    /// What such a call returns is part of what `symbol` returns, which
+    /// can't be worked out before the call is decided, so the return type
+    /// has to be written (Scala asks the same). The call's result is a
+    /// failed check, so what's built from it isn't reported again.
+    fn report_overloaded_recursion(&mut self, symbol: SymbolId, scheme: &[Waiting]) {
+        let name = self.resolver.symbol_name(symbol).to_string();
+        for waiting in scheme {
+            let Constraint::Call(call) = &waiting.constraint else {
+                continue;
+            };
+            let reachable = self.overloads().reachable_symbols(call.candidates());
+            let mut takers = Vec::new();
+            for candidate in reachable {
+                if self.could_accept(candidate, call.arguments()) {
+                    takers.push(candidate);
+                }
+            }
+            if takers.len() > 1 && takers.contains(&symbol) {
+                self.emit(AnalysisError::overloaded_recursion_needs_return_type(
+                    &name,
+                    call.span(),
+                ));
+                self.vars.unify(call.result(), &StaticType::Error);
+            }
+        }
     }
 
     /// Reports each named function the batch declares that overlaps an

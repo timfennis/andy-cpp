@@ -1,0 +1,6 @@
+// The recursive call could mean either `f`, which is only known when `f` is
+// called, so what `f` returns can't be worked out from its body.
+// expect-error: `f` calls itself here, where another `f` could be meant too, so its return type has to be written
+fn f(x: Int) => x;
+fn f(x) => if true { x } else { f(x) };
+print(f("a"), f(1));
