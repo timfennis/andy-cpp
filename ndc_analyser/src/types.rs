@@ -864,6 +864,44 @@ impl TypeVars {
         false
     }
 
+    /// Whether `typ` holds the unsettled variable `var` inside a type, as
+    /// `List<?0>` holds `?0`, so that `var` can't stand for it: it would
+    /// have to hold itself without end. What a literal at the top of `typ`
+    /// holds counts as `typ` too: in `xs.push([xs])`, `xs`'s element type
+    /// would be the type of `[xs]`, whose elements hold a list of it. What's
+    /// at the top itself doesn't: in `let xs = [x]; x = xs.pop()`, `x`'s type
+    /// is the element type of `[x]`, which holds just `x`'s type.
+    fn would_contain(&self, typ: &StaticType, var: TypeVar) -> bool {
+        let mut seen = AHashSet::new();
+        let mut todo = vec![typ.clone()];
+        while let Some(next) = todo.pop() {
+            match self.shallow(&next) {
+                StaticType::Var(top) => {
+                    if seen.insert(top) && self.is_literal(top) {
+                        todo.extend(self.held_types(top));
+                    }
+                }
+                inside => {
+                    if self.is_made_from(&inside, var) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// The types the literal type `var` holds: `x`'s and `Int` in `[x, 1]`.
+    fn held_types(&self, var: TypeVar) -> Vec<StaticType> {
+        self.bounds[var.0 as usize]
+            .iter()
+            .filter_map(|bound| match bound {
+                Bound::Holds(held, _, _) => Some(held.clone()),
+                Bound::Number(..) => None,
+            })
+            .collect()
+    }
+
     /// The variables in what the literal type `var` holds: `x`'s in `[x, 1]`.
     pub(crate) fn held_vars(&self, var: TypeVar) -> Vec<TypeVar> {
         self.bounds[var.0 as usize]
@@ -1095,10 +1133,7 @@ impl TypeVars {
             }
             (StaticType::Var(var), other) | (other, StaticType::Var(var)) => {
                 // A variable can't stand for a type that contains it.
-                if self
-                    .resolve(other)
-                    .contains(&|part| *part == StaticType::Var(*var))
-                {
+                if self.would_contain(other, *var) {
                     return false;
                 }
                 self.settle(*var, other.clone())
