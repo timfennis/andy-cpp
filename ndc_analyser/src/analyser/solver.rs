@@ -7,6 +7,7 @@ use super::function_values::{Choice, FunctionValue};
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, ResolvedCall, is_strictly_more_specific};
 use crate::types::TypeVars;
+use ahash::AHashSet;
 use itertools::Itertools;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
@@ -562,15 +563,47 @@ impl Analyser {
     }
 
     fn wait_again(&mut self, serial: u64, waiting: Waiting) {
-        for var in waiting
-            .constraint
-            .inputs()
-            .iter()
-            .flat_map(|input| self.vars.unsettled(input))
-        {
+        for var in self.waits_on(&waiting.constraint) {
             self.watchers.entry(var).or_default().push(serial);
         }
         self.waiting.insert(serial, waiting);
+    }
+
+    /// The unsettled variables `constraint` waits on: those of its inputs,
+    /// and for a call, those of the variables it may call, as `f` in `for f
+    /// in [fn() => 1] { f() }` holds what the literal holds.
+    fn waits_on(&self, constraint: &Constraint) -> Vec<TypeVar> {
+        let mut vars = constraint
+            .inputs()
+            .iter()
+            .flat_map(|input| self.vars.unsettled(input))
+            .collect::<Vec<_>>();
+        if let Constraint::Call(call) = constraint {
+            for symbol in self.overloads().reachable_symbols(&call.candidates) {
+                if let StaticType::Var(var) = self.vars.resolve(self.types.get_type(symbol)) {
+                    vars.push(var);
+                }
+            }
+        }
+        vars
+    }
+
+    /// The unsettled variables the waiting constraints settle once they're
+    /// solved, which no fallback settles: what a call returns is what the
+    /// overload it picks returns, once what it waits on is known.
+    fn produced_by_waiting(&self) -> AHashSet<TypeVar> {
+        self.waiting
+            .values()
+            .flat_map(|waiting| {
+                waiting
+                    .constraint
+                    .outputs()
+                    .iter()
+                    .flat_map(|output| self.vars.unsettled(output))
+                    .chain(self.returned_by(&waiting.constraint))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
     }
 
     /// Solves `waiting` if what it waits on is known, as
@@ -630,8 +663,8 @@ impl Analyser {
     /// branch's type. Then what empty literals hold takes its default, all
     /// at once: each default depends only on the value it's for, so the
     /// order the calls are solved in can't change it. What's left gets its
-    /// fallbacks,
-    /// oldest constraint first. Constraints that wait only on older
+    /// fallback, oldest constraint first, but for what a waiting constraint
+    /// settles once it's solved. Constraints that wait only on older
     /// variables keep waiting.
     pub(super) fn settle_waiting(&mut self, first: usize) {
         // Each constraint is checked for a default rule once, and again only
@@ -647,8 +680,10 @@ impl Analyser {
             if self.default_literals(|_, var| var.0 as usize >= first) {
                 unchecked.extend(self.waiting.keys().copied());
             }
+            // A branch's default may settle what a call returns, as the
+            // `+` in `fib(n - 1) + fib(n - 2)` returns what `fib` does.
             while let Some(serial) = unchecked.pop_first() {
-                let vars = self.waits_on_vars_since(serial, first);
+                let vars = self.waits_on_vars_since(serial, first, &AHashSet::new());
                 if !vars.is_empty() && self.default_to_branch(serial, &vars) {
                     unchecked.extend(self.solve_waiting_and_report());
                 }
@@ -659,12 +694,13 @@ impl Analyser {
                 unchecked.extend(self.solve_waiting_and_report());
                 continue;
             }
+            let produced = self.produced_by_waiting();
             let next = self
                 .waiting
                 .range(fallen_back..)
                 .map(|(&serial, _)| serial)
                 .find_map(|serial| {
-                    let vars = self.waits_on_vars_since(serial, first);
+                    let vars = self.waits_on_vars_since(serial, first, &produced);
                     (!vars.is_empty()).then_some((serial, vars))
                 });
             let Some((serial, vars)) = next else {
@@ -674,14 +710,12 @@ impl Analyser {
             self.vars.settle_with_fallbacks(&vars);
             unchecked.extend(self.solve_waiting_and_report());
         }
-        self.vars.settle_from(first);
+        // What's left gets its fallback, but for what a waiting constraint
+        // settles, which only gets one if that constraint can't be solved.
+        let produced = self.produced_by_waiting();
+        self.vars.settle_from(first, &produced);
         self.solve_waiting();
-        // A call can still wait when its arguments are known: a variable's
-        // type might have settled since, which nothing watches.
-        let serials = self.waiting.keys().copied().collect::<Vec<_>>();
-        for serial in serials {
-            self.retry(serial);
-        }
+        self.vars.settle_from(first, &AHashSet::new());
         self.solve_waiting();
     }
 
@@ -802,30 +836,19 @@ impl Analyser {
         Some(settled)
     }
 
-    /// Tries the waiting constraint `serial` again, if it's still waiting.
-    /// A call can wait although its arguments are known: a variable's type
-    /// might have settled since, which nothing watches.
-    pub(super) fn retry(&mut self, serial: u64) {
-        let Some(mut waiting) = self.waiting.remove(&serial) else {
-            return;
-        };
-        if !self.try_waiting(&mut waiting) {
-            self.wait_again(serial, waiting);
-        }
-    }
-
     /// The unsettled variables made since `first` that the waiting
-    /// constraint `serial` waits on, if it's still waiting.
-    /// What it settles itself isn't among them: see [`Self::returned_by`].
-    fn waits_on_vars_since(&self, serial: u64, first: usize) -> Vec<TypeVar> {
+    /// constraint `serial` waits on, if it's still waiting, but for those a
+    /// waiting constraint settles: see [`Self::produced_by_waiting`].
+    fn waits_on_vars_since(
+        &self,
+        serial: u64,
+        first: usize,
+        produced: &AHashSet<TypeVar>,
+    ) -> Vec<TypeVar> {
         self.waiting.get(&serial).map_or_else(Vec::new, |waiting| {
-            let returned = self.returned_by(&waiting.constraint);
-            waiting
-                .constraint
-                .inputs()
-                .iter()
-                .flat_map(|input| self.vars.unsettled(input))
-                .filter(|var| var.0 as usize >= first && !returned.contains(var))
+            self.waits_on(&waiting.constraint)
+                .into_iter()
+                .filter(|var| var.0 as usize >= first && !produced.contains(var))
                 .collect()
         })
     }

@@ -1341,13 +1341,19 @@ impl TypeVars {
     }
 
     /// Settles every variable made since `first` that nothing settled with
-    /// its fallback.
-    pub(crate) fn settle_from(&mut self, first: usize) {
-        let contents = self.unsettled_contents(first);
+    /// its fallback, but for those in `except`.
+    pub(crate) fn settle_from(&mut self, first: usize, except: &AHashSet<TypeVar>) {
+        let contents = self
+            .unsettled_contents(first)
+            .into_iter()
+            .filter(|var| !except.contains(var))
+            .collect::<Vec<_>>();
         self.settle_contents(&contents);
         for index in first..self.solutions.len() {
             let var = TypeVar(u32::try_from(index).expect("fewer than 2^32 type variables"));
-            self.settle_with_fallbacks(&[var]);
+            if !except.contains(&var) {
+                self.settle_with_fallbacks(&[var]);
+            }
         }
     }
 }
