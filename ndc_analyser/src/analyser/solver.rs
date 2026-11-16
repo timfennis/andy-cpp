@@ -995,7 +995,7 @@ impl Analyser {
                     // that doesn't fit. The write fails the same way and
                     // isn't reported again.
                     CallSite::Getter(id) if !self.accepts_write(&result, &typ) => {
-                        self.emit_rejected_write(&typ, &result, call.span);
+                        self.emit_rejected_write(&typ, &result, call.span, false);
                         self.failed_reads.insert(id);
                     }
                     CallSite::Getter(_) => {}

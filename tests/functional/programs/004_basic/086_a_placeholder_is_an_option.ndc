@@ -1,0 +1,5 @@
+// expect-error: A value that only comes later is an `Option`
+let best = ();
+for x in [3, 1] {
+    best = x;
+}
