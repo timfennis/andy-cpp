@@ -159,7 +159,6 @@ mod inner {
                     .peek()
                     .map(|v| v.0.clone())
                     .ok_or_else(|| anyhow!("empty input to max")),
-                Object::MinHeap(_) => Err(anyhow!("max is not supported for MinHeap")),
                 obj => vm_try_max(
                     Value::Object(Rc::new(obj))
                         .try_into_iter()
@@ -184,21 +183,57 @@ mod inner {
 
     /// Returns the maximum element using a comparator function.
     ///
-    /// The comparator function takes two elements and returns a number. A positive result means the
-    /// first argument is greater than the second, a negative result means the first argument is
-    /// less than the second, and zero means they are equal.
-    #[function(signature = "<T, U>(Iterable<T>, Fn(T, T) -> U) -> T")]
+    /// The comparator function takes two elements and returns an Int, as `<=>` does. A positive
+    /// result means the first argument is greater than the second, a negative result means the
+    /// first argument is less than the second, and zero means they are equal.
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Int) -> T")]
     pub fn max_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        by_comp(seq, comp, Ordering::Greater)
+    }
+
+    /// [`max_by`] with a comparator that returns a Float.
+    #[function(
+        name = "max_by",
+        signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> T"
+    )]
+    pub fn max_by_float(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        by_comp(seq, comp, Ordering::Greater)
+    }
+
+    /// [`max_by`] with a comparator that returns a Number.
+    #[function(
+        name = "max_by",
+        signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> T"
+    )]
+    pub fn max_by_number(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Greater)
     }
 
     /// Returns the minimum element using a comparator function.
     ///
-    /// The comparator function takes two elements and returns a number. A positive result means the
-    /// first argument is greater than the second, a negative result means the first argument is
-    /// less than the second, and zero means they are equal.
-    #[function(signature = "<T, U>(Iterable<T>, Fn(T, T) -> U) -> T")]
+    /// The comparator function takes two elements and returns an Int, as `<=>` does. A positive
+    /// result means the first argument is greater than the second, a negative result means the
+    /// first argument is less than the second, and zero means they are equal.
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Int) -> T")]
     pub fn min_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        by_comp(seq, comp, Ordering::Less)
+    }
+
+    /// [`min_by`] with a comparator that returns a Float.
+    #[function(
+        name = "min_by",
+        signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> T"
+    )]
+    pub fn min_by_float(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        by_comp(seq, comp, Ordering::Less)
+    }
+
+    /// [`min_by`] with a comparator that returns a Number.
+    #[function(
+        name = "min_by",
+        signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> T"
+    )]
+    pub fn min_by_number(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         by_comp(seq, comp, Ordering::Less)
     }
 
@@ -225,7 +260,6 @@ mod inner {
                     .peek()
                     .map(|v| v.0.0.clone())
                     .ok_or_else(|| anyhow!("empty input to min")),
-                Object::MaxHeap(_) => Err(anyhow!("min is not supported for MaxHeap")),
                 obj => vm_try_min(
                     Value::Object(Rc::new(obj))
                         .try_into_iter()
@@ -258,6 +292,36 @@ mod inner {
         Ok(())
     }
 
+    /// [`sort_by`] with a comparator that returns a Float.
+    #[function(name = "sort_by", signature = "<T>(List<T>, Fn(T, T) -> Float)")]
+    pub fn sort_by_float(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
+        sort_with(list, comp)
+    }
+
+    /// [`sorted_by`] with a comparator that returns a Float.
+    #[function(
+        name = "sorted_by",
+        signature = "<T>(Iterable<T>, Fn(T, T) -> Float) -> List<T>"
+    )]
+    pub fn sorted_by_float(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        sorted_with(seq, comp)
+    }
+
+    /// [`sort_by`] with a comparator that returns a Number.
+    #[function(name = "sort_by", signature = "<T>(List<T>, Fn(T, T) -> Number)")]
+    pub fn sort_by_number(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
+        sort_with(list, comp)
+    }
+
+    /// [`sorted_by`] with a comparator that returns a Number.
+    #[function(
+        name = "sorted_by",
+        signature = "<T>(Iterable<T>, Fn(T, T) -> Number) -> List<T>"
+    )]
+    pub fn sorted_by_number(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        sorted_with(seq, comp)
+    }
+
     /// Sorts the given sequence using a comparing function in place.
     ///
     /// The result of the comparing function is compared to the number `0` to determine the relative ordering such that:
@@ -266,8 +330,13 @@ mod inner {
     /// - for values equal to `0` the first argument is equal to the second argument
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
-    #[function(signature = "<T, U>(List<T>, Fn(T, T) -> U)")]
+    #[function(signature = "<T>(List<T>, Fn(T, T) -> Int)")]
     pub fn sort_by(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
+        sort_with(list, comp)
+    }
+
+    /// Sorts `list` in place by what `comp` says of each pair of elements.
+    fn sort_with(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
         let mut err: Option<String> = None;
         list.sort_by(|left, right| {
             if err.is_some() {
@@ -312,8 +381,13 @@ mod inner {
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
-    #[function(signature = "<T, U>(Iterable<T>, Fn(T, T) -> U) -> List<T>")]
+    #[function(signature = "<T>(Iterable<T>, Fn(T, T) -> Int) -> List<T>")]
     pub fn sorted_by(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        sorted_with(seq, comp)
+    }
+
+    /// The elements of `seq` in a new list, sorted by what `comp` says of each pair.
+    fn sorted_with(seq: SeqValue, comp: &mut VmCallable<'_>) -> anyhow::Result<Value> {
         let mut list: Vec<Value> = seq
             .try_into_iter()
             .ok_or_else(|| anyhow!("sorted_by requires a sequence"))?
@@ -348,26 +422,129 @@ mod inner {
         str.len() as i64
     }
 
-    /// Returns the length of the sequence, for strings this returns the number of UTF-8 characters.
-    #[function(signature = "<T>(Iterable<T>) -> Int")]
-    pub fn len(seq: SeqValue) -> anyhow::Result<i64> {
-        match &seq {
+    /// Returns the number of elements of a collection whose size is known: a list, deque, map or
+    /// heap, a tuple, or a string, for which it's the number of UTF-8 characters. An iterator's
+    /// length isn't known without reading it.
+    #[function(name = "len", signature = "<T>(List<T>) -> Int")]
+    pub fn len_list(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a string.
+    #[function(name = "len", signature = "(String) -> Int")]
+    pub fn len_string(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a map.
+    #[function(name = "len", signature = "<K, V>(Map<K, V>) -> Int")]
+    pub fn len_map(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a deque.
+    #[function(name = "len", signature = "<T>(Deque<T>) -> Int")]
+    pub fn len_deque(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a min heap.
+    #[function(name = "len", signature = "<T>(MinHeap<T>) -> Int")]
+    pub fn len_min_heap(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a max heap.
+    #[function(name = "len", signature = "<T>(MaxHeap<T>) -> Int")]
+    pub fn len_max_heap(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a tuple.
+    #[function(name = "len", signature = "<A>(Tuple<A>) -> Int")]
+    pub fn len_tuple1(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a tuple.
+    #[function(name = "len", signature = "<A, B>(Tuple<A, B>) -> Int")]
+    pub fn len_tuple2(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a tuple.
+    #[function(name = "len", signature = "<A, B, C>(Tuple<A, B, C>) -> Int")]
+    pub fn len_tuple3(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a tuple.
+    #[function(name = "len", signature = "<A, B, C, D>(Tuple<A, B, C, D>) -> Int")]
+    pub fn len_tuple4(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a tuple.
+    #[function(
+        name = "len",
+        signature = "<A, B, C, D, E>(Tuple<A, B, C, D, E>) -> Int"
+    )]
+    pub fn len_tuple5(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a tuple.
+    #[function(
+        name = "len",
+        signature = "<A, B, C, D, E, F>(Tuple<A, B, C, D, E, F>) -> Int"
+    )]
+    pub fn len_tuple6(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a tuple.
+    #[function(
+        name = "len",
+        signature = "<A, B, C, D, E, F, G>(Tuple<A, B, C, D, E, F, G>) -> Int"
+    )]
+    pub fn len_tuple7(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    /// [`len`] of a tuple.
+    #[function(
+        name = "len",
+        signature = "<A, B, C, D, E, F, G, H>(Tuple<A, B, C, D, E, F, G, H>) -> Int"
+    )]
+    pub fn len_tuple8(seq: Value) -> anyhow::Result<i64> {
+        length(&seq)
+    }
+
+    fn length(seq: &Value) -> anyhow::Result<i64> {
+        let length = match seq {
             Value::Object(obj) => match obj.as_ref() {
-                Object::List(l) => Ok(l.borrow().len() as i64),
-                Object::Tuple(t) => Ok(t.len() as i64),
-                Object::Deque(d) => Ok(d.borrow().len() as i64),
-                Object::String(s) => Ok(s.char_count() as i64),
-                Object::Map { entries, .. } => Ok(entries.borrow().len() as i64),
-                _ => Err(anyhow!(
+                Object::List(l) => l.borrow().len(),
+                Object::Tuple(t) => t.len(),
+                Object::Deque(d) => d.borrow().len(),
+                Object::String(s) => s.char_count(),
+                Object::Map { entries, .. } => entries.borrow().len(),
+                Object::MinHeap(h) => h.borrow().len(),
+                Object::MaxHeap(h) => h.borrow().len(),
+                _ => {
+                    return Err(anyhow!(
+                        "cannot determine the length of {}",
+                        seq.static_type()
+                    ));
+                }
+            },
+            _ => {
+                return Err(anyhow!(
                     "cannot determine the length of {}",
                     seq.static_type()
-                )),
-            },
-            _ => Err(anyhow!(
-                "cannot determine the length of {}",
-                seq.static_type()
-            )),
-        }
+                ));
+            }
+        };
+        Ok(length as i64)
     }
 
     /// Returns a lazy iterator yielding `(index, value)` tuples for each element of `seq`.

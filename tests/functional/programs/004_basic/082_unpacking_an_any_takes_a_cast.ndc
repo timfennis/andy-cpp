@@ -1,0 +1,3 @@
+// expect-error: Invalid unpacking of Any
+let v: Any = (1, 2);
+let a, b = v;

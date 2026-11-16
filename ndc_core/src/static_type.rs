@@ -649,11 +649,9 @@ impl StaticType {
 
     pub fn unpack(&self) -> Option<Box<dyn Iterator<Item = &Self> + '_>> {
         match self {
-            // Any just unpacks to an infinite list of Any
-            // The same types as `is_unknown`, spelled out for this exhaustive match.
-            Self::Any | Self::Var(_) | Self::Generic(_) => {
-                Some(Box::new(std::iter::repeat(&Self::Any)))
-            }
+            // What isn't known yet unpacks to as many parts as it's unpacked
+            // into, each of them not known yet either.
+            Self::Var(_) | Self::Generic(_) => Some(Box::new(std::iter::repeat(&Self::Any))),
             Self::Error => Some(Box::new(std::iter::repeat(&Self::Error))),
             Self::List(elem)
             | Self::Iterable(elem)
@@ -663,7 +661,9 @@ impl StaticType {
             | Self::Deque(elem) => Some(Box::new(std::iter::repeat(&**elem))),
             Self::Tuple(types) => Some(Box::new(types.iter())),
             Self::String => Some(Box::new(std::iter::repeat(&Self::String))),
-            Self::Bool
+            // An `Any` could hold anything, which a cast has to say first.
+            Self::Any
+            | Self::Bool
             | Self::Function { .. }
             | Self::Option(_)
             | Self::Number

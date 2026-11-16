@@ -521,6 +521,33 @@ fn compare_operands(args: &[Value]) -> Result<Ordering, VmError> {
     })
 }
 
+/// The parameter lists of the comparisons, for the values that have an
+/// order: numbers of any kind, against each other, strings, booleans, and
+/// lists and tuples of what has an order. Maps, deques, options, structs and
+/// functions have none, and neither do values of two different kinds. A list
+/// or tuple of what has no order still passes as one: that needs a constraint
+/// on the type parameter.
+fn orderable_parameters() -> Vec<String> {
+    let numbers = ["Int", "Float", "Number"];
+    let mut parameters = Vec::new();
+    for left in numbers {
+        for right in numbers {
+            parameters.push(format!("({left}, {right})"));
+        }
+    }
+    parameters.push("(String, String)".to_string());
+    parameters.push("(Bool, Bool)".to_string());
+    parameters.push("<T>(List<T>, List<T>)".to_string());
+    for arity in 1..=8 {
+        let names = (0..arity)
+            .map(|index| char::from(b'A' + index).to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        parameters.push(format!("<{names}>(Tuple<{names}>, Tuple<{names}>)"));
+    }
+    parameters
+}
+
 fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     for (name, predicate, docs) in [
         (
@@ -544,9 +571,15 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             "Returns whether the left value is less than or equal to the right.",
         ),
     ] {
-        declare_signature(env, name, "<A, B>(A, B) -> Bool", docs, move |args| {
-            Ok(Value::Bool(predicate(compare_operands(args)?)))
-        });
+        for parameters in orderable_parameters() {
+            declare_signature(
+                env,
+                name,
+                &format!("{parameters} -> Bool"),
+                docs,
+                move |args| Ok(Value::Bool(predicate(compare_operands(args)?))),
+            );
+        }
     }
 
     declare_signature(
@@ -574,14 +607,22 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         ("<=>", false, "Performs a three-way comparison."),
         (">=<", true, "Performs a reverse three-way comparison."),
     ] {
-        declare_signature(env, name, "<A, B>(A, B) -> Int", docs, move |args| {
-            let result = match compare_operands(args)? {
-                Ordering::Less => -1,
-                Ordering::Equal => 0,
-                Ordering::Greater => 1,
-            };
-            Ok(Value::Int(if reverse { -result } else { result }))
-        });
+        for parameters in orderable_parameters() {
+            declare_signature(
+                env,
+                name,
+                &format!("{parameters} -> Int"),
+                docs,
+                move |args| {
+                    let result = match compare_operands(args)? {
+                        Ordering::Less => -1,
+                        Ordering::Equal => 0,
+                        Ordering::Greater => 1,
+                    };
+                    Ok(Value::Int(if reverse { -result } else { result }))
+                },
+            );
+        }
     }
 }
 
@@ -1081,26 +1122,30 @@ fn bigint_number(value: BigInt) -> Value {
 }
 
 fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    declare_signature(
-        env,
-        "int",
-        "<A>(A) -> Int",
-        "Converts a value to a checked i64 Int.",
-        |args| {
-            arity(args, 1)?;
-            convert_to_int(&args[0]).map(Value::Int)
-        },
-    );
-    declare_signature(
-        env,
-        "float",
-        "<A>(A) -> Float",
-        "Converts a value to a Float.",
-        |args| {
-            arity(args, 1)?;
-            convert_to_float(&args[0]).map(Value::Float)
-        },
-    );
+    // What `int` and `float` convert: numbers, booleans, and strings that
+    // spell a number.
+    for from in ["Int", "Float", "Number", "Bool", "String"] {
+        declare_signature(
+            env,
+            "int",
+            &format!("({from}) -> Int"),
+            "Converts a value to a checked i64 Int.",
+            |args| {
+                arity(args, 1)?;
+                convert_to_int(&args[0]).map(Value::Int)
+            },
+        );
+        declare_signature(
+            env,
+            "float",
+            &format!("({from}) -> Float"),
+            "Converts a value to a Float.",
+            |args| {
+                arity(args, 1)?;
+                convert_to_float(&args[0]).map(Value::Float)
+            },
+        );
+    }
 
     for left_mode in NumericMode::ALL {
         for right_mode in NumericMode::ALL {

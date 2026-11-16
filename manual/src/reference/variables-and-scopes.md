@@ -177,3 +177,10 @@ You can also destructure nested patterns:
 let [a, (b, c)] = (1, [2, 3]);
 print(a, b, c);  // 1 2 3
 ```
+
+A deque, a heap, a range or another iterator destructures too, into as many of its elements as there are names, and it's an error when it has more or fewer. A value of type `Any` has to be cast first, to say what it holds:
+
+```ndc
+let low, high = 0..2;
+print(low, high);  // 0 1
+```

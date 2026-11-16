@@ -152,6 +152,18 @@ let inc: Fn(Int) -> Any = fn(x: Int) => x + 1;
 print(inc(1));                      // 2
 ```
 
+### Values that have an order
+
+`<`, `<=`, `>`, `>=`, `<=>` and `>=<` compare two values of the same kind that has an order: numbers of any kind, an `Int` with a `Float` too, strings, booleans, and lists and tuples of those. Values of two different kinds have no order, and neither do maps, deques, options, structs and functions:
+
+```ndc,fails
+print(1 < 1.5, "a" < "b", (1, "b") < (1, "c"));
+print(1 < "a");
+// error[analysis]: No function called '<' found that matches the arguments 'Int, String'
+```
+
+A list or tuple of values without an order, such as a list of maps, still passes as one, and comparing two of them is an error when the program runs.
+
 ### Values of different types
 
 The elements of a list, the keys and the values of a map (its default too), the branches of an `if` and the values a function returns have one type. Number literals take the type of the numbers next to them, and an empty list the type of what's next to it:
