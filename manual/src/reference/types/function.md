@@ -22,7 +22,7 @@ fn my_function(input) {
 Function declarations are not hoisted. Define a function before you call it.
 
 ```ndc,fails
-foo(); // ERROR: no function called foo exists
+foo(); // ERROR: Identifier foo has not previously been declared
 
 fn foo() {
   print("Hello, World!");
