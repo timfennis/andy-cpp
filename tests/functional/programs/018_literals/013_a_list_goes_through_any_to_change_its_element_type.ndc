@@ -1,5 +1,0 @@
-// expect-output: ["a","b",1]
-let any: Any = "a b".split(" ");
-let anything = any as List<Any>;
-anything.push(1);
-print(anything);

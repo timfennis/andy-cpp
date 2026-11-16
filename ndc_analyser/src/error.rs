@@ -417,7 +417,8 @@ impl AnalysisError {
             help_text: Some(
                 concat!(
                     "An overload would accept a narrower argument type. ",
-                    "Cast to say what the value holds, as in `value as List<Int>`.",
+                    "Cast to say what the value holds, as in `value.clone() as List<Int>`: ",
+                    "a container is cast as a copy while something else still holds it.",
                 )
                 .to_string(),
             ),

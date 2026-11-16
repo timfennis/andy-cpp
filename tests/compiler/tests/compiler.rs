@@ -592,31 +592,23 @@ fn an_unproven_cast_checks_the_type_at_runtime() {
     );
 }
 
-// let x: Any = [1]; x as List<Int>; f() as List<Int>; x as Int
+// let x: Any = [1]; x as List<Int>; x as Int
 //
 // A cast to a container type checks that nothing else holds the container,
-// before the type check. An `Any` variable it's read from may hold it too;
-// the result of a call is held by nothing else. A cast to a type without a
-// container in it has nothing to check.
+// ahead of the type check. A cast to a type without a container in it has
+// nothing to check.
 #[test]
 fn a_cast_to_a_container_checks_it_is_unshared() {
-    let ops = compile_with_analysis(
-        "let x: Any = [1]; fn f() -> Any => [1]; x as List<Int>; f() as List<Int>; x as Int",
-    );
-    let holders: Vec<usize> = ops
+    let ops = compile_with_analysis("let x: Any = [1]; x as List<Int>; x as Int");
+    let checks: Vec<usize> = ops
         .iter()
-        .filter_map(|op| match op {
-            CheckUnshared(_, holders) => Some(*holders),
-            _ => None,
-        })
+        .enumerate()
+        .filter(|(_, op)| matches!(op, CheckUnshared(_)))
+        .map(|(at, _)| at)
         .collect();
-    assert_eq!(holders, vec![2, 1], "got: {ops:?}");
-    let check = ops
-        .iter()
-        .position(|op| matches!(op, CheckUnshared(..)))
-        .unwrap();
+    assert_eq!(checks.len(), 1, "got: {ops:?}");
     assert!(
-        matches!(&ops[check + 1], CheckType(t) if t.holds_a_mutable_container()),
+        matches!(&ops[checks[0] + 1], CheckType(t) if t.holds_a_mutable_container()),
         "expected the type check right after, got: {ops:?}",
     );
 }

@@ -239,11 +239,11 @@ impl Vm {
                         ));
                     }
                 }
-                OpCode::CheckUnshared(target, holders) => {
+                OpCode::CheckUnshared(target) => {
                     // A value that isn't a `target` fails the cast's own test
                     // instead, whether it's shared or not.
                     let value = self.stack.last().expect("stack underflow");
-                    if let Some(kind) = value.shared_beyond(target, *holders)
+                    if let Some(kind) = value.shared_container(target)
                         && value.conforms_to(target)
                     {
                         return Err(VmError::new(

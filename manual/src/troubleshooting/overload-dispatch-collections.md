@@ -22,14 +22,15 @@ A [cast](../features/casts.md) says which one is meant. It checks the value as t
 fn process(xs: List<Int>) => "ints";
 fn process(xs: List<String>) => "strings";
 let value: Any = [1];
-print(process(value as List<Int>));  // ints
+// value still holds the list, so a copy is cast (see the casts chapter).
+print(process(value.clone() as List<Int>));  // ints
 ```
 
 To find out which one it is, test it with `as?`, which gives `None` when the value isn't one:
 
 ```ndc
 let value: Any = ["a"];
-print(value as? List<Int>, value as? List<String>);  // None Some(["a"])
+print(value as? List<Int>, value.clone() as? List<String>);  // None Some(["a"])
 ```
 
 ## A `List<Any>` fits no typed overload
@@ -49,7 +50,8 @@ let values: List<Any> = [1, 2, 3];
 values.sum()
 // error[analysis]: No function called 'sum' found that matches the arguments 'List<Any>'
 // = An overload would accept a narrower argument type. Cast to say what the value holds,
-//   as in `value as List<Int>`.
+//   as in `value.clone() as List<Int>`: a container is cast as a copy while something
+//   else still holds it.
 ```
 
 ## Workaround

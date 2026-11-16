@@ -435,26 +435,25 @@ impl Value {
     }
 
     /// The kind of the first container a cast of this value to `target`
-    /// gives a new type that's held by more than `holders` holders, or, deeper
-    /// in, by more than the container holding it: another holder could still
-    /// write what the old type allowed. `None` if there's none.
+    /// gives a new type that's held by anything but this value, or, deeper
+    /// in, by anything but the container holding it: another holder could
+    /// still write what the old type allowed. `None` if there's none.
+    ///
+    /// It counts references, so it's conservative: a holder the program can
+    /// no longer reach, or one that's an `Any` and so can't write to the
+    /// container without a cast of its own, counts as well.
     ///
     /// A tuple or option can't be written to, so sharing one is harmless by
     /// itself; what's in a shared one is reachable from elsewhere, though.
     /// `(1, None)` held twice passes as a `(Int, Option<List<Int>>)`, and
     /// `(1, Some([2]))` held twice doesn't.
-    pub fn shared_beyond(&self, target: &StaticType, holders: usize) -> Option<&'static str> {
-        self.shared_container(target, holders, false)
+    pub fn shared_container(&self, target: &StaticType) -> Option<&'static str> {
+        self.held_elsewhere(target, false)
     }
 
-    /// [`Self::shared_beyond`], for a value that's `reached_elsewhere` when a
+    /// [`Self::shared_container`], for a value that's `reached_elsewhere` when a
     /// tuple or option holding it is shared.
-    fn shared_container(
-        &self,
-        target: &StaticType,
-        holders: usize,
-        reached_elsewhere: bool,
-    ) -> Option<&'static str> {
+    fn held_elsewhere(&self, target: &StaticType, reached_elsewhere: bool) -> Option<&'static str> {
         /// The first of `values` with a shared container, looked for only when
         /// `target`, the type of each, can hold one.
         fn inside<'v>(
@@ -467,7 +466,7 @@ impl Value {
             }
             values
                 .into_iter()
-                .find_map(|value| value.shared_container(target, 1, reached_elsewhere))
+                .find_map(|value| value.held_elsewhere(target, reached_elsewhere))
         }
         if !target.holds_a_mutable_container() {
             return None;
@@ -475,7 +474,7 @@ impl Value {
         let Self::Object(object) = self else {
             return None;
         };
-        let shared = reached_elsewhere || Rc::strong_count(object) > holders;
+        let shared = reached_elsewhere || Rc::strong_count(object) > 1;
         let container = match object.as_ref() {
             Object::List(_) => Some("list"),
             Object::Map { .. } => Some("map"),
@@ -507,13 +506,11 @@ impl Value {
                 inside(entries.keys(), key, false)
                     .or_else(|| inside(entries.values().chain(default.iter()), value, false))
             }
-            (StaticType::Option(inner), Object::Some(value)) => {
-                value.shared_container(inner, 1, shared)
-            }
+            (StaticType::Option(inner), Object::Some(value)) => value.held_elsewhere(inner, shared),
             (StaticType::Tuple(elements), Object::Tuple(values)) => elements
                 .iter()
                 .zip(values)
-                .find_map(|(element, value)| value.shared_container(element, 1, shared)),
+                .find_map(|(element, value)| value.held_elsewhere(element, shared)),
             _ => None,
         }
     }

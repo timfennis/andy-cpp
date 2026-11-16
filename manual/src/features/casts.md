@@ -6,8 +6,9 @@ The `as` operator asserts that a value has the given type:
 let values: Any = [1, 2];
 
 // values is an Any; the cast says it's a list of Ints, so the result
-// works with functions that expect a List<Int>.
-let ints = values as List<Int>;
+// works with functions that expect a List<Int>. values still holds the
+// list, so a copy is cast (see "A container held by another name" below).
+let ints = values.clone() as List<Int>;
 print(ints.sum());  // 3
 ```
 
@@ -88,11 +89,15 @@ let anything = any as List<Any>;
 // error[vm]: cannot cast to List<Any>: the list is also held by something else, which would still expect what it held before
 ```
 
-Had it worked, `anything.push(1)` would have put an Int in `words`. An `Any`
-the container is read from doesn't count as another holder: nothing writes to
-a container through an `Any` without a cast of its own. A cast that the
-analyser proves, such as one to the type the value already has, gives no new
-type and isn't checked.
+Had it worked, `anything.push(1)` would have put an Int in `words`. A cast that
+the analyser proves, such as one to the type the value already has, gives no
+new type and isn't checked.
+
+The check counts what holds the container as the program runs, so it's
+conservative: anything else that holds it counts, even an `Any`, which couldn't
+write to it without a cast of its own, and a variable of a block that has
+ended. A cast straight out of a variable therefore takes a copy. A container
+that nothing else holds, such as what a call returns, needs none.
 
 Cast a copy instead. `clone` copies the container and `deepcopy` the
 containers in it too, which a cast also needs when it gives those a new type:
@@ -122,7 +127,7 @@ It checks a value the way `as` does, so a container is checked element by elemen
 let mixed: List<Any> = [1, "a"];
 print(mixed as? List<Int>);  // None
 let ints: Any = [1, 2];
-print(ints as? List<Int>);   // Some([1,2])
+print(ints.clone() as? List<Int>);  // Some([1,2])
 ```
 
 That makes it the way to ask what a value is:

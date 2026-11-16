@@ -284,31 +284,6 @@ impl Compiler {
         }
     }
 
-    /// How many holders a value being cast may have without another one
-    /// giving the containers in it another type: the value being cast, and
-    /// the variable, field or element it's read from when that's an `Any`,
-    /// which nothing can write through without a cast of its own.
-    fn cast_operand_holders(&self, value: &ExpressionLocation) -> usize {
-        let mut value = value;
-        while let Expression::Grouping(inner) = &value.expression {
-            value = inner;
-        }
-        let read_from_a_place = match &value.expression {
-            Expression::Identifier { .. } | Expression::MemberAccess { .. } => true,
-            // An index `xs[i]` is the call `[](xs, i)`.
-            Expression::Call {
-                function,
-                arguments,
-            } => {
-                matches!(&function.expression, Expression::Identifier { name, .. } if name == "[]")
-                    && arguments.len() == 2
-            }
-            _ => false,
-        };
-        let is_any = self.analysis.expr_types.get(&value.id) == Some(&StaticType::Any);
-        if read_from_a_place && is_any { 2 } else { 1 }
-    }
-
     /// Compile one expression. Leaves exactly one result value on the stack,
     /// on top of any local slots the expression declared. Diverging
     /// expressions (`break`, `continue`, `return`) leave nothing because
@@ -366,7 +341,6 @@ impl Compiler {
             Expression::Cast {
                 value, optional, ..
             } => {
-                let holders = self.cast_operand_holders(&value);
                 self.compile_expr(*value)?;
                 let check = match self.analysis.cast_checks.get(&id) {
                     None => return Err(CompileError::unresolved_cast(span)),
@@ -380,7 +354,7 @@ impl Compiler {
                     && target.holds_a_mutable_container()
                 {
                     self.ir
-                        .write(OpCode::CheckUnshared(Rc::clone(target), holders), span);
+                        .write(OpCode::CheckUnshared(Rc::clone(target)), span);
                 }
                 match (check, optional) {
                     (None, false) => {}
