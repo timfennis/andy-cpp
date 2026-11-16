@@ -212,9 +212,10 @@ fn call(name: &str, arguments: &[String]) -> Option<String> {
 /// Combinations of one value from each of `pools` that use every value of
 /// every pool: the `i`th takes each pool's `i`th value, from the start again
 /// in a pool that has fewer. `take(Iterable<T>, Int)` gets a list, a deque,
-/// a heap, an iterator and a range, each with one of the Ints.
+/// a heap, an iterator and a range, each with one of the Ints. A native
+/// without parameters, as `randi()`, gets the one call without arguments.
 fn covering(pools: &[Vec<String>]) -> Vec<Vec<String>> {
-    let longest = pools.iter().map(Vec::len).max().unwrap_or(0);
+    let longest = pools.iter().map(Vec::len).max().unwrap_or(1);
     (0..longest)
         .map(|index| {
             pools
@@ -345,4 +346,16 @@ fn an_error_about_a_type_is_told_from_one_about_a_value() {
     ] {
         assert!(!is_about_a_type(about_a_value), "{about_a_value}");
     }
+}
+
+#[test]
+fn a_native_without_parameters_is_called_once() {
+    assert_eq!(covering(&[]), vec![Vec::<String>::new()]);
+    assert_eq!(
+        covering(&[vec!["1".into(), "2".into()], vec!["a".into()]]),
+        vec![
+            vec!["1".to_string(), "a".to_string()],
+            vec!["2".to_string(), "a".to_string()]
+        ]
+    );
 }
