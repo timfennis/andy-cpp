@@ -19,45 +19,111 @@ print(multiply(4, 5));  // 20
 
 > **Note:** The interpreter does not check whether a function is actually pure. You must avoid side effects yourself.
 
-### Which calls share a result
+### When a result is reused
 
-A call gets an earlier call's result when `==` says their arguments are equal.
-Marking a function `pure` promises that it gives equal results for equal
-arguments. A function that tells apart values `==` calls equal breaks that
-promise: `0.0 == -0.0`, and a map's default isn't part of what `==` compares,
-so these calls share a result:
+A pure function remembers its results. When you call it again with arguments
+that are equal to an earlier call's, it gives back the remembered result
+instead of running again:
+
+```ndc
+let calls = 0;
+pure fn square(n) {
+    calls += 1;
+    n * n
+}
+print(square(4), square(4), calls);  // 16 16 1
+```
+
+"Equal" means what `==` says. Two separate lists with the same items are
+equal, so the second call below reuses the first one's result:
+
+```ndc
+let calls = 0;
+pure fn total(xs: List<Int>) {
+    calls += 1;
+    xs.sum()
+}
+print(total([1, 2, 3]), total([1, 2, 3]), calls);  // 6 6 1
+```
+
+So a pure function must give the same answer for any two arguments that are
+equal. Watch out for values that are equal but not quite the same:
+
+- `0.0 == -0.0` is true, so `inverse(-0.0)` below gets the result of
+  `inverse(0.0)`.
+- Maps are equal when they have the same entries. Their default value isn't
+  compared, so two maps with different defaults count as the same argument.
 
 ```ndc
 pure fn inverse(x: Float) => 1.0 / x;
 print(inverse(0.0), inverse(-0.0));  // Inf Inf
 ```
 
-### A `pure fn` takes data
+A pure function keeps separate results for each type it's used with, so an
+Int and a Float never mix:
 
-A `pure fn` only takes values `==` compares by what they hold: numbers,
-strings, booleans, `None`, and lists, tuples, options, deques, maps and
-structs of those. `==` says two functions, iterators or heaps are equal only
-when they're the same one, and an `Any` could hold any of them, so a
-parameter can't be or hold one, nor can a struct's field:
-
-```ndc,fails
-pure fn call(f: Fn(Int) -> Int, n: Int) => f(n);
-// error[analysis]: `call` is a `pure fn`, which only takes data, but its parameter `f` has type `Fn(Int) -> Int`
+```ndc
+pure fn same(x) => x;
+print(same(1), same(1.0));  // 1 1.0
 ```
 
-A `pure fn` without annotations is checked for the types each call gives it.
+### What a pure function can take
 
-### Results are shared
+The arguments of a pure function must be plain data, which `==` compares by
+what's in it:
 
-A `pure fn` called with values of different types has a cache for each set of
-types, and for each type it returns. The cached value is what the later call
-gets, not a copy of it, so a change to a list it returned is in what the next
-call with the same arguments returns:
+- numbers, strings, booleans and `None`
+- lists, tuples, options, deques and maps of those
+- structs whose fields are all of those
+
+These aren't allowed:
+
+- **Functions.** `==` only says two functions are equal when they're the very
+  same function, and what a function returns can depend on things outside it.
+- **Iterators.** An iterator changes every time you read from it.
+- **Heaps** (`MinHeap` and `MaxHeap`). `==` only says two heaps are equal when
+  they're the very same heap.
+- **`Any`.** It could hold any of the above.
+
+The same goes for what's inside an argument: a list of functions isn't allowed,
+and neither is a struct with an `Any` field.
+
+```ndc,norun
+pure fn path_length(grid: Map<(Int, Int), Int>, from: (Int, Int)) { ... }  // fine
+pure fn apply(f: Fn(Int) -> Int, x: Int) => f(x);                          // a function
+pure fn first(numbers: Iterator<Int>) { ... }                              // an iterator
+pure fn smallest(h: MinHeap<Int>) => h.min();                              // a heap
+pure fn describe(x: Any) { ... }                                           // an Any
+```
+
+Using one of them is an error before the program runs:
+
+```ndc,fails
+pure fn apply(f: Fn(Int) -> Int, x: Int) => f(x);
+// error[analysis]: `apply` is a `pure fn`, which only takes data, but its parameter `f` has type `Fn(Int) -> Int`
+```
+
+When a parameter has no type, each call is checked instead. `pure fn same(x)
+=> x` can be called with `5` or `[1, 2]`, but not with a function.
+
+### The remembered result isn't a copy
+
+Every call that reuses a result gets the very same value. If that value is a
+list and you change it, later calls see the change:
 
 ```ndc
 pure fn empty() -> List<Int> => [];
 empty().push(1);
 print(empty());  // [1]
+```
+
+If you want to change a result, copy it first with `clone`:
+
+```ndc
+pure fn empty() -> List<Int> => [];
+let mine = empty().clone();
+mine.push(1);
+print(empty());  // []
 ```
 
 ### Performance: keep memoization keys small
