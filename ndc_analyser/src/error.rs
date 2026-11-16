@@ -166,6 +166,20 @@ impl AnalysisError {
         }
     }
 
+    /// A function whose result would have a type that contains itself.
+    pub(crate) fn return_type_contains_itself(function: &str, span: Span) -> Self {
+        Self {
+            text: format!(
+                "What `{function}` returns would have a type that contains itself, as it returns itself or a value built from what it returns"
+            ),
+            span,
+            help_text: Some(format!(
+                "Only an `Any` can hold it, which has to be written: `fn {function}(...) -> Any`"
+            )),
+            notes: Vec::new(),
+        }
+    }
+
     pub(crate) fn recursion_changes_types(function: &str, span: Span) -> Self {
         Self {
             text: format!(

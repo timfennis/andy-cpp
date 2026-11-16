@@ -723,15 +723,16 @@ fn a_captured_local_is_read_and_written_through_its_cell() {
     );
 }
 
-// fn outer() { fn f() { f } }
+// fn outer() { fn f() -> Any { f } }
 //
 // `f` captures itself before its value exists, so its slot gets a fresh cell
 // before the closure is made, and the closure is written into that cell.
-// (At the top level `f` would be a global, which needs no cell.)
+// (At the top level `f` would be a global, which needs no cell.) What it returns
+// contains itself, which only an `Any` holds.
 #[test]
 fn a_self_capturing_function_gets_its_cell_before_its_closure() {
     assert_eq!(
-        compile_nested_function("fn outer() { fn f() { f } }", &[0]),
+        compile_nested_function("fn outer() { fn f() -> Any { f } }", &[0]),
         [
             NewCell(0),
             Closure {

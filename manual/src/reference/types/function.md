@@ -295,6 +295,13 @@ forever(0)
 // error[vm]: calls go more than 1000000 deep, which usually means a function calls itself without end
 ```
 
+A function that returns itself, or a value built from what it returns, as a list of it, would have a result type that contains itself. Only an `Any` holds such a value, which has to be written:
+
+```ndc
+fn nest(x, n) -> Any => if n == 0 { [x] } else { [nest(x, n - 1)] };
+print(nest(1, 3));  // [[[[1]]]]
+```
+
 ## Function overloading
 
 A name can refer to several functions, called overloads, as long as they differ in their number of parameters, their parameter types, or both:
