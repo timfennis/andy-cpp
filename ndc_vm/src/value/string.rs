@@ -26,6 +26,22 @@ impl VmString {
         })
     }
 
+    /// [`Self::borrow`], or an error if the string is being changed.
+    pub fn try_borrow(&self) -> Result<Ref<'_, String>, std::cell::BorrowError> {
+        self.storage.try_borrow().map(|storage| {
+            Ref::map(storage, |storage| match storage {
+                Storage::Plain(string) => string,
+                Storage::Indexed(string) => string.as_string(),
+            })
+        })
+    }
+
+    /// [`Self::borrow_mut`], or an error if the string is in use.
+    pub fn try_borrow_mut(&self) -> Result<RefMut<'_, String>, std::cell::BorrowMutError> {
+        drop(self.storage.try_borrow_mut()?);
+        Ok(self.borrow_mut())
+    }
+
     pub fn borrow_mut(&self) -> RefMut<'_, String> {
         let mut storage = self.storage.borrow_mut();
         if matches!(*storage, Storage::Indexed(_)) {

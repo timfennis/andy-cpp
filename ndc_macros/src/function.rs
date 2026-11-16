@@ -398,7 +398,7 @@ fn try_generate_vm_native(
     return_type_override: &TokenStream,
     signature: Option<&syn::LitStr>,
 ) -> Option<VmNativeTokens> {
-    use crate::vm_convert::{try_vm_input, try_vm_return};
+    use crate::vm_convert::{Borrow, try_vm_input, try_vm_return};
 
     let mut extracts = Vec::new();
     let mut passes = Vec::new();
@@ -419,7 +419,7 @@ fn try_generate_vm_native(
             has_vm_callable = true;
         }
         let conv = try_vm_input(ty, i)?;
-        extracts.push(conv.extract);
+        extracts.push((conv.borrow, conv.extract));
         passes.push(conv.pass);
         param_types.push(conv.static_type);
         let name = match &*pat_ty.pat {
@@ -429,9 +429,33 @@ fn try_generate_vm_native(
         param_names.push(quote! { #name });
     }
 
+    // Every argument that's only read is taken before any that's changed,
+    // so `extend(xs, xs)` reads `xs` before it borrows it to append.
+    extracts.sort_by_key(|(borrow, _)| *borrow == Borrow::Write);
+    let holds_a_borrow = extracts.iter().any(|(borrow, _)| *borrow != Borrow::None);
+    let extracts = extracts
+        .into_iter()
+        .map(|(_, extract)| extract)
+        .collect::<Vec<_>>();
+
     let (return_code, _) = try_vm_return(&function.sig.output)?;
     let return_static_type = return_type_override;
     let n = function.sig.inputs.len();
+
+    // A callback is the program's code, which may use what the native holds
+    // a borrow of, as a `sort_by` comparator may read the list it sorts:
+    // holding one while calling back would panic there.
+    if has_vm_callable && holds_a_borrow {
+        let message = format!(
+            "{}: a native that takes a callback can't borrow its other arguments; take them as `Value`s and copy what it needs",
+            function.sig.ident
+        );
+        return Some(VmNativeTokens {
+            native_let: quote! { compile_error!(#message); },
+            param_types,
+            param_names,
+        });
+    }
 
     let func_variant = if has_vm_callable {
         quote! {

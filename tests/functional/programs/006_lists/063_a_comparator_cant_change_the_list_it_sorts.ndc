@@ -1,0 +1,6 @@
+// expect-error: the list changed while `sort_by` sorted it
+let xs = [3, 1, 2];
+xs.sort_by(fn(a, b) {
+    xs.push(9);
+    a <=> b
+});

@@ -954,87 +954,112 @@ impl fmt::Display for Value {
     }
 }
 
+thread_local! {
+    /// The containers being displayed, outermost first, so that one that
+    /// holds itself displays as `[...]` there instead of without end.
+    static DISPLAYING: RefCell<Vec<*const Object>> = const { RefCell::new(Vec::new()) };
+}
+
 impl fmt::Display for Object {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Some(v) => write!(f, "Some({v:?})"),
-            // Strings display without quotes at the top level.
-            Self::String(s) => write!(f, "{}", s.borrow()),
-            Self::List(vs) => {
-                let vs = vs.borrow();
-                write!(f, "[")?;
-                for (i, v) in vs.iter().enumerate() {
-                    // Use Debug (repr) for elements so strings appear quoted inside lists.
-                    write!(f, "{v:?}")?;
-                    if i + 1 < vs.len() {
-                        write!(f, ",")?;
-                    }
-                }
-                write!(f, "]")
-            }
-            // Empty tuple is the unit value, which prints as nothing on its
-            // own; inside another value it shows as `()`.
-            Self::Tuple(vs) if vs.is_empty() => Ok(()),
-            Self::Tuple(vs) => {
-                write!(f, "(")?;
-                for (i, v) in vs.iter().enumerate() {
-                    write!(f, "{v:?}")?;
-                    if i + 1 < vs.len() {
-                        write!(f, ",")?;
-                    }
-                }
-                // `(1,)` is a tuple, `(1)` is just 1.
-                if vs.len() == 1 {
+        let this = std::ptr::from_ref(self);
+        if DISPLAYING.with_borrow(|displaying| displaying.contains(&this)) {
+            return f.write_str(match self {
+                Self::List(_) => "[...]",
+                Self::Tuple(_) => "(...)",
+                Self::Map { .. } => "%{...}",
+                Self::Some(_) => "Some(...)",
+                _ => "{...}",
+            });
+        }
+        DISPLAYING.with_borrow_mut(|displaying| displaying.push(this));
+        let result = display_contents(self, f);
+        DISPLAYING.with_borrow_mut(|displaying| displaying.pop());
+        result
+    }
+}
+
+/// What [`Object`]'s `Display` shows of `object`, which isn't one it's
+/// displaying already.
+fn display_contents(object: &Object, f: &mut Formatter<'_>) -> fmt::Result {
+    match object {
+        Object::Some(v) => write!(f, "Some({v:?})"),
+        // Strings display without quotes at the top level.
+        Object::String(s) => write!(f, "{}", s.borrow()),
+        Object::List(vs) => {
+            let vs = vs.borrow();
+            write!(f, "[")?;
+            for (i, v) in vs.iter().enumerate() {
+                // Use Debug (repr) for elements so strings appear quoted inside lists.
+                write!(f, "{v:?}")?;
+                if i + 1 < vs.len() {
                     write!(f, ",")?;
                 }
-                write!(f, ")")
             }
-            Self::Map { entries, .. } => {
-                write!(f, "%{{")?;
-                let entries = entries.borrow();
-                // A set is a map whose values are all `()`: `%{1,2}`.
-                let is_set = entries.values().all(Value::is_unit);
-                for (i, (k, v)) in entries.iter().enumerate() {
-                    if is_set {
-                        write!(f, "{k:?}")?;
-                    } else {
-                        write!(f, "{k:?}: {v:?}")?;
-                    }
-                    if i + 1 < entries.len() {
-                        write!(f, ",")?;
-                    }
+            write!(f, "]")
+        }
+        // Empty tuple is the unit value, which prints as nothing on its
+        // own; inside another value it shows as `()`.
+        Object::Tuple(vs) if vs.is_empty() => Ok(()),
+        Object::Tuple(vs) => {
+            write!(f, "(")?;
+            for (i, v) in vs.iter().enumerate() {
+                write!(f, "{v:?}")?;
+                if i + 1 < vs.len() {
+                    write!(f, ",")?;
                 }
-                write!(f, "}}")
             }
-            Self::Function(func) => write!(f, "{func}"),
-            Self::OverloadSet {
-                scalars,
-                vec_candidates,
-            } => write!(
-                f,
-                "<overload set ({} candidates)>",
-                scalars.len() + vec_candidates.len()
-            ),
-            Self::Iterator(iter) => match iter.borrow().len() {
-                Some(n) => write!(f, "<iterator (len={n})>"),
-                None => write!(f, "<iterator>"),
-            },
-            Self::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
-            Self::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
-            Self::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
-            Self::Struct { info, fields } => {
-                let length = info.fields.len();
-                write!(f, "{} {{", info.name)?;
-                for (i, ((field, _type), v)) in
-                    info.fields.iter().zip(fields.borrow().iter()).enumerate()
-                {
-                    write!(f, "{field}: {v:?}")?;
-                    if i + 1 < length {
-                        write!(f, ", ")?;
-                    }
+            // `(1,)` is a tuple, `(1)` is just 1.
+            if vs.len() == 1 {
+                write!(f, ",")?;
+            }
+            write!(f, ")")
+        }
+        Object::Map { entries, .. } => {
+            write!(f, "%{{")?;
+            let entries = entries.borrow();
+            // A set is a map whose values are all `()`: `%{1,2}`.
+            let is_set = entries.values().all(Value::is_unit);
+            for (i, (k, v)) in entries.iter().enumerate() {
+                if is_set {
+                    write!(f, "{k:?}")?;
+                } else {
+                    write!(f, "{k:?}: {v:?}")?;
                 }
-                write!(f, "}}")
+                if i + 1 < entries.len() {
+                    write!(f, ",")?;
+                }
             }
+            write!(f, "}}")
+        }
+        Object::Function(func) => write!(f, "{func}"),
+        Object::OverloadSet {
+            scalars,
+            vec_candidates,
+        } => write!(
+            f,
+            "<overload set ({} candidates)>",
+            scalars.len() + vec_candidates.len()
+        ),
+        Object::Iterator(iter) => match iter.borrow().len() {
+            Some(n) => write!(f, "<iterator (len={n})>"),
+            None => write!(f, "<iterator>"),
+        },
+        Object::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
+        Object::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
+        Object::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
+        Object::Struct { info, fields } => {
+            let length = info.fields.len();
+            write!(f, "{} {{", info.name)?;
+            for (i, ((field, _type), v)) in
+                info.fields.iter().zip(fields.borrow().iter()).enumerate()
+            {
+                write!(f, "{field}: {v:?}")?;
+                if i + 1 < length {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "}}")
         }
     }
 }

@@ -16,6 +16,23 @@ pub struct VmInputArg {
     pub pass: TokenStream,
     /// `StaticType` token for this parameter.
     pub static_type: TokenStream,
+    /// What the argument holds a borrow of while the native runs.
+    pub borrow: Borrow,
+}
+
+/// What an argument holds a borrow of while the native runs. One that's
+/// changed is borrowed after every argument that's only read, so
+/// `extend(xs, xs)` reads `xs` before it appends to it. A native that takes
+/// a callback holds none, as the callback is the program's code, which may
+/// use the same value.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Borrow {
+    /// It's copied out, or isn't in a `RefCell`.
+    None,
+    /// Its `RefCell` is borrowed to be read.
+    Read,
+    /// Its `RefCell` is borrowed to be changed.
+    Write,
 }
 
 /// Build the `VmError::native(format!("arg {pos}: expected {expected}, got {actual}"))` expression.
@@ -25,6 +42,18 @@ fn arg_error(position: usize, expected: &str) -> TokenStream {
         ndc_vm::error::VmError::native(format!(
             "arg {}: expected {}, got {}",
             #position, #expected, #raw.static_type()
+        ))
+    }
+}
+
+/// The error for an argument a call can't borrow, as another call that's
+/// still running is changing it: `sort_by` changes the list whose elements
+/// its comparator gets, so the comparator can't use that list.
+fn in_use_error(position: usize, expected: &str) -> TokenStream {
+    quote! {
+        ndc_vm::error::VmError::native(format!(
+            "arg {}: the {} can't be used here, as a call that's still running is changing it, as `sort_by` changes the list its comparator compares the elements of",
+            #position, #expected
         ))
     }
 }
@@ -46,13 +75,17 @@ fn refcell_collection_arg(
     let guard = format_ident!("{temp}_guard");
     let variant_ident = format_ident!("{variant}");
 
+    let in_use = in_use_error(position, expected);
     let (borrow, pass) = if mutable {
         (
-            quote! { let mut #guard = #rc.borrow_mut(); },
+            quote! { let mut #guard = #rc.try_borrow_mut().map_err(|_| #in_use)?; },
             quote! { &mut *#guard },
         )
     } else {
-        (quote! { let #guard = #rc.borrow(); }, quote! { &*#guard })
+        (
+            quote! { let #guard = #rc.try_borrow().map_err(|_| #in_use)?; },
+            quote! { &*#guard },
+        )
     };
 
     VmInputArg {
@@ -67,6 +100,7 @@ fn refcell_collection_arg(
         },
         pass,
         static_type,
+        borrow: if mutable { Borrow::Write } else { Borrow::Read },
     }
 }
 
@@ -87,6 +121,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Number },
+                borrow: Borrow::None,
             }
         }
 
@@ -98,6 +133,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Number },
+                borrow: Borrow::None,
             }
         }
 
@@ -112,6 +148,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Float },
+                borrow: Borrow::None,
             }
         }
 
@@ -126,11 +163,13 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Bool },
+                borrow: Borrow::None,
             }
         }
 
         NdcType::String | NdcType::StrRef => {
             let err = arg_error(position, "string");
+            let in_use = in_use_error(position, "string");
             let pass = if ndc_type == NdcType::StrRef {
                 quote! { &#temp }
             } else {
@@ -140,7 +179,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 extract: quote! {
                     let #temp = match #raw {
                         ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
-                            ndc_vm::value::Object::String(s) => s.borrow().clone(),
+                            ndc_vm::value::Object::String(s) => s.try_borrow().map_err(|_| #in_use)?.clone(),
                             _ => return Err(#err),
                         },
                         _ => return Err(#err),
@@ -148,6 +187,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass,
                 static_type: quote! { ndc_core::StaticType::String },
+                borrow: Borrow::None,
             }
         }
 
@@ -162,6 +202,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Int },
+                borrow: Borrow::None,
             }
         }
 
@@ -181,6 +222,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Int },
+                borrow: Borrow::None,
             }
         }
 
@@ -195,6 +237,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { &#temp },
                 static_type: quote! { ndc_core::StaticType::Int },
+                borrow: Borrow::None,
             }
         }
 
@@ -209,6 +252,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { &#temp },
                 static_type: quote! { ndc_core::StaticType::Number },
+                borrow: Borrow::None,
             }
         }
 
@@ -223,11 +267,13 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass: quote! { #temp },
                 static_type: quote! { ndc_core::StaticType::Number },
+                borrow: Borrow::None,
             }
         }
 
         NdcType::MutString => {
             let err = arg_error(position, "string");
+            let in_use = in_use_error(position, "string");
             let rc = format_ident!("{temp}_rc");
             let guard = format_ident!("{temp}_guard");
             VmInputArg {
@@ -238,10 +284,11 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let ndc_vm::value::Object::String(ref #rc) = *#rc.as_ref() else {
                         return Err(#err);
                     };
-                    let mut #guard = #rc.borrow_mut();
+                    let mut #guard = #rc.try_borrow_mut().map_err(|_| #in_use)?;
                 },
                 pass: quote! { &mut *#guard },
                 static_type: quote! { ndc_core::StaticType::String },
+                borrow: Borrow::Write,
             }
         }
 
@@ -266,6 +313,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 },
                 pass,
                 static_type: quote! { ndc_core::StaticType::String },
+                borrow: Borrow::None,
             }
         }
 
@@ -279,6 +327,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
 
         NdcType::MutHashMap => {
             let err = arg_error(position, "map");
+            let in_use = in_use_error(position, "map");
             let rc = format_ident!("{temp}_rc");
             let guard = format_ident!("{temp}_guard");
             VmInputArg {
@@ -289,7 +338,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let ndc_vm::value::Object::Map { entries: ref #rc, .. } = *#rc.as_ref() else {
                         return Err(#err);
                     };
-                    let mut #guard = #rc.borrow_mut();
+                    let mut #guard = #rc.try_borrow_mut().map_err(|_| #in_use)?;
                 },
                 pass: quote! { &mut *#guard },
                 static_type: quote! {
@@ -298,11 +347,13 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                         value: Box::new(ndc_core::StaticType::Any),
                     }
                 },
+                borrow: Borrow::Write,
             }
         }
 
         NdcType::RefHashMap => {
             let err = arg_error(position, "map");
+            let in_use = in_use_error(position, "map");
             let rc = format_ident!("{temp}_rc");
             let guard = format_ident!("{temp}_guard");
             VmInputArg {
@@ -313,7 +364,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let ndc_vm::value::Object::Map { entries: ref #rc, .. } = *#rc.as_ref() else {
                         return Err(#err);
                     };
-                    let #guard = #rc.borrow();
+                    let #guard = #rc.try_borrow().map_err(|_| #in_use)?;
                 },
                 pass: quote! { &*#guard },
                 static_type: quote! {
@@ -322,6 +373,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                         value: Box::new(ndc_core::StaticType::Any),
                     }
                 },
+                borrow: Borrow::Read,
             }
         }
 
@@ -361,12 +413,14 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             extract: quote! {},
             pass: quote! { #raw.clone() },
             static_type: quote! { ndc_core::StaticType::Any },
+            borrow: Borrow::None,
         },
 
         NdcType::SeqValue => VmInputArg {
             extract: quote! {},
             pass: quote! { #raw.clone() },
             static_type: quote! { ndc_core::StaticType::Iterable(Box::new(ndc_core::StaticType::Any)) },
+            borrow: Borrow::None,
         },
 
         NdcType::MapValue => VmInputArg {
@@ -378,16 +432,18 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     value: Box::new(ndc_core::StaticType::Any),
                 }
             },
+            borrow: Borrow::None,
         },
 
         NdcType::SliceOfValue => {
             let vec = format_ident!("{temp}_vec");
             let err = arg_error(position, "list");
+            let in_use = in_use_error(position, "list");
             VmInputArg {
                 extract: quote! {
                     let #vec: Vec<ndc_vm::value::Value> = match #raw {
                         ndc_vm::value::Value::Object(obj) => match obj.as_ref() {
-                            ndc_vm::value::Object::List(list) => list.borrow().clone(),
+                            ndc_vm::value::Object::List(list) => list.try_borrow().map_err(|_| #in_use)?.clone(),
                             ndc_vm::value::Object::Tuple(tuple) => tuple.clone(),
                             _ => return Err(#err),
                         },
@@ -398,6 +454,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                 static_type: quote! {
                     ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Any))
                 },
+                borrow: Borrow::None,
             }
         }
 
@@ -423,6 +480,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                         return_type: Box::new(ndc_core::StaticType::Any),
                     }
                 },
+                borrow: Borrow::None,
             }
         }
 

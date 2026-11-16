@@ -294,8 +294,8 @@ mod inner {
 
     /// [`sort_by`] with a comparator that returns a Float.
     #[function(name = "sort_by", signature = "<T>(List<T>, Fn(T, T) -> Float)")]
-    pub fn sort_by_float(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
-        sort_with(list, comp)
+    pub fn sort_by_float(list: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
+        sort_with(&list, comp)
     }
 
     /// [`sorted_by`] with a comparator that returns a Float.
@@ -309,8 +309,8 @@ mod inner {
 
     /// [`sort_by`] with a comparator that returns a Number.
     #[function(name = "sort_by", signature = "<T>(List<T>, Fn(T, T) -> Number)")]
-    pub fn sort_by_number(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
-        sort_with(list, comp)
+    pub fn sort_by_number(list: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
+        sort_with(&list, comp)
     }
 
     /// [`sorted_by`] with a comparator that returns a Number.
@@ -331,14 +331,45 @@ mod inner {
     ///
     /// This function only works for strings and lists and will throw errors otherwise.
     #[function(signature = "<T>(List<T>, Fn(T, T) -> Int)")]
-    pub fn sort_by(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
-        sort_with(list, comp)
+    pub fn sort_by(list: Value, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
+        sort_with(&list, comp)
     }
 
-    /// Sorts `list` in place by what `comp` says of each pair of elements.
-    fn sort_with(list: &mut Vec<Value>, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
+    /// Sorts the list `list` in place by what `comp` says of each pair of
+    /// elements. The comparator is the program's code, which may use the
+    /// list, so it sorts a copy of the elements, with no borrow of the list
+    /// held while the comparator runs, and puts them back after. A
+    /// comparator that changed the list meanwhile is an error, as the order
+    /// it said was for elements the list doesn't hold any more.
+    fn sort_with(list: &Value, comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
+        let Value::Object(object) = list else {
+            return Err(anyhow::anyhow!("sort_by takes a list"));
+        };
+        let Object::List(cell) = object.as_ref() else {
+            return Err(anyhow::anyhow!("sort_by takes a list"));
+        };
+        let original = cell
+            .try_borrow()
+            .map_err(|_in_use| anyhow::anyhow!("the list is being changed"))?
+            .clone();
+        let mut sorted = original.clone();
+        sort_values(&mut sorted, comp)?;
+        let mut current = cell
+            .try_borrow_mut()
+            .map_err(|_in_use| anyhow::anyhow!("the list is in use"))?;
+        if *current != original {
+            return Err(anyhow::anyhow!(
+                "the list changed while `sort_by` sorted it"
+            ));
+        }
+        *current = sorted;
+        Ok(())
+    }
+
+    /// Sorts `values` by what `comp` says of each pair of them.
+    fn sort_values(values: &mut [Value], comp: &mut VmCallable<'_>) -> anyhow::Result<()> {
         let mut err: Option<String> = None;
-        list.sort_by(|left, right| {
+        values.sort_by(|left, right| {
             if err.is_some() {
                 return Ordering::Equal;
             }
@@ -392,28 +423,7 @@ mod inner {
             .try_into_iter()
             .ok_or_else(|| anyhow!("sorted_by requires a sequence"))?
             .collect();
-        let mut err: Option<String> = None;
-        list.sort_by(|left, right| {
-            if err.is_some() {
-                return Ordering::Equal;
-            }
-            match comp.call(&[left.clone(), right.clone()]) {
-                Ok(ret) => match ret.cmp_to_zero() {
-                    Ok(ord) => ord,
-                    Err(e) => {
-                        err = Some(e);
-                        Ordering::Equal
-                    }
-                },
-                Err(e) => {
-                    err = Some(e.message);
-                    Ordering::Equal
-                }
-            }
-        });
-        if let Some(e) = err {
-            return Err(anyhow::anyhow!(e));
-        }
+        sort_values(&mut list, comp)?;
         Ok(Value::list(list))
     }
 

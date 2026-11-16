@@ -1,0 +1,5 @@
+// `extend` reads what it appends before it changes the list.
+// expect-output: [1,2,1,2]
+let xs = [1, 2];
+xs.extend(xs);
+print(xs);
