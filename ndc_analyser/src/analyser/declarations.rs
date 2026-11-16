@@ -117,7 +117,8 @@ impl Analyser {
             _ => None,
         };
         if let Some((name, symbol)) = declared {
-            self.check_overlap(symbol, name, Some(&param_types), span);
+            self.declared_overloads
+                .push((symbol, name.to_string(), span));
             let placeholder = StaticType::Function {
                 parameters: Some(param_types.clone()),
                 return_type: Box::new(
