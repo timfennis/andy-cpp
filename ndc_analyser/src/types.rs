@@ -1053,14 +1053,14 @@ impl TypeVars {
         unsettled.into_inner()
     }
 
-    /// `typ` as an error shows it: the parts not known yet could still be
-    /// anything, so they're shown as `Any`, except a literal's, which is
-    /// shown as what it is unless something says otherwise: `[1]` as a
-    /// `List<Int>`.
+    /// `typ` as an error shows it: a part nothing has said the type of yet
+    /// is `Unknown`, as `None` is an `Option<Unknown>`, except a literal's,
+    /// which is shown as what it is unless something says otherwise: `[1]`
+    /// as a `List<Int>`. `Any` is only what the program says is one.
     pub(crate) fn shown(&self, typ: &StaticType) -> StaticType {
         self.resolve(typ).replace(&|part| match part {
             StaticType::Var(var) if self.is_literal(*var) => Some(self.preview(*var)),
-            StaticType::Var(_) => Some(StaticType::Any),
+            StaticType::Var(_) => Some(StaticType::Unknown),
             _ => None,
         })
     }
