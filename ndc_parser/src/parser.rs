@@ -308,6 +308,17 @@ impl Parser {
             self.let_statement()?
         } else if self.match_token(&[Token::Struct]).is_some() {
             self.struct_declaration()?
+        } else if self
+            .match_token(&[Token::If, Token::While, Token::For, Token::LeftCurlyBracket])
+            .is_some()
+        {
+            // A statement that starts with an `if`, a loop or a block ends
+            // at its closing brace, as in Rust: what follows starts the next
+            // statement, so `for x in xs { ... }` and then `[x]` on the next
+            // line is a list, not an index into the loop's value. Within an
+            // expression they still take an index or a call, as in
+            // `print(if c { [1] } else { [2] }[0])`.
+            self.primary()?
         } else {
             self.expression()?
         };
