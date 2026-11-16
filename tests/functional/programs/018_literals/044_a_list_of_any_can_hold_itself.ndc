@@ -1,0 +1,5 @@
+// An `Any` can hold anything, the list it's in too.
+// expect-output: 1
+let xs: List<Any> = [];
+xs.push([xs]);
+print(xs.len());

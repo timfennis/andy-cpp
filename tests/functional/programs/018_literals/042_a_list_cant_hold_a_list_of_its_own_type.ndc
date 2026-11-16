@@ -1,0 +1,5 @@
+// `xs`'s elements would be lists of what `xs` holds, which would be lists of
+// what those hold, without end.
+// expect-error: No function called 'push' found
+let xs = [];
+xs.push([xs]);
