@@ -14,7 +14,7 @@ pub enum CallKind {
     Operator,
 }
 
-/// What [`Overloads::resolve_call`] hands back: the binding the analyser will
+/// What picking a call's overload hands back: the binding the analyser will
 /// store on the call node, plus the inferred return type of the call.
 ///
 /// Folding the return-type computation into the same walk that produces the
@@ -23,54 +23,30 @@ pub enum CallKind {
 pub(crate) struct ResolvedCall {
     pub binding: Binding<SymbolId>,
     pub return_type: StaticType,
+    /// The overloads that tie for the call when no one of them is more
+    /// specific than the others, which makes it ambiguous.
+    pub tied: Vec<SymbolId>,
 }
 
-/// Per-position vec resolution result for an operator-form call. See
-/// [`Overloads::resolve_vec`].
+impl ResolvedCall {
+    /// No overload takes the call.
+    pub(crate) fn none() -> Self {
+        Self {
+            binding: Binding::None,
+            return_type: StaticType::Any,
+            tied: Vec::new(),
+        }
+    }
+}
+
+/// The overloads for each element position of an operator applied to tuple
+/// arguments. See [`Overloads::tuple_call`].
 pub(crate) struct VecResolution {
     axis_len: usize,
     /// `positions[i]` is the priority-ordered scalar overloads compatible
     /// with the call's element types at position `i`. Always non-empty —
     /// an empty position cancels the whole vec resolution upstream.
     positions: Vec<Vec<SymbolId>>,
-}
-
-/// Output of a single scalar overload walk across the scope chain.
-struct ScalarWalk {
-    /// First exact match found; short-circuits the walk.
-    exact: Option<SymbolId>,
-    /// First-scope-wins loose-compatibility candidates.
-    loose: Option<Vec<SymbolId>>,
-}
-
-/// Whether a value of type `typ` could still accept a call with this
-/// signature at runtime: its type isn't known yet, or it's a variadic
-/// function, or a function whose parameters don't provably conflict with
-/// `sig`, as the parts of either type not known yet could be anything. An
-/// `Any` is not one of them: it only goes where an `Any` is taken. A lambda `fn(x) => x * 2` can be passed for an
-/// `Fn(Int) -> Int`, but `fn(x: String) => 1` can't.
-fn could_take(typ: &StaticType, sig: &[StaticType]) -> bool {
-    match typ {
-        StaticType::Function {
-            parameters: Some(parameters),
-            ..
-        } => {
-            parameters.len() == sig.len()
-                && parameters
-                    .iter()
-                    .zip(sig)
-                    .all(|(param, arg)| arg.may_fit(param))
-                && StaticType::type_parameters_agree(parameters, sig)
-        }
-        StaticType::Function {
-            parameters: None, ..
-        } => true,
-        // A value whose type isn't known may hold a function.
-        unknown => matches!(
-            unknown,
-            StaticType::Var(_) | StaticType::Generic(_) | StaticType::Error
-        ),
-    }
 }
 
 /// Returns `true` iff `more` is strictly more specific than `less`: each of
@@ -239,188 +215,70 @@ impl<'a> Overloads<'a> {
         })
     }
 
-    /// Resolve a function call to a binding and an inferred return type.
-    ///
-    /// `candidates` are the resolver's same-named symbols for the callee,
-    /// grouped by scope, nearest first. The binding names the symbols it picks;
-    /// the layout works out later where they live.
-    ///
-    /// Single entry point for both regular calls (`f(x)`) and operator-form
-    /// calls (`a + b`, `-x`, `op=`). The two differ only in whether
-    /// element-wise tuple broadcast is allowed when no scalar overload matches.
-    ///
-    /// Resolution order, first match wins:
-    ///   1. **Scalar exact match** — `is_fn_and_matches` on the args. Returns
-    ///      `Binding::Resolved(Scalar)`, return type = the overload's declared
-    ///      return.
-    ///   2. **Operator-form vec, single scalar across all positions** — the
-    ///      per-position lookup pins exactly one scalar for every element
-    ///      position and no looser scalar competes. Returns
-    ///      `Binding::Resolved(Vec)`, return type = `Tuple<scalar_return; n>`.
-    ///   3. **Loose scalar or vec candidates** — returns
-    ///      `Binding::Dynamic(candidates)`, return type = the join of the
-    ///      contributions (pure-scalar joins the declared returns; pure-vec
-    ///      joins per position and wraps in `Tuple<…>`; mixed scalar+vec
-    ///      collapses to `Any`).
-    ///   4. Nothing found — `Binding::None`, return type = `Any`.
-    pub(crate) fn resolve_call(
-        self,
-        candidates: &Candidates,
-        sig: &[StaticType],
-        kind: CallKind,
-    ) -> ResolvedCall {
-        let walk = self.scalar_walk(candidates, sig);
-
-        // 1. Scalar exact match.
-        if let Some(exact) = walk.exact {
-            return ResolvedCall {
-                binding: Binding::Resolved(Candidate::Scalar(exact)),
-                return_type: self.scalar_return_type(exact),
-            };
+    /// The length of the tuples an operator's arguments are, when it applies
+    /// to each of their elements: one argument at least is a tuple, and all
+    /// of them that are have the same length. `(1, 2) + (3, 4)` adds the
+    /// elements in pairs, and `(1, 2) * 2` multiplies each by 2.
+    pub(crate) fn tuple_axis(sig: &[StaticType]) -> Option<usize> {
+        let mut axis = None;
+        for arg in sig {
+            if let StaticType::Tuple(elements) = arg {
+                if elements.is_empty() {
+                    return None;
+                }
+                match axis {
+                    None => axis = Some(elements.len()),
+                    Some(length) if length == elements.len() => {}
+                    _ => return None,
+                }
+            }
         }
+        axis
+    }
 
-        // 2. Per-position vec resolution, but only for operator-form calls.
-        let vec_resolution = match kind {
-            CallKind::Operator => self.resolve_vec(candidates, sig),
-            CallKind::Regular => None,
-        };
+    /// The arguments an operator applied to each element of tuple
+    /// arguments gets at `position`: the tuples' elements there, and the
+    /// other arguments as they are.
+    pub(crate) fn at_position(sig: &[StaticType], position: usize) -> Vec<StaticType> {
+        sig.iter()
+            .map(|arg| match arg {
+                StaticType::Tuple(elements) => elements[position].clone(),
+                other => other.clone(),
+            })
+            .collect()
+    }
 
-        // 2a. If the user clearly *meant* vec dispatch (at least one arg is
-        // statically a tuple) but a per-position lookup found no overload at
-        // some position, the call can't succeed at runtime either. Surfacing
-        // this as `Binding::None` lets the caller emit a precise compile-time
-        // error instead of letting the program limp on to a runtime miss.
-        if let Some(VecResolution { positions, .. }) = &vec_resolution
-            && sig
-                .iter()
-                .any(|t| matches!(t, StaticType::Tuple(elems) if !elems.is_empty()))
-            && positions.iter().any(|p| p.is_empty())
-        {
-            return ResolvedCall {
-                binding: Binding::None,
-                return_type: StaticType::Any,
-            };
+    /// The call of an operator on each element of tuple arguments, given
+    /// the overloads that take the elements at each position. One overload
+    /// for every position is the call's; different ones are picked as the
+    /// program runs; a position no overload takes is an error.
+    pub(crate) fn tuple_call(self, positions: Vec<Vec<SymbolId>>) -> ResolvedCall {
+        if positions.iter().any(Vec::is_empty) {
+            return ResolvedCall::none();
         }
-
-        let scalar_loose = walk.loose.unwrap_or_default();
-
-        // Resolved(Vec): vec is the unique candidate (no loose scalars compete)
-        // and every position pins the same scalar overload.
-        if scalar_loose.is_empty()
-            && let Some(VecResolution {
-                axis_len,
-                positions,
-            }) = &vec_resolution
-            && let Some(scalar) = unique_scalar(positions)
-        {
+        let axis_len = positions.len();
+        if let Some(scalar) = unique_scalar(&positions) {
             let scalar_return = self.scalar_return_type(scalar);
             return ResolvedCall {
                 binding: Binding::Resolved(Candidate::Vec(scalar)),
-                return_type: StaticType::Tuple(vec![scalar_return; *axis_len]),
+                return_type: StaticType::Tuple(vec![scalar_return; axis_len]),
+                tied: Vec::new(),
             };
         }
-
-        // 3. Dynamic: mix scalar loose candidates with vec candidates.
-        if !scalar_loose.is_empty() || vec_resolution.is_some() {
-            let return_type = self.dynamic_return_type(&scalar_loose, vec_resolution.as_ref());
-            let vec_symbols = vec_resolution
-                .into_iter()
-                .flat_map(|vec| vec.positions.into_iter().flatten());
-            let mut combined = Vec::new();
-            for symbol in scalar_loose {
-                let candidate = Candidate::Scalar(symbol);
-                push_unique(&mut combined, candidate);
-            }
-            for symbol in vec_symbols {
-                let candidate = Candidate::Vec(symbol);
-                push_unique(&mut combined, candidate);
-            }
-            return ResolvedCall {
-                binding: Binding::Dynamic(combined),
-                return_type,
-            };
+        let resolution = VecResolution {
+            axis_len,
+            positions,
+        };
+        let return_type = self.dynamic_return_type(&[], Some(&resolution));
+        let mut combined = Vec::new();
+        for symbol in resolution.positions.into_iter().flatten() {
+            push_unique(&mut combined, Candidate::Vec(symbol));
         }
-
-        // 4. Nothing.
         ResolvedCall {
-            binding: Binding::None,
-            return_type: StaticType::Any,
+            binding: Binding::Dynamic(combined),
+            return_type,
+            tied: Vec::new(),
         }
-    }
-
-    /// Per-scope walk for scalar matches against `sig`. Exact matches
-    /// short-circuit; `loose` holds the first scope's compatibility candidates.
-    fn scalar_walk(self, candidates: &Candidates, sig: &[StaticType]) -> ScalarWalk {
-        let mut loose: Option<Vec<SymbolId>> = None;
-
-        for group in self.reachable(candidates) {
-            let compatible = || {
-                let compatible = group
-                    .iter()
-                    .copied()
-                    .filter(|&symbol| self.is_compatible(symbol, sig))
-                    .collect::<Vec<_>>();
-                self.most_specific_first(compatible)
-            };
-            if let Some(exact) = self.most_specific_match(group, sig) {
-                return ScalarWalk {
-                    exact: Some(exact),
-                    loose: None,
-                };
-            }
-
-            if loose.is_none() {
-                let compatible = compatible();
-                if !compatible.is_empty() {
-                    loose = Some(compatible);
-                }
-            }
-        }
-
-        ScalarWalk { exact: None, loose }
-    }
-
-    /// The best-matching overload in one scope's `group` (newest first) for a
-    /// call of the given signature, or `None` if none of them accepts the call.
-    ///
-    /// Resolution proceeds in two stages:
-    ///   1. Filter to overloads whose declared signature accepts `sig`
-    ///      (each argument [`StaticType::fits`] its parameter).
-    ///   2. Among the survivors, pick the one whose parameter signature is
-    ///      most specific — i.e. not strictly dominated by any other match's
-    ///      parameter signature (see [`is_strictly_more_specific`]).
-    ///
-    /// Variadic overloads (`parameters: None`) match anything but are treated
-    /// as the least specific shape: any concrete overload that also matches
-    /// will dominate them.
-    ///
-    /// When multiple undominated overloads remain (genuinely incomparable
-    /// shapes, e.g. `fn(Int, Any)` vs `fn(Any, Int)` called with `(Int, Int)`),
-    /// the latest-registered one wins — preserving shadow semantics.
-    fn most_specific_match(self, group: &[SymbolId], sig: &[StaticType]) -> Option<SymbolId> {
-        let matches = group
-            .iter()
-            .copied()
-            .filter(|&symbol| self.type_of(symbol).is_fn_and_matches(sig))
-            .collect::<Vec<_>>();
-
-        // `group` is newest first, so ties resolve to the most-recently registered overload.
-        matches.iter().copied().find(|&i| {
-            let Some(pi) = self.parameters_of(i) else {
-                // Variadic only wins if every other match is also variadic.
-                return matches.iter().all(|&j| self.parameters_of(j).is_none());
-            };
-            matches.iter().all(|&j| {
-                if i == j {
-                    return true;
-                }
-                let Some(pj) = self.parameters_of(j) else {
-                    // Variadic never dominates a concrete overload.
-                    return true;
-                };
-                !is_strictly_more_specific(&pj, &pi)
-            })
-        })
     }
 
     /// The parameter types of `symbol`, if it's a function that isn't
@@ -435,99 +293,13 @@ impl<'a> Overloads<'a> {
         }
     }
 
-    /// `symbols` with each one before every one it's more specific than,
-    /// and otherwise in the order given. The program tries the overloads it
-    /// picks from as it runs in this order, and takes the first that
-    /// accepts the arguments. Overloads in one scope don't tie, so of those
-    /// that accept them, one is more specific than the others, and it's the
-    /// first.
-    pub(crate) fn most_specific_first(self, mut symbols: Vec<SymbolId>) -> Vec<SymbolId> {
-        let mut ordered = Vec::with_capacity(symbols.len());
-        while !symbols.is_empty() {
-            let next = symbols
-                .iter()
-                .position(|&symbol| {
-                    let Some(parameters) = self.parameters_of(symbol) else {
-                        // A variadic function is the least specific.
-                        return symbols
-                            .iter()
-                            .all(|&other| self.parameters_of(other).is_none());
-                    };
-                    symbols.iter().all(|&other| {
-                        self.parameters_of(other)
-                            .is_none_or(|other| !is_strictly_more_specific(&other, &parameters))
-                    })
-                })
-                .unwrap_or(0);
-            ordered.push(symbols.remove(next));
-        }
-        ordered
-    }
-
-    /// Whether `symbol` is a function whose parameters don't provably conflict
-    /// with `sig`, so it might accept the call at runtime.
-    fn is_compatible(self, symbol: SymbolId, sig: &[StaticType]) -> bool {
-        let typ = self.type_of(symbol);
-        matches!(typ.as_ref(), StaticType::Function { .. }) && could_take(&typ, sig)
-    }
-
-    /// The scalar overloads for each element position of `sig`, when at
-    /// least one argument is a non-empty tuple and every tuple argument has
-    /// that length. A position may have none; the caller reports that as a
-    /// call error. `None` when the call can't be element-wise.
-    fn resolve_vec(self, candidates: &Candidates, sig: &[StaticType]) -> Option<VecResolution> {
-        let mut axis: Option<usize> = None;
-        for arg in sig {
-            if let StaticType::Tuple(elems) = arg {
-                if elems.is_empty() {
-                    return None;
-                }
-                match axis {
-                    None => axis = Some(elems.len()),
-                    Some(n) if n == elems.len() => {}
-                    _ => return None,
-                }
-            }
-        }
-        let axis_len = axis?;
-
-        let mut positions = Vec::with_capacity(axis_len);
-        for i in 0..axis_len {
-            let pos_sig: Vec<StaticType> = sig
-                .iter()
-                .map(|arg| match arg {
-                    StaticType::Tuple(elems) => elems[i].clone(),
-                    other => other.clone(),
-                })
-                .collect();
-            positions.push(self.candidates_for_sig(candidates, &pos_sig));
-        }
-        Some(VecResolution {
-            axis_len,
-            positions,
-        })
-    }
-
-    /// Priority-ordered scalar candidates for one signature, used by per-position
-    /// vec resolution. Exact match (if any) first, then loose-compat candidates
-    /// with the exact entry deduplicated.
-    fn candidates_for_sig(self, candidates: &Candidates, sig: &[StaticType]) -> Vec<SymbolId> {
-        let walk = self.scalar_walk(candidates, sig);
-        let mut out = Vec::new();
-        out.extend(walk.exact);
-        for symbol in walk.loose.into_iter().flatten() {
-            push_unique(&mut out, symbol);
-        }
-        out
-    }
-
     /// Return type of a scalar candidate. Falls back to `Any` if the binding
     /// turned out not to carry a function type (e.g. `Any`-typed callee).
     ///
     /// A type parameter such as `T` in `first<T>(List<T>) -> T` is `Any`
     /// here: only a call that commits to the overload knows what it stands
     /// for, and one picked at runtime never does.
-    fn scalar_return_type(self, symbol: SymbolId) -> StaticType {
+    pub(crate) fn scalar_return_type(self, symbol: SymbolId) -> StaticType {
         match self.type_of(symbol).as_ref() {
             StaticType::Function { return_type, .. } => self
                 .vars
@@ -609,13 +381,6 @@ mod tests {
         }
     }
 
-    fn variadic_fn(ret: StaticType) -> StaticType {
-        StaticType::Function {
-            parameters: None,
-            return_type: Box::new(ret),
-        }
-    }
-
     /// A table holding these functions' types, each under a fresh `fn`
     /// symbol, returned in order.
     fn table(types: Vec<StaticType>) -> (TypeTable, Vec<SymbolId>) {
@@ -642,200 +407,9 @@ mod tests {
         )
     }
 
-    fn resolve(
-        types: &TypeTable,
-        candidates: &Candidates,
-        sig: &[StaticType],
-        kind: CallKind,
-    ) -> ResolvedCall {
-        SYMBOLS.with_borrow(|table| {
-            Overloads::new(types, &TypeVars::default(), table).resolve_call(candidates, sig, kind)
-        })
-    }
-
-    /// Asserts the call picks `expected` as its single overload.
-    fn assert_resolves_to(
-        types: &TypeTable,
-        candidates: &Candidates,
-        sig: &[StaticType],
-        expected: SymbolId,
-    ) {
-        let resolved = resolve(types, candidates, sig, CallKind::Regular);
-        assert_eq!(
-            resolved.binding,
-            Binding::Resolved(Candidate::Scalar(expected))
-        );
-    }
-
-    // Two overloads of `locate` registered in the same scope: a more-specific
-    // predicate version (takes a function) and a less-specific element version
-    // (takes any value). When called with a function value, the predicate
-    // version must win even though the element version was registered later.
-    #[test]
-    fn more_specific_overload_wins_in_same_scope() {
-        let seq_any = StaticType::Iterable(Box::new(StaticType::Any));
-        let fn_any = variadic_fn(StaticType::Generic("U".into()));
-        let (types, locates) = table(vec![
-            fn_type(vec![seq_any.clone(), fn_any], StaticType::Any),
-            fn_type(vec![seq_any, StaticType::Any], StaticType::Any),
-        ]);
-
-        let call_sig = [
-            StaticType::List(Box::new(StaticType::Int)),
-            fn_type(vec![StaticType::Any], StaticType::Bool),
-        ];
-        assert_resolves_to(&types, &candidates(&[&locates]), &call_sig, locates[0]);
-    }
-
-    // `fn foo(Any)` declared in an inner scope matches every call shape, so
-    // it completely shadows any `foo` overload in the parent scope — even a
-    // more-specific one. The walk must stop at the first scope with a match.
-    #[test]
-    fn inner_any_overload_shadows_parent() {
-        let (types, foos) = table(vec![
-            fn_type(vec![StaticType::Int], StaticType::Int),
-            fn_type(vec![StaticType::Any], StaticType::Any),
-        ]);
-        let (outer, inner) = (foos[0], foos[1]);
-
-        assert_resolves_to(
-            &types,
-            &candidates(&[&[inner], &[outer]]),
-            &[StaticType::Int],
-            inner,
-        );
-    }
-
-    // `fn foo(Int)` in an inner scope only matches `Int` calls; calls with a
-    // different argument type must fall through to the parent scope's overload.
-    #[test]
-    fn inner_int_overload_does_not_shadow_other_types() {
-        let (types, foos) = table(vec![
-            fn_type(vec![StaticType::Any], StaticType::Int),
-            fn_type(vec![StaticType::Int], StaticType::Int),
-        ]);
-        let (outer, inner) = (foos[0], foos[1]);
-
-        assert_resolves_to(
-            &types,
-            &candidates(&[&[inner], &[outer]]),
-            &[StaticType::String],
-            outer,
-        );
-    }
-
-    // The variadic overload is the newer one, which would win a tie.
-    #[test]
-    fn a_concrete_overload_beats_a_variadic_one() {
-        let (types, foos) = table(vec![
-            fn_type(vec![StaticType::Int], StaticType::Int),
-            variadic_fn(StaticType::Any),
-        ]);
-        assert_resolves_to(&types, &candidates(&[&foos]), &[StaticType::Int], foos[0]);
-    }
-
-    // Neither `(Int, Any)` nor `(Any, Int)` is more specific than the other.
-    #[test]
-    fn the_newest_of_incomparable_overloads_wins() {
-        let (types, foos) = table(vec![
-            fn_type(vec![StaticType::Int, StaticType::Any], StaticType::Any),
-            fn_type(vec![StaticType::Any, StaticType::Int], StaticType::Any),
-        ]);
-        assert_resolves_to(
-            &types,
-            &candidates(&[&foos]),
-            &[StaticType::Int, StaticType::Int],
-            foos[1],
-        );
-    }
-
-    // An `Any` argument goes only where `Any` is taken: it takes a cast
-    // to be an `Int` or a `String`.
-    #[test]
-    fn an_any_argument_takes_no_overload_of_another_type() {
-        let list_of = |typ| StaticType::List(Box::new(typ));
-        let (types, foos) = table(vec![
-            fn_type(vec![StaticType::Int], list_of(StaticType::Int)),
-            fn_type(vec![StaticType::String], list_of(StaticType::String)),
-        ]);
-        let resolved = resolve(
-            &types,
-            &candidates(&[&foos]),
-            &[StaticType::Any],
-            CallKind::Regular,
-        );
-        assert_eq!(resolved.binding, Binding::None);
-    }
-
-    #[test]
-    fn an_any_argument_takes_the_overload_that_takes_any() {
-        // `show(Int)` doesn't take an `Any`, whatever it holds as the
-        // program runs, so `show(Any)` takes the call, whichever was
-        // declared first.
-        let (types, shows) = table(vec![
-            fn_type(vec![StaticType::Int], StaticType::String),
-            fn_type(vec![StaticType::Any], StaticType::String),
-        ]);
-        for group in [[shows[0], shows[1]], [shows[1], shows[0]]] {
-            assert_resolves_to(&types, &candidates(&[&group]), &[StaticType::Any], shows[1]);
-        }
-    }
-
-    #[test]
-    fn an_any_argument_takes_the_nearest_overload_that_takes_any() {
-        // The inner `show(Any)` takes every call, so the outer one never does.
-        let (types, shows) = table(vec![
-            fn_type(vec![StaticType::Any], StaticType::String),
-            fn_type(vec![StaticType::Int], StaticType::String),
-            fn_type(vec![StaticType::Any], StaticType::String),
-        ]);
-        assert_resolves_to(
-            &types,
-            &candidates(&[&shows[1..], &shows[..1]]),
-            &[StaticType::Any],
-            shows[2],
-        );
-    }
-
-    #[test]
-    fn a_call_every_overload_rejects_binds_nothing() {
-        let (types, foos) = table(vec![
-            fn_type(vec![StaticType::Int], StaticType::Int),
-            fn_type(vec![StaticType::Int, StaticType::Int], StaticType::Int),
-        ]);
-        let resolved = resolve(
-            &types,
-            &candidates(&[&foos]),
-            &[StaticType::String],
-            CallKind::Regular,
-        );
-        assert_eq!(resolved.binding, Binding::None);
-    }
-
-    // `(1, 2) + (3, 4)` adds each pair of elements with the scalar `+`.
-    #[test]
-    fn an_operator_on_tuples_applies_one_scalar_overload_to_each_element() {
-        let (types, plus) = table(vec![fn_type(
-            vec![StaticType::Int, StaticType::Int],
-            StaticType::Float,
-        )]);
-        let pair = StaticType::Tuple(vec![StaticType::Int, StaticType::Int]);
-        let resolved = resolve(
-            &types,
-            &candidates(&[&plus]),
-            &[pair.clone(), pair],
-            CallKind::Operator,
-        );
-        assert_eq!(resolved.binding, Binding::Resolved(Candidate::Vec(plus[0])));
-        assert_eq!(
-            resolved.return_type,
-            StaticType::Tuple(vec![StaticType::Float, StaticType::Float])
-        );
-    }
-
     // Simulates: fn foo(x: Int) { … } let foo = fn(x: String) { … }; foo(1)
     // The `let` ends the search, so the outer `fn` that would accept `Int`
-    // isn't reached and nothing matches.
+    // isn't reached.
     #[test]
     fn a_variable_holding_a_function_ends_the_search() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
@@ -846,9 +420,6 @@ mod tests {
         SYMBOLS.with_borrow(|table| {
             let vars = TypeVars::default();
             let overloads = Overloads::new(&types, &vars, table);
-            let resolved =
-                overloads.resolve_call(&candidates, &[StaticType::Int], CallKind::Regular);
-            assert_eq!(resolved.binding, Binding::None);
             assert_eq!(
                 overloads.variable_ending_search(&candidates),
                 Some(variable)
@@ -870,9 +441,7 @@ mod tests {
         });
     }
 
-    // Any plain binding ends the search, whatever its type: one that can't
-    // be called leaves the call without a match instead of reaching the
-    // function further out.
+    // Any plain binding ends the search, whatever its type.
     #[test]
     fn a_variable_ends_the_search_whatever_its_type() {
         let (mut types, fns) = table(vec![fn_type(vec![StaticType::Int], StaticType::Int)]);
@@ -880,8 +449,6 @@ mod tests {
         types.declare(variable, StaticType::Int);
         let candidates = candidates(&[&[variable], &[fns[0]]]);
 
-        let resolved = resolve(&types, &candidates, &[StaticType::Int], CallKind::Regular);
-        assert_eq!(resolved.binding, Binding::None);
         SYMBOLS.with_borrow(|table| {
             let vars = TypeVars::default();
             let overloads = Overloads::new(&types, &vars, table);

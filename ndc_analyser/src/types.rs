@@ -36,6 +36,16 @@ impl TypeTable {
 /// What each type variable of the analysis stands for once something settled
 /// it. In `let xs = []; xs[0] = 1;`, the element type of `xs` is a variable
 /// that the assignment settles as `Int`.
+/// What [`TypeVars::bind_arguments`] puts off while it passes the arguments.
+#[derive(Debug)]
+struct Deferred {
+    /// The variables of the parameters.
+    variables: AHashSet<TypeVar>,
+    /// Each value passed where one of them is expected directly or as what
+    /// an `Iterable` holds.
+    passed: Vec<(TypeVar, StaticType)>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct TypeVars {
     /// What each variable stands for, once settled.
@@ -81,6 +91,9 @@ pub(crate) struct TypeVars {
     /// Those an `Any` was expected of, in order, so a [`Snapshot`] can take
     /// them back.
     expects_any: Vec<TypeVar>,
+    /// While [`Self::bind_arguments`] runs, the values passed for the type
+    /// parameters, which decide them once every argument is in.
+    deferred: Option<Deferred>,
     /// The variables made as what an empty `[]`, `%{}` or `None` holds, in
     /// the order they were made: see [`Self::fresh_contents`].
     contents: Vec<TypeVar>,
@@ -1167,16 +1180,94 @@ impl TypeVars {
     /// Passes each of `arguments` where its parameter is expected, as
     /// [`Self::bind_argument`], and returns whether there's one argument
     /// for each parameter and each fits.
+    ///
+    /// A type parameter passed values directly, or as what an `Iterable`
+    /// holds, is the one of their types that all of them fit, whatever order
+    /// the arguments come in: `in(T, Iterable<T>)` given a String and a
+    /// `List<Any>` has `T` be `Any`, while given an Int and a `List<String>`
+    /// it fits neither. A container that can be written to, as the `List<T>`
+    /// of `push(List<T>, T)`, says exactly what `T` is, which those values
+    /// then have to fit.
     pub(crate) fn bind_arguments(
         &mut self,
         parameters: &[StaticType],
         arguments: &[StaticType],
     ) -> bool {
-        parameters.len() == arguments.len()
-            && parameters
+        if parameters.len() != arguments.len() {
+            return false;
+        }
+        let variables = parameters
+            .iter()
+            .flat_map(|parameter| self.unsettled(parameter))
+            .collect::<AHashSet<_>>();
+        let outer = self.deferred.replace(Deferred {
+            variables,
+            passed: Vec::new(),
+        });
+        let fits = parameters
+            .iter()
+            .zip(arguments)
+            .all(|(parameter, argument)| self.bind_argument(parameter, argument));
+        let passed = std::mem::replace(&mut self.deferred, outer)
+            .expect("bind_arguments set what's deferred")
+            .passed;
+        let outer = self.deferred.take();
+        let decided_some = !passed.is_empty();
+        let mut fits = fits && self.decide_deferred(passed);
+        // What an argument passes on to what it's passed, as `sorted` in
+        // `map(xs, sorted)` takes what `xs` holds, is passed again now that
+        // the type parameters it depends on are decided.
+        if fits && decided_some {
+            fits = parameters
                 .iter()
                 .zip(arguments)
-                .all(|(parameter, argument)| self.bind_argument(parameter, argument))
+                .all(|(parameter, argument)| self.bind_argument(parameter, argument));
+        }
+        self.deferred = outer;
+        fits
+    }
+
+    /// Settles each type parameter whose values [`Self::bind_arguments`]
+    /// put off as the one of their types all of them fit, and returns
+    /// whether there's one. One a container already settled has to take
+    /// each of them.
+    fn decide_deferred(&mut self, passed: Vec<(TypeVar, StaticType)>) -> bool {
+        let mut groups: Vec<(StaticType, Vec<StaticType>)> = Vec::new();
+        for (var, value) in passed {
+            let target = self.shallow(&StaticType::Var(var));
+            match groups.iter_mut().find(|(other, _)| *other == target) {
+                Some((_, values)) => values.push(value),
+                None => groups.push((target, vec![value])),
+            }
+        }
+        for (target, values) in groups {
+            let target = self.shallow(&target);
+            let target = if matches!(target, StaticType::Var(_)) {
+                let Some(widest) = values.iter().find(|&candidate| {
+                    values.iter().all(|value| {
+                        let snapshot = self.snapshot();
+                        let fits = self.bind_argument(candidate, value);
+                        self.rollback(snapshot);
+                        fits
+                    })
+                }) else {
+                    return false;
+                };
+                if !self.unify(&target, widest) {
+                    return false;
+                }
+                widest.clone()
+            } else {
+                target
+            };
+            if !values
+                .iter()
+                .all(|value| self.bind_argument(&target, value))
+            {
+                return false;
+            }
+        }
+        true
     }
 
     /// [`Self::instantiate`], with the variables already made for some type
@@ -1261,8 +1352,24 @@ impl TypeVars {
                 };
                 self.settle_literal(*var, &held) && self.bind_argument(&parameter, &held)
             }
+            // A value passed for a type parameter decides it with the others
+            // passed for it: see `bind_arguments`.
+            (StaticType::Var(var), _)
+                if self.unsettled(&argument).is_empty()
+                    && !self.is_literal(*var)
+                    && self
+                        .deferred
+                        .as_ref()
+                        .is_some_and(|deferred| deferred.variables.contains(var)) =>
+            {
+                let deferred = self.deferred.as_mut().expect("checked above");
+                deferred.passed.push((*var, argument.clone()));
+                true
+            }
             (StaticType::Var(_), _) | (_, StaticType::Var(_)) => self.unify(&parameter, &argument),
             (_, StaticType::Error) | (StaticType::Error, _) => true,
+            // An `Any` takes a cast to be a sequence.
+            (StaticType::Iterable(_), StaticType::Any) => false,
             (
                 StaticType::Function {
                     parameters: expected,

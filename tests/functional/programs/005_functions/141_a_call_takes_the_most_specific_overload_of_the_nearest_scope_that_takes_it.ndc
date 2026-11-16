@@ -1,0 +1,14 @@
+// Of the overloads that take a call, the most specific one of the nearest
+// scope with any is the call's: the inner `show(Any)` takes every call, an
+// inner `count(Int)` only Ints, and an `Any` only goes where `Any` is taken.
+// expect-output: int any inner-any inner-any outer
+fn kind(x: Any) => "any";
+fn kind(x: Int) => "int";
+fn show(x: Int) => "outer";
+fn count(x: Any) => "outer";
+let a: Any = 1;
+{
+    fn show(x: Any) => "inner-any";
+    fn count(x: Int) => "inner-int";
+    print(kind(1), kind(a), show(1), show("s"), count("s"));
+}
