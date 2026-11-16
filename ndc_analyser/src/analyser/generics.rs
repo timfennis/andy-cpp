@@ -575,15 +575,29 @@ impl Analyser {
         self.solve_waiting();
     }
 
-    /// Reports the function `symbol`, about to be declared with parameters
-    /// of these types, if an earlier function with its name in its scope
+    /// Reports each named function the batch declares that overlaps an
+    /// earlier one of its name, see [`Self::check_overlap`]. It runs once the
+    /// batch has settled their types, which a body or a call can settle, so
+    /// that which of two functions comes first doesn't change the verdict.
+    pub(super) fn check_overlaps(&mut self) {
+        for (symbol, name, span) in std::mem::take(&mut self.declared_overloads) {
+            let parameters = match self.vars.resolve(self.types.get_type(symbol)) {
+                StaticType::Function { parameters, .. } => parameters,
+                _ => continue,
+            };
+            self.check_overlap(symbol, &name, parameters.as_deref(), span);
+        }
+    }
+
+    /// Reports the function `symbol`, declared with parameters of these
+    /// types, if an earlier function with its name in its scope
     /// takes the same parameters, or if a call could fit both and neither
     /// is more specific, so nothing says which one it means. A parameter
     /// without an annotation takes any argument the body can work with, so
     /// `fn f(x: Int, y)` and `fn f(x, y: Int)` both fit `f(1, 2)`. But
     /// `fn show(x)` next to `fn show(x: Int)` is a fallback that a call
     /// with an Int doesn't pick, like `fn show(x: Any)`.
-    pub(super) fn check_overlap(
+    fn check_overlap(
         &mut self,
         symbol: SymbolId,
         name: &str,

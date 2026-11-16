@@ -86,6 +86,10 @@ pub struct Analyser {
     pure_functions: AHashMap<NodeId, declarations::PureFunction>,
     /// The `pure fn`s the batch declares.
     pure_in_batch: Vec<NodeId>,
+    /// The named functions the batch declares, with their names and where
+    /// they're declared, which [`Self::check_overlaps`] compares with the
+    /// earlier functions of the same name once their types are settled.
+    declared_overloads: Vec<(SymbolId, String, Span)>,
     /// The native that indexes a tuple or an `Any`: see
     /// [`ndc_core::ANY_INDEX`].
     any_index: Option<SymbolId>,
@@ -182,6 +186,7 @@ impl Analyser {
             declared_functions: Vec::new(),
             pure_functions: AHashMap::new(),
             pure_in_batch: Vec::new(),
+            declared_overloads: Vec::new(),
             expected_parameters: AHashMap::new(),
             copied_through: None,
             literal_origins: AHashMap::new(),
@@ -217,6 +222,7 @@ impl Analyser {
         self.instantiate_uses();
         self.keep_own_picks();
         self.check_pure_functions();
+        self.check_overlaps();
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
         self.watchers.clear();
         if cfg!(debug_assertions) {

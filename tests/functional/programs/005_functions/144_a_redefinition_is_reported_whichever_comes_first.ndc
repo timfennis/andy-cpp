@@ -1,0 +1,8 @@
+// As 143, with the functions the other way around: the second `f`'s body
+// makes `x` an Int after the first `f` is declared.
+// expect-error: Illegal redefinition of function 'f' with parameters (Int) in the same scope
+fn f(x: Int) => x;
+fn f(x) {
+    let y: Int = x;
+    y + 100
+}

@@ -1,0 +1,7 @@
+// The body of the first `f` makes `x` an Int, so both take an Int.
+// expect-error: Illegal redefinition of function 'f' with parameters (Int) in the same scope
+fn f(x) {
+    let y: Int = x;
+    y + 100
+}
+fn f(x: Int) => x;
