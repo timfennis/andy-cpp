@@ -162,10 +162,17 @@ impl Analyser {
         if let Some(returns) = &recursive_return
             && !self.vars.try_unify(returns, &inferred_return)
         {
-            // A function that returns itself, like `fn f() { f }`, would
-            // have a type that contains itself, so it returns `Any`.
+            // A function that returns itself, like `fn f() { f }`, or a list
+            // of what it returns, like `fn f(n) => [f(n - 1)]`, would have a
+            // type that contains itself: only an `Any` can say what it
+            // returns, which has to be written. What it returns is a failed
+            // check, so what's built from it isn't reported again.
             if matches!(self.vars.resolve(returns), StaticType::Var(_)) {
-                self.vars.unify(returns, &StaticType::Any);
+                self.emit(AnalysisError::return_type_contains_itself(
+                    name.unwrap_or("?"),
+                    span,
+                ));
+                self.vars.unify(returns, &StaticType::Error);
             } else {
                 self.emit_rejected_write(returns, &inferred_return, span, false);
             }
