@@ -355,9 +355,29 @@ fn a_later_line_settles_what_none_will_hold() {
 }
 
 #[test]
-fn a_later_line_settles_an_unused_lambda_parameter() {
-    let out = repl_output(&["let wrap = fn(x) => [x];", "print(wrap(1).len());"]);
-    assert_eq!(out.trim(), "1");
+fn a_lambdas_type_is_settled_on_its_line() {
+    // The function is made with its type, which a cast checks against as
+    // the program runs, so a later line can't change it.
+    repl_error(
+        &["let identity = fn(x) => x;", "identity(1);"],
+        "doesn't accept the arguments 'Int'",
+    );
+}
+
+#[test]
+fn a_pure_lambdas_parameter_is_settled_on_its_line() {
+    repl_error(
+        &["let same = pure fn(x) => x;", "same(fn(n: Int) => n);"],
+        "doesn't accept the arguments",
+    );
+}
+
+#[test]
+fn what_a_functions_type_mentions_is_settled_on_its_line() {
+    repl_error(
+        &["let xs = [];", "let get = fn() => xs;", "xs.push(1);"],
+        "List<Unknown>, Int",
+    );
 }
 
 #[test]

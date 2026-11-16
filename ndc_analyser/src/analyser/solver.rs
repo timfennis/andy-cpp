@@ -750,11 +750,14 @@ impl Analyser {
         self.solve_waiting();
     }
 
-    /// The unsettled variables that nothing waiting needs settled: not a
-    /// literal's, which is what the line writes, and not what a waiting
-    /// constraint or a generic function's use waits on, or what those hold.
-    /// What an empty `[]`, `%{}` or `None` holds, or a lambda parameter
-    /// nothing has used yet, is one.
+    /// The unsettled variables that only what values hold mentions: not a
+    /// literal's, which is what the line writes; not what a waiting
+    /// constraint or a generic function's use waits on, or what those hold;
+    /// and not what the type of a function the batch makes mentions, which
+    /// is compiled into the function and checked against it as the program
+    /// runs, as a cast to a function type does, and which a `pure fn`'s
+    /// parameters are checked by. What an empty `[]`, `%{}` or `None` holds
+    /// is one; a lambda's parameter isn't, even if nothing has used it yet.
     pub(super) fn not_needed_now(&self) -> AHashSet<TypeVar> {
         let needed_types = self
             .waiting
@@ -773,6 +776,7 @@ impl Analyser {
                     .iter()
                     .flat_map(|generic_use| generic_use.key.clone()),
             )
+            .chain(self.result.analysis.function_types.values().cloned())
             .collect::<Vec<_>>();
         let mut needed = AHashSet::new();
         let mut todo = needed_types

@@ -84,7 +84,11 @@ xs.push("two");   // error: No function called 'push' found that matches the arg
 
 When nothing settles them, they're `Unknown`, which only a function taking any type takes, so a use that needs to know asks for an annotation (see [Types](./types.md)).
 
-In the REPL, a later line settles them as later code in a program does: `let xs = [];` on one line and `xs.push(1);` on the next make `xs` a `List<Int>`. A line runs before the next one is typed, though, so what its own code needs is settled when it runs. `let double = fn(x) => x * 2;` has to know which `*` it calls, so on its own line `x` is `Unknown` and the line is an error; annotate it as `fn(x: Int)`. Passing an empty list to a generic function settles what it holds the same way.
+In the REPL, a later line settles what a value holds as later code in a program does: `let xs = [];` on one line and `xs.push(1);` on the next make `xs` a `List<Int>`. A line runs before the next one is typed, though, so the functions it makes, and what its own code needs, are settled when it runs:
+
+- `let double = fn(x) => x * 2;` has to know which `*` it calls, so on its own line `x` is `Unknown` and the line is an error. Annotate it as `fn(x: Int)`.
+- `let identity = fn(x) => x;` is made as a function that takes an `Unknown`, so a later `identity(1)` is an error. Annotate it as `fn(x: Int)` too.
+- A function whose type mentions what an empty list holds, as `fn() => xs` does, settles that with it, and so does passing the list to a generic function.
 
 A variable that only gets its real value later holds an `Option`:
 
