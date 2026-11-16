@@ -235,7 +235,20 @@ impl Analyser {
         span: Span,
     ) {
         if !self.accepts_write(stored_type, value_type) {
-            self.emit_rejected_write(stored_type, value_type, span);
+            self.emit_rejected_write(stored_type, value_type, span, false);
+        }
+    }
+
+    /// [`Self::check_write`] for an assignment to a variable, whose error
+    /// says how a variable's type is decided.
+    fn check_variable_write(
+        &mut self,
+        stored_type: &StaticType,
+        value_type: &StaticType,
+        span: Span,
+    ) {
+        if !self.accepts_write(stored_type, value_type) {
+            self.emit_rejected_write(stored_type, value_type, span, true);
         }
     }
 
@@ -244,11 +257,14 @@ impl Analyser {
     /// of `if c { 1 } else { "a" }`, are reported as such once they're
     /// settled, unless a later use makes them `Any`s, as `let v: Any = …`
     /// does, so their write is checked again then.
+    /// `into_variable` says it's an assignment to a variable, which the help
+    /// then explains.
     pub(super) fn emit_rejected_write(
         &mut self,
         stored_type: &StaticType,
         value_type: &StaticType,
         span: Span,
+        into_variable: bool,
     ) {
         if let StaticType::Var(var) = self.vars.resolve(value_type)
             && self.vars.is_literal(var)
@@ -268,11 +284,28 @@ impl Analyser {
             &self.vars.shown(stored_type),
             span,
         );
-        if self.vars.has_number_literal(stored_type) {
+        let value_is_a_number = matches!(
+            self.vars.shown(value_type),
+            StaticType::Int | StaticType::Float | StaticType::Number
+        );
+        let stored = self.vars.resolve(stored_type);
+        if self.vars.has_number_literal(stored_type) && value_is_a_number {
             error = error.with_help(
                 "A number written without a `.` is an Int, and a variable holds what it's \
                  given first: write it as a Float, as in `let total = 0.0`, or annotate the \
                  variable, as in `let total: Float = 0`",
+            );
+        } else if into_variable && stored == StaticType::unit() {
+            error = error.with_help(
+                "`()` holds nothing, and a variable holds what it's given first. A value that \
+                 only comes later is an `Option`: start with `None` and write `Some(…)`, as in \
+                 `let best = None;` and `best = Some(x)`",
+            );
+        } else if into_variable {
+            error = error.with_help(
+                "A variable holds one type, the type of what it's given first. Use a new name \
+                 for a value of another type, or annotate the variable with `Any` to hold values \
+                 of different types, as in `let x: Any = 1`",
             );
         }
         self.emit(error);
@@ -317,7 +350,7 @@ impl Analyser {
             AssignmentTarget::Identifier { .. }
                 if self.picks.variables.contains_key(&lvalue.id) =>
             {
-                self.check_write(stored_type, value_type, span);
+                self.check_variable_write(stored_type, value_type, span);
             }
             AssignmentTarget::Member { .. } | AssignmentTarget::Index { .. } => {
                 self.check_write(stored_type, value_type, span);

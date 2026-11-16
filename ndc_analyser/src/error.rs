@@ -134,7 +134,7 @@ impl AnalysisError {
             ),
             span: unshared.span,
             help_text: Some(
-                "Values of different types are an `Any`, which has to be said: annotate it, as in `let x: Any = …`, `-> Any` or `List<Any>`"
+                "Give them one type, as with `String(n)` for a number among strings, or, as values of different types are an `Any`, which has to be said, annotate it, as in `let x: Any = …`, `-> Any` or `List<Any>`"
                     .to_string(),
             ),
             notes: Vec::new(),
@@ -427,8 +427,25 @@ impl AnalysisError {
             Some(format!(
                 "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
             ))
+        } else if *variable_type == StaticType::Any {
+            Some(cast_out_of_any("Fn(Int) -> Int"))
+        } else if let StaticType::Function {
+            parameters: Some(parameters),
+            ..
+        } = variable_type
+        {
+            let takes = parameters.iter().join(", ");
+            Some(if has_unknown(parameters) {
+                format!(
+                    "'{name}' takes ({takes}): nothing said what its parameters are when it was made, as on a REPL line of its own. Annotate them, as in `fn(x: Int) => …`"
+                )
+            } else {
+                format!(
+                    "A function stored in a variable has one type: '{name}' takes ({takes}). One declared as `fn {name}(…)` takes the types each call gives it"
+                )
+            })
         } else {
-            (*variable_type == StaticType::Any).then(|| cast_out_of_any("Fn(Int) -> Int"))
+            None
         };
         Self {
             text,

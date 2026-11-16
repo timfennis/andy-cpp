@@ -393,3 +393,11 @@ fn a_lambda_whose_body_needs_its_parameter_type_is_settled_on_its_line() {
     // The line runs before the next one exists, so `*` is picked now.
     repl_error(&["let double = fn(x) => x * 2;"], "Unknown, Int");
 }
+
+#[test]
+fn a_lambda_with_a_parameter_its_line_said_nothing_about_asks_for_an_annotation() {
+    repl_error(
+        &["let identity = fn(x) => x;", "identity(1);"],
+        "nothing said what its parameters are when it was made",
+    );
+}

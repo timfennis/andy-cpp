@@ -1,0 +1,5 @@
+// expect-error: Give them one type, as with `String(n)` for a number among strings
+fn fizz(n) {
+    if n % 3 == 0 { "Fizz" } else { n }
+}
+print(fizz(3));

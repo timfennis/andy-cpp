@@ -1,0 +1,3 @@
+// expect-error: A function stored in a variable has one type: 'id' takes (Int). One declared as `fn id(…)` takes the types each call gives it
+let id = fn(x) => x;
+print(id(1), id("a"));
