@@ -1,0 +1,12 @@
+// The inner `d` takes a `v` of a type the call after it settles, so it
+// could still be a String tuple: the first call can't be its yet, and is
+// the outer `d`'s once the second settles the inner one.
+// expect-output: outer
+fn d(v: Tuple<Int, Int>) => "outer";
+fn f(x) {
+    fn d(v) => "inner";
+    let r = d((x, x));
+    d(("s", "s"));
+    r
+}
+print(f(1));

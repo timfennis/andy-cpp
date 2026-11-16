@@ -1544,11 +1544,16 @@ impl Analyser {
         if !self.iterables_known(narrowest, arguments) {
             return None;
         }
+        // What isn't known yet of the overload itself, such as the parameter
+        // of a function declared without a type in the function being
+        // checked, is as open as what isn't known of the arguments.
+        let declared = self.vars.resolve(self.types.get_type(narrowest));
         let unknowns = arguments
             .iter()
-            .flat_map(|argument| self.vars.unsettled(argument))
+            .chain(std::iter::once(&declared))
+            .flat_map(|typ| self.vars.unsettled(typ))
+            .unique()
             .collect::<Vec<_>>();
-        let declared = self.vars.resolve(self.types.get_type(narrowest));
         let snapshot = self.vars.snapshot();
         let free = match self.vars.instantiate_with(&declared, &mut Vec::new()) {
             StaticType::Function {
