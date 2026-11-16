@@ -1,0 +1,4 @@
+// expect-error: No function called 'pick' found that matches the arguments 'Int'
+fn pick(c) => if c { "yes" } else { "no" };
+print(pick(true));
+print(pick(10));

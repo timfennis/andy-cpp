@@ -307,6 +307,15 @@ impl Analyser {
         self.result.errors.push(err);
     }
 
+    /// Analyses `condition`, which says whether an `if`, a `while` or a
+    /// guard runs, or is an operand of `and` or `or`, and so is a Bool: the
+    /// program runs only with one, as it does with what's written into a
+    /// Bool variable. In `fn g(c) => if c { 1 } else { 2 }`, `c` is a Bool.
+    fn analyse_condition(&mut self, condition: &ExpressionLocation) {
+        let typ = self.analyse_expr(condition);
+        self.check_write(&StaticType::Bool, &typ, condition.span);
+    }
+
     /// Resolves a syntactic type annotation to a `StaticType`: `Int` becomes
     /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`,
     /// and a struct name becomes that struct's `StaticType::Struct`. The
@@ -459,9 +468,10 @@ impl Analyser {
                     StaticType::unit()
                 }
             }
+            // `and` and `or` give one of their operands, so both are Bools.
             Expression::Logical { left, right, .. } => {
-                self.analyse_expr(left);
-                self.analyse_expr(right);
+                self.analyse_condition(left);
+                self.analyse_condition(right);
                 StaticType::Bool
             }
             Expression::Grouping(expr) => self.analyse_expr(expr),
@@ -575,7 +585,7 @@ impl Analyser {
                 on_true,
                 on_false,
             } => {
-                self.analyse_expr(condition);
+                self.analyse_condition(condition);
                 let true_type = self.analyse_expr(on_true);
                 // An `if` without an `else` is `()`, whatever its branch is:
                 // `if c { 1 }` has no value when `c` is false.
@@ -592,7 +602,7 @@ impl Analyser {
                 // The condition is part of the loop too, as it runs on every
                 // iteration.
                 self.loops.push(false);
-                self.analyse_expr(expression);
+                self.analyse_condition(expression);
                 self.analyse_expr(loop_body);
                 let broken = self.loops.pop().expect("the loop was pushed");
                 // A `while true` that no `break` leaves only ends by
@@ -776,7 +786,7 @@ impl Analyser {
                 self.declare_binding_pattern(l_value, None, found_type, sequence_span);
             }
             ForIteration::Guard(expr) => {
-                self.analyse_expr(expr);
+                self.analyse_condition(expr);
             }
         }
 

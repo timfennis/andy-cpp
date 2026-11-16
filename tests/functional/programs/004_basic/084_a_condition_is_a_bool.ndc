@@ -1,0 +1,4 @@
+// The conditions of `if`, `while` and guards, and the operands of `and` and
+// `or`, are Bools: `and` and `or` give one of their operands.
+// expect-error: mismatched types: found Int but expected Bool
+let ok: Bool = true and 3;
