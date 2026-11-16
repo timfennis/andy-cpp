@@ -654,7 +654,7 @@ fn a_function_argument_fits_a_function_parameter_where_their_known_parts_agree()
     for (lambda, shown) in [
         ("fn(x: String) => 1", "Fn(String) -> Int"),
         ("fn(x) => \"a\"", "Fn(Int) -> String"),
-        ("fn(a, b) => 1", "Fn(Any, Any) -> Int"),
+        ("fn(a, b) => 1", "Fn(Unknown, Unknown) -> Int"),
     ] {
         assert_eq!(
             errors(&format!("{apply}apply({lambda});"), vec![]),
@@ -675,7 +675,7 @@ fn a_function_value_rejects_a_callback_taking_another_number_of_arguments() {
             index_natives()
         ),
         vec![
-            "A function of type Fn(Fn(Int) -> Int) -> Int doesn't accept the arguments 'Fn(Any, Any) -> Int'"
+            "A function of type Fn(Fn(Int) -> Int) -> Int doesn't accept the arguments 'Fn(Unknown, Unknown) -> Int'"
         ]
     );
 }
@@ -1034,10 +1034,10 @@ fn a_field_write_settles_the_receiver_like_a_field_read() {
 }
 
 #[test]
-fn an_error_shows_what_isnt_known_yet_as_any() {
+fn an_error_shows_what_isnt_known_yet_as_unknown() {
     assert_eq!(
         errors("let f = fn(x) -> Int { [x] };", vec![]),
-        vec!["mismatched types: found List<Any> but expected Int"]
+        vec!["mismatched types: found List<Unknown> but expected Int"]
     );
 }
 
@@ -1094,7 +1094,7 @@ fn an_operator_takes_no_any_operand_that_no_overload_takes() {
     let globals = natives(&[("++", "<T>(List<T>, List<T>) -> List<T>")]);
     assert_eq!(
         errors("let g = fn(a: Any) => a ++ [];", globals.clone()),
-        vec!["No function called '++' found that matches the arguments 'Any, List<Any>'"]
+        vec!["No function called '++' found that matches the arguments 'Any, List<Unknown>'"]
     );
     let (_, result) =
         analyse_with_globals("let g = fn(a: Any) => (a as List<Int>) ++ [];", globals);

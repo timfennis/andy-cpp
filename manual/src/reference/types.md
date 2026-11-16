@@ -60,6 +60,14 @@ describe(ints);  // fine: "ints"
 describe([]);    // error: No function called 'describe' found that matches the arguments 'List<Unknown>'
 ```
 
+An error also shows a type that nothing has said yet as `Unknown`, so `Any` in an error is always one the program wrote:
+
+```ndc,fails
+let xs = [];
+let n: Int = xs;
+// error[analysis]: mismatched types: found List<Unknown> but expected Int
+```
+
 And the types pick which overload of a function is meant. A generic function is compiled once for each set of types it's called with, so `signum` below is the `Int` version in one call and the `Float` version in the other:
 
 ```ndc
