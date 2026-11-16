@@ -963,22 +963,22 @@ fn a_call_nothing_else_settles_takes_no_narrowest_overload_when_unsure() {
         parameters: Some(vec![parameter]),
         return_type: Box::new(returns),
     };
-    // Nothing is known about `x`, so it's `Any`, which only `pick(Any)`
+    // Nothing is known about `x`, so it's `Unknown`, which only `pick(Any)`
     // takes.
     assert_eq!(
         analyse_last_type(
             "fn pick(x: Int) => 1; fn pick(x: Any) => \"any\"; let f = fn(x) => pick(x); f"
         ),
-        function(StaticType::Any, StaticType::String)
+        function(StaticType::Unknown, StaticType::String)
     );
-    // Overloads in two scopes fit, so none settles `x`: it's `Any`, and
-    // `[x]` is a `List<Any>`, which neither takes.
+    // Overloads in two scopes fit, so none settles `x`: it's `Unknown`, and
+    // `[x]` is a `List<Unknown>`, which neither takes.
     assert_eq!(
         errors(
             "fn pick(xs: List<String>) => \"outer\"; { fn pick(xs: List<Int>) => 1; let f = fn(x) => pick([x]); f }",
             vec![]
         ),
-        vec!["No function called 'pick' found that matches the arguments 'List<Any>'"]
+        vec!["No function called 'pick' found that matches the arguments 'List<Unknown>'"]
     );
 }
 
@@ -1315,11 +1315,11 @@ fn a_join_waits_until_both_branches_are_known() {
 }
 
 #[test]
-fn a_parameter_nothing_settles_is_an_any_that_no_overload_takes() {
-    // Nothing says what `x` is, so it's `Any`, which neither `+` takes.
+fn a_parameter_nothing_settles_is_unknown_which_no_overload_takes() {
+    // Nothing says what `x` is, so it's `Unknown`, which neither `+` takes.
     assert_eq!(
         errors("let f = fn(x) => x + 1; f", ambiguous_plus()),
-        vec!["No function called '+' found that matches the arguments 'Any, Int'"]
+        vec!["No function called '+' found that matches the arguments 'Unknown, Int'"]
     );
 }
 

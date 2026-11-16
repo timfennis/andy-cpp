@@ -125,8 +125,15 @@ pub(crate) struct Snapshot {
 }
 
 impl TypeVars {
+    /// A new variable, which is [`StaticType::Unknown`] if nothing settles
+    /// it: a type parameter or an `Any` takes it, but no other type is. In
+    /// `let f = fn(x) => x + 1;` with `f` never called, no `+` takes `x`.
+    pub(crate) fn fresh(&mut self) -> StaticType {
+        self.fresh_with(StaticType::Unknown)
+    }
+
     /// A new variable, which becomes `fallback` if nothing settles it.
-    pub(crate) fn fresh(&mut self, fallback: StaticType) -> StaticType {
+    fn fresh_with(&mut self, fallback: StaticType) -> StaticType {
         let var = self.next_var();
         self.solutions.push(None);
         self.fallbacks.push(fallback);
@@ -142,7 +149,7 @@ impl TypeVars {
     /// It doesn't depend on what the calls the literal is passed to need,
     /// so it's the same whatever order they're solved in.
     pub(crate) fn fresh_contents(&mut self) -> StaticType {
-        let typ = self.fresh(StaticType::Unknown);
+        let typ = self.fresh();
         if let StaticType::Var(var) = typ {
             self.contents.push(var);
         }
@@ -324,7 +331,7 @@ impl TypeVars {
     }
 
     fn fresh_bounded(&mut self, fallback: StaticType, bounds: Vec<Bound>) -> StaticType {
-        let typ = self.fresh(fallback);
+        let typ = self.fresh_with(fallback);
         let StaticType::Var(var) = typ else {
             unreachable!("a fresh type is a variable");
         };
@@ -700,7 +707,7 @@ impl TypeVars {
         }
         let plain = self.next_var();
         self.solutions.push(None);
-        self.fallbacks.push(StaticType::Any);
+        self.fallbacks.push(StaticType::Unknown);
         self.levels.push(self.levels[var.0 as usize]);
         self.bounds.push(Vec::new());
         self.settle_literal(var, &StaticType::Var(plain))
@@ -1115,7 +1122,7 @@ impl TypeVars {
     ) -> StaticType {
         for name in typ.type_parameters() {
             if !made.iter().any(|(generic, _)| *generic == name) {
-                let var = self.fresh(StaticType::Any);
+                let var = self.fresh();
                 made.push((name, var));
             }
         }
@@ -1389,7 +1396,7 @@ mod tests {
     fn a_rollback_takes_back_the_bounds_another_variable_got() {
         let mut vars = TypeVars::default();
         let literal = vars.fresh_number(span());
-        let other = vars.fresh(StaticType::Any);
+        let other = vars.fresh();
         let snapshot = vars.snapshot();
         assert!(vars.unify(&literal, &other));
         // `other` is the literal now, so it can't be a String.

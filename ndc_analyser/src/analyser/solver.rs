@@ -286,7 +286,7 @@ impl Analyser {
         if let Some(typ) = self.try_call(&call) {
             return typ;
         }
-        call.result = self.vars.fresh(StaticType::Any);
+        call.result = self.vars.fresh();
         let result = call.result.clone();
         // Arithmetic on literals gives a literal of their type: `-1` and
         // `1 + 1` are Floats in `if c { 2.5 } else { -1 }`.
@@ -301,7 +301,7 @@ impl Analyser {
     /// until the kind of sequence is known.
     pub(super) fn constrain_iteration(&mut self, sequence: StaticType, span: Span) -> StaticType {
         if self.vars.waits_to_iterate(&sequence) {
-            let element = self.vars.fresh(StaticType::Any);
+            let element = self.vars.fresh();
             self.wait(Constraint::Iterate {
                 sequence,
                 element: element.clone(),
@@ -336,9 +336,7 @@ impl Analyser {
         count: usize,
         span: Span,
     ) -> Vec<StaticType> {
-        let parts = (0..count)
-            .map(|_| self.vars.fresh(StaticType::Any))
-            .collect::<Vec<_>>();
+        let parts = (0..count).map(|_| self.vars.fresh()).collect::<Vec<_>>();
         self.wait(Constraint::Unpack {
             value,
             parts: parts.clone(),
@@ -364,7 +362,7 @@ impl Analyser {
             (_, StaticType::Never) => a,
             _ if a == b => a,
             _ if unknown(self, &a) || unknown(self, &b) => {
-                let result = self.vars.fresh(StaticType::Any);
+                let result = self.vars.fresh();
                 self.wait(Constraint::Join {
                     types: [a, b, result.clone()],
                     expects_any: false,
@@ -519,7 +517,7 @@ impl Analyser {
             // of a String is the mismatch, not the `0`.
             StaticType::Var(var) if self.vars.is_number(var) => default,
             StaticType::Var(_) => {
-                let value = self.vars.fresh(StaticType::Any);
+                let value = self.vars.fresh();
                 self.wait(Constraint::MapDefault {
                     default,
                     value: value.clone(),
@@ -1850,7 +1848,7 @@ impl Analyser {
         callee: &StaticType,
         arguments: Vec<StaticType>,
     ) -> StaticType {
-        let returns = self.vars.fresh(StaticType::Any);
+        let returns = self.vars.fresh();
         let function = StaticType::Function {
             parameters: Some(arguments),
             return_type: Box::new(returns.clone()),
