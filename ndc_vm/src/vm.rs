@@ -464,7 +464,7 @@ impl Vm {
                     let val = self.stack.pop().expect("stack underflow");
 
                     // Check if already an iterator
-                    if matches!(val, Value::Object(ref obj) if matches!(**obj, Object::Iterator(..)))
+                    if matches!(val, Value::Object(ref obj) if matches!(**obj, Object::Iterator(_)))
                     {
                         self.stack.push(val);
                         continue;
@@ -508,7 +508,7 @@ impl Vm {
                     let Value::Object(obj) = top else {
                         panic!("IterNext expects an iterator on the stack")
                     };
-                    let Object::Iterator(iter_rc, _) = &**obj else {
+                    let Object::Iterator(iter_rc) = &**obj else {
                         panic!("IterNext expects an iterator on the stack")
                     };
                     let next = iter_rc.borrow_mut().next();

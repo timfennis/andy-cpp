@@ -1,7 +1,7 @@
 use super::{Analyser, Returns};
 use crate::error::AnalysisError;
 use itertools::izip;
-use ndc_core::r#struct::StructInfo;
+use ndc_core::r#struct::{StructId, StructInfo};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{
@@ -9,6 +9,7 @@ use ndc_parser::{
     TypeExpr,
 };
 use ndc_resolver::SymbolId;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// What a function declaration consists of, named like `fn f(x) { … }` or
@@ -23,6 +24,16 @@ pub(super) struct FunctionDeclaration<'a> {
     /// Whether it's a `pure fn`, whose results are cached.
     pub pure: bool,
     pub span: Span,
+}
+
+/// A `pure fn` the batch declares, whose parameters are checked to take only
+/// data once the batch has settled their types.
+#[derive(Debug)]
+pub(super) struct PureFunction {
+    pub(super) declaration: NodeId,
+    pub(super) name: Option<String>,
+    /// Each parameter's name, type and span.
+    pub(super) parameters: Vec<(String, StaticType, Span)>,
 }
 
 impl Analyser {
@@ -68,6 +79,19 @@ impl Analyser {
             })
             .collect::<Vec<_>>();
         let annotated_return = self.lower_annotation(return_annotation);
+        if pure {
+            self.pure_functions.push(PureFunction {
+                declaration: id,
+                name: name.map(str::to_string),
+                parameters: parameters
+                    .iter()
+                    .zip(&param_types)
+                    .map(|(parameter, typ)| {
+                        (parameter.name().to_string(), typ.clone(), parameter.span)
+                    })
+                    .collect(),
+            });
+        }
         // A function's value takes what its parameters turn out to be.
         let runtime_parameters = Some(param_types.clone());
         self.result.analysis.function_types.insert(
@@ -369,6 +393,78 @@ impl Analyser {
     fn bind_patterns_as_errors(&mut self, patterns: &[BindingPatternLocation], span: Span) {
         for pattern in patterns {
             self.declare_binding_pattern(pattern, None, StaticType::Error, span);
+        }
+    }
+
+    /// The part of `typ` a `pure fn` can't take: a function, an iterator or
+    /// an `Any`, in `typ` or in the fields of a struct in it. A `pure fn`
+    /// gives a call the result of an earlier one with the same arguments,
+    /// and a function's result can depend on what it uses from outside, an
+    /// iterator changes as it's read, and an `Any` may hold either.
+    pub(super) fn not_data(&self, typ: &StaticType) -> Option<StaticType> {
+        self.not_data_beyond(typ, &mut Vec::new())
+    }
+
+    /// [`Self::not_data`], past the structs in `seen`, whose fields are
+    /// already being looked at.
+    fn not_data_beyond(&self, typ: &StaticType, seen: &mut Vec<StructId>) -> Option<StaticType> {
+        let found = RefCell::new(None);
+        let structs = RefCell::new(Vec::new());
+        typ.contains(&|part| match part {
+            StaticType::Any | StaticType::Function { .. } | StaticType::Iterator(_) => {
+                *found.borrow_mut() = Some(part.clone());
+                true
+            }
+            StaticType::Struct { id, .. } => {
+                structs.borrow_mut().push(*id);
+                false
+            }
+            _ => false,
+        });
+        if let Some(part) = found.into_inner() {
+            return Some(part);
+        }
+        for id in structs.into_inner() {
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id);
+            let info = Rc::clone(&self.struct_registry[id]);
+            for (_, field) in &info.fields {
+                if let Some(part) = self.not_data_beyond(field, seen) {
+                    return Some(part);
+                }
+            }
+        }
+        None
+    }
+
+    /// Reports the `pure fn`s the batch declares that take more than data.
+    /// One that runs as instances is checked as each is made instead, for
+    /// the types its calls give it, see [`Self::solve_instance`].
+    pub(super) fn check_pure_functions(&mut self) {
+        for function in std::mem::take(&mut self.pure_functions) {
+            if self
+                .result
+                .analysis
+                .instances
+                .contains_key(&function.declaration)
+            {
+                continue;
+            }
+            for (parameter, typ, span) in &function.parameters {
+                let typ = self.vars.resolve(typ);
+                if let Some(part) = self.not_data(&typ) {
+                    self.emit(AnalysisError::pure_fn_parameter_takes_more_than_data(
+                        function.name.as_deref(),
+                        parameter,
+                        &self.vars.shown(&typ),
+                        &part,
+                        *span,
+                    ));
+                    break;
+                }
+            }
         }
     }
 }

@@ -87,7 +87,7 @@ mod inner {
                 Object::Deque(d) => d.borrow().contains(elem),
                 Object::MinHeap(h) => h.borrow().iter().any(|v| v.0.0 == *elem),
                 Object::MaxHeap(h) => h.borrow().iter().any(|v| v.0 == *elem),
-                Object::Iterator(i, _) => {
+                Object::Iterator(i) => {
                     {
                         let iter = i.borrow();
                         if let Some((start, end, inclusive)) = iter.range_bounds() {

@@ -1,0 +1,3 @@
+// expect-error: its parameter `b` has type `Bag`
+struct Bag { items: List<Any> }
+pure fn first(b: Bag) => b.items[0];

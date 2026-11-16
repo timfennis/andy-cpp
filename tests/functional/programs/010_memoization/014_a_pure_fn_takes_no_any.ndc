@@ -1,0 +1,3 @@
+// An `Any` could hold a function or an iterator.
+// expect-error: its parameter `x` has type `Any`
+pure fn same(x: Any) => x;

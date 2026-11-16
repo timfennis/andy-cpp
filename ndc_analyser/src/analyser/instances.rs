@@ -36,11 +36,22 @@ pub(super) struct Scheme {
     pub(super) uses: Rc<[GenericUse]>,
     /// The function's declaration.
     pub(super) declaration: NodeId,
+    /// Whether it's a `pure fn`, which takes only data.
+    pub(super) pure: bool,
     /// The calls its body makes of itself, which have its own types.
     pub(super) recursive_calls: Rc<[NodeId]>,
     /// The functions its body declares, with the types they're declared
     /// with, which an instance makes what its own types make them.
     pub(super) functions: Rc<[(NodeId, StaticType)]>,
+}
+
+/// An instance [`Analyser::instance_for`] made, which waits to be solved.
+pub(super) struct NewInstance {
+    instance: SymbolId,
+    function: SymbolId,
+    key: Vec<StaticType>,
+    /// The use that needs it.
+    span: Span,
 }
 
 /// A call of a generic function, or its name used as a value, which needs
@@ -134,10 +145,16 @@ impl Analyser {
             for generic_use in uses {
                 self.point_at_instance(&generic_use, &mut new);
             }
-            let Some((instance, function, key)) = new.pop() else {
+            let Some(NewInstance {
+                instance,
+                function,
+                key,
+                span,
+            }) = new.pop()
+            else {
                 break;
             };
-            self.solve_instance(instance, function, &key);
+            self.solve_instance(instance, function, &key, span);
         }
     }
 
@@ -146,11 +163,7 @@ impl Analyser {
     /// function value is one instance, so its key must be known:
     /// `let f: Any = inc` doesn't say which `inc` it is, while
     /// `let f: Fn(Any) -> Any = inc` is the one for `Any`.
-    fn point_at_instance(
-        &mut self,
-        generic_use: &GenericUse,
-        new: &mut Vec<(SymbolId, SymbolId, Vec<StaticType>)>,
-    ) {
+    fn point_at_instance(&mut self, generic_use: &GenericUse, new: &mut Vec<NewInstance>) {
         let key = generic_use
             .key
             .iter()
@@ -176,7 +189,7 @@ impl Analyser {
             self.report_unknown_instance(generic_use);
             return;
         }
-        let instance = self.instance_for(generic_use.function, key, new);
+        let instance = self.instance_for(generic_use.function, key, generic_use.span, new);
         if instance == generic_use.function {
             return;
         }
@@ -257,7 +270,8 @@ impl Analyser {
         &mut self,
         function: SymbolId,
         key: Vec<StaticType>,
-        new: &mut Vec<(SymbolId, SymbolId, Vec<StaticType>)>,
+        span: Span,
+        new: &mut Vec<NewInstance>,
     ) -> SymbolId {
         if let Some(&instance) = self.instances.get(&(function, key.clone())) {
             return instance;
@@ -278,13 +292,26 @@ impl Analyser {
             .instances
             .insert(instance, InstancePicks::new(declaration));
         self.instances.insert((function, key.clone()), instance);
-        new.push((instance, function, key));
+        new.push(NewInstance {
+            instance,
+            function,
+            key,
+            span,
+        });
         instance
     }
 
     /// Solves the constraints of `function` for the instance whose key has
     /// these types, recording the picks they make in the instance's picks.
-    fn solve_instance(&mut self, instance: SymbolId, function: SymbolId, key: &[StaticType]) {
+    /// `span` is the use that needs it, where a `pure fn` that this instance
+    /// makes take more than data is reported.
+    fn solve_instance(
+        &mut self,
+        instance: SymbolId,
+        function: SymbolId,
+        key: &[StaticType],
+        span: Span,
+    ) {
         let scheme = self.schemes[&function].clone();
         let mut made = scheme
             .key
@@ -311,6 +338,29 @@ impl Analyser {
         for (node, declared) in std::iter::once(own).chain(scheme.functions.iter().cloned()) {
             let declared = self.vars.resolve(&declared);
             let typ = self.vars.instantiate_with(&declared, &mut made);
+            if scheme.pure
+                && node == scheme.declaration
+                && let StaticType::Function {
+                    parameters: Some(parameters),
+                    ..
+                } = &typ
+                && let Some((typ, part)) = parameters
+                    .iter()
+                    .find_map(|typ| self.not_data(typ).map(|part| (typ, part)))
+            {
+                // Pushed rather than emitted: `emit` leaves out what the
+                // instance's body reports, which its calls report, while
+                // this is the instance's own.
+                let name = self.resolver.symbol_name(function).to_string();
+                self.result
+                    .errors
+                    .push(AnalysisError::pure_fn_given_more_than_data(
+                        &name,
+                        &self.vars.shown(typ),
+                        &part,
+                        span,
+                    ));
+            }
             if let Some(picks) = self.picks.instances.get_mut(&instance) {
                 picks.function_types.insert(node, typ);
             }

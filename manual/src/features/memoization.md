@@ -19,30 +19,42 @@ print(multiply(4, 5));  // 20
 
 > **Note:** The interpreter does not check whether a function is actually pure. You must avoid side effects yourself.
 
-### Which calls share a result
+### A `pure fn` takes data
 
-A call gives what an earlier call returned when its arguments are the same
-values of the same types:
+A `pure fn` gives a call the result of an earlier one with the same arguments,
+so its arguments must be values it can compare. Its parameters can't be, or
+hold, a function, whose result can depend on what it uses from outside; an
+iterator, which changes as it's read; or an `Any`, which could hold either.
+That includes the fields of a struct:
 
-- Numbers are told apart by kind as well as value: `1` and `1.0` are equal, but
-  `f(1)` and `f(1.0)` are different calls.
-- Containers are compared by what they hold, and a map by its default too. Heaps
-  with the same elements are the same, whatever order they were pushed in.
-- A function is its code and the values of the variables it captured, so two
-  closures made by one `fn` expression are the same argument only when they
-  captured equal values.
-- An iterator is only ever the same as itself.
-
-A `pure fn` called with values of different types has a cache for each set of
-types, and for each type it returns:
-
-```ndc
-pure fn same(x) => x;
-print(same(1), same(1.0));  // 1 1.0
+```ndc,fails
+pure fn call(f: Fn(Int) -> Int, n: Int) => f(n);
+// error[analysis]: `call` is a `pure fn`, which only takes data, but its parameter `f` has type `Fn(Int) -> Int`
 ```
 
-The cached value is what the later call gets, not a copy of it. A change to a
-list it returned is in what the next call with the same arguments returns:
+A `pure fn` without annotations is checked for the types each call gives it.
+
+### Which calls share a result
+
+A call gets an earlier call's result when its arguments are the same values:
+lists, tuples and deques with the same elements in the same order, maps with
+the same entries and the same default, heaps with the same elements whatever
+order they were pushed in. Numbers that are equal but different, as `0.0` and
+`-0.0` are, are different arguments:
+
+```ndc
+pure fn inverse(x: Float) => 1.0 / x;
+print(inverse(0.0), inverse(-0.0));  // Inf -Inf
+```
+
+A map's default can be a function, as in `%{: fn() => []}`, which the map's
+type doesn't show. It's told apart by its code: like the `pure fn` itself,
+what it uses from outside isn't part of the arguments.
+
+A `pure fn` called with values of different types has a cache for each set of
+types, and for each type it returns. The cached value is what the later call
+gets, not a copy of it, so a change to a list it returned is in what the next
+call with the same arguments returns:
 
 ```ndc
 pure fn empty() -> List<Int> => [];
@@ -52,7 +64,7 @@ print(empty());  // [1]
 
 ### Performance: keep memoization keys small
 
-The cache key is computed by hashing **all arguments**, and for a function argument the values of the variables it captured. For container types like maps and lists this
+The cache key is computed by hashing **all arguments**. For container types like maps and lists this
 is an O(n) operation proportional to the number of elements. Passing large containers as arguments
 to a `pure fn` therefore adds hashing overhead on every call, even on cache hits.
 

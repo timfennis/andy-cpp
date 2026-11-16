@@ -193,6 +193,61 @@ impl AnalysisError {
         }
     }
 
+    /// A call that makes the `pure fn` `function` take `typ`, which holds
+    /// `part`: a function, an iterator or an `Any`.
+    pub(crate) fn pure_fn_given_more_than_data(
+        function: &str,
+        typ: &StaticType,
+        part: &StaticType,
+        span: Span,
+    ) -> Self {
+        Self {
+            text: format!(
+                "`{function}` is a `pure fn`, which only takes data, but this call passes it a value of type `{typ}`"
+            ),
+            span,
+            help_text: Some(Self::pure_fn_takes_data(part)),
+            notes: Vec::new(),
+        }
+    }
+
+    /// A parameter of a `pure fn` whose type `typ` holds `part`: a
+    /// function, an iterator or an `Any`. `function` is `None` for a lambda.
+    pub(crate) fn pure_fn_parameter_takes_more_than_data(
+        function: Option<&str>,
+        parameter: &str,
+        typ: &StaticType,
+        part: &StaticType,
+        span: Span,
+    ) -> Self {
+        let function = function.map_or_else(
+            || "This `pure fn`".to_string(),
+            |name| format!("`{name}` is a `pure fn`, which"),
+        );
+        Self {
+            text: format!(
+                "{function} only takes data, but its parameter `{parameter}` has type `{typ}`"
+            ),
+            span,
+            help_text: Some(Self::pure_fn_takes_data(part)),
+            notes: Vec::new(),
+        }
+    }
+
+    /// Why a `pure fn` can't take a value with `part` in it.
+    fn pure_fn_takes_data(part: &StaticType) -> String {
+        let why = match part {
+            StaticType::Function { .. } => {
+                "A function's result can depend on what it uses from outside, which isn't part of the arguments."
+            }
+            StaticType::Iterator(_) => "An iterator changes as it's read.",
+            _ => "An `Any` could hold a function or an iterator.",
+        };
+        format!(
+            "A `pure fn` gives a call the result of an earlier one with the same arguments, so it only takes data. {why}"
+        )
+    }
+
     pub(crate) fn type_too_large(function: &str, limit: usize, span: Span) -> Self {
         Self {
             text: format!(

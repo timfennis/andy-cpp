@@ -235,7 +235,7 @@ pub struct FieldAccessors {
     pub setter: ResolvedVar,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
     Local {
         slot: usize,

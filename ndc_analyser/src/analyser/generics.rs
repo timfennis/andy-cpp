@@ -201,6 +201,7 @@ impl Analyser {
                 key: key.into(),
                 uses: uses.into(),
                 declaration,
+                pure,
                 recursive_calls: std::mem::take(&mut self.recursive_calls).into(),
                 functions: self.declared_functions[first_function..]
                     .iter()

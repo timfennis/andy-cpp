@@ -81,6 +81,8 @@ pub struct Analyser {
     /// The functions the batch declares, in the order their declarations
     /// start, so a generic function knows the ones its body declares.
     declared_functions: Vec<NodeId>,
+    /// The `pure fn`s the batch declares, see [`Self::check_pure_functions`].
+    pure_functions: Vec<declarations::PureFunction>,
     /// The native that indexes a tuple or an `Any`: see
     /// [`ndc_core::ANY_INDEX`].
     any_index: Option<SymbolId>,
@@ -175,6 +177,7 @@ impl Analyser {
             recursive_calls: Vec::new(),
             waiting_function_values: AHashSet::new(),
             declared_functions: Vec::new(),
+            pure_functions: Vec::new(),
             expected_parameters: AHashMap::new(),
             copied_through: None,
             literal_origins: AHashMap::new(),
@@ -209,6 +212,7 @@ impl Analyser {
         );
         self.instantiate_uses();
         self.keep_own_picks();
+        self.check_pure_functions();
         debug_assert!(self.waiting.is_empty(), "unsolved: {:?}", self.waiting);
         self.watchers.clear();
         if cfg!(debug_assertions) {
