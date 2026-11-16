@@ -12,7 +12,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 const SKIPPED: &[&str] = &["print", "dbg", "read_file", "panic", "docs", "[any]", "zip"];
 
 /// What a runtime error about a value's type says, as opposed to one about
-/// its value.
+/// its value: the natives' own words, and, with [`is_about_a_type`], the
+/// argument errors the stdlib's macros and operators make.
 const TYPE_ERRORS: &[&str] = &[
     "cannot compare",
     "requires a sequence",
@@ -25,7 +26,23 @@ const TYPE_ERRORS: &[&str] = &[
     "cannot convert",
     "cannot use non-range iterator",
     "cannot unpack",
+    "mismatched types",
+    "expected a tuple",
+    "expected one tuple",
+    "expected the function to return",
 ];
+
+/// Whether `message` is about a value's type rather than its value. Besides
+/// [`TYPE_ERRORS`], an argument a native didn't take says what it expected
+/// and what it got: `arg 1: expected List, got Int` from the macros,
+/// `expected (Int, Int), got (Int, String)` from the operators, `expected 2
+/// arguments, got 3`. An error about a value says what's wrong with it
+/// instead: `arg 2: expected a non-negative integer, but the value was
+/// negative`.
+fn is_about_a_type(message: &str) -> bool {
+    TYPE_ERRORS.iter().any(|error| message.contains(error))
+        || (message.contains("expected ") && message.contains(", got "))
+}
 
 /// The types each type parameter is tried as.
 fn choices() -> Vec<StaticType> {
@@ -215,7 +232,7 @@ fn combinations(pools: &[Vec<String>], limit: usize) -> Vec<Vec<String>> {
 /// `signature`, is one this test allows: one about a value, or one a known
 /// gap explains.
 fn is_allowed(name: &str, signature: &StaticType, message: &str) -> bool {
-    if !TYPE_ERRORS.iter().any(|error| message.contains(error)) {
+    if !is_about_a_type(message) {
         return true;
     }
     // An `Any` is checked as the program runs, which is what it's for.
@@ -306,4 +323,29 @@ fn every_native_takes_what_its_signature_says() {
         failures.len(),
         failures.join("\n")
     );
+}
+
+#[test]
+fn an_error_about_a_type_is_told_from_one_about_a_value() {
+    for about_a_type in [
+        "arg 1: expected List, got Int",
+        "expected (Int, Int), got (Int, String)",
+        "expected 2 arguments, got 3",
+        "cannot compare Int and String",
+        "sum requires a sequence",
+        "comparator must return a number, got Bool",
+        "mismatched types: expected Bool, found Int",
+    ] {
+        assert!(is_about_a_type(about_a_type), "{about_a_type}");
+    }
+    for about_a_value in [
+        "arg 2: expected a non-negative integer, but the value was negative",
+        "expected an exact integer Number",
+        "division by zero",
+        "index out of bounds",
+        "comparator must return a real number, got a complex number",
+        "empty input to max",
+    ] {
+        assert!(!is_about_a_type(about_a_value), "{about_a_value}");
+    }
 }
