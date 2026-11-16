@@ -1,0 +1,6 @@
+// A tuple can't be written to, so sharing one is harmless when there's no
+// container in it: this one holds an Int and None.
+// expect-output: (1,None) Some((1,None))
+let value: Any = (1, None);
+let alias = value;
+print(value as (Int, Option<List<Int>>), alias as? (Int, Option<List<Int>>));

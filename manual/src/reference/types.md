@@ -127,13 +127,12 @@ print(total([1, 2]), total((3, 4)), total(1..4));   // 3 7 6
 
 ### Element types are exact
 
-A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options and the other containers. To change a container's element type, go through `Any` and a cast:
+A `List<Int>` is not a `List<Any>`: a `List<Any>` could be given a String, which the list of Ints would then hold. The same goes for maps, tuples, options and the other containers. To change a container's element type, cast a copy of it. A cast refuses a container that something else still holds, for the same reason (see [Casts](../features/casts.md#a-container-held-by-another-name)):
 
 ```ndc,fails
-let words = "a b".split(" ");        // List<String>
-let any: Any = words;
-let anything = any as List<Any>;     // fine: checked as the program runs
-let wrong: List<Any> = words;        // error: found List<String> but expected List<Any>
+let words = "a b".split(" ");               // List<String>
+let anything = words.clone() as List<Any>;  // fine: checked as the program runs
+let wrong: List<Any> = words;               // error: found List<String> but expected List<Any>
 ```
 
 A function type is exact too, with one exception for `Any`: a function that takes an `Any` can be used where one that takes something narrower is expected, as it takes whatever it's given, and any function fits where one returning `Any` is expected:

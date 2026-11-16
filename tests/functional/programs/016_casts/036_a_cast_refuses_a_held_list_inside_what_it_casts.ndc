@@ -1,0 +1,6 @@
+// A copy of `outer` is cast, but the list inside it is the one `inner`
+// holds, which a push through `lists[0]` would reach.
+// expect-error: the list is also held by something else
+let inner = ["a"];
+let outer: List<Any> = [inner];
+let lists = outer.clone() as List<List<Any>>;

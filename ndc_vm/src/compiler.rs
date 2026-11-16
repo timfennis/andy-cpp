@@ -346,6 +346,16 @@ impl Compiler {
                     None => return Err(CompileError::unresolved_cast(span)),
                     Some(check) => check.clone().map(Rc::new),
                 };
+                // A container the cast gives a new type mustn't be reachable
+                // by another name that keeps the old one, as `xs` is after
+                // `let a: Any = xs; let ys = a as List<Any>`: a write through
+                // `ys` would break what `xs` says it holds.
+                if let Some(target) = &check
+                    && target.holds_a_mutable_container()
+                {
+                    self.ir
+                        .write(OpCode::CheckUnshared(Rc::clone(target)), span);
+                }
                 match (check, optional) {
                     (None, false) => {}
                     (Some(target), false) => {

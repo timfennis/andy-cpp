@@ -592,6 +592,27 @@ fn an_unproven_cast_checks_the_type_at_runtime() {
     );
 }
 
+// let x: Any = [1]; x as List<Int>; x as Int
+//
+// A cast to a container type checks that nothing else holds the container,
+// ahead of the type check. A cast to a type without a container in it has
+// nothing to check.
+#[test]
+fn a_cast_to_a_container_checks_it_is_unshared() {
+    let ops = compile_with_analysis("let x: Any = [1]; x as List<Int>; x as Int");
+    let checks: Vec<usize> = ops
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| matches!(op, CheckUnshared(_)))
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(checks.len(), 1, "got: {ops:?}");
+    assert!(
+        matches!(&ops[checks[0] + 1], CheckType(t) if t.holds_a_mutable_container()),
+        "expected the type check right after, got: {ops:?}",
+    );
+}
+
 // 1 as Int; [1] as Any
 //
 // Both casts are proven by the value's static type, so no runtime guard is
