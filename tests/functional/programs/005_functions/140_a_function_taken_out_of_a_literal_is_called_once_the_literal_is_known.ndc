@@ -1,0 +1,13 @@
+// A call of `f` waits for what the literal holds, which is what `f` is,
+// and what it returns is what that function returns, which no fallback
+// decides before the call is solved.
+// expect-output: 1
+// expect-output: 2 a 4
+let fs = [fn() => 1];
+for f in fs {
+    print(f());
+}
+let gs = [fn(x: Int) => x + 1];
+let g = gs[0];
+let pair = (fn() => "a", fn(x: Int) => x * 2);
+print(g(len("a")), pair[0](), pair[1](len("ab")));
