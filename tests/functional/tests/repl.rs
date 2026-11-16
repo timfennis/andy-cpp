@@ -4,7 +4,7 @@ use ndc_interpreter::Interpreter;
 /// collected stdout output after all lines have been executed.
 fn repl_output(lines: &[&str]) -> String {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -19,7 +19,7 @@ fn repl_output(lines: &[&str]) -> String {
 /// containing the given substring.
 fn repl_error(lines: &[&str], expected_error: &str) {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -72,7 +72,7 @@ fn error_on_undefined_variable() {
 #[test]
 fn expression_result_is_returned() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -83,7 +83,7 @@ fn expression_result_is_returned() {
 #[test]
 fn statement_returns_unit() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -94,7 +94,7 @@ fn statement_returns_unit() {
 #[test]
 fn let_returns_unit() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -109,7 +109,7 @@ fn let_returns_unit() {
 #[test]
 fn a_failed_evaluation_starts_the_session_over() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -138,7 +138,7 @@ fn a_failed_evaluation_starts_the_session_over() {
 #[test]
 fn a_syntax_error_keeps_the_session() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -152,7 +152,7 @@ fn a_syntax_error_keeps_the_session() {
 #[test]
 fn output_of_a_failed_evaluation_is_kept() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -334,4 +334,42 @@ fn an_instance_of_an_earlier_line_calls_the_instance_its_types_need_of_another()
         "let a: Any = 1; let s: String = outer(a); print(s);",
     ]);
     assert_eq!(out.trim(), "fallback");
+}
+
+#[test]
+fn a_later_line_settles_what_an_empty_list_holds() {
+    let out = repl_output(&["let xs = [];", "xs.push(1);", "print(xs);"]);
+    assert_eq!(out.trim(), "[1]");
+}
+
+#[test]
+fn a_later_line_settles_what_an_empty_map_holds() {
+    let out = repl_output(&["let m = %{};", r#"m["a"] = 1;"#, "print(m);"]);
+    assert_eq!(out.trim(), r#"%{"a": 1}"#);
+}
+
+#[test]
+fn a_later_line_settles_what_none_will_hold() {
+    let out = repl_output(&["let best = None;", "best = Some(3);", "print(best);"]);
+    assert_eq!(out.trim(), "Some(3)");
+}
+
+#[test]
+fn a_later_line_settles_an_unused_lambda_parameter() {
+    let out = repl_output(&["let wrap = fn(x) => [x];", "print(wrap(1).len());"]);
+    assert_eq!(out.trim(), "1");
+}
+
+#[test]
+fn a_type_a_later_line_settled_is_checked_on_the_next() {
+    repl_error(
+        &["let xs = [];", "xs.push(1);", r#"xs.push("a");"#],
+        "List<Int>, String",
+    );
+}
+
+#[test]
+fn a_lambda_whose_body_needs_its_parameter_type_is_settled_on_its_line() {
+    // The line runs before the next one exists, so `*` is picked now.
+    repl_error(&["let double = fn(x) => x * 2;"], "Unknown, Int");
 }

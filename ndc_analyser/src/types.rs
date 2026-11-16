@@ -24,11 +24,12 @@ impl TypeTable {
     }
 
     /// Replaces the settled type variables in every value's type with what
-    /// they stand for.
-    pub(crate) fn resolve_all(&mut self, vars: &TypeVars) {
+    /// they stand for. Unless `open` allows it, as after a REPL line, none
+    /// is left unsettled.
+    pub(crate) fn resolve_all(&mut self, vars: &TypeVars, open: bool) {
         for typ in self.types.values_mut() {
             *typ = vars.resolve(typ);
-            debug_assert!(!typ.has_vars(), "unsettled type variable in {typ}");
+            debug_assert!(open || !typ.has_vars(), "unsettled type variable in {typ}");
         }
     }
 }
@@ -1107,6 +1108,13 @@ impl TypeVars {
             StaticType::Error => Some(StaticType::Any),
             _ => None,
         })
+    }
+
+    /// [`Self::finish`], for a type that may hold variables a later REPL line
+    /// can still settle, which the analysis shows as `Unknown`.
+    pub(crate) fn finish_open(&self, typ: &StaticType) -> StaticType {
+        self.finish(typ)
+            .replace(&|part| matches!(part, StaticType::Var(_)).then_some(StaticType::Unknown))
     }
 
     /// `typ`, or what it stands for if it's a settled variable.

@@ -26,7 +26,7 @@ impl rustyline::highlight::Highlighter for RustylineHelper {
 }
 
 fn new_interpreter() -> Interpreter {
-    let mut interpreter = Interpreter::new();
+    let mut interpreter = Interpreter::new().line_by_line();
     interpreter.configure(ndc_stdlib::register);
     interpreter
 }

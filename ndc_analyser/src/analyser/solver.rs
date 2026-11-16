@@ -685,6 +685,13 @@ impl Analyser {
     /// settles once it's solved. Constraints that wait only on older
     /// variables keep waiting.
     pub(super) fn settle_waiting(&mut self, first: usize) {
+        self.settle_waiting_keeping(first, &AHashSet::new());
+    }
+
+    /// [`Self::settle_waiting`], but for the variables in `open`, which
+    /// nothing waits on and later code may still settle: see
+    /// [`Self::not_needed_now`].
+    pub(super) fn settle_waiting_keeping(&mut self, first: usize, open: &AHashSet<TypeVar>) {
         // Each constraint is checked for a default rule once, and again only
         // after something it waits on changed.
         let mut unchecked = self.waiting.keys().copied().collect::<BTreeSet<_>>();
@@ -706,7 +713,12 @@ impl Analyser {
                     unchecked.extend(self.solve_waiting_and_report());
                 }
             }
-            let contents = self.vars.unsettled_contents(first);
+            let contents = self
+                .vars
+                .unsettled_contents(first)
+                .into_iter()
+                .filter(|var| !open.contains(var))
+                .collect::<Vec<_>>();
             if !contents.is_empty() {
                 self.vars.settle_contents(&contents);
                 unchecked.extend(self.solve_waiting_and_report());
@@ -730,11 +742,56 @@ impl Analyser {
         }
         // What's left gets its fallback, but for what a waiting constraint
         // settles, which only gets one if that constraint can't be solved.
-        let produced = self.produced_by_waiting();
+        let mut produced = self.produced_by_waiting();
+        produced.extend(open);
         self.vars.settle_from(first, &produced);
         self.solve_waiting();
-        self.vars.settle_from(first, &AHashSet::new());
+        self.vars.settle_from(first, open);
         self.solve_waiting();
+    }
+
+    /// The unsettled variables that nothing waiting needs settled: not a
+    /// literal's, which is what the line writes, and not what a waiting
+    /// constraint or a generic function's use waits on, or what those hold.
+    /// What an empty `[]`, `%{}` or `None` holds, or a lambda parameter
+    /// nothing has used yet, is one.
+    pub(super) fn not_needed_now(&self) -> AHashSet<TypeVar> {
+        let needed_types = self
+            .waiting
+            .values()
+            .flat_map(|waiting| {
+                waiting
+                    .constraint
+                    .inputs()
+                    .iter()
+                    .chain(waiting.constraint.outputs())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .chain(
+                self.uses
+                    .iter()
+                    .flat_map(|generic_use| generic_use.key.clone()),
+            )
+            .collect::<Vec<_>>();
+        let mut needed = AHashSet::new();
+        let mut todo = needed_types
+            .iter()
+            .flat_map(|typ| self.vars.unsettled(typ))
+            .collect::<Vec<_>>();
+        while let Some(var) = todo.pop() {
+            if needed.insert(var) && self.vars.is_literal(var) {
+                todo.extend(self.vars.held_vars(var));
+            }
+        }
+        (0..self.vars.count())
+            .map(|index| TypeVar(u32::try_from(index).expect("fewer than 2^32 type variables")))
+            .filter(|&var| {
+                self.vars.resolve(&StaticType::Var(var)) == StaticType::Var(var)
+                    && !self.vars.is_literal(var)
+                    && !needed.contains(&var)
+            })
+            .collect()
     }
 
     /// Gives the number literals in `typ` their defaults, as what a variable
