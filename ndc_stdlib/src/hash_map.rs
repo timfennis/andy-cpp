@@ -63,37 +63,21 @@ mod inner {
         name = "&=",
         signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
     )]
-    pub fn intersect_assign(
-        lhs: MapValue,
-        rhs: &HashMap<Value, Value>,
-    ) -> anyhow::Result<MapValue> {
-        {
-            let Value::Object(ref obj) = lhs else {
-                anyhow::bail!("&= requires a map on the left side");
-            };
-            let Object::Map { ref entries, .. } = *obj.as_ref() else {
-                anyhow::bail!("&= requires a map on the left side");
-            };
-            entries.borrow_mut().retain(|key, _| rhs.contains_key(key));
-        }
+    pub fn intersect_assign(lhs: MapValue, rhs: MapValue) -> anyhow::Result<MapValue> {
+        change_with(&lhs, &rhs, "&=", |entries, other| {
+            entries.retain(|key, _| other.contains_key(key));
+        })?;
         Ok(lhs)
     }
 
     /// Union-assign: adds all elements from the right map or set into the left.
     #[function(name = "|=", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
-    pub fn union_assign(lhs: MapValue, rhs: &HashMap<Value, Value>) -> anyhow::Result<MapValue> {
-        {
-            let Value::Object(ref obj) = lhs else {
-                anyhow::bail!("|= requires a map on the left side");
-            };
-            let Object::Map { ref entries, .. } = *obj.as_ref() else {
-                anyhow::bail!("|= requires a map on the left side");
-            };
-            let mut m = entries.borrow_mut();
-            for (key, value) in rhs {
-                m.insert(key.clone(), value.clone());
+    pub fn union_assign(lhs: MapValue, rhs: MapValue) -> anyhow::Result<MapValue> {
+        change_with(&lhs, &rhs, "|=", |entries, other| {
+            for (key, value) in other {
+                entries.insert(key.clone(), value.clone());
             }
-        }
+        })?;
         Ok(lhs)
     }
 
@@ -102,39 +86,54 @@ mod inner {
         name = "-=",
         signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
     )]
-    pub fn difference_assign(
-        lhs: MapValue,
-        rhs: &HashMap<Value, Value>,
-    ) -> anyhow::Result<MapValue> {
-        {
-            let Value::Object(ref obj) = lhs else {
-                anyhow::bail!("-= requires a map on the left side");
-            };
-            let Object::Map { ref entries, .. } = *obj.as_ref() else {
-                anyhow::bail!("-= requires a map on the left side");
-            };
-            entries.borrow_mut().retain(|key, _| !rhs.contains_key(key));
-        }
+    pub fn difference_assign(lhs: MapValue, rhs: MapValue) -> anyhow::Result<MapValue> {
+        change_with(&lhs, &rhs, "-=", |entries, other| {
+            entries.retain(|key, _| !other.contains_key(key));
+        })?;
         Ok(lhs)
     }
 
     /// Symmetric-difference-assign: retains only elements present in exactly one of the two maps or sets.
     #[function(name = "~=", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
-    pub fn symmetric_difference_assign(
-        lhs: MapValue,
-        rhs: &HashMap<Value, Value>,
-    ) -> anyhow::Result<MapValue> {
-        {
-            let Value::Object(ref obj) = lhs else {
-                anyhow::bail!("~= requires a map on the left side");
-            };
-            let Object::Map { ref entries, .. } = *obj.as_ref() else {
-                anyhow::bail!("~= requires a map on the left side");
-            };
-            let diff = symmetric_difference(&*entries.borrow(), rhs);
-            *entries.borrow_mut() = diff;
-        }
+    pub fn symmetric_difference_assign(lhs: MapValue, rhs: MapValue) -> anyhow::Result<MapValue> {
+        change_with(&lhs, &rhs, "~=", |entries, other| {
+            *entries = symmetric_difference(entries, other);
+        })?;
         Ok(lhs)
+    }
+
+    /// Changes the entries of the map `target` by `change` with those of the
+    /// map `other`, which may be the same map, as in `m &= m`: `change` then
+    /// gets a copy of them, as a map can't be read while it's changed.
+    fn change_with(
+        target: &Value,
+        other: &Value,
+        operator: &str,
+        change: impl FnOnce(&mut HashMap<Value, Value>, &HashMap<Value, Value>),
+    ) -> anyhow::Result<()> {
+        fn entries_of(value: &Value) -> Option<&std::cell::RefCell<HashMap<Value, Value>>> {
+            match value {
+                Value::Object(object) => match object.as_ref() {
+                    Object::Map { entries, .. } => Some(entries),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        let (Some(entries), Some(other)) = (entries_of(target), entries_of(other)) else {
+            anyhow::bail!("{operator} requires two maps");
+        };
+        let copy;
+        let borrowed;
+        let other: &HashMap<Value, Value> = if std::ptr::eq(entries, other) {
+            copy = other.borrow().clone();
+            &copy
+        } else {
+            borrowed = other.borrow();
+            &borrowed
+        };
+        change(&mut entries.borrow_mut(), other);
+        Ok(())
     }
 
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
