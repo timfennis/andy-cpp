@@ -333,83 +333,31 @@ impl Analyser {
                 self.result.analysis.variable_types.insert(lvalue.id, typ);
             }
             BindingPattern::Sequence(seq) => {
-                // What a value whose type isn't known yet unpacks into is
-                // settled once its type is.
-                let found_type = self.vars.resolve(&found_type);
-                if expected_type.is_none() && matches!(found_type, StaticType::Var(_)) {
-                    let parts = self.constrain_unpacking(found_type, seq.len(), span);
-                    for (sub_lvalue, part) in seq.iter().zip(parts) {
-                        self.declare_binding_pattern(sub_lvalue, None, part, span);
-                    }
-                    return;
-                }
-                // If the type is a fixed-length Tuple whose arity doesn't match
-                // the number of bindings, bind each name as a failed check. This
-                // can happen when a variable is declared with one type (e.g. ())
-                // and later reassigned to a tuple of a different arity — the
-                // analyser doesn't track reassignment types.
-                let is_annotated = expected_type.is_some();
-                let resolved_type = expected_type.unwrap_or(found_type.clone());
-
-                let sub_types: Box<dyn Iterator<Item = &StaticType>> =
-                    if let StaticType::Tuple(elems) = &resolved_type {
-                        if elems.len() != seq.len() {
-                            self.emit(AnalysisError::tuple_arity_mismatch(
-                                seq.len(),
-                                elems.len(),
-                                span,
-                            ));
-                            self.bind_patterns_as_errors(seq, span);
+                // Each name gets its part of the value and, under an
+                // annotation, its part of that: `let (a, b): (Int, Int) = x`.
+                // An annotation that doesn't fit the names is the one error.
+                let expected = match expected_type {
+                    None => vec![None; seq.len()],
+                    Some(annotated) => {
+                        let Some(parts) = self.unpack_known(&annotated, seq.len(), span) else {
+                            for sub_lvalue in seq {
+                                self.declare_binding_pattern(
+                                    sub_lvalue,
+                                    None,
+                                    StaticType::Error,
+                                    span,
+                                );
+                            }
                             return;
-                        } else {
-                            Box::new(elems.iter())
-                        }
-                    } else if let Some(iter) = resolved_type.unpack() {
-                        iter
-                    } else {
-                        self.emit(AnalysisError::unable_to_unpack_type(&resolved_type, span));
-                        self.bind_patterns_as_errors(seq, span);
-                        return;
-                    };
-
-                let found_types = found_type
-                    .unpack()
-                    .unwrap_or_else(|| Box::new(std::iter::repeat(&StaticType::Any)));
-
-                let desired_length = seq.len();
-                let mut actual_len = 0;
-
-                for (sub_lvalue, sub_type, found_type) in izip!(seq.iter(), sub_types, found_types)
-                {
-                    let sub_expected = if is_annotated {
-                        Some(sub_type.clone())
-                    } else {
-                        None
-                    };
-                    self.declare_binding_pattern(
-                        sub_lvalue,
-                        sub_expected,
-                        found_type.clone(),
-                        span,
-                    );
-
-                    actual_len += 1;
-                }
-
-                if desired_length != actual_len {
-                    self.emit(AnalysisError::unable_to_unpack_type(&found_type, span));
-                    self.bind_patterns_as_errors(&seq[actual_len..], span);
+                        };
+                        parts.into_iter().map(Some).collect()
+                    }
+                };
+                let found = self.unpack(&found_type, seq.len(), span);
+                for (sub_lvalue, expected, found) in izip!(seq, expected, found) {
+                    self.declare_binding_pattern(sub_lvalue, expected, found, span);
                 }
             }
-        }
-    }
-
-    /// Binds every name in `patterns` as a failed check, so a pattern that
-    /// failed to type-check still declares its names. In `let (a, b, c) = (1, 2)`, `c`
-    /// is bound and a later `print(c)` reports nothing further.
-    fn bind_patterns_as_errors(&mut self, patterns: &[BindingPatternLocation], span: Span) {
-        for pattern in patterns {
-            self.declare_binding_pattern(pattern, None, StaticType::Error, span);
         }
     }
 

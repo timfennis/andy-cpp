@@ -347,9 +347,57 @@ impl Analyser {
         StaticType::Error
     }
 
+    /// The types of the `count` parts a value of type `value` unpacks into,
+    /// as in `let a, b = value`: what a tuple holds at each place, what
+    /// another sequence holds, or, for a value whose type isn't known yet,
+    /// what it holds once it is. A value that doesn't unpack into `count`
+    /// parts is reported, and its parts are failed checks.
+    pub(super) fn unpack(
+        &mut self,
+        value: &StaticType,
+        count: usize,
+        span: Span,
+    ) -> Vec<StaticType> {
+        let value = self.vars.resolve(value);
+        if matches!(value, StaticType::Var(_)) {
+            return self.constrain_unpacking(value, count, span);
+        }
+        self.unpack_known(&value, count, span)
+            .unwrap_or_else(|| vec![StaticType::Error; count])
+    }
+
+    /// [`Self::unpack`] for a value whose type is known, or `None`, reported,
+    /// if it doesn't unpack into `count` parts.
+    pub(super) fn unpack_known(
+        &mut self,
+        value: &StaticType,
+        count: usize,
+        span: Span,
+    ) -> Option<Vec<StaticType>> {
+        match value {
+            StaticType::Tuple(elements) if elements.len() != count => {
+                self.emit(AnalysisError::tuple_arity_mismatch(
+                    count,
+                    elements.len(),
+                    span,
+                ));
+                None
+            }
+            value => {
+                let parts = value
+                    .unpack()
+                    .map(|parts| parts.take(count).cloned().collect::<Vec<_>>());
+                if parts.is_none() {
+                    self.emit(AnalysisError::unable_to_unpack_type(value, span));
+                }
+                parts
+            }
+        }
+    }
+
     /// The types `let (a, b, …) = value` gives each name when the kind of
     /// value isn't known yet. They're settled once it is.
-    pub(super) fn constrain_unpacking(
+    fn constrain_unpacking(
         &mut self,
         value: StaticType,
         count: usize,
@@ -1025,28 +1073,12 @@ impl Analyser {
                 if matches!(value, StaticType::Var(_)) {
                     return false;
                 }
-                let found = match &value {
-                    StaticType::Tuple(elements) if elements.len() != parts.len() => {
-                        self.emit(AnalysisError::tuple_arity_mismatch(
-                            parts.len(),
-                            elements.len(),
-                            *span,
-                        ));
-                        None
-                    }
-                    value => {
-                        let found = value
-                            .unpack()
-                            .map(|found| found.take(parts.len()).cloned().collect::<Vec<_>>());
-                        if found.is_none() {
-                            self.emit(AnalysisError::unable_to_unpack_type(value, *span));
-                        }
-                        found
-                    }
-                };
-                let found = found.unwrap_or_else(|| vec![StaticType::Error; parts.len()]);
+                let (parts, span) = (parts.clone(), *span);
+                let found = self
+                    .unpack_known(&value, parts.len(), span)
+                    .unwrap_or_else(|| vec![StaticType::Error; parts.len()]);
                 for (part, found) in parts.iter().zip(found) {
-                    self.check_write(part, &found, *span);
+                    self.check_write(part, &found, span);
                 }
                 true
             }
