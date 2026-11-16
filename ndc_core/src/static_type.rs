@@ -460,11 +460,11 @@ impl StaticType {
                 parameters,
                 return_type,
             } => {
-                return_type.contains(test)
-                    || parameters
-                        .iter()
-                        .flatten()
-                        .any(|parameter| parameter.contains(test))
+                parameters
+                    .iter()
+                    .flatten()
+                    .any(|parameter| parameter.contains(test))
+                    || return_type.contains(test)
             }
             Self::Option(t)
             | Self::Iterable(t)
