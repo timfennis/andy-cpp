@@ -6,7 +6,7 @@ fn describe(x: List<Int>) { "list" }
 print(describe(1), describe("a"), describe([1, 2]));
 // expect-output: int string list
 
-// An argument only known as `Any` is matched against them when the call runs.
+// A generic function's call picks the overload for each type it's called with.
 fn describe_any(value) { describe(value) }
 print(describe_any(2), describe_any("b"));
 // expect-output: int string

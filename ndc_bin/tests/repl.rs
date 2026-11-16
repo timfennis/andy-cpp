@@ -50,12 +50,26 @@ fn children(pid: &str) -> Vec<String> {
         .collect()
 }
 
-fn is_running(pid: &str) -> bool {
-    let status = Command::new("kill")
-        .args(["-0", pid])
-        .stderr(Stdio::null())
-        .status();
-    status.expect("kill runs").success()
+/// Whether `pid` is still running, waiting up to a few seconds for it to stop.
+/// A process that has exited but isn't reaped yet (a zombie, `Z` in `ps`) has
+/// stopped: once its parent is gone it waits for init to reap it.
+fn keeps_running(pid: &str) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let output = Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .expect("ps runs");
+        let state = String::from_utf8_lossy(&output.stdout);
+        let state = state.trim();
+        if state.is_empty() || state.starts_with('Z') {
+            return false;
+        }
+        if Instant::now() > deadline {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// Sends `signal` (e.g. `"-TERM"`) to `pid`, or to a process group if `pid`
@@ -201,7 +215,7 @@ fn terminating_ndc_stops_the_repl() {
     let status = ndc.wait();
     assert_eq!(status.signal(), Some(15), "ndc should end by SIGTERM");
     for pid in repl.iter().chain(&running) {
-        assert!(!is_running(pid), "REPL process {pid} is still running");
+        assert!(!keeps_running(pid), "REPL process {pid} is still running");
     }
 }
 

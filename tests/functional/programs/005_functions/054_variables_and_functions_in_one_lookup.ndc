@@ -16,7 +16,7 @@ let bar = fn(a) { "outer let" };
 }
 // expect-output: inner fn outer let
 
-// A variable that can't be called is skipped.
+// A method call skips a variable that can't be called.
 let len = 99;
 print("abc".len(), len);
 // expect-output: 3 99

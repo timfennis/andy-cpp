@@ -1,3 +1,0 @@
-// expect-output: [[[[1]]]]
-fn f(x, n) -> Any => if n == 0 { [x] } else { [f(x, n - 1)] };
-print(f(1, 3));

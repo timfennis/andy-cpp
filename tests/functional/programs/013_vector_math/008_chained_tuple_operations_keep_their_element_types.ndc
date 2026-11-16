@@ -1,0 +1,19 @@
+// What a tuple operation gives feeds the next one with the same element
+// types: `a - b` on two `(Int, Int, Int)`s is an `(Int, Int, Int)`, so
+// `diff * diff` multiplies Ints (issue #139).
+let a = (1, 2, 3);
+let b = (4, 5, 6);
+let diff: (Int, Int, Int) = a - b;
+assert_eq(diff * diff, (9, 9, 9));
+assert_eq((a - b) * (a - b), (9, 9, 9));
+assert_eq(((1, 2) + (3, 4) + (10, 20)) * (2, 1), (28, 26));
+
+// With a number in place of a tuple.
+let c: (Int, Int) = (1, 2) + 10;
+assert_eq(c * (3, 4), (33, 48));
+
+// From `Any`s, after a cast to the tuple of numbers they hold.
+fn id(x) -> Any => x;
+let p: (Int, Int, Int) = (id(1), id(2), id(3)) as (Int, Int, Int);
+let q: (Int, Int, Int) = p - b;
+assert_eq(q * q, (9, 9, 9));

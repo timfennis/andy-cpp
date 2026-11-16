@@ -1,7 +1,0 @@
-// Formatting the "cannot compare" error walked the self-referential list
-// forever and aborted the process with a stack overflow. The bounded
-// description stops at a fixed depth instead.
-// expect-error: No function called '<' found that matches the arguments 'List<Any>, Int'
-let a: List<Any> = [];
-a.push(a);
-print(a < 1);

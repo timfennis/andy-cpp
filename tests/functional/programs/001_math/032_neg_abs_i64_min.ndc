@@ -1,9 +1,6 @@
-// Negating or taking the absolute value of `i64::MIN` overflows the i64
-// range (`-i64::MIN` does not fit in an i64). `Int::neg` and `Int::abs` used
-// to call `i.neg()` / `i.abs()` directly, which panics in debug builds and
-// silently wraps in release. They now promote to BigInt, yielding the correct
-// positive magnitude. Int arithmetic now reports the overflow instead of
-// promoting implicitly; Number remains arbitrary precision.
+// Negating the smallest Int overflows, as its positive doesn't fit in an Int.
+// Int arithmetic reports the overflow; it used to panic in debug builds and
+// wrap in release ones.
 // expect-error: integer negation overflowed
 let min = -9223372036854775807 - 1;
 print(-min);
