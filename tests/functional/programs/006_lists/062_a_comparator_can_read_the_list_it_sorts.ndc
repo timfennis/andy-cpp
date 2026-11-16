@@ -1,0 +1,9 @@
+// `sort_by` sorts a copy of the elements and puts them back, so its
+// comparator can read the list.
+// expect-output: [1,2,3]
+let xs = [3, 1, 2];
+xs.sort_by(fn(a, b) {
+    let n = xs.len() + xs[0];
+    a <=> b
+});
+print(xs);
