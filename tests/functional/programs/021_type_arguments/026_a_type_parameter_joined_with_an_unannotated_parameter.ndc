@@ -1,0 +1,5 @@
+// Joining a type parameter with a parameter that has no type leaves it free: the
+// parameter gets the same type.
+// expect-output: 1 a
+fn f<T>(x: T, y) => if true { x } else { y };
+print(f(1, 2), f::<String>("a", "b"));

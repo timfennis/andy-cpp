@@ -422,12 +422,15 @@
         {
           "comment": "Function with type arguments, called or used as a value: `f::<Int>(x)`, `f::<Int>`",
           "name": "meta.function.call.andy-cpp",
-          "begin": "([A-Za-z_][A-Za-z0-9_\\?]*)\\s*(::)\\s*(?=<)",
+          "begin": "(?:(\\.))?([A-Za-z_][A-Za-z0-9_\\?]*)\\s*(::)\\s*(?=<)",
           "beginCaptures": {
             "1": {
-              "name": "entity.name.function.andy-cpp"
+              "name": "keyword.operator.access.dot.andy-cpp"
             },
             "2": {
+              "name": "entity.name.function.andy-cpp"
+            },
+            "3": {
               "name": "punctuation.separator.namespace.andy-cpp"
             }
           },
@@ -441,7 +444,7 @@
         {
           "comment": "Field accessor style call",
           "name": "meta.function.call.andy-cpp",
-          "match": "(?<!\\.)(\\.)([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "(?<!\\.)(\\.)([A-Za-z_][A-Za-z0-9_]*)(?!\\s*::)",
           "captures": {
             "1": {
               "name": "keyword.operator.access.dot.andy-cpp"
@@ -538,6 +541,11 @@
         }
       },
       "patterns": [
+        {
+          "comment": "the arrow of a function type, whose `>` doesn't close the list",
+          "name": "keyword.operator.arrow.andy-cpp",
+          "match": "->"
+        },
         {
           "include": "#type-arguments"
         },

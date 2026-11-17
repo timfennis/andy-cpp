@@ -149,8 +149,7 @@ impl Analyser {
             self.recursive_calls.push(id);
         }
         let Some(typ) = self.instantiate_explicit(symbol, type_arguments) else {
-            let name = self.resolver.symbol_name(symbol).to_string();
-            self.emit(AnalysisError::type_arguments_do_not_fit(&name, span));
+            self.emit(self.recursive_type_arguments(symbol, span));
             return StaticType::Error;
         };
         self.flush_value_copies(id, &typ, span);
@@ -217,9 +216,8 @@ impl Analyser {
         type_arguments: &[StaticType],
     ) -> Option<StaticType> {
         let typ = self.vars.resolve(self.types.get_type(symbol));
-        let mut made = Vec::new();
-        self.bind_type_arguments(symbol, type_arguments, &mut made)
-            .then(|| self.vars.instantiate_with(&typ, &mut made))
+        let mut made = self.type_argument_bindings(symbol, type_arguments)?;
+        Some(self.vars.instantiate_with(&typ, &mut made))
     }
 
     /// Which overload `value` means where a value of type `expected` is

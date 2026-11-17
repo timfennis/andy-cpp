@@ -286,6 +286,20 @@ mod tests {
     }
 
     #[test]
+    fn hover_on_a_type_argument_is_not_hover_on_the_function() {
+        let src = "let n = fold::<Int, Int>([1], 0, fn(a, x) => a + x);";
+        let (state, functions) = analyse(src);
+        let pos = state
+            .line_index
+            .position(&state.source, src.find("Int").unwrap());
+        let value = hover(&state, pos, &functions).map(markdown);
+        assert!(
+            value.as_deref().is_none_or(|value| !value.contains("fold")),
+            "expected no docs of fold on its type argument, got: {value:?}"
+        );
+    }
+
+    #[test]
     fn hover_between_expressions_is_none() {
         let (state, functions) = analyse("let n = 1;\n\nlet m = 2;");
         // The blank line between the two declarations.

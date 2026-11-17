@@ -181,13 +181,15 @@ impl AnalysisError {
         .with_help(format!("use `{first}` for both"))
     }
 
-    /// `name::<…>` whose type arguments don't fit the type parameters the
-    /// function `name` is still working out, as in its own body.
-    pub(crate) fn type_arguments_do_not_fit(name: &str, span: Span) -> Self {
+    /// `name::<…>` in `name`'s own body with type arguments other than its
+    /// own type parameters, as `f::<Int>` in `fn f<T>(x: T)`, which would
+    /// need a version of `f` for them while `f` is still being worked out.
+    pub(crate) fn recursive_type_arguments(name: &str, parameters: &[String], span: Span) -> Self {
         Self::new(
-            format!("the type arguments don't fit the type parameters of `{name}` here"),
+            format!("a use of `{name}` in its own body passes its own type parameters on"),
             span,
         )
+        .with_help(format!("write `{name}::<{}>`", parameters.join(", ")))
     }
 
     /// A pattern of `names` names for a tuple of `values` values, the value

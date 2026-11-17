@@ -71,6 +71,15 @@ fn find_node_at<'a>(
     if offset < span.offset() || offset >= span.end() {
         return;
     }
+    // A name's node covers its type arguments, as in `f::<Int>`, but the
+    // cursor on `Int` isn't on the name.
+    if let Expression::Identifier {
+        identifier_span, ..
+    } = &expr.expression
+        && (offset < identifier_span.offset() || offset >= identifier_span.end())
+    {
+        return;
+    }
     // This node contains the offset; keep it if it's at least as specific
     // (smaller span) as the best candidate so far.
     if best.is_none_or(|b| span_len(span) <= span_len(b.span)) {

@@ -1,0 +1,6 @@
+// When every overload that can take the call agrees on a parameter once the type arguments
+// are bound, a literal or an empty list passed for it takes that type.
+// expect-output: 99 99 1.0
+fn len<T>(x: [T]) -> Int { 99 }
+fn first<T>(xs: [T]) -> T { xs[0] }
+print(len::<Float>([1]), len::<Float>([]), first::<Float>([1, 2]));

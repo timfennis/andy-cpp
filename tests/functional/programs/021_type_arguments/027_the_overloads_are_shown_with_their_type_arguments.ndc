@@ -1,0 +1,6 @@
+// When an argument doesn't fit, the error shows what the function takes with the type
+// arguments in place.
+// expect-error: `id` takes (Float)
+fn id<T>(x: T) -> T { x }
+let x = "a";
+id::<Float>(x);

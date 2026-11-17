@@ -15,6 +15,7 @@ impl Analyser {
     pub(super) fn no_match(
         &self,
         candidates: &Candidates,
+        type_arguments: &[StaticType],
         name: &str,
         types: &[StaticType],
         span: Span,
@@ -36,31 +37,55 @@ impl Analyser {
         } else if overloads.a_cast_could_resolve(candidates, types) {
             AnalysisError::function_not_found_suggest_cast(name, types, span)
         } else {
-            AnalysisError::function_not_found(name, types, span)
-                .with_overloads(name, &self.what_the_overloads_take(candidates))
+            AnalysisError::function_not_found(name, types, span).with_overloads(
+                name,
+                &self.what_the_overloads_take(candidates, type_arguments),
+            )
         }
     }
 
     /// What each overload `candidates` can reach takes, as `(Int, String)`,
     /// when there are few enough to list: why `put("a")` doesn't fit a `put`
-    /// whose body made its parameter an Int.
-    fn what_the_overloads_take(&self, candidates: &Candidates) -> Vec<String> {
+    /// whose body made its parameter an Int. With type arguments, only the
+    /// overloads that take that many are listed, with them in place of
+    /// their type parameters: `id::<String>` takes `(String)`.
+    fn what_the_overloads_take(
+        &self,
+        candidates: &Candidates,
+        type_arguments: &[StaticType],
+    ) -> Vec<String> {
         const MOST: usize = 3;
-        let symbols = self.overloads().reachable_symbols(candidates);
+        let symbols = self
+            .overloads()
+            .reachable_symbols(candidates)
+            .into_iter()
+            .filter_map(|symbol| {
+                self.type_argument_bindings(symbol, type_arguments)
+                    .map(|bound| (symbol, bound))
+            })
+            .collect::<Vec<_>>();
         if symbols.len() > MOST {
             return Vec::new();
         }
         symbols
             .into_iter()
-            .filter_map(
-                |symbol| match self.vars.shown(self.types.get_type(symbol)) {
+            .filter_map(|(symbol, bound)| {
+                let typ = self.vars.shown(self.types.get_type(symbol));
+                let typ = typ.replace(&|part| match part {
+                    StaticType::Generic(name) => bound
+                        .iter()
+                        .find(|(parameter, _)| parameter == name)
+                        .map(|(_, argument)| self.vars.shown(argument)),
+                    _ => None,
+                });
+                match typ {
                     StaticType::Function {
                         parameters: Some(parameters),
                         ..
                     } => Some(format!("({})", parameters.iter().join(", "))),
                     _ => None,
-                },
-            )
+                }
+            })
             .collect()
     }
 
@@ -289,10 +314,9 @@ impl Analyser {
     ) -> Expects {
         let function = self.vars.resolve(self.types.get_type(symbol));
         let first = self.vars.count();
-        let mut made = Vec::new();
-        if !self.bind_type_arguments(symbol, type_arguments, &mut made) {
+        let Some(mut made) = self.type_argument_bindings(symbol, type_arguments) else {
             return Expects::Nothing;
-        }
+        };
         let Some(parameters) = self.vars.instantiate_parameters(&function, &mut made) else {
             return Expects::Anything;
         };
@@ -355,7 +379,7 @@ fn parameter_count(argument: &ExpressionLocation) -> usize {
 /// nothing in it is only known as the program runs, and its variables are
 /// from before `first`, not ones an overload's signature made. A list
 /// literal's elements are a variable until its uses settle them.
-fn is_known_before(typ: &StaticType, first: usize) -> bool {
+pub(super) fn is_known_before(typ: &StaticType, first: usize) -> bool {
     !typ.contains(&|part| match part {
         StaticType::Var(var) => var.0 as usize >= first,
         StaticType::Any | StaticType::Generic(_) => true,

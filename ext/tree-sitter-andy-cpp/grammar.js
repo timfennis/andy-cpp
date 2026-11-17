@@ -109,8 +109,10 @@ module.exports = grammar({
     function_definition: $ => prec.right(seq(
       optional('pure'),
       'fn',
-      optional(field('name', $.identifier)),
-      optional(field('type_parameters', $.type_parameters)),
+      optional(seq(
+        field('name', $.identifier),
+        optional(field('type_parameters', $.type_parameters)),
+      )),
       field('parameters', $.parameters),
       optional(seq('->', field('return_type', $._type))),
       choice(

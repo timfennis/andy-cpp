@@ -63,11 +63,11 @@ pub struct Analyser {
     /// function's are those it declares, as `T` in `fn f<T>(x: T)`, which
     /// are variables while its body is analysed. Absent for a function
     /// that takes none.
-    type_parameters: AHashMap<SymbolId, Vec<StaticType>>,
+    explicit_type_parameters: AHashMap<SymbolId, Vec<StaticType>>,
     /// What each type parameter a function declares stands for in its
     /// declaration: a variable, which ends up a type parameter of the
     /// function's type. Keyed by the type parameter's symbol.
-    declared_type_parameters: AHashMap<SymbolId, StaticType>,
+    type_parameter_vars: AHashMap<SymbolId, StaticType>,
     /// What a call just copied from a generic function, until the call is
     /// known to commit to it.
     pending: Pending,
@@ -191,7 +191,7 @@ impl Analyser {
         );
         let mut types = TypeTable::default();
         let mut any_index = None;
-        let mut type_parameters = AHashMap::new();
+        let mut explicit_type_parameters = AHashMap::new();
         for ((name, typ, _), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
             if name == ndc_core::ANY_INDEX {
                 any_index = Some(symbol);
@@ -204,7 +204,7 @@ impl Analyser {
                 .map(StaticType::Generic)
                 .collect::<Vec<_>>();
             if !declared.is_empty() {
-                type_parameters.insert(symbol, declared);
+                explicit_type_parameters.insert(symbol, declared);
             }
             types.declare(symbol, typ);
         }
@@ -215,8 +215,8 @@ impl Analyser {
             vars: TypeVars::default(),
             waiting: BTreeMap::new(),
             schemes: AHashMap::new(),
-            type_parameters,
-            declared_type_parameters: AHashMap::new(),
+            explicit_type_parameters,
+            type_parameter_vars: AHashMap::new(),
             pending: Pending::default(),
             uses: Vec::new(),
             instances: AHashMap::new(),
@@ -405,7 +405,7 @@ impl Analyser {
                 let has_args = !args.is_empty();
                 let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
                 let symbol = self.resolver.type_name_symbol(*id);
-                if let Some(parameter) = self.declared_type_parameters.get(&symbol) {
+                if let Some(parameter) = self.type_parameter_vars.get(&symbol) {
                     if has_args {
                         self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
                         return StaticType::Error;

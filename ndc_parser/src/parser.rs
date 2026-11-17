@@ -1655,6 +1655,16 @@ impl Parser {
         if self.consume_token_if(&[Token::ColonColon]).is_none() {
             return Ok((Vec::new(), name_span));
         }
+        // `<>` lexes as one token.
+        if let Some(location) = self
+            .peek_current_token_location()
+            .filter(|location| location.token == Token::Diamond)
+        {
+            return Err(Error::text(
+                "type arguments can't be empty".to_string(),
+                location.span,
+            ));
+        }
         if self.peek_current_token() != Some(&Token::Less) {
             let span = self
                 .peek_current_token_location()

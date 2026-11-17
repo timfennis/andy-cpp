@@ -105,6 +105,7 @@ fn two_colons_start_type_arguments() {
 
 #[test]
 fn type_arguments_are_not_empty() {
-    assert!(parse("f::<>(x);").is_err());
+    let error = parse("f::<>(x);").unwrap_err();
+    assert!(error.to_string().contains("can't be empty"), "{error}");
     assert!(parse("fn f<>(x) => x;").is_err());
 }
