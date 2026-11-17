@@ -1,0 +1,9 @@
+// `none()` leaves the option's type open until `Some(2)` settles it, and
+// `unwrap` returns the type inside: `xs` becomes a List<Int>.
+let o = none();
+o = Some(2);
+let xs = [];
+xs.push(o.unwrap());
+xs.push(o.unwrap_or(0) + 1);
+xs.push("a");
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'

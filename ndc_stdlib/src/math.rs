@@ -83,6 +83,23 @@ fn declare(
     }));
 }
 
+/// Declares a native whose type is a generic signature such as
+/// `<A, B>(A, B) -> Bool`, see [`StaticType::signature`].
+fn declare_signature(
+    env: &mut FunctionRegistry<Rc<NativeFunction>>,
+    name: &str,
+    signature: &str,
+    documentation: impl Into<String>,
+    func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
+) {
+    env.declare_global_fn(Rc::new(NativeFunction {
+        name: name.to_string(),
+        documentation: Some(documentation.into()),
+        static_type: StaticType::signature(signature).expect("valid signature"),
+        func: NativeFunc::Simple(Box::new(func)),
+    }));
+}
+
 /// Declares a native whose operands and result have fixed types.
 ///
 /// A type name is written once and used twice: as the operand's declared
@@ -129,7 +146,7 @@ macro_rules! declare_typed {
 /// wrapper, so it needs its own arm.
 macro_rules! wrap_payload {
     (Number, $payload:expr) => {
-        Value::from_number($payload)
+        Value::number($payload)
     };
     ($variant:ident, $payload:expr) => {
         Value::$variant($payload)
@@ -166,21 +183,6 @@ fn native_error(error: impl std::fmt::Display) -> VmError {
     VmError::native(error.to_string())
 }
 
-/// Runtime overload candidates are inspected in reverse registration order.
-/// Keep homogeneous primitive pairs first in that runtime order: dynamic code
-/// usually preserves one numeric representation across repeated operations.
-const NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY: [(NumericMode, NumericMode); 9] = [
-    (NumericMode::Int, NumericMode::Int),
-    (NumericMode::Float, NumericMode::Float),
-    (NumericMode::Number, NumericMode::Number),
-    (NumericMode::Int, NumericMode::Float),
-    (NumericMode::Float, NumericMode::Int),
-    (NumericMode::Int, NumericMode::Number),
-    (NumericMode::Number, NumericMode::Int),
-    (NumericMode::Float, NumericMode::Number),
-    (NumericMode::Number, NumericMode::Float),
-];
-
 fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     const OPERATIONS: [BinaryOperation; 8] = [
         BinaryOperation::Add,
@@ -194,7 +196,10 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     ];
 
     for operation in OPERATIONS {
-        for (left_mode, right_mode) in NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY.into_iter().rev() {
+        for (left_mode, right_mode) in NumericMode::ALL
+            .into_iter()
+            .flat_map(|left| NumericMode::ALL.map(|right| (left, right)))
+        {
             let output_mode = left_mode.promote(right_mode);
             let parameters = vec![left_mode.static_type(), right_mode.static_type()];
             let (name, documentation) = (operation.name(), operation.documentation());
@@ -313,7 +318,7 @@ fn eval_number_operands(
     let right = numeric_ref(right_mode, right)?.to_advanced_number();
 
     eval_number_binary(operation, left, right)
-        .map(Value::from_number)
+        .map(Value::number)
         .map_err(native_error)
 }
 
@@ -495,13 +500,36 @@ fn compare_operands(args: &[Value]) -> Result<Ordering, VmError> {
         return Err(wrong_arity(args));
     };
 
-    left.partial_cmp(right).ok_or_else(|| {
-        VmError::native(format!(
-            "cannot compare {} and {}",
-            left.diagnostic_type(),
-            right.diagnostic_type()
-        ))
-    })
+    left.try_cmp(right).map_err(VmError::native)
+}
+
+/// The parameter lists of the comparisons, for the values that have an
+/// order: numbers of any kind, against each other, strings, booleans, and
+/// lists and tuples of what has an order, a tuple of each length up to
+/// twelve, as `first` and `last` take, with one of the same length. The empty
+/// tuple's is declared apart, as a signature can't spell it. Maps, deques,
+/// options, structs and functions have none, and neither do values of two
+/// different kinds. A list or tuple of what has no order still passes as one:
+/// that needs a constraint on the type parameter.
+fn orderable_parameters() -> Vec<String> {
+    let numbers = ["Int", "Float", "Number"];
+    let mut parameters = Vec::new();
+    for left in numbers {
+        for right in numbers {
+            parameters.push(format!("({left}, {right})"));
+        }
+    }
+    parameters.push("(String, String)".to_string());
+    parameters.push("(Bool, Bool)".to_string());
+    parameters.push("<T>(List<T>, List<T>)".to_string());
+    for arity in 1..=12 {
+        let names = (0..arity)
+            .map(|index| char::from(b'A' + index).to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        parameters.push(format!("<{names}>(Tuple<{names}>, Tuple<{names}>)"));
+    }
+    parameters
 }
 
 fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
@@ -527,32 +555,35 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             "Returns whether the left value is less than or equal to the right.",
         ),
     ] {
+        let compare = move |args: &[Value]| Ok(Value::Bool(predicate(compare_operands(args)?)));
+        for parameters in orderable_parameters() {
+            declare_signature(env, name, &format!("{parameters} -> Bool"), docs, compare);
+        }
+        let unit = StaticType::unit();
         declare(
             env,
             name,
-            vec![StaticType::Any, StaticType::Any],
+            vec![unit.clone(), unit],
             StaticType::Bool,
             docs,
-            move |args| Ok(Value::Bool(predicate(compare_operands(args)?))),
+            compare,
         );
     }
 
-    declare(
+    declare_signature(
         env,
         "==",
-        vec![StaticType::Any, StaticType::Any],
-        StaticType::Bool,
+        "<A, B>(A, B) -> Bool",
         "Returns whether two values are equal.",
         |args| {
             arity(args, 2)?;
             Ok(Value::Bool(args[0] == args[1]))
         },
     );
-    declare(
+    declare_signature(
         env,
         "!=",
-        vec![StaticType::Any, StaticType::Any],
-        StaticType::Bool,
+        "<A, B>(A, B) -> Bool",
         "Returns whether two values are not equal.",
         |args| {
             arity(args, 2)?;
@@ -564,20 +595,25 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         ("<=>", false, "Performs a three-way comparison."),
         (">=<", true, "Performs a reverse three-way comparison."),
     ] {
+        let compare = move |args: &[Value]| {
+            let result = match compare_operands(args)? {
+                Ordering::Less => -1,
+                Ordering::Equal => 0,
+                Ordering::Greater => 1,
+            };
+            Ok(Value::Int(if reverse { -result } else { result }))
+        };
+        for parameters in orderable_parameters() {
+            declare_signature(env, name, &format!("{parameters} -> Int"), docs, compare);
+        }
+        let unit = StaticType::unit();
         declare(
             env,
             name,
-            vec![StaticType::Any, StaticType::Any],
+            vec![unit.clone(), unit],
             StaticType::Int,
             docs,
-            move |args| {
-                let result = match compare_operands(args)? {
-                    Ordering::Less => -1,
-                    Ordering::Equal => 0,
-                    Ordering::Greater => 1,
-                };
-                Ok(Value::Int(if reverse { -result } else { result }))
-            },
+            compare,
         );
     }
 }
@@ -695,7 +731,7 @@ fn register_constructors(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             "Wraps a primitive numeric value as a Number.",
             move |args| {
                 arity(args, 1)?;
-                Ok(Value::from_number(
+                Ok(Value::number(
                     numeric_ref(mode, &args[0])?.to_advanced_number(),
                 ))
             },
@@ -709,7 +745,7 @@ fn register_aggregates(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             declare(
                 env,
                 name,
-                vec![StaticType::Sequence(Box::new(mode.static_type()))],
+                vec![StaticType::Iterable(Box::new(mode.static_type()))],
                 mode.static_type(),
                 if product {
                     "Returns the product of a numeric sequence."
@@ -798,7 +834,7 @@ where
                 }
                 .map_err(native_error)
             })?;
-            Ok(Value::from_number(value))
+            Ok(Value::number(value))
         }
     }
 }
@@ -974,7 +1010,7 @@ fn unary_preserving(
                 PreservingUnary::Round => value.round(),
                 PreservingUnary::Abs => value.abs(),
             };
-            Ok(Value::from_number(result))
+            Ok(Value::number(result))
         }
         _ => Err(VmError::native(format!(
             "expected {}, got {}",
@@ -1074,32 +1110,34 @@ fn exact_integer(value: &Value) -> Result<BigInt, VmError> {
 }
 
 fn bigint_number(value: BigInt) -> Value {
-    Value::from_number(AdvancedNumber::Int(value))
+    Value::number(AdvancedNumber::Int(value))
 }
 
 fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    declare(
-        env,
-        "int",
-        vec![StaticType::Any],
-        StaticType::Int,
-        "Converts a value to a checked i64 Int.",
-        |args| {
-            arity(args, 1)?;
-            convert_to_int(&args[0]).map(Value::Int)
-        },
-    );
-    declare(
-        env,
-        "float",
-        vec![StaticType::Any],
-        StaticType::Float,
-        "Converts a value to a Float.",
-        |args| {
-            arity(args, 1)?;
-            convert_to_float(&args[0]).map(Value::Float)
-        },
-    );
+    // What `int` and `float` convert: numbers, booleans, and strings that
+    // spell a number.
+    for from in ["Int", "Float", "Number", "Bool", "String"] {
+        declare_signature(
+            env,
+            "int",
+            &format!("({from}) -> Int"),
+            "Converts a value to a checked i64 Int.",
+            |args| {
+                arity(args, 1)?;
+                convert_to_int(&args[0]).map(Value::Int)
+            },
+        );
+        declare_signature(
+            env,
+            "float",
+            &format!("({from}) -> Float"),
+            "Converts a value to a Float.",
+            |args| {
+                arity(args, 1)?;
+                convert_to_float(&args[0]).map(Value::Float)
+            },
+        );
+    }
 
     for left_mode in NumericMode::ALL {
         for right_mode in NumericMode::ALL {
@@ -1126,7 +1164,7 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                         let right = right.to_f64().ok_or_else(|| {
                             VmError::native("atan2 requires real Number operands".to_string())
                         })?;
-                        Ok(Value::from_number(AdvancedNumber::Float(left.atan2(right))))
+                        Ok(Value::number(AdvancedNumber::Float(left.atan2(right))))
                     } else {
                         let left = left
                             .to_primitive_float()
@@ -1418,35 +1456,6 @@ mod tests {
                     }));
                 }
             }
-        }
-    }
-
-    #[test]
-    fn arithmetic_registration_prefers_homogeneous_dynamic_operands() {
-        let mut registry = FunctionRegistry::default();
-        register(&mut registry);
-
-        for operator in ["+", "-", "*", "/", "\\", "%", "%%", "^"] {
-            let dynamic_order = registry
-                .iter()
-                .filter(|function| function.name == operator)
-                .filter_map(|function| match &function.static_type {
-                    StaticType::Function {
-                        parameters: Some(parameters),
-                        ..
-                    } if parameters.len() == 2 && parameters.iter().all(StaticType::is_number) => {
-                        Some((parameters[0].clone(), parameters[1].clone()))
-                    }
-                    _ => None,
-                })
-                .rev()
-                .collect::<Vec<_>>();
-            let expected = NUMERIC_PAIRS_BY_DYNAMIC_PRIORITY
-                .iter()
-                .map(|(left, right)| (left.static_type(), right.static_type()))
-                .collect::<Vec<_>>();
-
-            assert_eq!(dynamic_order, expected, "unexpected {operator} priority");
         }
     }
 

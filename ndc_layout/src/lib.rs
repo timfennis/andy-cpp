@@ -8,9 +8,11 @@
 //! them lives, once per batch.
 
 use ahash::AHashMap;
-use ndc_analysis::{Analysis, Binding, CaptureSource, DeclaredStruct, FieldAccessors, ResolvedVar};
-use ndc_core::NodeId;
+use ndc_analysis::{
+    Analysis, Binding, CaptureSource, DeclaredStruct, FieldAccessors, Instance, ResolvedVar,
+};
 use ndc_core::r#struct::StructInfo;
+use ndc_core::{NodeId, StaticType};
 use ndc_resolver::{NameResolver, ScopeId, ScopeKind, SymbolId};
 
 #[cfg(test)]
@@ -28,11 +30,46 @@ pub struct Picks {
     pub setters: AHashMap<NodeId, Binding<SymbolId>>,
     /// For [`Analysis::augmented_assignments`].
     pub augmented_assignments: AHashMap<NodeId, Binding<SymbolId>>,
+    /// For [`Analysis::cast_checks`].
+    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
     /// For [`Analysis::variables`].
     pub variables: AHashMap<NodeId, SymbolId>,
     /// Each struct declaration's struct, for [`Analysis::structs`], which also
     /// says where its field accessors live.
     pub structs: AHashMap<NodeId, StructInfo>,
+    /// For [`Analysis::instances`], by the symbol each instance is stored as.
+    pub instances: AHashMap<SymbolId, InstancePicks>,
+}
+
+/// What one instance of a generic function picks in its body, where that
+/// differs from the function's own picks.
+#[derive(Debug)]
+pub struct InstancePicks {
+    /// The generic function's declaration.
+    pub declaration: NodeId,
+    pub bindings: AHashMap<NodeId, Binding<SymbolId>>,
+    pub getters: AHashMap<NodeId, Binding<SymbolId>>,
+    pub setters: AHashMap<NodeId, Binding<SymbolId>>,
+    pub augmented_assignments: AHashMap<NodeId, Binding<SymbolId>>,
+    /// As [`Analysis::function_types`], for the functions the instance's
+    /// body declares, with the instance's types.
+    pub function_types: AHashMap<NodeId, StaticType>,
+    /// As [`Analysis::cast_checks`], for the casts in the instance's body.
+    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
+}
+
+impl InstancePicks {
+    pub fn new(declaration: NodeId) -> Self {
+        Self {
+            declaration,
+            bindings: AHashMap::new(),
+            getters: AHashMap::new(),
+            setters: AHashMap::new(),
+            augmented_assignments: AHashMap::new(),
+            function_types: AHashMap::new(),
+            cast_checks: AHashMap::new(),
+        }
+    }
 }
 
 /// Where the resolver's symbols live at runtime.
@@ -119,6 +156,26 @@ impl<'a> Layout<'a> {
         let locate_binding = |(node, binding): (NodeId, Binding<SymbolId>)| {
             (node, binding.map(|symbol| locate_use(node, symbol)))
         };
+        for (symbol, picks) in picks.instances {
+            let instance = Instance {
+                variable: self.location(symbol, None),
+                bindings: picks.bindings.into_iter().map(locate_binding).collect(),
+                getters: picks.getters.into_iter().map(locate_binding).collect(),
+                setters: picks.setters.into_iter().map(locate_binding).collect(),
+                augmented_assignments: picks
+                    .augmented_assignments
+                    .into_iter()
+                    .map(locate_binding)
+                    .collect(),
+                function_types: picks.function_types,
+                cast_checks: picks.cast_checks,
+            };
+            analysis
+                .instances
+                .entry(picks.declaration)
+                .or_default()
+                .push(instance);
+        }
         analysis
             .bindings
             .extend(picks.bindings.into_iter().map(locate_binding));
@@ -131,6 +188,7 @@ impl<'a> Layout<'a> {
         analysis
             .augmented_assignments
             .extend(picks.augmented_assignments.into_iter().map(locate_binding));
+        analysis.cast_checks.extend(picks.cast_checks);
         // A declaration is in the frame it is made in, so only an assignment
         // target can be a use from a function further in.
         analysis.variables.extend(

@@ -1,0 +1,8 @@
+// Each position of a tuple operation takes the overload its elements pick,
+// and its result keeps that overload's type: here a list and a string are
+// each extended in place.
+// expect-output: (4,6.5) [1,2] ab
+let t = ([1], "a");
+t ++= ([2], "b");
+let (xs, s): (List<Int>, String) = t;
+print((1, 2.5) + (3, 4), xs, s);

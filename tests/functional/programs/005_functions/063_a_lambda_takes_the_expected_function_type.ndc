@@ -1,0 +1,14 @@
+// A lambda written where a function type is expected takes its parameter
+// types from it: in an annotated variable, an assignment, or an argument
+// to a function value. These lambdas need no annotations.
+let double: Fn(Int) -> Int = fn(x) => x * 2;
+let shout: Fn(String) -> String = fn(s) => s;
+shout = fn(s) => s ++ "!";
+let apply = fn(f: Fn(Int) -> Int, x: Int) -> Int { f(x) };
+let calls = [apply];
+print(double(4));
+print(shout("hi"));
+print(calls[0](fn(x) => x + 1, 1));
+// expect-output: 8
+// expect-output: hi!
+// expect-output: 2

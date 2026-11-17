@@ -3,6 +3,9 @@
 ## Project Structure & Module Organization
 This repository is a Rust workspace for the Andy C++ language. Core crates live at the root: `ndc_lexer`, `ndc_parser`, `ndc_analyser`, `ndc_vm`, `ndc_interpreter`, `ndc_stdlib`, `ndc_core`, `ndc_lsp`, `ndc_macros`, and the CLI in `ndc_bin`. Integration tests live in `tests/` and `compiler_tests/`. Benchmarks are split between the Criterion crate in `benches/` and the `bench.sh` runner. End-user docs are in `manual/`, and the VS Code extension is isolated in `ext/andy-cpp/`.
 
+## Manual
+The manual introduces people to the language and teaches the most common ways to use it, with examples and plain English. It does not document every edge case of the compiler or analyser: leave out corner cases, internal rules and exact error conditions that a newcomer won't run into. Edge cases belong in tests, and in the error messages and help texts that explain them when someone does run into one.
+
 ## Build, Test, and Development Commands
 Use workspace commands from the repository root:
 

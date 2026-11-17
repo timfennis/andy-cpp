@@ -1,0 +1,11 @@
+// `t[1]` picks the second element, so it's a String, and `t[-2]` the
+// first, an Int. A generic function gets each call's element types.
+// expect-output: a 2 x ("x",1)
+fn first(t) => t[0];
+fn swap(t) => (t[1], t[0]);
+let t = (1, "a");
+let s: String = t[1];
+let n: Int = t[-2] + 1;
+let f: String = first(("x", 2));
+let p: (String, Int) = swap((1, "x"));
+print(s, n, f, p);

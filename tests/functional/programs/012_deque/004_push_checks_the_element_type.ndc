@@ -1,0 +1,5 @@
+// The first push settles what a deque holds, and later pushes must fit it.
+// expect-error: No function called 'push_front' found that matches the arguments 'Deque<Int>, String'
+let queue = Deque();
+queue.push_back(1);
+queue.push_front("a");

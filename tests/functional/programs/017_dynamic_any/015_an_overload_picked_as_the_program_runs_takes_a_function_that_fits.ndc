@@ -1,0 +1,9 @@
+// An overload picked as the program runs takes a function of type `Any` only
+// if its own type shows it fits: `text`'s value takes and returns anything,
+// so nothing says it's a `Fn(Int) -> Int`. Casting it first checks its calls.
+// expect-output: 2
+fn h(f: Fn(Int) -> Int) => f(1) + 1;
+fn h(x: Int) => x;
+fn one(x) => x;
+let a: Any = one;
+print(h(a as Fn(Int) -> Int));

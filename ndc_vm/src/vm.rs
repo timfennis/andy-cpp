@@ -7,7 +7,8 @@ use crate::iterator::{
 };
 use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{ClosureFunction, Object, Value};
-use ndc_analysis::{CaptureSource, ResolvedVar};
+use ndc_analysis::CaptureSource;
+use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -78,6 +79,9 @@ pub struct CallFrame {
     /// cache to write into and the hash key when the frame returns.  `None`
     /// for ordinary (non-memoized) calls.
     memo: Option<MemoCache>,
+    /// What the frame's call has to return, when it's a call of a
+    /// [`Function::Checked`]. Boxed to keep frames small.
+    returns: Option<Box<StaticType>>,
 }
 
 /// The VM's globals for `natives`: native `i` is global slot `i`. The analyser
@@ -112,6 +116,7 @@ impl Vm {
                 ip: 0,
                 frame_pointer: 0,
                 memo: None,
+                returns: None,
             }],
             output: OutputSink::Stdout,
             #[cfg(feature = "trace")]
@@ -199,19 +204,27 @@ impl Vm {
                 }
                 OpCode::Return => {
                     let ret = self.stack.pop().expect("stack underflow");
-                    let frame = self.frames.last().expect("no frame");
+                    let frame = self.frames.last_mut().expect("no frame");
                     let frame_pointer = frame.frame_pointer;
                     // If this was a memoized call, cache the return value now,
                     // before the frame is torn down.
                     if let Some((cache, key)) = &frame.memo {
                         cache.borrow_mut().insert(*key, ret.clone());
                     }
+                    let returns = frame.returns.take();
                     if frame_pointer == 0 {
                         return Err(VmError::new("Return at top level", span));
                     }
                     self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
                     self.stack.push(ret);
+                    // A checked call's result is checked where it was called.
+                    if let Some(returns) = returns {
+                        let caller = self.frames.last().expect("a call has a caller");
+                        let call = caller.closure.prototype.body.span(caller.ip - 1);
+                        convert_result(&mut self.stack, &returns)
+                            .map_err(|message| VmError::new(message, call))?;
+                    }
                     if self.frames.len() == target_depth {
                         break Ok(());
                     }
@@ -222,14 +235,31 @@ impl Vm {
                         .push(frame.closure.prototype.body.constant(idx).clone());
                 }
                 OpCode::CheckType(target) => {
-                    let value = self.stack.last().expect("stack underflow");
-                    if !value.conforms_to(target) {
+                    if !convert_top(&mut self.stack, target) {
+                        let value = self.stack.last().expect("stack underflow");
                         return Err(VmError::new(
                             format!("cannot cast {} to {target}", value.diagnostic_type()),
                             span,
                         ));
                     }
                 }
+                OpCode::CheckUnshared(target) => {
+                    // A value that isn't a `target` fails the cast's own test
+                    // instead, whether it's shared or not.
+                    let value = self.stack.last().expect("stack underflow");
+                    if let Some(kind) = value.shared_container(target)
+                        && value.conforms_to(target)
+                    {
+                        return Err(VmError::new(
+                            format!(
+                                "cannot cast to {target}: the {kind} is also held by something else, \
+                                 which would still expect what it held before"
+                            ),
+                            span,
+                        ));
+                    }
+                }
+                OpCode::TryCast(target) => try_cast(&mut self.stack, target),
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());
@@ -285,13 +315,7 @@ impl Vm {
                             frame.ip = offset.apply(frame.ip);
                         }
                         Value::Bool(true) => {}
-                        value => {
-                            let type_str = value.static_type().to_string();
-                            return Err(VmError::new(
-                                format!("mismatched types: expected Bool, found {type_str}"),
-                                span,
-                            ));
-                        }
+                        value => return Err(VmError::new(not_a_bool(value), span)),
                     }
                 }
                 OpCode::JumpIfTrue(offset) => {
@@ -302,13 +326,7 @@ impl Vm {
                             frame.ip = offset.apply(frame.ip);
                         }
                         Value::Bool(false) => {}
-                        value => {
-                            let type_str = value.static_type().to_string();
-                            return Err(VmError::new(
-                                format!("mismatched types: expected Bool, found {type_str}"),
-                                span,
-                            ));
-                        }
+                        value => return Err(VmError::new(not_a_bool(value), span)),
                     }
                 }
                 OpCode::Jump(offset) => {
@@ -319,80 +337,65 @@ impl Vm {
                 }
                 OpCode::Call(args) => {
                     let args = *args;
-                    if let Some(func) = self
+                    let func = self
                         .resolve_callee(args)
-                        .map_err(|msg| VmError::new(msg, span))?
-                    {
-                        if let Err(mut e) = self.dispatch_call(func, args) {
-                            e.span.get_or_insert(span);
-                            return Err(e);
-                        }
-                    } else if let Some((overload_set, axis_len)) = self.try_vec_dispatch(args) {
-                        if let Err(mut e) =
-                            self.dispatch_vec_call_dynamic(&overload_set, args, axis_len, span)
-                        {
-                            e.span.get_or_insert(span);
-                            return Err(e);
-                        }
-                    } else {
-                        let arg_types: Vec<_> = self.stack[self.stack.len() - args..]
-                            .iter()
-                            .map(Value::static_type)
-                            .collect();
-                        let callee_name = self.callee_name(args);
-                        return Err(VmError::new(
-                            format!(
-                                "no function called '{}' found matches the arguments: ({})",
-                                callee_name.as_deref().unwrap_or("?"),
-                                arg_types
-                                    .iter()
-                                    .map(|t| t.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(", "),
-                            ),
-                            span,
-                        ));
+                        .map_err(|msg| VmError::new(msg, span))?;
+                    if let Err(mut e) = self.dispatch_call(func, args) {
+                        e.span.get_or_insert(span);
+                        return Err(e);
                     }
                 }
                 OpCode::CallVec(args) => {
                     let args = *args;
-                    // Compiler emitted a directly-loaded scalar function — no
-                    // OverloadSet probing needed. We still verify it's callable
-                    // because the analyser may have widened its slot to Any
-                    // somewhere along the way.
-                    let scalar = {
-                        let callee = &self.stack[self.stack.len() - args - 1];
-                        let Value::Object(obj) = callee else {
+                    // The analyser picked the function for each position: one
+                    // for all of them, or a tuple with one for each.
+                    let callee = match &self.stack[self.stack.len() - args - 1] {
+                        Value::Object(obj) => Rc::clone(obj),
+                        callee => {
                             return Err(VmError::new(
                                 format!("Unable to invoke {} as a function.", callee.static_type()),
                                 span,
                             ));
-                        };
-                        let Object::Function(f) = obj.as_ref() else {
-                            return Err(VmError::new(
-                                format!(
-                                    "Unable to invoke {} as a function.",
-                                    obj.as_ref().static_type()
-                                ),
-                                span,
-                            ));
-                        };
-                        f.clone()
-                    };
-                    let axis_len = match vec_axis_len(&self.stack[self.stack.len() - args..]) {
-                        Some(n) => n,
-                        None => {
-                            return Err(VmError::new(
-                                format!(
-                                    "vec call '{}' requires tuple arguments of equal non-zero length",
-                                    scalar.name().unwrap_or("?")
-                                ),
-                                span,
-                            ));
                         }
                     };
-                    let scalars = [scalar];
-                    if let Err(mut e) = self.dispatch_vec_call(&scalars, args, axis_len, span) {
+                    let at_position = |i: usize| -> Option<&Function> {
+                        match callee.as_ref() {
+                            Object::Function(f) => Some(f),
+                            Object::Tuple(overloads) => match overloads.get(i)? {
+                                Value::Object(obj) => match obj.as_ref() {
+                                    Object::Function(f) => Some(f),
+                                    _ => None,
+                                },
+                                _ => None,
+                            },
+                            _ => None,
+                        }
+                    };
+                    let Some(first) = at_position(0) else {
+                        return Err(VmError::new(
+                            format!(
+                                "Unable to invoke {} as a function.",
+                                callee.as_ref().static_type()
+                            ),
+                            span,
+                        ));
+                    };
+                    let name = first.name();
+                    let Some(axis_len) = vec_axis_len(&self.stack[self.stack.len() - args..])
+                    else {
+                        return Err(VmError::new(
+                            format!(
+                                "vec call '{}' requires tuple arguments of equal non-zero length",
+                                name.unwrap_or("?")
+                            ),
+                            span,
+                        ));
+                    };
+                    if let Err(mut e) = self.call_elementwise(args, axis_len, name, span, |i| {
+                        at_position(i).cloned().ok_or_else(|| {
+                            VmError::new(format!("no function for tuple position {i}"), span)
+                        })
+                    }) {
                         e.span.get_or_insert(span);
                         return Err(e);
                     }
@@ -641,6 +644,9 @@ impl Vm {
         if let Function::Memoized { cache, function } = func {
             let start = self.stack.len() - args;
             let mut hasher = DefaultHasher::default();
+            // Arguments `==` calls equal share a result: a `pure fn` takes
+            // only values it compares by what they are, which hash alike when
+            // they're equal.
             for arg in &self.stack[start..] {
                 arg.hash(&mut hasher);
             }
@@ -658,6 +664,44 @@ impl Vm {
             self.dispatch_call_with_memo(Rc::unwrap_or_clone(function), args, Some((cache, key)))
         } else {
             self.dispatch_call_with_memo(func, args, None)
+        }
+    }
+
+    /// Calls the function a [`Function::Checked`] checks, and checks that
+    /// what it returns is what the function type it's used as says: right
+    /// away when the call completes here, or when its frame returns.
+    #[cold]
+    fn call_checked(
+        &mut self,
+        function: Rc<Function>,
+        typ: StaticType,
+        args: usize,
+    ) -> Result<Dispatch, VmError> {
+        let StaticType::Function { return_type, .. } = typ else {
+            unreachable!("a checked function is used as a function type");
+        };
+        // The function type it's used as may take more than the function
+        // does, as `Fn(Any) -> Int` would of a function taking an Int.
+        let arguments = &self.stack[self.stack.len() - args..];
+        if !function.conforms_value_args(arguments) {
+            return Err(VmError::native(format!(
+                "the function doesn't take the arguments ({})",
+                arguments
+                    .iter()
+                    .map(|argument| argument.diagnostic_type().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        match self.dispatch_call(Rc::unwrap_or_clone(function), args)? {
+            Dispatch::FramePushed => {
+                self.frames.last_mut().expect("a frame was pushed").returns = Some(return_type);
+                Ok(Dispatch::FramePushed)
+            }
+            Dispatch::Completed => {
+                convert_result(&mut self.stack, &return_type).map_err(VmError::native)?;
+                Ok(Dispatch::Completed)
+            }
         }
     }
 
@@ -699,6 +743,7 @@ impl Vm {
                 prototype: f,
                 upvalues: Vec::new(),
             },
+            Function::Checked { function, typ } => return self.call_checked(function, *typ, args),
             Function::Memoized { .. } => {
                 // Already unwrapped in dispatch_call; this branch is unreachable.
                 unreachable!(
@@ -720,6 +765,7 @@ impl Vm {
             ip: 0,
             frame_pointer: self.stack.len() - args,
             memo,
+            returns: None,
         });
         for _ in args..num_locals {
             self.stack.push(Value::unit());
@@ -765,24 +811,11 @@ impl Vm {
         self.globals
     }
 
-    /// Resolves the callee on the stack to a scalar `Function`. Direct
-    /// `Object::Function` and `OverloadSet` scalars both go through this
-    /// path — for an `OverloadSet`, the scalar list is walked first-match-
-    /// wins (no vec dispatch yet). `Ok(None)` means no scalar matched; the
-    /// caller falls through to vec dispatch.
-    ///
-    /// Returns `Option<Function>` (not the wider `Callable` enum) so the
-    /// arm body in the dispatch loop stays the same shape as master — that
-    /// matters: earlier drafts that widened the return type or split this
-    /// into two helpers regressed numerics-heavy benches by ~10%.
-    fn resolve_callee(&self, args: usize) -> Result<Option<Function>, String> {
+    /// The function on the stack below the `args` arguments of a call.
+    fn resolve_callee(&self, args: usize) -> Result<Function, String> {
         match &self.stack[self.stack.len() - args - 1] {
             Value::Object(obj) => match obj.as_ref() {
-                Object::Function(f) => Ok(Some(f.clone())),
-                Object::OverloadSet { scalars, .. } => {
-                    let start = self.stack.len() - args;
-                    Ok(self.find_scalar_overload(scalars, &self.stack[start..]))
-                }
+                Object::Function(f) => Ok(f.clone()),
                 other => Err(format!(
                     "Unable to invoke {} as a function.",
                     other.static_type()
@@ -795,239 +828,29 @@ impl Vm {
         }
     }
 
-    /// Probes `OpCode::Call`'s callee for vec dispatch eligibility without
-    /// allocating: returns the `OverloadSet` Rc and broadcast axis length
-    /// when vec applies. `dispatch_vec_call_dynamic` resolves the candidates
-    /// lazily from there, avoiding a per-call `Vec<Function>` allocation.
-    fn try_vec_dispatch(&self, args: usize) -> Option<(Rc<Object>, usize)> {
-        let Value::Object(obj) = &self.stack[self.stack.len() - args - 1] else {
-            return None;
-        };
-        match obj.as_ref() {
-            Object::OverloadSet { vec_candidates, .. } if !vec_candidates.is_empty() => {
-                let start = self.stack.len() - args;
-                let axis_len = vec_axis_len(&self.stack[start..])?;
-                Some((Rc::clone(obj), axis_len))
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns the name of the callee at the given stack position, if known.
-    /// For a direct `Function` this is its own name; for an `OverloadSet` it
-    /// reads the name off the first scalar (or vec) candidate.
-    fn callee_name(&self, args: usize) -> Option<String> {
-        let frame_pointer = self.frames.last()?.frame_pointer;
-        match &self.stack[self.stack.len() - args - 1] {
-            Value::Object(obj) => match obj.as_ref() {
-                Object::Function(f) => f.name().map(str::to_string),
-                Object::OverloadSet {
-                    scalars,
-                    vec_candidates,
-                } => {
-                    let first = scalars.first().or_else(|| vec_candidates.first())?;
-                    let value = self.resolve_var(first, frame_pointer);
-                    let Value::Object(obj) = value else {
-                        return None;
-                    };
-                    let Object::Function(f) = obj.as_ref() else {
-                        return None;
-                    };
-                    f.name().map(str::to_string)
-                }
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    /// Walks the `OverloadSet`'s scalar candidates in priority order,
-    /// returning the first whose parameter types accept `args`. Mirrors
-    /// master's `find_overload` body so the hot path on numerics-heavy
-    /// code stays at the same shape and footprint.
-    fn find_scalar_overload(&self, scalars: &[ResolvedVar], args: &[Value]) -> Option<Function> {
-        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-        scalars.iter().find_map(|var| {
-            let value = self.resolve_var(var, frame_pointer);
-            let Value::Object(obj) = value else {
-                return None;
-            };
-            let Object::Function(f) = obj.as_ref() else {
-                return None;
-            };
-            f.matches_value_args(args).then(|| f.clone())
-        })
-    }
-
-    /// Vec dispatch for `Binding::Dynamic` operator calls — the runtime
-    /// picks the matching scalar overload per element position. Resolves
-    /// candidates lazily from `vec_candidates` with a last-match cache, so
-    /// homogeneous tuples (the common case) pay one resolve per outer call
-    /// instead of N. No upfront `Vec<Function>` allocation.
-    fn dispatch_vec_call_dynamic(
+    /// Calls the function `pick` gives for each element position of the
+    /// tuple arguments on the stack, and replaces the callee and arguments
+    /// with the tuple of the results: `(1, 2) + (3, 4)` is `(1 + 3, 2 + 4)`.
+    fn call_elementwise(
         &mut self,
-        overload_set: &Rc<Object>,
         args: usize,
         axis_len: usize,
+        callee_name: Option<&str>,
         span: Span,
+        pick: impl Fn(usize) -> Result<Function, VmError>,
     ) -> Result<(), VmError> {
-        let Object::OverloadSet { vec_candidates, .. } = overload_set.as_ref() else {
-            unreachable!("dispatch_vec_call_dynamic invoked with non-OverloadSet callee");
-        };
-        debug_assert!(!vec_candidates.is_empty());
-
-        let arg_start = self.stack.len() - args;
-        let arg_values: Vec<Value> = self.stack.split_off(arg_start);
-        self.stack.pop(); // discard the callee slot
-
-        let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
-
-        // Resolve one candidate up front so the error paths can borrow its name
-        // as `&str` instead of allocating a `String` on every successful call.
-        let callee_fn: Option<Rc<Object>> =
-            vec_candidates
-                .first()
-                .and_then(|var| match self.resolve_var(var, frame_pointer) {
-                    Value::Object(obj) if matches!(obj.as_ref(), Object::Function(_)) => Some(obj),
-                    _ => None,
-                });
-        let callee_name: Option<&str> = callee_fn.as_ref().and_then(|obj| {
-            let Object::Function(f) = obj.as_ref() else {
-                return None;
-            };
-            f.name()
-        });
-
-        let mut elem_args: Vec<Value> = Vec::with_capacity(args);
-        let mut results: Vec<Value> = Vec::with_capacity(axis_len);
-        // Cached last-match Function. Homogeneous tuples reuse this across
-        // positions; heterogeneous tuples fall through to the candidate walk.
-        let mut last_match: Option<Function> = None;
-
-        for i in 0..axis_len {
-            elem_args.clear();
-            for arg in &arg_values {
-                elem_args.push(vec_element_at(arg, i));
-            }
-
-            let scalar: Function = if let Some(f) = &last_match
-                && f.matches_value_args(&elem_args)
-            {
-                f.clone()
-            } else {
-                let mut found: Option<Function> = None;
-                for var in vec_candidates {
-                    let value = self.resolve_var(var, frame_pointer);
-                    let Value::Object(obj) = value else { continue };
-                    let Object::Function(f) = obj.as_ref() else {
-                        continue;
-                    };
-                    if f.matches_value_args(&elem_args) {
-                        found = Some(f.clone());
-                        break;
-                    }
-                }
-                let Some(f) = found else {
-                    let element_types = elem_args
-                        .iter()
-                        .map(|v| v.static_type().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let name = callee_name.unwrap_or("?");
-                    return Err(VmError::new(
-                        format!("no overload of '{name}' accepts element {i}: ({element_types})"),
-                        span,
-                    ));
-                };
-                last_match = Some(f.clone());
-                f
-            };
-
-            let result = self.call_callback(scalar, &elem_args).map_err(|mut e| {
-                let prefix = match callee_name {
-                    Some(name) => format!("while vectorising '{name}' at index {i}: "),
-                    None => format!("while vectorising at index {i}: "),
-                };
-                e.message = format!("{prefix}{}", e.message);
-                e.span.get_or_insert(span);
-                e
-            })?;
-            results.push(result);
-        }
-
-        self.stack
-            .push(Value::Object(Rc::new(Object::Tuple(results))));
-        Ok(())
-    }
-
-    /// Vec dispatch when the scalar set is already resolved — the `CallVec`
-    /// opcode path. `scalars.len() == 1` is the analyser-pinned fast path
-    /// that skips the per-element probe entirely.
-    fn dispatch_vec_call(
-        &mut self,
-        scalars: &[Function],
-        args: usize,
-        axis_len: usize,
-        span: Span,
-    ) -> Result<(), VmError> {
-        let arg_start = self.stack.len() - args;
-        // Borrow the callee name straight off the resolved scalars — its lifetime
-        // is tied to the caller-owned slice, not to `self`, so the error paths
-        // can use it without allocating a `String` on the success path.
-        let callee_name: Option<&str> = scalars.first().and_then(|f| f.name());
-
         // Materialise the broadcast arguments up front so the inner
         // call_callback can hold &mut self without conflicting with stack
         // borrows. Element values clone Rcs only.
-        let arg_values: Vec<Value> = self.stack.split_off(arg_start);
+        let arg_values: Vec<Value> = self.stack.split_off(self.stack.len() - args);
         self.stack.pop(); // discard the callee slot
-
-        let pinned: Option<&Function> = if scalars.len() == 1 {
-            Some(&scalars[0])
-        } else {
-            None
-        };
 
         let mut elem_args: Vec<Value> = Vec::with_capacity(args);
         let mut results: Vec<Value> = Vec::with_capacity(axis_len);
-        // Cache the last scalar that matched. Homogeneous tuples — the common
-        // case — all want the same scalar at every position, so probing it
-        // first short-circuits the candidate walk for positions 1..N.
-        let mut last_match: Option<usize> = None;
-
         for i in 0..axis_len {
             elem_args.clear();
-            for arg in &arg_values {
-                elem_args.push(vec_element_at(arg, i));
-            }
-
-            let scalar: Function = if let Some(f) = pinned {
-                f.clone()
-            } else if let Some(idx) = last_match
-                && scalars[idx].matches_value_args(&elem_args)
-            {
-                scalars[idx].clone()
-            } else {
-                let Some((idx, found)) = scalars
-                    .iter()
-                    .enumerate()
-                    .find(|(_, f)| f.matches_value_args(&elem_args))
-                else {
-                    let element_types = elem_args
-                        .iter()
-                        .map(|v| v.static_type().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let name = callee_name.unwrap_or("?");
-                    return Err(VmError::new(
-                        format!("no overload of '{name}' accepts element {i}: ({element_types})"),
-                        span,
-                    ));
-                };
-                last_match = Some(idx);
-                found.clone()
-            };
-
+            elem_args.extend(arg_values.iter().map(|arg| vec_element_at(arg, i)));
+            let scalar = pick(i)?;
             let result = self.call_callback(scalar, &elem_args).map_err(|mut e| {
                 let prefix = match callee_name {
                     Some(name) => format!("while vectorising '{name}' at index {i}: "),
@@ -1121,40 +944,41 @@ impl Vm {
                 chars.reverse();
                 self.stack.append(&mut chars);
             }
+            // A deque, heap or iterator unpacks the elements it gives, one
+            // past the variables at most, as an iterator may not end.
             _ => {
-                return Err(VmError::new(
-                    "cannot unpack: expected a list, tuple, or string",
-                    span,
-                ));
+                let Some(iter) = Value::Object(obj).try_into_iter() else {
+                    return Err(VmError::new(
+                        "cannot unpack: expected a list, tuple, string, deque, heap or iterator",
+                        span,
+                    ));
+                };
+                let mut elements: Vec<Value> = iter.take(size + 1).collect();
+                if elements.len() != size {
+                    return Err(VmError::new(
+                        if elements.len() > size {
+                            format!("cannot unpack more than {size} values into {size} variables")
+                        } else {
+                            format!(
+                                "cannot unpack {} values into {size} variables",
+                                elements.len()
+                            )
+                        },
+                        span,
+                    ));
+                }
+                elements.reverse();
+                self.stack.append(&mut elements);
             }
         }
         Ok(())
-    }
-
-    fn resolve_var(&self, var: &ResolvedVar, frame_pointer: usize) -> Value {
-        match var {
-            ResolvedVar::Global { slot } => self.globals[*slot].clone(),
-            ResolvedVar::Local { slot } => self.stack[frame_pointer + slot].clone(),
-            ResolvedVar::Cell { slot } => {
-                let value = &self.stack[frame_pointer + slot];
-                match value.as_cell() {
-                    Some(cell) => cell.borrow().clone(),
-                    None => value.clone(),
-                }
-            }
-            ResolvedVar::Upvalue { slot } => {
-                let frame = self.frames.last().expect("no frame");
-                frame.closure.upvalues[*slot].borrow().clone()
-            }
-        }
     }
 }
 
 /// Find the broadcast-axis length for a vec call: the shared length of every
 /// tuple-shaped argument. Empty tuples and length mismatches return `None`,
-/// which is interpreted upstream as "vec doesn't apply" and falls through to
-/// the regular `no function found` error.
-pub(crate) fn vec_axis_len(args: &[Value]) -> Option<usize> {
+/// which `CallVec` reports as an error.
+fn vec_axis_len(args: &[Value]) -> Option<usize> {
     let mut axis: Option<usize> = None;
     for arg in args {
         if let Value::Object(obj) = arg
@@ -1175,7 +999,7 @@ pub(crate) fn vec_axis_len(args: &[Value]) -> Option<usize> {
 
 /// Pick the per-element value at vec position `i`. Tuple args contribute
 /// `tuple[i]`; non-tuple args broadcast unchanged.
-pub(crate) fn vec_element_at(arg: &Value, i: usize) -> Value {
+fn vec_element_at(arg: &Value, i: usize) -> Value {
     if let Value::Object(obj) = arg
         && let Object::Tuple(elems) = obj.as_ref()
     {
@@ -1210,16 +1034,59 @@ impl VmCallable<'_> {
     }
 }
 
-/// Explain why a range bound was rejected. Only an integer too big for an
-/// `Int` is a size problem; every other non-`Int` bound is a type problem, and
-/// since `n` literals are the only way to write a big integer, a small
-/// `Number` bound is now the common case.
+/// The analyser makes a condition a `Bool`; this is what a VM that's given
+/// something else says.
+#[cold]
+fn not_a_bool(value: &Value) -> String {
+    format!(
+        "mismatched types: expected Bool, found {}",
+        value.diagnostic_type()
+    )
+}
+
+/// The analyser makes a range bound an `Int`; this is what a VM that's
+/// given something else says.
+#[cold]
 fn bad_range_bound(value: &Value) -> String {
-    if let Some(number) = value.as_number()
-        && matches!(number, crate::value::AdvancedNumber::Int(_))
-        && number.as_exact_i64().is_none()
-    {
-        return "Integer too large for range bounds".to_string();
-    }
     format!("range bounds must be Int, got {}", value.diagnostic_type())
+}
+
+/// Replaces the value on top of `stack` with `Some` of it, made the
+/// `target` as [`Value::converted_to`] does, or with `None` when it isn't
+/// one.
+#[cold]
+fn try_cast(stack: &mut [Value], target: &StaticType) {
+    let value = stack.last_mut().expect("stack underflow");
+    *value = Value::option(value.converted_to(target));
+}
+
+/// Checks that the value on top of `stack` is a `target`, and makes it one:
+/// a function that may be a function `target` gets its calls checked (see
+/// [`Value::converted_to`]).
+fn convert_top(stack: &mut [Value], target: &StaticType) -> bool {
+    let value = stack.last_mut().expect("stack underflow");
+    if !matches!(target, StaticType::Function { .. }) {
+        return value.conforms_to(target);
+    }
+    match value.converted_to(target) {
+        Some(converted) => {
+            *value = converted;
+            true
+        }
+        None => false,
+    }
+}
+
+/// Checks that the result of a call of a [`Function::Checked`], on top of
+/// `stack`, is a `returns`, and makes it one, as [`convert_top`] does: a
+/// function it returns may get its own calls checked.
+fn convert_result(stack: &mut [Value], returns: &StaticType) -> Result<(), String> {
+    if convert_top(stack, returns) {
+        return Ok(());
+    }
+    let returned = stack.last().expect("a call leaves its result");
+    Err(format!(
+        "expected the function to return {returns} but it returned {}",
+        returned.diagnostic_type()
+    ))
 }

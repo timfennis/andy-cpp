@@ -1,0 +1,7 @@
+// A parameter called as a function takes what the call passes it, so
+// `apply` takes an overloaded function too: `abs(Int)` is the one that
+// takes `-1`.
+// expect-output: 1 hi! [2,3]
+fn apply(f, x) => f(x);
+fn inc(x) => x + 1;
+print(apply(abs, -1), apply(fn(s) => s ++ "!", "hi"), [1, 2].map(inc));

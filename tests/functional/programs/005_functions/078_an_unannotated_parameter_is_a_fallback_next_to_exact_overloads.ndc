@@ -1,0 +1,8 @@
+// A call uses the most specific overload that fits it, so `show(x)` takes
+// what `show(Int)` doesn't, like `show(x: Any)` would, but with a typed body.
+// expect-output: int other other
+fn show(x: Int) { "int" }
+fn show(x) { "other" }
+fn show_any(x: Int) { "int" }
+fn show_any(x: Any) { "other" }
+print(show(1), show("a"), show_any([1]));

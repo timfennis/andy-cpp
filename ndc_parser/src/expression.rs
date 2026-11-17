@@ -35,9 +35,12 @@ pub enum Expression {
     },
     Grouping(Box<ExpressionLocation>),
     /// `value as Type` — asserts the value has the target type; never converts.
+    /// `value as? Type` (`optional`) — `Some(value)` when the value has the
+    /// target type, `None` when it doesn't.
     Cast {
         value: Box<ExpressionLocation>,
         annotation: TypeExpr,
+        optional: bool,
     },
     VariableDeclaration {
         l_value: BindingPatternLocation,

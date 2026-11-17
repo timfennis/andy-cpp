@@ -1,7 +1,7 @@
 // `>=` after a cast type must not be split into `>` plus `=`: this is a
-// comparison chain, not a cast to `Int<y>` assigned to `z`. It reaches the VM
-// and fails there exactly as `3 < y >= z` does without the cast.
-// expect-error: cannot compare Bool and Int
+// comparison chain, not a cast to `Int<y>` assigned to `z`. It's rejected
+// exactly as `3 < y >= z` is without the cast.
+// expect-error: No function called '>=' found that matches the arguments 'Bool, Int'
 let y = 1;
 let z = 2;
 print(3 as Int < y >= z)

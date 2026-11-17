@@ -151,6 +151,7 @@ fn kind(
         | Token::While
         | Token::Pure
         | Token::As
+        | Token::AsOptional
         | Token::LogicAnd
         | Token::LogicOr
         | Token::LogicNot => Kind::Keyword,

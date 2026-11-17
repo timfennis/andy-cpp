@@ -1,0 +1,4 @@
+// The first element is an Int, which isn't a String.
+// expect-error: mismatched types: found Int but expected String
+let t = (1, "a");
+let s: String = t[0];

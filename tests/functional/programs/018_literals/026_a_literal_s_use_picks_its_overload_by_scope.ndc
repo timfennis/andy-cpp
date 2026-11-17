@@ -1,0 +1,10 @@
+// The inner `f` takes the call, so it doesn't matter that the outer one
+// would give a String back for an Int: the `1` stays an Int.
+// expect-output: 1 0.5
+fn f(x: Int) => "outer";
+{
+    fn f(x: Any) => 0.5;
+    let n = 1;
+    let r: Float = f(n);
+    print(n, r);
+}

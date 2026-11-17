@@ -1,0 +1,3 @@
+// expect-error: found List<Int> but expected List<String>
+fn dup(x) => [0].flat_map(fn(_) => (x, x));
+let r: List<String> = dup(1);

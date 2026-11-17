@@ -1,0 +1,5 @@
+// expect-error: No function called 'len' found that matches the arguments 'Player'
+// Only the missing `len` is reported, not `sum` of the list of what it gave.
+struct Player { name: String, score: Int }
+let players = [Player("ann", 3), Player("bob", 5)];
+print(players.map(fn(p) => p.len).sum());

@@ -1,0 +1,5 @@
+// `filter` returns some of the elements it is given, so filtering a
+// List<Int> gives a List<Int>, which only takes integers.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'
+let big = [1, 2, 3].filter(fn(n) => n > 1);
+big.push("4");

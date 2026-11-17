@@ -1,0 +1,4 @@
+// `1` is a Float like `1.5`, so dividing it gives a Float.
+// expect-output: 0.5
+let xs = [1.5, 1];
+print(xs[1] / 2);

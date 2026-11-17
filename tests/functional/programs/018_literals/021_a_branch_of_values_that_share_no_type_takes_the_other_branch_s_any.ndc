@@ -1,0 +1,7 @@
+// The literal in the second branch takes the type of the first, whose
+// lists hold `Any`s: the branches are one type, a List<List<Any>>.
+// expect-output: nested
+fn f(x: List<List<Any>>) => "nested";
+fn f(x: Any) => "any";
+let first: List<List<Any>> = [[1, "a"]];
+print(f(if true { first } else { [[2, "b"]] }));

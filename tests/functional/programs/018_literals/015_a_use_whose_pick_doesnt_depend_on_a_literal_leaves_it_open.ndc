@@ -1,0 +1,10 @@
+// `map` takes `describe(x)` whether the list holds Strings or `Any`s, as
+// `describe(x: Int)` takes neither, so its pick doesn't decide what the list
+// holds, and the annotation after it makes it a List<Any>.
+// expect-output: ["other"] ["other"]
+fn describe(x: Int) => "int";
+fn describe(x) => "other";
+let words = ["a"];
+let described = words.map(describe);
+let anything: List<Any> = words;
+print(described, anything.map(describe));

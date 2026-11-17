@@ -1,9 +1,12 @@
 use ndc_analyser::Analyser;
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
+/// The type of a value as the analyser sees it, which each of
+/// [`Interpreter::functions`] has as its `static_type`.
+pub use ndc_core::StaticType;
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
-use ndc_vm::compiler::Compiler;
+use ndc_vm::compiler::{Compiler, Session};
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
@@ -27,8 +30,16 @@ pub struct Interpreter {
     globals: Vec<Value>,
     capturing: bool,
     analyser: Analyser,
+    /// What compiling the evaluations so far leaves for the next, of a
+    /// resumable interpreter: a later one can call an earlier one's generic
+    /// functions with new types, which compiles new instances of them.
+    session: Session,
     source_db: SourceDb,
     resumable: bool,
+    /// Whether each evaluation is a line that more lines may follow, as in
+    /// the REPL, which leaves what a line's code doesn't need settled for
+    /// them to settle: see [`Analyser::take_line_result`].
+    line_by_line: bool,
     /// What the evaluations printed, if output is captured.
     output: Vec<u8>,
     #[cfg(feature = "trace")]
@@ -55,8 +66,10 @@ impl Interpreter {
             globals: Vec::new(),
             capturing,
             analyser: Analyser::new(vec![]),
+            session: Session::default(),
             source_db: SourceDb::new(),
             resumable: true,
+            line_by_line: false,
             output: Vec::new(),
             #[cfg(feature = "trace")]
             tracer: None,
@@ -72,6 +85,17 @@ impl Interpreter {
         Self {
             resumable: false,
             ..Self::from_capturing(false)
+        }
+    }
+
+    /// This interpreter, evaluating lines that more lines may follow, as the
+    /// REPL does: `let xs = [];` leaves what `xs` holds for a later line's
+    /// `xs.push(1)` to settle.
+    #[must_use]
+    pub fn line_by_line(self) -> Self {
+        Self {
+            line_by_line: true,
+            ..self
         }
     }
 
@@ -93,6 +117,7 @@ impl Interpreter {
     /// Forgets everything evaluated so far, keeping only what was printed.
     fn start_over(&mut self) {
         self.analyser = self.new_analyser();
+        self.session = Session::default();
         self.globals = ndc_vm::native_globals(self.function_registry.iter());
     }
 
@@ -239,7 +264,11 @@ impl Interpreter {
             }
         });
 
-        let result = self.analyser.take_result();
+        let result = if self.line_by_line {
+            self.analyser.take_line_result()
+        } else {
+            self.analyser.take_result()
+        };
         if !result.errors.is_empty() {
             return Err(InterpreterError::Analysis {
                 causes: result.errors,
@@ -259,7 +288,11 @@ impl Interpreter {
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let mut timings = ExecutionTimings::default();
         let code = measure(&mut timings, Phase::Compiling, || {
-            Compiler::compile(expressions, analysis)
+            if self.resumable {
+                Compiler::compile_line(expressions, analysis, &mut self.session)
+            } else {
+                Compiler::compile(expressions, analysis)
+            }
         })?;
         let num_locals = code.num_locals();
         let output = if self.capturing {

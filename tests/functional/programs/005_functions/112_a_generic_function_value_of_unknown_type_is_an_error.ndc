@@ -1,0 +1,5 @@
+// A generic function's value is its instance for one set of types, so where
+// nothing says which, as when it's stored as an `Any`, it's an error.
+// expect-error: `is_safe` is generic, and its value here doesn't say which types it takes
+fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }
+let f: Any = is_safe;

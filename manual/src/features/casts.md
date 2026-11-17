@@ -1,97 +1,95 @@
 # Casts
 
-The `as` operator asserts that a value has the given type:
+A cast is how you get a value back out of an `Any`. Anything can go into an
+`Any`, but an `Any` can't be used where another type is expected (see
+[Getting a value out of an `Any`](../reference/types.md#getting-a-value-out-of-an-any)):
+
+```ndc,fails
+let value: Any = 5;
+value + 1
+// error[analysis]: No function called '+' found that matches the arguments 'Any, Int'
+```
+
+The `as` operator says what type the value has. It checks that while the
+program runs:
 
 ```ndc
-let values = %{};
-values.insert(1);
-values.insert(2);
-
-// keys returns List<Any>; the cast recovers the element type so the
-// result works with functions that expect a List<Int>.
-let keys = values.keys as List<Int>;
-print(keys.max());  // 2
+let value: Any = 5;
+print((value as Int) + 1);  // 6
 ```
 
-A cast checks the value without converting it. `5 as Float` is an error
-because `5` is an `Int`; use conversion functions like `float(5)` to change
-a value's type.
-
-## Checking
-
-When the compiler can already prove the cast from the value's static type,
-the cast is free: no runtime check is emitted. Otherwise the value is
-checked at runtime, and a failed check raises an error at the cast site:
+A cast that turns out to be wrong stops the program with an error:
 
 ```ndc,fails
-let value: Any = ["a"];
-value as List<Int>
-// error[vm]: cannot cast List<String> to List<Int>
+let value: Any = "five";
+value as Int
+// error[vm]: cannot cast String to Int
 ```
 
-Checking a container inspects every element (and recurses into nested
-containers), so a cast costs one pass over the value. Empty containers
-conform to any element type: `[] as List<Int>` succeeds.
+A cast only checks the value, it doesn't convert it, so `n as Float` is an
+error when `n` is an `Int`. To turn one type into another, use functions like
+`float(n)`, `int(x)` and `string(x)`.
 
-A map's default value is checked against the value type too, since a
-missing-key lookup inserts it. A default *function*'s results can't be
-verified without calling it, so such a map only conforms when the value
-type is `Any`.
+## Casting a list or a map
 
-The analyser rejects casts between types that cannot share a value:
+A cast checks every element of a list, map or other container. It also gives
+the container a new type, so it refuses a container that a variable still
+holds: the variable would still expect the old type. Cast a copy instead, made
+with `clone`:
+
+```ndc
+let values: Any = [1, 2];
+let ints = values.clone() as List<Int>;
+print(ints.sum());  // 3
+```
 
 ```ndc,fails
-"foo" as Int
-// error[analysis]: invalid cast: String can never be Int
+let values: Any = [1, 2];
+values as List<Int>
+// error[vm]: cannot cast to List<Int>: the list is also held by something else, which would still expect what it held before
+```
+
+A container that nothing else holds, such as what a function returns, can be
+cast without a copy.
+
+A list of `Any`s needs a cast too before you use a function that wants a list
+of something more specific, like `sum`:
+
+```ndc
+let values: List<Any> = [1, 2, 3];
+print((values.clone() as List<Int>).sum());  // 6
+```
+
+## Testing a value's type with `as?`
+
+`value as? T` is the cast that doesn't fail: it gives `Some(value)` when the
+value is a `T`, and `None` when it isn't.
+
+```ndc
+let value: Any = 5;
+print(value as? Int);     // Some(5)
+print(value as? String);  // None
+```
+
+That makes it the way to ask what a value is:
+
+```ndc
+fn describe(value: Any) {
+    if (value as? Int).is_some() {
+        "a number"
+    } else if (value as? String).is_some() {
+        "some text"
+    } else {
+        "something else"
+    }
+}
+print(describe(1));    // a number
+print(describe("a"));  // some text
+print(describe([1]));  // something else
 ```
 
 ## Precedence
 
-`as` binds tighter than binary operators and looser than unary operators
-and calls, so `a + b as Int` means `a + (b as Int)`. Method calls bind
-tighter than the cast: recovering an element type before a method call
-needs parentheses, as in `(values.keys as List<Int>).max()`.
-
-A `<` after the cast type is read as a type argument list when the tokens
-that follow form one, and as a less-than comparison otherwise, so
-`n as Int < 10` compares while `xs as List<Int>` casts.
-
-## Casting to state what a value holds
-
-The analyser only accepts what it can prove. Where it cannot, a cast states the
-value's type and checks it at the cast site.
-
-Reassigning a variable widens its type, which can lose the detail a function
-needs:
-
-```ndc,fails
-let line = "a b c";
-line = line.split(" ");    // line is now Sequence<String>, not List<String>
-line.remove(0);            // error: no `remove` matches Sequence<String>, Int
-```
-
-A cast states that it is still a list:
-
-```ndc
-let line = "a b c";
-line = line.split(" ");
-print((line as List<String>).remove(0));  // a
-```
-
-A specialized `op=` mutates its target in place and keeps its type, so it only
-accepts a right operand that provably fits. A value of unknown type does not,
-and a cast gets the elements checked instead of letting them slip into the
-target unverified:
-
-```ndc
-fn opaque(x) => x;
-let values = [1];
-values ++= opaque([2, 3]) as List<Int>;
-print(values);  // [1,2,3]
-```
-
-## Limitations
-
-Checking an iterator's elements would consume it, so a runtime check against
-an element type other than `Any` fails. Cast a value into a typed collection
-before turning it into an iterator.
+`as` and `as?` bind tighter than binary operators, so `a + b as Int` means
+`a + (b as Int)`. Method calls bind tighter than the cast, so a method call on
+the result of a cast needs parentheses: `(value as? Int).is_some()`.

@@ -1,0 +1,11 @@
+// `m` is an Int, so `g(m - 1)` is decided in the body: the `g` that takes
+// one. An overload declared after `fac` isn't one it can call.
+// expect-output: 0 120
+fn g(s: String) => 0;
+fn g(n) {
+    let m: Int = n;
+    if m == 0 { 0 } else { g(m - 1) }
+}
+fn fac(n) => if n <= 1 { 1 } else { n * fac(n - 1) };
+fn fac(s: String) => s;
+print(g(3), fac(5));

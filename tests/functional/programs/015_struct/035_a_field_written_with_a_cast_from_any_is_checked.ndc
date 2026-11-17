@@ -1,0 +1,6 @@
+// expect-error: cannot cast String to Int
+struct P { x: Int }
+let p: Any = P(1);
+let v: Any = "s";
+let q = p as P;
+q.x = v as Int;

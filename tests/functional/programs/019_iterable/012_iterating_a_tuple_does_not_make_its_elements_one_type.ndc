@@ -1,0 +1,8 @@
+// expect-output: true
+// expect-output: a
+fn visit(a, b) {
+    for x in (a, b) {
+        print(x);
+    }
+}
+visit(true, "a");

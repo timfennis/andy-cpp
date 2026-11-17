@@ -1,0 +1,3 @@
+// `fold` passes its result back to the lambda, so `0` is a Float.
+// expect-output: 3.75
+print([1.5, 2.25].fold(0, fn(acc, x) => acc + x));

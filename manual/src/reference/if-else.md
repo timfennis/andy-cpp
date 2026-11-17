@@ -1,7 +1,8 @@
 # If/else
 
 If-statements are very similar to how they are in Go and Rust. You don't need parentheses
-around the conditions but braces around the body are required.
+around the conditions but braces around the body are required. The condition has to be a `Bool`:
+write `if count > 0`, not `if count`.
 
 ```ndc
 let x = 3;
@@ -31,4 +32,14 @@ let x = if n > 0 {
 };
 print(x);  // 1
 
+```
+
+Both branches have to give a value of the same type. Branches of different types, like `if c { 1 } else { "a" }`, are an error unless you store the result as an `Any`: `let x: Any = if c { 1 } else { "a" };` (see [Values of different types](./types.md#values-of-different-types)).
+
+An `if` without an `else` has no value when the condition is false, so its value is always `()`:
+
+```ndc
+let c = true;
+let x = if c { 1 };
+print(x == ());  // true
 ```

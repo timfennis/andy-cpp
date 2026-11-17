@@ -1,4 +1,4 @@
-use ndc_core::{FunctionRegistry, StaticType};
+use ndc_core::{ANY_INDEX, FunctionRegistry, StaticType};
 use ndc_vm::Vm;
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
@@ -55,36 +55,28 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let doc =
         "Retrieves an element by index. Supports negative indices and range slicing.".to_string();
 
-    // []<List, Any> -> Any
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::List(Box::new(StaticType::Any)),
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
-        func: make_get_func_simple(),
-    }));
+    // An element by its index, or a slice by a range of indices. A range of a
+    // deque is a list.
+    for signature in [
+        "<T>(List<T>, Int) -> T",
+        "<T>(List<T>, Iterator<Int>) -> List<T>",
+        "(String, Int) -> String",
+        "(String, Iterator<Int>) -> String",
+        "<T>(Deque<T>, Int) -> T",
+        "<T>(Deque<T>, Iterator<Int>) -> List<T>",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_get_func_simple(),
+        }));
+    }
 
-    // []<String, Any> -> String
+    // Indexing a tuple or an `Any`: see `ANY_INDEX`. A map can come here as an
+    // `Any`, and its default function takes the VM.
     env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![StaticType::String, StaticType::Any]),
-            return_type: Box::new(StaticType::String),
-        },
-        func: make_get_func_simple(),
-    }));
-
-    // []<Any, Any> -> Any (fallback for Tuple and other indexable types).
-    // Kept on the WithVm path because Maps can fall through here when their
-    // static type is `Any`, and the Map default-function lookup needs `&mut Vm`.
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
+        name: ANY_INDEX.to_string(),
         documentation: Some(doc.clone()),
         static_type: StaticType::Function {
             parameters: Some(vec![StaticType::Any, StaticType::Any]),
@@ -93,34 +85,10 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         func: make_get_func(),
     }));
 
-    // []<Deque, Any> -> Any
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Deque(Box::new(StaticType::Any)),
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
-        func: make_get_func_simple(),
-    }));
-
-    // []<Map, Any> -> Any
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]".to_string(),
         documentation: Some(doc),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Map {
-                    key: Box::new(StaticType::Any),
-                    value: Box::new(StaticType::Any),
-                },
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::Any),
-        },
+        static_type: StaticType::signature("<K, V>(Map<K, V>, K) -> V").expect("valid signature"),
         func: make_get_func(),
     }));
 }
@@ -128,51 +96,32 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
 fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let doc = "Sets an element by index. Supports negative indices and range slicing for lists and strings.".to_string();
 
-    // []=<List, Any, Any> -> ()
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]=".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::List(Box::new(StaticType::Any)),
-                StaticType::Any,
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::unit()),
-        },
-        func: make_set_func(),
-    }));
+    // An element by its index, or a slice by a range of indices.
+    for signature in [
+        "<T>(List<T>, Int, T)",
+        "<T>(List<T>, Iterator<Int>, Iterable<T>)",
+    ] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]=".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_set_func(),
+        }));
+    }
 
-    // []=<String, Any, String> -> ()
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]=".to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::String,
-                StaticType::Any,
-                StaticType::String,
-            ]),
-            return_type: Box::new(StaticType::unit()),
-        },
-        func: make_set_func(),
-    }));
+    for signature in ["(String, Int, String)", "(String, Iterator<Int>, String)"] {
+        env.declare_global_fn(Rc::new(NativeFunction {
+            name: "[]=".to_string(),
+            documentation: Some(doc.clone()),
+            static_type: StaticType::signature(signature).expect("valid signature"),
+            func: make_set_func(),
+        }));
+    }
 
-    // []=<Map, Any, Any> -> ()
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]=".to_string(),
         documentation: Some(doc),
-        static_type: StaticType::Function {
-            parameters: Some(vec![
-                StaticType::Map {
-                    key: Box::new(StaticType::Any),
-                    value: Box::new(StaticType::Any),
-                },
-                StaticType::Any,
-                StaticType::Any,
-            ]),
-            return_type: Box::new(StaticType::unit()),
-        },
+        static_type: StaticType::signature("<K, V>(Map<K, V>, K, V)").expect("valid signature"),
         func: make_set_func(),
     }));
 }
@@ -275,117 +224,44 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
     Ok(VmOffset::Element(to_forward_index(i, size, false)?))
 }
 
+/// `[]` on any container, a map's default function included, which takes
+/// the VM to call.
 fn vm_get_at_index(container: &Value, index_value: &Value, vm: &mut Vm) -> Result<Value, VmError> {
-    let Some(size) = vm_sequence_length(container) else {
-        return Err(VmError::native(format!(
-            "cannot index into {}",
-            container.static_type()
-        )));
+    let Value::Object(obj) = container else {
+        return vm_get_at_index_simple(container, index_value);
     };
-    match container {
-        Value::Object(obj) => match obj.as_ref() {
-            Object::List(list) => {
-                let list = list.borrow();
-                match extract_vm_offset(index_value, size)? {
-                    VmOffset::Element(idx) => Ok(list[idx].clone()),
-                    VmOffset::Range(from, to) => {
-                        let values = list.get(from..to).ok_or_else(|| {
-                            VmError::native(format!("{from}..{to} out of bounds"))
-                        })?;
-                        Ok(Value::Object(Rc::new(Object::list(values.to_vec()))))
-                    }
-                }
-            }
-            Object::String(s) => {
-                let s = s.indexed();
-                match extract_vm_offset(index_value, size)? {
-                    VmOffset::Element(idx) => {
-                        let ch = s.get_char(idx).expect("bounds already checked");
-                        Ok(Value::string(ch.to_string()))
-                    }
-                    VmOffset::Range(from, to) => {
-                        let from = s.get_index(from).unwrap_or(s.len());
-                        let to = s.get_index(to).unwrap_or(s.len());
-                        Ok(Value::string(&s[from..to]))
-                    }
-                }
-            }
-            Object::Map { entries, default } => {
-                if matches!(
-                    index_value,
-                    Value::Object(o) if matches!(o.as_ref(), Object::Iterator(_))
-                ) {
-                    return Err(VmError::native(
-                        "cannot use range expression as index in map",
-                    ));
-                }
-                let key = index_value.clone();
-                let value = entries.borrow().get(&key).cloned();
-                if let Some(v) = value {
-                    return Ok(v);
-                }
-                match default {
-                    None => Err(VmError::native(format!("Key not found in map: {key}"))),
-                    Some(default_val) => match default_val {
-                        Value::Object(o) if matches!(o.as_ref(), Object::Function(_)) => {
-                            let Object::Function(f) = o.as_ref() else {
-                                unreachable!()
-                            };
-                            let result = vm.call_callback(f.clone(), &[])?;
-                            entries.borrow_mut().insert(key, result.clone());
-                            Ok(result)
-                        }
-                        non_fn => {
-                            let v = non_fn.clone();
-                            entries.borrow_mut().insert(key, v.clone());
-                            Ok(v)
-                        }
-                    },
-                }
-            }
-            Object::Tuple(tuple) => match extract_vm_offset(index_value, size)? {
-                VmOffset::Element(idx) => tuple
-                    .get(idx)
-                    .cloned()
-                    .ok_or_else(|| VmError::native("index out of bounds")),
-                VmOffset::Range(from, to) => {
-                    let values = tuple
-                        .get(from..to)
-                        .ok_or_else(|| VmError::native("index out of bounds"))?;
-                    Ok(Value::Object(Rc::new(Object::Tuple(values.to_vec()))))
-                }
-            },
-            Object::Deque(deque) => {
-                let deque = deque.borrow();
-                match extract_vm_offset(index_value, size)? {
-                    VmOffset::Element(idx) => deque
-                        .get(idx)
-                        .cloned()
-                        .ok_or_else(|| VmError::native("index out of bounds")),
-                    VmOffset::Range(from, to) => {
-                        let out: Vec<Value> =
-                            deque.iter().skip(from).take(to - from).cloned().collect();
-                        Ok(Value::Object(Rc::new(Object::list(out))))
-                    }
-                }
-            }
-            _ => Err(VmError::native(format!(
-                "cannot index into {}",
-                container.static_type()
-            ))),
-        },
-        _ => Err(VmError::native(format!(
-            "cannot index into {}",
-            container.static_type()
-        ))),
+    let Object::Map { entries, default } = obj.as_ref() else {
+        return vm_get_at_index_simple(container, index_value);
+    };
+    if matches!(
+        index_value,
+        Value::Object(o) if matches!(o.as_ref(), Object::Iterator(_))
+    ) {
+        return Err(VmError::native(
+            "cannot use range expression as index in map",
+        ));
     }
+    if let Some(value) = entries.borrow().get(index_value) {
+        return Ok(value.clone());
+    }
+    let value = match default {
+        None => {
+            return Err(VmError::native(format!(
+                "Key not found in map: {index_value}"
+            )));
+        }
+        Some(Value::Object(o)) if let Object::Function(f) = o.as_ref() => {
+            vm.call_callback(f.clone(), &[])?
+        }
+        Some(value) => value.clone(),
+    };
+    entries
+        .borrow_mut()
+        .insert(index_value.clone(), value.clone());
+    Ok(value)
 }
 
-/// `vm_get_at_index` without the Map default-function callback path. Used by
-/// `make_get_func_simple` for overloads (`List`/`String`/`Deque`) whose
-/// parameter type means the Map branch is unreachable in practice. The Map
-/// arm is kept as a defensive error so that any future widening which routes
-/// a Map through here doesn't silently misbehave.
+/// `[]` on a container other than a map, which needs no VM.
 fn vm_get_at_index_simple(container: &Value, index_value: &Value) -> Result<Value, VmError> {
     let Some(size) = vm_sequence_length(container) else {
         return Err(VmError::native(format!(
@@ -447,9 +323,6 @@ fn vm_get_at_index_simple(container: &Value, index_value: &Value) -> Result<Valu
                     }
                 }
             }
-            Object::Map { .. } => Err(VmError::native(
-                "internal: Map indexing reached the no-callback path",
-            )),
             _ => Err(VmError::native(format!(
                 "cannot index into {}",
                 container.static_type()
@@ -480,21 +353,22 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
                         list[idx] = rhs;
                     }
                     VmOffset::Range(from, to) => {
-                        let rhs_vec = match rhs {
-                            Value::Object(o) => match o.as_ref() {
-                                Object::List(l) => l.borrow().clone(),
-                                Object::Tuple(t) => t.clone(),
-                                _ => {
-                                    return Err(VmError::native(
-                                        "cannot assign non-list to list slice",
-                                    ));
-                                }
-                            },
-                            _ => {
-                                return Err(VmError::native(
-                                    "cannot assign non-list to list slice",
-                                ));
+                        // Any sequence goes in a slice: a list, a tuple, a
+                        // range or another iterator.
+                        let rhs_vec = match &rhs {
+                            Value::Object(o) if matches!(o.as_ref(), Object::List(_)) => {
+                                let Object::List(l) = o.as_ref() else {
+                                    unreachable!("matched a list");
+                                };
+                                l.borrow().clone()
                             }
+                            _ => rhs
+                                .clone()
+                                .try_into_iter()
+                                .ok_or_else(|| {
+                                    VmError::native("cannot assign non-sequence to list slice")
+                                })?
+                                .collect(),
                         };
                         let tail: Vec<Value> = list.drain(from..).collect();
                         list.extend(rhs_vec);

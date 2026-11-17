@@ -1,6 +1,6 @@
-// `keys` returns List<Any>; the cast recovers the element type so calls on
-// the result can resolve against Int overloads.
-let values = %{};
+// The keys of a `Map<Any, ()>` are a List<Any>; the cast recovers the element
+// type so calls on the result can resolve against Int overloads.
+let values: Map<Any, ()> = %{};
 values.insert(3);
 values.insert(1);
 values.insert(2);

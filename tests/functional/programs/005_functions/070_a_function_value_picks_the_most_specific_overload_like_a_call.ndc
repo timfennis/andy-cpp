@@ -1,0 +1,7 @@
+// With the parameter types known, a function value is the overload a call
+// with arguments of those types would pick: `f(Int)` over `f(Any)`.
+// expect-output: int ["int"] int
+fn f(x: Int) { "int" }
+fn f(x) { "any" }
+let g: Fn(Int) -> String = f;
+print(g(1), [1].map(f), f(1));

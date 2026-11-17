@@ -1,0 +1,5 @@
+// A container keeps the element type it was inferred with: storing a String
+// in a List<Int> is an error rather than widening the list.
+// expect-error: mismatched types: found String but expected Int
+let values = [1];
+values[0] = "two";

@@ -1,0 +1,7 @@
+// `[x]` is a list of what `x` is, and `f` can't take a list of its own
+// parameter's type, so only the first `f` takes it, which makes `x` an
+// `Any`: `f(1)` calls `f([1])` with a `List<Any>`.
+// expect-output: 42
+fn f(xs: List<Any>) => 42;
+fn f(x) => f([x]);
+print(f(1));

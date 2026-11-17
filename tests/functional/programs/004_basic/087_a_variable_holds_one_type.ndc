@@ -1,0 +1,4 @@
+// The help about writing a number with a `.` is only for numbers.
+// expect-error: A variable holds one type, the type of what it's given first
+let x = 1;
+x = "a";

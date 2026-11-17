@@ -1,0 +1,8 @@
+// A checked function's calls run on the VM's own stack, so recursion through
+// one goes as deep as any other.
+// expect-output: 0
+let f: Fn(Int) -> Int = fn(x: Int) => 0;
+fn step(x: Int) { if x == 0 { 0 } else { f(x - 1) } }
+let a: Any = step;
+f = a as Fn(Int) -> Int;
+print(f(10000));

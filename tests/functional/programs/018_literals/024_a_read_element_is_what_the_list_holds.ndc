@@ -1,0 +1,6 @@
+// What `first` gives back is what the list holds, an Int, and adding 0.5
+// to it is a Float, which leaves the list as it is.
+// expect-output: [1] 1.5
+let ys = [1];
+let y = ys.first() + 0.5;
+print(ys, y);

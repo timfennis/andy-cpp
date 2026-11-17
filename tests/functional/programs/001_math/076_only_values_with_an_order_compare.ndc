@@ -1,0 +1,5 @@
+// Numbers of any kind, strings, booleans, and lists and tuples of those have
+// an order; values of two different kinds don't.
+// expect-error: No function called '<' found that matches the arguments 'Int, String'
+print(1 < 1.5, "a" < "b", false < true, [1, 2] < [1, 3], (1, "b") < (1, "c"));
+print(1 < "a");

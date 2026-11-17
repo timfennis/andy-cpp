@@ -1,0 +1,11 @@
+// `zip` of two lists gives pairs of their elements, and `zip` of three lists
+// gives triples.
+// expect-output: a
+// expect-output: 9
+// expect-output: 12
+let (number, letter) = zip([1, 2], ["a", "b"])[0];
+let text: String = letter;
+print(text);
+for (a, b, c) in zip([1, 2], [3, 4], [5, 6]) {
+    print(a + b + c);
+}

@@ -1,0 +1,2 @@
+// expect-error: cannot unpack more than 2 values into 2 variables
+let a, b = repeat(1);

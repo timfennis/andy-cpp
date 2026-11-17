@@ -1,0 +1,5 @@
+// What `flat_map` gives is what the tuple its callback returns holds,
+// once `x` is known.
+// expect-output: [2,2]
+fn dup(x) => [0].flat_map(fn(_) => (x, x));
+print(dup(1).map(fn(v: Int) => v + 1));

@@ -1,0 +1,4 @@
+// `flat_map` iterates what its callback returns, which is `xs`.
+// expect-error: Bool is not iterable
+fn flatten(xs) => [0].flat_map(fn(_) => xs);
+flatten(true);

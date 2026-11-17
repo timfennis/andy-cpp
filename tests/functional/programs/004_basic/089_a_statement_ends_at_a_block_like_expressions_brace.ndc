@@ -1,0 +1,9 @@
+// A statement that starts with an `if`, a loop or a block ends at its closing
+// brace, so the comprehension on the next line is a statement of its own, not
+// an index into the `if`'s value.
+// expect-output: [0,1,2]
+let xs = [];
+if 1 == 1 { }
+[x for x in 0..3]
+xs = [x for x in 0..3];
+print(xs);

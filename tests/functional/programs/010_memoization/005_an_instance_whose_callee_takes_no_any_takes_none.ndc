@@ -1,0 +1,10 @@
+// `outer` doesn't call anything with `v` itself, but its instance for a
+// `List<Int>` calls the instance of `has` that doesn't take an `Any`.
+// expect-error: No function called 'contains' found that matches the arguments 'List<Int>, Any'
+fn has(xs, v) { xs.contains(v) }
+pure fn outer(xs, v) { has(xs, v) }
+let anything: List<Any> = [];
+let numbers: List<Int> = [];
+let a: Any = "s";
+print(outer(anything, a));
+print(outer(numbers, a));

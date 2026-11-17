@@ -1,0 +1,6 @@
+// A generic function's value in another generic function's body is the
+// instance for the types each instance of that function gives it.
+// expect-output: [2,3] [1.5]
+fn inc(x) => x + 1
+fn incs(xs) => xs.map(inc)
+print(incs([1, 2]), incs([0.5]));

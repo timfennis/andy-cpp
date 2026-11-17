@@ -1,0 +1,5 @@
+// The `0` takes its type first, and then the call asks for the branches as
+// an `Any`.
+// expect-output: ok
+fn f(x: Any, y: Int) => "ok";
+print(f(if true { 1 } else { "a" }, 0));

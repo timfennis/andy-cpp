@@ -27,6 +27,14 @@ print(x);  // 2
 
 `false and ...` stops at `false`, and `true or ...` stops at `true`.
 
+Both sides have to be Bools. A number, a list or an `Option` isn't true or false by itself, so using one there is an error, just like in the condition of an `if` or a `while`:
+
+```ndc,fails
+let count = 3;
+if count { print("some"); }
+// error[analysis]: mismatched types: found Int but expected Bool
+```
+
 ## Precedence
 
 `and` binds tighter than `or`.

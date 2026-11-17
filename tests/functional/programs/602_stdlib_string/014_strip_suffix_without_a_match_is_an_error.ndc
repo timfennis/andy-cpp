@@ -1,0 +1,4 @@
+// `strip_suffix?` returns `None` when the suffix doesn't match; `strip_suffix`
+// reports it.
+// expect-error: doesn't end with
+"hello".strip_suffix("x");

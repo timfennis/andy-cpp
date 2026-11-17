@@ -1,2 +1,3 @@
-let list = ["foobar", 123];
-assert_eq(list, ["foobar", 123]);
+let list: List<Any> = ["foobar", 123];
+assert_eq(list[0], "foobar");
+assert_eq(list[1], 123);

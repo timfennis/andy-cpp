@@ -1,0 +1,4 @@
+// `split_once?` returns `None` when the pattern doesn't occur; `split_once`
+// reports it.
+// expect-error: doesn't contain
+"keyvalue".split_once("=");

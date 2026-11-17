@@ -1,0 +1,4 @@
+// expect-error: Bool is not iterable
+for x in true {
+    print(x);
+}

@@ -1,0 +1,4 @@
+// expect-output: [1,2,"three"]
+let xs: List<Any> = [1, 2];
+xs.push("three");
+print(xs);

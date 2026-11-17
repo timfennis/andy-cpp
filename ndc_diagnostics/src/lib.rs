@@ -86,13 +86,16 @@ fn into_diagnostics(err: InterpreterError) -> Vec<Diagnostic<SourceId>> {
             .iter()
             .map(|cause| {
                 let span = cause.span();
+                let mut labels = vec![
+                    Label::primary(span.source_id(), span.range()).with_message("related to this"),
+                ];
+                labels.extend(cause.notes().iter().map(|(span, note)| {
+                    Label::secondary(span.source_id(), span.range()).with_message(note)
+                }));
                 let mut d = Diagnostic::error()
                     .with_code("analysis")
                     .with_message(cause.to_string())
-                    .with_labels(vec![
-                        Label::primary(span.source_id(), span.range())
-                            .with_message("related to this"),
-                    ]);
+                    .with_labels(labels);
                 if let Some(help) = cause.help_text() {
                     d = d.with_notes(vec![help.to_owned()]);
                 }

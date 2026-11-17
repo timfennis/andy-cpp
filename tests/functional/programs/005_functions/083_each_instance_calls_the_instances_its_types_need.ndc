@@ -1,0 +1,10 @@
+// A generic function's body is compiled for each type it's called with, and
+// the generic functions it calls are the ones for the types they get there:
+// `perlin(0.5)` calls `fade` for Floats.
+// expect-output: 0.25 1 0.25
+fn fade(t) => t * t;
+fn perlin(x) {
+    let xf = x - int(x);
+    fade(xf)
+}
+print(perlin(1.5), fade(1), fade(0.5));

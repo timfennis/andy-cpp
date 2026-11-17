@@ -1,0 +1,10 @@
+// A generic function's value whose type says it takes `Any` is its instance
+// for `Any`, as a call with an `Any` gets: its calls take the overloads that
+// take `Any`.
+// expect-output: 2 2
+fn pick(x: Int) => 1;
+fn pick(x: Any) => 2;
+fn wrap(x) => pick(x);
+let f: Fn(Any) -> Int = wrap;
+let a: Any = 5;
+print(f(a), wrap(a));

@@ -1,0 +1,6 @@
+// `++=` appends in place, so the empty list takes the type of what it
+// appends, and a later write must fit it.
+// expect-error: mismatched types: found String but expected Int
+let xs = [];
+xs ++= [1, 2];
+xs[0] = "a";

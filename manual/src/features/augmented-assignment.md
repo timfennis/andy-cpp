@@ -20,9 +20,7 @@ values[0] += 10;
 print(values);  // [11,2,3]
 ```
 
-This works even when reading the location produces a new value rather than a
-reference, such as a character of a string or a slice of a list. The updated
-value is always stored back into the container:
+This works for a character of a string and for a slice of a list too:
 
 ```ndc
 let text = "ab";
@@ -34,71 +32,21 @@ items[0..1] ++= [3];
 print(items);  // [1,3,2]
 ```
 
-The target, index, and right-hand side are each evaluated exactly once, in
-source order. The augmented assignment expression itself evaluates to `()`.
+## Types
 
-## Type checking
-
-An augmented assignment with an in-place operator such as `++=` never changes
-the type of its target. If the right-hand side would force a type change the
-program is rejected:
+`a op= b` is checked like `a = a op b`: the operator has to take both values, and its result has to fit the type of `a`:
 
 ```ndc,fails
 let values = [1];
-values ++= ["two"]; // error: mismatched types: found List<String> but expected List<Int>
+values ++= ["two"]; // error: No function called '++' found that matches the arguments 'List<Int>, List<String>'
 ```
 
-The right-hand side has to *provably* fit. A wider element type is not enough,
-because the operator copies the values across without checking them:
-
-```ndc,fails
-let values: List<Int> = [1];
-let rhs: List<Number> = [0.5n];
-values ++= rhs; // error: mismatched types: found List<Number> but expected List<Int>
-```
-
-The same goes for an operand whose type is unknown. `Any` says nothing about
-what the value holds, and no later step re-checks it, so it is rejected too:
-
-```ndc,fails
-fn opaque(x) => x;
-let values = [1];
-values ++= opaque([2, 3]); // error: mismatched types: found Any but expected List<Int>
-```
-
-[Cast](casts.md) the operand to say what it holds. The cast checks the value, so
-the assignment gets its guarantee from the cast site:
-
-```ndc
-fn opaque(x) => x;
-let values = [1];
-values ++= opaque([2, 3]) as List<Int>;
-print(values);  // [1,2,3]
-```
-
-A cast that does not hold fails there rather than corrupting the target:
-
-```ndc,fails
-fn opaque(x) => x;
-let values = [1];
-values ++= opaque([0.5]) as List<Int>; // error: cannot cast List<Float> to List<Int>
-```
-
-Annotate the target with `Any` to opt into heterogeneous contents:
+Annotate the target with `Any` to allow mixed contents:
 
 ```ndc
 let mixed: List<Any> = [1];
 mixed ++= ["two"];
 print(mixed);  // [1,"two"]
-```
-
-Operators without an in-place implementation behave like `target = target op value`
-and may widen the inferred type of the target, just like a regular assignment:
-
-```ndc
-let numbers = [1];
-numbers[0] += 0.5; // fine: the element type widens from Int to Any
-print(numbers);     // [1.5]
 ```
 
 ## Optimization
@@ -121,7 +69,7 @@ print(x); // 8
 One common use case is tracking the highest or lowest value in a loop:
 
 ```ndc
-fn g(x) => (x - 40) ^ 2;
+fn g(x) => (x - 40.0) ^ 2;
 let lowest, highest = Inf, -Inf;
 
 for x in 1..100 {
@@ -129,5 +77,5 @@ for x in 1..100 {
   highest max= g(x);
 }
 
-print(lowest, highest);  // 0 3481
+print(lowest, highest);  // 0.0 3481.0
 ```

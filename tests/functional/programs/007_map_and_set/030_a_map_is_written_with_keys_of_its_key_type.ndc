@@ -1,0 +1,5 @@
+// The first write settles the map's key type, and later writes must use it.
+// expect-error: No function called '[]=' found that matches the arguments 'Map<Int, Int>, String, Int'
+let m = %{};
+m[1] = 2;
+m["a"] = 3;

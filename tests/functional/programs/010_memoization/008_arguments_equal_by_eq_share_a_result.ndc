@@ -1,0 +1,7 @@
+// A `pure fn` promises equal results for arguments `==` says are equal, and
+// gives calls with such arguments one result: `0.0 == -0.0`, and a map's
+// default isn't part of what `==` compares.
+// expect-output: Inf Inf 1 1
+pure fn inverse(x: Float) => 1.0 / x;
+pure fn missing(m: Map<Int, Int>) => m[0];
+print(inverse(0.0), inverse(-0.0), missing(%{: 1}), missing(%{: 2}));

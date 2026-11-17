@@ -34,32 +34,14 @@ print(Person("Ada", 36, ["London"]));  // Person {name: "Ada", age: 36, location
 print(Marker());                       // Marker {}
 ```
 
-Declare a struct on its own line, like a `let` declaration — at the top level of
-a program, inside a block, or in the REPL. A struct cannot be declared in the
-middle of another expression, so `let s = struct P { x: Int }` is an error.
-
-Struct names are lexically scoped, like variables. Declaring two structs with
-the same name in the same scope is an error, but the name can be reused in
-scopes that never coexist, and a declaration in an inner scope shadows a
-same-named struct from an outer scope.
+Struct names are scoped like variables: a struct declared inside a function or
+block can only be used there. Declaring two structs with the same name in the
+same scope is an error:
 
 ```ndc,fails
 struct Point { x: Int }
 struct Point { y: Int } // ERROR: Illegal redefinition of struct 'Point'
 ```
-
-A struct declared inside a function or block goes out of scope with it: the
-type name, the constructor, and the field accessors are all unavailable
-outside.
-
-A struct cannot take the name of a built-in type:
-
-```ndc,fails
-struct Int { x: Float } // ERROR: Struct 'Int' is not allowed to shadow the built-in type 'Int'
-```
-
-A struct can only be used after its declaration, and the name becomes usable as a
-[type annotation](../types.md) in the scopes where the struct is visible.
 
 ## Constructing instances
 
@@ -73,13 +55,8 @@ let p = Point(1, 2);
 print(p);  // Point {x: 1, y: 2}
 ```
 
-Constructor calls are checked before the program runs: passing the wrong number of
-arguments or incompatible types is a compile-time error.
-
-```ndc,fails
-struct Point { x: Int, y: Int }
-Point(1);      // ERROR: no 'Point' matches the arguments 'Int'
-```
+Passing the wrong number of arguments, or arguments of the wrong type, is an
+error before the program runs:
 
 ```ndc,fails
 struct Point { x: Int, y: Int }
@@ -88,10 +65,9 @@ Point("x", 2); // ERROR: no 'Point' matches the arguments 'String, Int'
 
 ## Field access
 
-`p.x` reads the field `x` from `p`. This is not special syntax for structs:
-declaring a struct binds an ordinary getter function per field, and `p.x` is
-exactly the call `x(p)`. [Method call syntax](../../features/method-call-syntax.md)
-works too, so `p.x()` is the same call again.
+`p.x` reads the field `x` from `p`. Declaring a struct also declares a function
+for each field, and `p.x` is the [method call](../../features/method-call-syntax.md)
+`x(p)`, so these are all the same:
 
 ```ndc
 struct Point { x: Int, y: Int }
@@ -102,19 +78,7 @@ print(x(p));   // 1
 print(p.x());  // 1
 ```
 
-Like a method call, `p.x` only looks among functions, so a variable named `x`
-doesn't get in its way, as described in
-[How a call finds its function](function.md#how-a-call-finds-its-function):
-
-```ndc
-struct Point { x: Int, y: Int }
-fn shift(p, x) { p.x + x }   // p.x is the field, x the parameter
-
-print(shift(Point(1, 2), 10));  // 11
-```
-
-Because getters are ordinary function values you can pass them to higher-order
-functions:
+Because these are ordinary functions, you can pass them to other functions:
 
 ```ndc
 struct Point { x: Int, y: Int }
@@ -128,8 +92,7 @@ struct Wrap { v: Int }
 print([1, 2, 3].map(Wrap));          // [Wrap {v: 1},Wrap {v: 2},Wrap {v: 3}]
 ```
 
-Accessors are resolved by overloading, so two structs can share a field name
-without interfering:
+Two structs can have a field with the same name:
 
 ```ndc
 struct Foo { size: Int }
@@ -139,19 +102,19 @@ print(Foo(1).size);   // 1
 print(Bar(10).size);  // 10
 ```
 
-Because `s.f()` is method-call syntax, calling a *function stored in a field*
-needs parentheses around the member access: `(s.f)()` first evaluates `s.f`
-(the getter) and then calls its result.
+To call a function stored in a field, put parentheses around the field:
+`(s.f)()` reads the field and calls what it holds, while `s.f()` is the method
+call `f(s)`.
 
 ```ndc
-struct Callback { f: Any }
+struct Callback { f: Fn(Int) -> Int }
 let cb = Callback(fn (a) => a * 2);
 
 print((cb.f)(21));  // 42
 ```
 
 ```ndc,fails
-struct Callback { f: Any }
+struct Callback { f: Fn(Int) -> Int }
 let cb = Callback(fn (a) => a * 2);
 
 cb.f(21);    // ERROR: this is method-call syntax for `f(cb, 21)`
@@ -168,8 +131,7 @@ let p = Point(1);
 p.x = "ten";   // ERROR: mismatched types: found String but expected Int
 ```
 
-[Augmented assignment](../../features/augmented-assignment.md) works on fields
-and evaluates the receiver expression exactly once:
+[Augmented assignment](../../features/augmented-assignment.md) works on fields too:
 
 ```ndc
 struct Counter { hits: Int }
@@ -177,16 +139,6 @@ let c = Counter(1);
 
 c.hits += 4;
 print(c.hits);  // 5
-```
-
-A field is a typed location, so an augmented assignment whose result would not
-fit the field type is rejected:
-
-```ndc,fails
-struct Counter { hits: Int }
-let c = Counter(1);
-
-c.hits += 0.5; // ERROR: mismatched types: found Float but expected Int
 ```
 
 ## Reference semantics
@@ -221,8 +173,8 @@ print(c.x);  // 1
 
 ## Equality and hashing
 
-Typing is nominal: instances of the same struct compare field by field, and
-instances of different structs are never equal, even when the fields match.
+Instances of the same struct are equal when their fields are equal. Instances
+of different structs are never equal, even when their fields match.
 
 ```ndc
 struct Foo { v: Int }
@@ -260,6 +212,5 @@ json_encode(Point(1, 2));                // ERROR: cannot convert a struct to JS
 - Constructors are positional only; there is no named-field or default-value
   syntax.
 - Structs do not take generic parameters: `Point<Int>` is an error.
-- A struct cannot reference itself in its own field types.
-  `struct Node { next: Option<Node> }` fails with `unknown type`, because the
-  name is only registered after its field annotations are resolved.
+- A struct can't refer to itself in its own fields, so
+  `struct Node { next: Option<Node> }` is an error.

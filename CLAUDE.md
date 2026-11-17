@@ -63,6 +63,8 @@ perf report -i /tmp/out.perf --stdio --no-children --percent-limit=1
 
 User-facing language documentation lives in `manual/src/`. It is an mdBook project. The entry point is `manual/src/SUMMARY.md`.
 
+The manual introduces people to the language and teaches the most common ways to use it, with examples and plain English. It does not document every edge case of the compiler or analyser: leave out corner cases, internal rules and exact error conditions that a newcomer won't run into. Edge cases belong in tests, and in the error messages and help texts that explain them when someone does run into one.
+
 When making changes that affect language behaviour or runtime semantics, update the relevant manual page.
 
 The published manual highlights ` ```ndc ` code blocks and gives them a Run button, running them on the interpreter compiled to WebAssembly (`manual/theme/ndc.js`). Mark a block that can't run on its own, such as a fragment that uses names from an earlier block, as ` ```ndc,norun `. Write examples so running them shows the result: `print(-7 / 2);  // -3` rather than `assert_eq(-7 / 2, -3);`, with the exact printed output in the comment. A block that demonstrates a runtime error ends with it, as nothing after the first error runs, and is marked ` ```ndc,fails `. `tests/functional/tests/manual.rs` runs every block that isn't `norun` and checks all of this: blocks fail exactly when marked `fails`, the others show something, and print comments match the output (`cargo test -p functional_tests --test manual`). The playground page and the code it shares with the manual live in `manual/src/playground/`.
@@ -117,7 +119,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 
 **Function overloading** — Functions are matched by name and arity. The semantic analyser produces `Binding::Resolved` (exact compile-time match) or `Binding::Dynamic(Vec<ResolvedVar>)` (runtime dispatch among candidates). Binary operators like `+` are parsed as `Expression::Call`.
 
-**Semantic analyser** — `ndc_analyser/src/analyser/` infers `StaticType` and resolves function bindings: `mod.rs` holds the expression match, with calls, assignments and declarations in their own modules. `StaticType::Any` is the fallback when inference fails.
+**Semantic analyser** — `ndc_analyser/src/analyser/` infers `StaticType` and resolves function bindings: `mod.rs` holds the expression match, with calls, assignments and declarations in their own modules. `StaticType::Unknown` is what nothing settles the type of; only a type parameter or `Any` takes it.
 
 **`FunctionRegistry`** — Lives in `ndc_core`. Holds all registered built-in functions as `Rc<NativeFunction>`. Replaces the old `Environment`-based function registry. At runtime, natives are passed to the VM as global slots.
 
@@ -135,6 +137,7 @@ Test crates live under `tests/`:
   // expect-error: divide   ← assert error message contains this substring
   ```
   It also generates one test per ` ```ndc ` block in the manual (`manual_<page>_<line>`), run by `tests/manual.rs`; see [Manual](#manual).
+  `tests/stdlib_signatures.rs` calls every native with sample values of the types its signature takes and fails on a runtime error about types, as the type checker trusts the signatures: a native whose signature promises more than it handles fails it.
 - `tests/compiler/` (`compiler_tests`) — validates the bytecode compiler by asserting exact `OpCode` sequences. Use when adding new VM instructions.
 - `ndc_bin/tests/repl.rs` — feeds lines to the built `ndc` binary's REPL (Unix only) and checks what it prints, e.g. that a failed line leaves no trace.
 - `tests/proptest/` (`proptest_tests`) — property-based panic fuzzer over random token streams. The fresh-fuzz test is `#[ignore]`d; regression replay (from `panic.regressions`) runs by default. See [CONTRIBUTING.md](CONTRIBUTING.md) for run commands.

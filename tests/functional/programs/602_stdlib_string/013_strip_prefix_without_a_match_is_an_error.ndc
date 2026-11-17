@@ -1,0 +1,4 @@
+// `strip_prefix?` returns `None` when the prefix doesn't match; `strip_prefix`
+// reports it.
+// expect-error: doesn't start with
+"hello".strip_prefix("x");

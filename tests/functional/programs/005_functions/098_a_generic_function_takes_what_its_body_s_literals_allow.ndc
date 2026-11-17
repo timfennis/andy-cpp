@@ -1,0 +1,8 @@
+// The literals in a generic function's body are Ints, and an Int works
+// with a Float in `+`, `-` and `<`, so these take Floats too. `fact` with a
+// `1.0` returns what it's given multiplied.
+// expect-output: 3.5 3 55.0 120.0 120.0
+fn inc(x) => x + 1;
+fn fib(n) => if n < 2 { n } else { fib(n - 1) + fib(n - 2) };
+fn fact(n) => if n < 2 { 1.0 } else { n * fact(n - 1) };
+print(inc(2.5), inc(2), fib(10.0), fact(5.0), fact(5));

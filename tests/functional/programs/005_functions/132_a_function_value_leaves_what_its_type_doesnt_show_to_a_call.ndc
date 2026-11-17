@@ -1,0 +1,9 @@
+// `f`'s type doesn't show what its `[]` holds, so each call of `f`, or of
+// `g`, says it. Here none does, so it's `Unknown`, which neither `pick`
+// takes.
+// expect-error: No function called 'pick' found that matches the arguments 'List<Unknown>, Int'
+fn pick(xs: List<Int>, x: Int) => 1;
+fn pick(xs: List<Any>, x: Any) => 2;
+fn f(x) => pick([], x);
+let g: Fn(Int) -> Int = f;
+print(g(3), f(3));

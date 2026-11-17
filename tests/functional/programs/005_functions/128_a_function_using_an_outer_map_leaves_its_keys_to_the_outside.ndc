@@ -1,0 +1,27 @@
+// `pairs`' keys are decided once unpacking its Strings is, after `make_seq`
+// is declared: what `make_seq` passes it is left to the code around it, not
+// made an `Any` when `make_seq` is generalized.
+// expect-output: [["<"]]
+let pairs = %{ (a, b): c for a, b, c in ["A0<", "0A>"] };
+let keypad_graph = %{ "A": list("0"), "0": list("A") };
+fn solve_next(from, to, graph) {
+    let q = Deque();
+    q.push_back((from, [from]));
+    let options = [];
+    while q.len > 0 {
+        let cur, path = q.pop_front;
+        if cur == to {
+            options.push(path);
+        } else {
+            for nb in graph[cur], if nb not in path {
+                q.push_back((nb, path ++ [nb]));
+            }
+        }
+    }
+    options
+}
+fn make_seq(from, to, graph) {
+    let best = solve_next(from, to, graph);
+    best.map(fn(route) => route.pairwise(fn(a, b) => pairs[a, b]))
+}
+print(make_seq("A", "0", keypad_graph));

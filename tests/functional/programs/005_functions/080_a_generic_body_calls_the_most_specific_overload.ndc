@@ -1,0 +1,8 @@
+// A generic function's body is compiled once, so a call on its parameter
+// picks the overload as the program runs: the most specific one that takes
+// the argument, `show(Int)` for an Int.
+// expect-output: int other
+fn show(x: Int) { "int" }
+fn show(x) { "other" }
+fn via(v) => show(v);
+print(via(1), via("a"));

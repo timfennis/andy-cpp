@@ -1,0 +1,5 @@
+// `apply` passes its function an Int, so a function taking a String can't
+// be given to it.
+// expect-error: No function called 'apply' found that matches the arguments 'Fn(String) -> Int, Int'
+fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
+apply(fn(s: String) => 1, 4);

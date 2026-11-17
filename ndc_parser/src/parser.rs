@@ -308,6 +308,17 @@ impl Parser {
             self.let_statement()?
         } else if self.match_token(&[Token::Struct]).is_some() {
             self.struct_declaration()?
+        } else if self
+            .match_token(&[Token::If, Token::While, Token::For, Token::LeftCurlyBracket])
+            .is_some()
+        {
+            // A statement that starts with an `if`, a loop or a block ends
+            // at its closing brace, as in Rust: what follows starts the next
+            // statement, so `for x in xs { ... }` and then `[x]` on the next
+            // line is a list, not an index into the loop's value. Within an
+            // expression they still take an index or a call, as in
+            // `print(if c { [1] } else { [2] }[0])`.
+            self.primary()?
         } else {
             self.expression()?
         };
@@ -650,12 +661,13 @@ impl Parser {
 
     fn cast(&mut self) -> Result<ExpressionLocation, Error> {
         let mut expression = self.tight_unary()?;
-        while self.consume_token_if(&[Token::As]).is_some() {
+        while let Some(operator) = self.consume_token_if(&[Token::As, Token::AsOptional]) {
             let annotation = self.cast_type_annotation()?;
             let span = expression.span.merge(annotation.span());
             expression = Expression::Cast {
                 value: Box::new(expression),
                 annotation,
+                optional: operator.token == Token::AsOptional,
             }
             .to_location(span);
         }
@@ -1428,6 +1440,11 @@ impl Parser {
         };
 
         match token {
+            Token::Identifier(name)
+                if name == "Fn" && self.peek_next_token() == Some(&Token::LeftParentheses) =>
+            {
+                self.function_type()
+            }
             Token::Identifier(_) => self.named_or_generic_type(),
             Token::LeftParentheses => self.tuple_type(),
             _ => Err(Error::with_help(
@@ -1615,6 +1632,29 @@ impl Parser {
         };
 
         Ok(greater_span)
+    }
+
+    /// Parses `Fn(A, B) -> C`, where `-> C` is optional.
+    fn function_type(&mut self) -> Result<TypeExpr, Error> {
+        let start = self.require_current_token()?.span;
+        let (parameters, parameters_span) = self.delimited_comma_separated(
+            &Token::LeftParentheses,
+            &Token::RightParentheses,
+            Self::type_annotation,
+            true,
+        )?;
+        let (return_type, span) = if self.consume_token_if(&[Token::RightArrow]).is_some() {
+            let return_type = self.type_annotation()?;
+            let span = start.merge(return_type.span());
+            (Some(Box::new(return_type)), span)
+        } else {
+            (None, start.merge(parameters_span))
+        };
+        Ok(TypeExpr::Function {
+            parameters,
+            return_type,
+            span,
+        })
     }
 
     pub fn tuple_type(&mut self) -> Result<TypeExpr, Error> {

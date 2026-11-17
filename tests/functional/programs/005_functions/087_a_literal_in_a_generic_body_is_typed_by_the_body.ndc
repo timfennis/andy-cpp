@@ -1,0 +1,7 @@
+// Nothing in `fact`'s body needs the `1` to be anything else, so it's an
+// Int, which `fact` returns. Called with a Float, `n * fact(n - 1)` is a
+// Float, and the two branches can't both be what `fact` returns: write
+// `1.0` for a `fact` of Floats.
+// expect-error: mismatched types: found Float but expected Int
+fn fact(n) => if n < 2 { 1 } else { n * fact(n - 1) };
+print(fact(5.0));

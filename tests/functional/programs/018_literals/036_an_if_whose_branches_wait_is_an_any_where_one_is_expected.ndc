@@ -1,0 +1,16 @@
+// An `if` whose branches aren't known yet, as a call's result or a
+// parameter isn't, may have branches that share no type where an `Any` is
+// expected of it, as one whose branches are known may. Branches that share
+// a type keep it: passing `y` to `g` doesn't make it an `Any`.
+// expect-output: s s [1] 2
+fn g(v: Any) => v;
+fn f(x) => g(if false { x } else { [1] });
+fn h(x) {
+    let y = if true { x } else { 1 };
+    g(y);
+    let n: Int = y;
+    n
+}
+let a: Any = if true { "s" } else { -1 };
+let b: Any = if true { "s" } else { abs(1) };
+print(a, b, f(1), h(2));

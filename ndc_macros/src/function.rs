@@ -8,12 +8,14 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::fmt::Write;
 
+/// A native's body, once, and its registration under each of its names and
+/// signatures.
 pub struct WrappedFunction {
     pub function_declaration: TokenStream,
-    pub function_registration: TokenStream,
+    pub function_registrations: Vec<TokenStream>,
 }
 
-pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>> {
+pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<WrappedFunction> {
     let original_identifier = function.sig.ident.clone();
 
     let mut function_names = vec![proc_macro2::Literal::string(
@@ -21,6 +23,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
     )];
 
     let mut return_type = None;
+    let mut signatures: Vec<syn::LitStr> = Vec::new();
 
     let mut documentation_buffer = String::new();
     for attr in &function.attrs {
@@ -37,6 +40,11 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
                     let value: syn::Type = meta.value()?.parse()?;
                     return_type = Some(map_type(&value)?);
                     Ok(())
+                } else if meta.path.is_ident("signature") {
+                    // #[function(signature = "<T>(List<T>, T) -> Option<T>")], once
+                    // for each overload the one body serves.
+                    signatures.push(meta.value()?.parse()?);
+                    Ok(())
                 } else {
                     Err(meta.error("unsupported property on function"))
                 }
@@ -51,6 +59,16 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
         }
     }
 
+    for signature in &signatures {
+        if return_type.is_some() {
+            return Err(syn::Error::new_spanned(
+                signature,
+                "a signature already has a return type: drop `return_type`",
+            ));
+        }
+        check_signature(signature, function.sig.inputs.len())?;
+    }
+
     let return_type = match return_type {
         Some(t) => t,
         None => map_return_type(&function.sig.output)?,
@@ -63,20 +81,41 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<Vec<WrappedFunction>
         ));
     }
 
-    function_names
+    let inner_ident = format_ident!("{original_identifier}_inner");
+    let inner = {
+        let mut inner = function.clone();
+        inner.attrs.clear();
+        inner.vis = syn::Visibility::Public(syn::token::Pub::default());
+        inner.sig.ident = inner_ident.clone();
+        inner
+    };
+
+    let signatures: Vec<Option<&syn::LitStr>> = if signatures.is_empty() {
+        vec![None]
+    } else {
+        signatures.iter().map(Some).collect()
+    };
+    let function_registrations = function_names
         .iter()
-        .enumerate()
-        .map(|(i, function_name)| {
-            let ident = format_ident!("{original_identifier}_{i}");
-            wrap_single(
+        .flat_map(|name| signatures.iter().map(move |signature| (name, *signature)))
+        .map(|(function_name, signature)| {
+            register(
                 function,
-                &ident,
+                &inner_ident,
                 function_name,
                 &return_type,
+                signature,
                 &documentation_buffer,
             )
         })
-        .collect()
+        .collect::<syn::Result<_>>()?;
+    Ok(WrappedFunction {
+        function_declaration: quote! {
+            #[inline]
+            #inner
+        },
+        function_registrations,
+    })
 }
 
 fn map_return_type(output: &syn::ReturnType) -> syn::Result<TokenStream> {
@@ -264,13 +303,7 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
             )),
         },
         "AdvancedNumber" => Ok(quote! { ndc_core::StaticType::Number }),
-        "MapValue" => Ok(quote! {
-            ndc_core::StaticType::Map {
-                key: Box::new(ndc_core::StaticType::Any),
-                value: Box::new(ndc_core::StaticType::Any),
-            }
-        }),
-        "Value" | "EvaluationResult" | "SeqValue" => Ok(quote! { ndc_core::StaticType::Any }),
+        "Value" | "EvaluationResult" => Ok(quote! { ndc_core::StaticType::Any }),
         unmatched => Err(syn::Error::new_spanned(
             segment,
             format!("cannot map type '{unmatched}' to StaticType"),
@@ -278,28 +311,50 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
     }
 }
 
-fn wrap_single(
+/// Checks that a signature such as `<T>(List<T>, T)` parses, and that it
+/// declares as many parameters as the Rust function takes.
+fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<()> {
+    let parsed = ndc_core::StaticType::signature(&signature.value())
+        .map_err(|error| syn::Error::new_spanned(signature, error))?;
+    let ndc_core::StaticType::Function {
+        parameters: Some(parameters),
+        ..
+    } = parsed
+    else {
+        return Err(syn::Error::new_spanned(
+            signature,
+            "a native function takes a fixed number of arguments, so `(*)` doesn't fit",
+        ));
+    };
+    if parameters.len() == expected {
+        Ok(())
+    } else {
+        Err(syn::Error::new_spanned(
+            signature,
+            format!(
+                "the signature declares {} parameters but the function takes {expected}",
+                parameters.len()
+            ),
+        ))
+    }
+}
+
+/// Registers the native `inner_ident` as `register_as_function_name`.
+fn register(
     function: &syn::ItemFn,
-    identifier: &syn::Ident,
+    inner_ident: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     return_type: &TokenStream,
+    signature: Option<&syn::LitStr>,
     docs: &str,
-) -> syn::Result<WrappedFunction> {
-    let inner_ident = format_ident!("{}_inner", identifier);
-    let inner = {
-        let mut inner = function.clone();
-        inner.attrs.clear();
-        inner.vis = syn::Visibility::Public(syn::token::Pub::default());
-        inner.sig.ident = inner_ident.clone();
-        inner
-    };
-
-    let vm = try_generate_vm_native(
+) -> syn::Result<TokenStream> {
+    let native_let = try_generate_vm_native(
         function,
-        &inner_ident,
+        inner_ident,
         register_as_function_name,
         docs,
         return_type,
+        signature,
     )
     .ok_or_else(|| {
         syn::Error::new_spanned(
@@ -307,56 +362,28 @@ fn wrap_single(
             "unsupported parameter or return type for VM native",
         )
     })?;
-
-    let function_declaration = quote! {
-        #[inline]
-        #inner
-    };
-
-    let VmNativeTokens {
-        native_let,
-        param_types: _,
-        param_names: _,
-    } = vm;
-
-    let function_registration = quote! {
+    Ok(quote! {
         #native_let
         env.declare_global_fn(native);
-    };
-    Ok(WrappedFunction {
-        function_declaration,
-        function_registration,
     })
 }
 
-/// Tokens emitted by `try_generate_vm_native` when `vm_native` is possible.
-#[allow(dead_code)]
-struct VmNativeTokens {
-    /// `let native: Rc<NativeFunction> = Rc::new(NativeFunction { ... });`
-    native_let: TokenStream,
-    /// `StaticType` expressions for each parameter
-    param_types: Vec<TokenStream>,
-    /// Parameter name strings
-    param_names: Vec<TokenStream>,
-}
-
-/// Attempt to generate `vm_native` tokens for a function.
-///
-/// Returns `None` when any parameter or the return type cannot be expressed in
-/// VM-native terms.
+/// `let native: Rc<NativeFunction> = …;` for a function, or `None` when a
+/// parameter or the return type can't be expressed in VM-native terms.
 fn try_generate_vm_native(
     function: &syn::ItemFn,
     inner_ident: &syn::Ident,
     fn_name: &proc_macro2::Literal,
     docs: &str,
     return_type_override: &TokenStream,
-) -> Option<VmNativeTokens> {
-    use crate::vm_convert::{try_vm_input, try_vm_return};
+    signature: Option<&syn::LitStr>,
+) -> Option<TokenStream> {
+    use crate::vm_convert::{Borrow, try_vm_input, try_vm_return};
 
     let mut extracts = Vec::new();
+    let mut borrows = Vec::new();
     let mut passes = Vec::new();
     let mut param_types = Vec::new();
-    let mut param_names = Vec::new();
     let mut has_vm_callable = false;
     let raw_args: Vec<_> = (0..function.sig.inputs.len())
         .map(|i| format_ident!("vm_raw{i}"))
@@ -372,24 +399,78 @@ fn try_generate_vm_native(
             has_vm_callable = true;
         }
         let conv = try_vm_input(ty, i)?;
-        extracts.push(conv.extract);
+        borrows.push(conv.borrow);
+        extracts.push((conv.borrow, conv.extract));
         passes.push(conv.pass);
         param_types.push(conv.static_type);
-        let name = match &*pat_ty.pat {
-            syn::Pat::Ident(ident) => ident.ident.to_string(),
-            _ => format!("arg{i}"),
-        };
-        param_names.push(quote! { #name });
     }
+
+    // Every argument that's only read is taken before any that's changed,
+    // and copied if it's one of them, so `m.remove(m)` reads a copy of `m`
+    // before it borrows `m` to remove from it. Two arguments the call
+    // changes can't be the same value: `xs.append(xs)` would have to move
+    // the elements of `xs` and keep them.
+    extracts.sort_by_key(|(borrow, _)| *borrow == Borrow::Write);
+    let changed = (0..borrows.len())
+        .filter(|&i| borrows[i] == Borrow::Write)
+        .collect::<Vec<_>>();
+    let same_value = |a: usize, b: usize| {
+        let (a, b) = (&raw_args[a], &raw_args[b]);
+        quote! {
+            matches!(
+                (#a, #b),
+                (ndc_vm::value::Value::Object(a), ndc_vm::value::Value::Object(b))
+                    if std::rc::Rc::ptr_eq(a, b)
+            )
+        }
+    };
+    let mut alias_checks = Vec::new();
+    for (i, borrow) in borrows.iter().enumerate() {
+        if *borrow != Borrow::Read {
+            continue;
+        }
+        let alias = format_ident!("vm_alias{i}");
+        let aliases = changed.iter().map(|&w| same_value(i, w));
+        alias_checks.push(quote! { let #alias = false #(|| #aliases)*; });
+    }
+    for (index, &first) in changed.iter().enumerate() {
+        for &second in &changed[index + 1..] {
+            let same = same_value(first, second);
+            let message =
+                format!("arg {second} is the same value as arg {first}, and the call changes both");
+            alias_checks.push(quote! {
+                if #same {
+                    return Err(ndc_vm::error::VmError::native(#message.to_string()));
+                }
+            });
+        }
+    }
+    let holds_a_borrow = extracts.iter().any(|(borrow, _)| *borrow != Borrow::None);
+    let extracts = extracts
+        .into_iter()
+        .map(|(_, extract)| extract)
+        .collect::<Vec<_>>();
 
     let (return_code, _) = try_vm_return(&function.sig.output)?;
     let return_static_type = return_type_override;
     let n = function.sig.inputs.len();
 
+    // A callback is the program's code, which may use what the native holds
+    // a borrow of, as a `sort_by` comparator may read the list it sorts:
+    // holding one while calling back would panic there.
+    if has_vm_callable && holds_a_borrow {
+        let message = format!(
+            "{}: a native that takes a callback can't borrow its other arguments; take them as `Value`s and copy what it needs",
+            function.sig.ident
+        );
+        return Some(quote! { compile_error!(#message); });
+    }
+
     let func_variant = if has_vm_callable {
         quote! {
             ndc_vm::value::NativeFunc::WithVm(Box::new(|args, _vm| match args {
                 [#(#raw_args),*] => {
+                    #(#alias_checks)*
                     #(#extracts)*
                     let result = #inner_ident(#(#passes),*);
                     #return_code
@@ -401,6 +482,7 @@ fn try_generate_vm_native(
         quote! {
             ndc_vm::value::NativeFunc::Simple(Box::new(|args| match args {
                 [#(#raw_args),*] => {
+                    #(#alias_checks)*
                     #(#extracts)*
                     let result = #inner_ident(#(#passes),*);
                     #return_code
@@ -415,22 +497,28 @@ fn try_generate_vm_native(
     } else {
         quote! { Some(String::from(#docs)) }
     };
-    let native_let = quote! {
+    // A signature replaces the types read off the Rust parameters.
+    let static_type = if let Some(signature) = signature {
+        quote! {
+            ndc_core::StaticType::signature(#signature).unwrap_or_else(|error| {
+                panic!("invalid signature of {}: {error}", #fn_name)
+            })
+        }
+    } else {
+        quote! {
+            ndc_core::StaticType::Function {
+                parameters: Some(vec![#(#param_types.clone()),*]),
+                return_type: Box::new(#return_static_type),
+            }
+        }
+    };
+    Some(quote! {
         let native: std::rc::Rc<ndc_vm::value::NativeFunction> =
             std::rc::Rc::new(ndc_vm::value::NativeFunction {
                 name: String::from(#fn_name),
                 documentation: #documentation_tokens,
-                static_type: ndc_core::StaticType::Function {
-                    parameters: Some(vec![#(#param_types.clone()),*]),
-                    return_type: Box::new(#return_static_type),
-                },
+                static_type: #static_type,
                 func: #func_variant,
             });
-    };
-
-    Some(VmNativeTokens {
-        native_let,
-        param_types,
-        param_names,
     })
 }

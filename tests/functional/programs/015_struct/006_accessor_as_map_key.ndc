@@ -19,15 +19,17 @@ assert(x != y);
 let by_ctor = %{Point: "the Point constructor"};
 assert_eq(by_ctor[Point], "the Point constructor");
 
-// A same-named field on another struct is a distinct getter.
+// A same-named field on another struct is a distinct getter. Once both
+// exist, `x` used as a value needs a type to say which one it is.
 let point_x = x;
 struct Other {
     x: Int,
 }
-let other_x = x;
+let other_x: Fn(Other) -> Int = x;
 
 assert(point_x != other_x);
-let both = %{point_x: "Point", other_x: "Other"};
+// The two getters have different types, so the keys are typed `Any`.
+let both: Map<Any, String> = %{point_x: "Point", other_x: "Other"};
 assert_eq(both.len(), 2);
 assert_eq(both[point_x], "Point");
 assert_eq(both[other_x], "Other");

@@ -4,10 +4,7 @@ In Andy C++ a String is a mutable list of characters. Characters don't have thei
 iterate over a string you get strings of length 1. Just like in Rust strings are guaranteed (and required) to be valid
 UTF-8. This means that you can't store arbitrary binary data in a String.
 
-Indexing into a String is done by UTF-8 codepoint (equivalent to Rust's `char`) rather than by byte offset.
-The first indexed read builds a character index in `O(n)` time. Subsequent reads use
-that cache: `O(1)` for ASCII strings and `O(log n)` in the worst case for Unicode strings.
-Mutating the string discards the cache, so the next indexed read rebuilds it.
+Indexing into a String counts characters (UTF-8 codepoints, like Rust's `char`) rather than bytes.
 
 ```ndc
 let string = "I ❤ Andy C++";
@@ -15,7 +12,7 @@ print(string[2]);  // ❤
 print(string[4]);  // A
 ```
 
-The advantage is that it's a bit easier to guess that `A` is the 4th character in the example above. The downside is that
+The advantage is that it's a bit easier to guess that `A` is at index 4 in the example above. The downside is that
 depending on which heart you're using there might be an invisible [Variation Selector](https://en.wikipedia.org/wiki/Variation_Selectors_(Unicode_block))
 after the heart which messes everything up. This specific behavior will probably change in the future.
 
@@ -38,19 +35,43 @@ print(string);  // raw string with r#"stop doing this"#
 ## Removing prefixes and suffixes
 
 `strip_prefix(string, prefix)` and `strip_suffix(string, suffix)` remove one matching
-prefix or suffix. `strip_circumfix(string, prefix, suffix)` removes both only when
-both match without overlapping. Each function returns a new string on success or
-`()` on mismatch, leaving the original string unchanged. Matches are exact and
-case-sensitive; empty patterns match without removing any text.
+prefix or suffix. `strip_circumfix(string, prefix, suffix)` removes both. Each
+function returns a new string, leaving the original string unchanged, and it's
+an error when the pattern doesn't match.
 
 ```ndc
-print("foobar".strip_prefix("foo"));             // bar
-print("foobar".strip_suffix("bar"));             // foo
-print("[hello]".strip_circumfix("[", "]"));      // hello
-print("foofoo".strip_prefix("foo"));             // foo
-print("hello".strip_prefix("x") == ());          // true
-print("aaa".strip_circumfix("aa", "aa") == ());  // true
-print("[]".strip_circumfix("[", "]") == "");     // true
+print("foobar".strip_prefix("foo"));         // bar
+print("foobar".strip_suffix("bar"));         // foo
+print("[hello]".strip_circumfix("[", "]"));  // hello
+print("foofoo".strip_prefix("foo"));         // foo
+print("[]".strip_circumfix("[", "]") == "");  // true
+```
+
+A mismatch is an error:
+
+```ndc,fails
+"hello".strip_prefix("x");  // error: "hello" doesn't start with "x"
+```
+
+The `?` variants return an `Option` instead of failing:
+
+```ndc
+print("foobar".strip_prefix?("foo"));         // Some("bar")
+print("hello".strip_prefix?("x"));            // None
+print("aaa".strip_circumfix?("aa", "aa"));    // None
+```
+
+## Splitting once
+
+`split_once(string, pattern)` splits a string at the first occurrence of `pattern` into
+the parts before and after it. It's an error when `pattern` doesn't occur, and
+`split_once?` returns `None` instead:
+
+```ndc
+let (key, value) = "port=80".split_once("=");
+print(key);                       // port
+print("a=b=c".split_once("="));   // ("a","b=c")
+print("abc".split_once?("="));    // None
 ```
 
 ## Operators

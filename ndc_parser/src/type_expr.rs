@@ -18,13 +18,22 @@ pub enum TypeExpr {
     },
     /// A tuple type: `(Int, String)`. The unit type `()` is the empty tuple.
     Tuple { elements: Vec<Self>, span: Span },
+    /// A function type: `Fn(Int, Int) -> Int`. Without `-> …` the function
+    /// returns `()`.
+    Function {
+        parameters: Vec<Self>,
+        return_type: Option<Box<Self>>,
+        span: Span,
+    },
 }
 
 impl TypeExpr {
     #[must_use]
     pub fn span(&self) -> Span {
         match self {
-            Self::Name { span, .. } | Self::Tuple { span, .. } => *span,
+            Self::Name { span, .. } | Self::Tuple { span, .. } | Self::Function { span, .. } => {
+                *span
+            }
         }
     }
 }
@@ -55,6 +64,19 @@ impl fmt::Display for TypeExpr {
                 write!(f, "(")?;
                 join(f, elements)?;
                 write!(f, ")")
+            }
+            Self::Function {
+                parameters,
+                return_type,
+                ..
+            } => {
+                write!(f, "Fn(")?;
+                join(f, parameters)?;
+                write!(f, ")")?;
+                match return_type {
+                    Some(return_type) => write!(f, " -> {return_type}"),
+                    None => Ok(()),
+                }
             }
         }
     }

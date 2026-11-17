@@ -1,0 +1,9 @@
+// A generic function's value is its instance for one set of types, and keeps
+// them through an `Any`: it can't be cast to take a String.
+// expect-error: cannot cast Fn(Int) -> Int to Fn(String) -> Int
+fn pick(x: Int) => 1;
+fn pick(x: Any) => 2;
+fn wrap(x) => pick(x);
+let a: Any = wrap as Fn(Int) -> Int;
+let g = a as Fn(String) -> Int;
+print(g("s"));

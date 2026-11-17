@@ -1,0 +1,12 @@
+// A function declared in a generic body whose types don't depend on the
+// instance is one function, whatever nests inside it.
+// expect-output: true
+fn make(x) {
+    x + 1;
+    fn f() {
+        fn g() => 0;
+        42
+    }
+    f
+}
+print(make(1) == make(1.5));

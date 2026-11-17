@@ -1,4 +1,6 @@
 // A cast asserts, it does not convert, and Int is not a Number under the
-// sibling numeric model — `Number(1)` is the conversion.
+// sibling numeric model — `Number(1)` is the conversion. A literal like `1`
+// would take the type the cast says.
 // expect-error: invalid cast: Int can never be Number
-1 as Number
+let n = "a".len();
+n as Number

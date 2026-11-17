@@ -22,21 +22,14 @@ fn my_function(input) {
 Function declarations are not hoisted. Define a function before you call it.
 
 ```ndc,fails
-foo(); // ERROR: no function called foo exists
+foo(); // ERROR: Identifier foo has not previously been declared
 
 fn foo() {
   print("Hello, World!");
 }
 ```
 
-A function declared with `fn` can't be replaced:
-
-```ndc,fails
-fn double(x) { x * 2 }
-double = fn(x) { x * 10 };     // ERROR: Can't assign to the function 'double'
-```
-
-To have a variable that holds a function, declare it with `let`:
+A function declared with `fn` can't be replaced. If you want a variable that holds a function, declare it with `let`:
 
 ```ndc
 let scale = fn(x) { x * 2 };
@@ -72,7 +65,7 @@ increment();
 print(count);  // 2
 ```
 
-Each block and each loop iteration has its own variables, so a function keeps the one from the iteration that created it:
+Each loop iteration has its own variables, so a function made in a loop keeps the values of the iteration that made it:
 
 ```ndc
 let getters = [];
@@ -135,7 +128,7 @@ print(x(1));               // (1,3)
 
 ## Type annotations
 
-Parameters and return values can carry type annotations, just like `let` bindings:
+Parameters and return values can have type annotations, just like `let` bindings. They are optional, so you can annotate as much or as little as you like:
 
 ```ndc
 fn greet(name: String) -> String => "hello " <> name;
@@ -144,27 +137,82 @@ fn add(x: Int, y: Int) -> Int {
     x + y
 }
 
+fn count(xs) -> Int => len(xs);
+
 print(greet("world"));  // hello world
 print(add(1, 2));       // 3
+print(count([1, 2]));   // 2
 ```
 
-Annotations are optional — leave them off and the parameter is treated as `Any`. Mix and match as you like:
-
-```ndc
-fn first(xs: List<Int>) => xs[0];   // params annotated, return inferred
-fn count(xs) -> Int => len(xs);      // return annotated, params inferred
-
-print(first([7, 8]));      // 7
-print(count([1, 2, 3]));   // 3
-```
-
-If the body produces a value that doesn't fit the declared return type, the analyser flags it:
+If the body returns a value that doesn't fit the return type, you get an error before the program runs:
 
 ```ndc,fails
-fn bad() -> Int { "hello" }   // ERROR: mismatched types
+fn bad() -> Int { "hello" }   // error: mismatched types
 ```
 
-A return-type annotation also helps the analyser understand recursive calls — without it, a recursive call resolves against an unknown return type and you can lose precision.
+A function that returns values of different types, like a String in one place and an Int in another, has to say that it returns `Any`:
+
+```ndc
+fn size(n: Int) -> Any {
+  if n > 9 { return "big"; }
+  n
+}
+print(size(3), size(10));  // 3 big
+```
+
+### Function types
+
+The type of a function is written `Fn(A, B) -> C`: it takes an `A` and a `B` and returns a `C`. Without `-> …` the function returns `()`:
+
+```ndc
+let twice: Fn(Int) -> Int = fn(x: Int) => x * 2;
+let log: Fn(String) = fn(s: String) { print(s); };
+
+fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn make_adder(n: Int) -> Fn(Int) -> Int { fn(x: Int) => x + n }
+
+print(apply(twice, 4));           // 8
+print(apply(make_adder(10), 1));  // 11
+```
+
+You rarely need to annotate the parameters of an anonymous function. They get their types from where the function is used:
+
+```ndc
+let shout: Fn(String) -> String = fn(s) => s ++ "!";   // s is a String
+print(shout("hi"));  // hi!
+
+let tens = [3, 1, 2].map(fn(x) => x * 10);             // x is an Int
+print(tens);         // [30,10,20]
+```
+
+When nothing says what a parameter is, annotate it, as in `fn(x: Int) => x + 1`.
+
+## Generic functions
+
+A function declared with `fn` takes any argument that its body can work with. You don't have to say so:
+
+```ndc
+fn inc(x) => x + 1;
+print(inc(1), inc(2.5));               // 2 3.5
+
+fn apply(f, x) => f(x);
+print(apply(abs, -1));                 // 1
+print(apply(fn(s) => s ++ "!", "hi"));  // hi!
+```
+
+Calling it with an argument the body can't use is an error before the program runs, and the error points at the line in the body that can't take it:
+
+```ndc,fails
+fn inc(x) => x + 1;
+inc("a");  // error: No function called '+' found that matches the arguments 'String, Int'
+```
+
+To take a value of any type at all, annotate the parameter with `Any`. Inside the function you can print it or compare it, but to use it as something else you have to [cast](../../features/casts.md) it:
+
+```ndc
+fn show(x: Any) => "got " <> x;
+print(show(1), show("a"));  // got 1 got a
+```
 
 ## Recursion
 
@@ -180,7 +228,7 @@ forever(0)
 
 ## Function overloading
 
-A name can refer to several functions, called overloads, as long as they differ in their number of parameters, their parameter types, or both:
+A name can refer to several functions, called overloads, as long as they differ in their number of parameters or their parameter types:
 
 ```ndc
 fn add(n) { n + 1 }
@@ -190,97 +238,49 @@ print(add(9));     // 10
 print(add(8, 4));  // 12
 ```
 
-A call uses the overload whose parameters accept its arguments. When several accept them, the most specific one wins:
+A call uses the overload whose parameters fit its arguments. When several fit, the most specific one wins:
 
 ```ndc
 fn describe(x: Int) { "int" }
 fn describe(x: String) { "string" }
-fn describe(x: Any) { "something else" }
+fn describe(x) { "something else" }
 
 print(describe(1));    // int
 print(describe("a"));  // string
 print(describe([1]));  // something else
 ```
 
-Two overloads in the same scope can't have the same parameter types. Parameter names don't count, and a parameter without a type annotation has type `Any`:
+Two overloads with the same parameter types are an error. Parameter names don't count:
 
 ```ndc,fails
 fn foo(a) { a + 1 }
-fn foo(b) { b + 2 }   // ERROR: Illegal redefinition of function 'foo' with parameters (Any)
+fn foo(b) { b + 2 }   // error: Illegal redefinition of function 'foo' with parameters (Any)
 ```
 
-## How a call finds its function
+### An overloaded function as a value
 
-A call such as `foo(x)` looks for `foo` in the scope it's written in first, then in each enclosing scope in turn, and finally among the built-in functions.
-
-**Functions in a nested scope** take over only the calls they accept. Other calls still reach the overloads further out:
+You can pass a function by its name, as in `xs.map(abs)`. When the name has several overloads, Andy C++ picks the one that fits where it's used. Where nothing says which one you mean, add a function type:
 
 ```ndc
-fn foo(a) { "outer-one" }
-fn foo(a, b) { "outer-two" }
+print([-1.5, 2.5].map(abs));     // [1.5,2.5]
 
-{
-    fn foo(a) { "inner-one" }
-    print(foo("x"));        // inner-one
-    // the inner foo doesn't take two arguments
-    print(foo("x", "y"));   // outer-two
-}
+let by_pattern: Fn(String, String) -> List<String> = split;
+print(by_pattern("a:b", ":"));   // ["a","b"]
 ```
 
-**A variable**, such as a `let`, a parameter or a loop variable, shadows the functions with its name, whatever it holds. It doesn't join their overloads, so the call uses the variable, and it's an error when the variable can't take the call, even when a function further out would:
+## Variables with the name of a function
+
+A variable hides the functions with the same name. A method call, like `"test".len()`, only looks at functions, so it still finds them:
 
 ```ndc
-fn foo(a) { "one" }
-fn foo(a, b) { "two" }
-
-let foo = fn(a) => "let";
-print(foo("x"));  // let
-```
-
-```ndc,fails
-fn foo(a, b) { "two" }
-
-let foo = fn(a) => "let";
-foo("x", "y");   // ERROR: The variable 'foo' holds a function that doesn't accept the arguments 'String, String'
+let len = 300;
+print(len);              // 300
+print("test".len());     // 4
 ```
 
 ```ndc,fails
 let len = 300;
 len("test");     // ERROR: The variable 'len' is Int, which can't be called
-```
-
-**A method call `x.foo()` and a property read `x.foo`** are the call `foo(x)`, but they only look among functions: variables named `foo` are skipped. A variable never gets in the way of a method call, and a function stored in a variable is called the plain way:
-
-```ndc
-let len = 300;
-print(len);              // 300
-// the built-in len
-print("test".len());     // 4
-print("test".len);       // 4
-
-let double = fn(x) => x * 2;
-print(double(5));        // 10
-```
-
-```ndc,fails
-let double = fn(x) => x * 2;
-5.double();        // ERROR: No function named 'double'
-```
-
-**Within one scope**, a name belongs either to `let` bindings or to functions, not both. A `fn` after a `let` with the same name in the same scope is an error, while in a nested scope it's fine. The same applies to a struct's constructor:
-
-```ndc,fails
-let foo = fn(a) => "let";
-fn foo(a, b) { "fn" }    // ERROR: Illegal redefinition of variable foo as a function in the same scope
-```
-
-```ndc
-let bar = 1;
-{
-    fn bar(a) { a }      // fine: a different scope
-    print(bar(2));       // 2
-}
-print(bar);              // 1
 ```
 
 ## Method call syntax

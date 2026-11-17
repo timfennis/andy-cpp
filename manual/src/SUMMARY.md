@@ -40,6 +40,3 @@
 # Tooling
 - [Editor support](./tooling/editor-support.md)
 - [Formatter](./tooling/formatter.md)
-
-# Troubleshooting
-- [Overload dispatch with collections](./troubleshooting/overload-dispatch-collections.md)

@@ -1,0 +1,11 @@
+// `m &= m` reads the map it changes, as `xs ++= xs` does a list.
+// expect-output: %{1: 2} %{1: 2} %{} %{}
+let a = %{1: 2};
+a &= a;
+let b = %{1: 2};
+b |= b;
+let c = %{1: 2};
+c -= c;
+let d = %{1: 2};
+d ~= d;
+print(a, b, c, d);

@@ -1,0 +1,9 @@
+// A generic function's name used as a value is its instance for the type
+// it's used at, as a call is: two values of it at one type are the same
+// function, and values at different types are different functions.
+// expect-output: true false 2 2.5
+fn inc(x) => x + 1;
+let a: Fn(Int) -> Int = inc;
+let again: Fn(Int) -> Int = inc;
+let b: Fn(Float) -> Float = inc;
+print(a == again, a == b, a(1), b(1.5));

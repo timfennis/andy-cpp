@@ -1,0 +1,10 @@
+// `[cur] ++ [cur]` makes the lists' elements what `cur` is, which each call
+// says, so `cur` stays a type parameter rather than becoming an `Any` that
+// `+` doesn't take.
+// expect-output: (2,3) [(1,2),(1,2)]
+fn f(cur) {
+    let next = cur + (1, 1);
+    let both = [cur] ++ [cur];
+    print(next, both);
+}
+f((1, 2));

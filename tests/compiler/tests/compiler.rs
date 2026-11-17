@@ -129,6 +129,77 @@ fn an_if_without_else_yields_unit_when_false() {
     );
 }
 
+// if true { 1 }, analysed: an `if` without an `else` is `()`, so the branch's
+// own value is dropped for one.
+//
+// 0: Constant(0)      push `true`
+// 1: JumpIfFalse(5)   if false, jump to the else path (index 7)
+// 2: Pop              pop condition (true path)
+// 3: Constant(1)      push `1`
+// 4: Pop              drop the branch's value
+// 5: Constant(2)      push `()`
+// 6: Jump(2)          skip the else path
+// 7: Pop              pop condition (false path)
+// 8: Constant(3)      push `()`
+// 9: Halt
+#[test]
+fn an_if_without_else_drops_its_branch_s_value() {
+    assert_eq!(
+        compile_with_analysis("if true { 1 }"),
+        [
+            Constant(0),
+            JumpIfFalse(JumpTarget::Offset(5)),
+            Pop,
+            Constant(1),
+            Pop,
+            Constant(2),
+            Jump(JumpTarget::Offset(2)),
+            Pop,
+            Constant(3),
+            Halt
+        ]
+    );
+}
+
+// A branch that's already `()`, or never finishes, needs no extra ops.
+#[test]
+fn an_if_without_else_keeps_a_unit_or_never_branch_as_it_is() {
+    assert_eq!(
+        compile_with_analysis("if true { () }"),
+        [
+            Constant(0),
+            JumpIfFalse(JumpTarget::Offset(3)),
+            Pop,
+            MakeTuple(0),
+            Jump(JumpTarget::Offset(2)),
+            Pop,
+            Constant(1),
+            Halt
+        ]
+    );
+    // The inner `if`'s branch is a `break`, which is `Never`.
+    assert_eq!(
+        compile_with_analysis("while true { if true { break } }"),
+        [
+            Constant(0),
+            JumpIfFalse(JumpTarget::Offset(10)),
+            Pop,
+            Constant(1),
+            JumpIfFalse(JumpTarget::Offset(3)),
+            Pop,
+            Jump(JumpTarget::Offset(6)),
+            Jump(JumpTarget::Offset(2)),
+            Pop,
+            Constant(2),
+            Pop,
+            Jump(JumpTarget::Offset(-12)),
+            Pop,
+            Constant(3),
+            Halt
+        ]
+    );
+}
+
 // if true { 1 } else { 2 }
 //
 // 0: Constant(0)      push `true`
@@ -492,14 +563,16 @@ fn member_assignment_calls_the_setter_with_the_receiver_and_the_value() {
     );
 }
 
-// while true { print(1 + break); }
+// fn add(a: Int, b: Int) -> Int { a + b } while true { print(add(1, break)); }
 //
-// The break sits inside a partially compiled call (`print` and `+` callees
+// The break sits inside a partially compiled call (`print` and `add` callees
 // and the constant `1` are already on the stack), so it pops those three
 // pending operands before jumping out of the loop.
 #[test]
 fn break_pops_the_operands_pending_in_its_expression() {
-    let ops = compile_with_stdlib_unoptimized("while true { print(1 + break); }");
+    let ops = compile_with_stdlib_unoptimized(
+        "fn add(a: Int, b: Int) -> Int { a + b } while true { print(add(1, break)); }",
+    );
     assert!(
         ops.windows(4)
             .any(|w| matches!(w, [Pop, Pop, Pop, Jump(_)])),
@@ -521,6 +594,27 @@ fn an_unproven_cast_checks_the_type_at_runtime() {
     );
 }
 
+// let x: Any = [1]; x as List<Int>; x as Int
+//
+// A cast to a container type checks that nothing else holds the container,
+// ahead of the type check. A cast to a type without a container in it has
+// nothing to check.
+#[test]
+fn a_cast_to_a_container_checks_it_is_unshared() {
+    let ops = compile_with_analysis("let x: Any = [1]; x as List<Int>; x as Int");
+    let checks: Vec<usize> = ops
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| matches!(op, CheckUnshared(_)))
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(checks.len(), 1, "got: {ops:?}");
+    assert!(
+        matches!(&ops[checks[0] + 1], CheckType(t) if t.holds_a_mutable_container()),
+        "expected the type check right after, got: {ops:?}",
+    );
+}
+
 // 1 as Int; [1] as Any
 //
 // Both casts are proven by the value's static type, so no runtime guard is
@@ -531,6 +625,63 @@ fn a_proven_cast_needs_no_runtime_check() {
     assert!(
         ops.iter().all(|op| !matches!(op, CheckType(_))),
         "provable casts must not emit CheckType, got: {ops:?}",
+    );
+}
+
+// let x: Any = 1; x as? Int
+//
+// An optional cast tests the value with a TryCast, which gives an option
+// instead of a CheckType guard that fails.
+#[test]
+fn an_unproven_optional_cast_tries_the_type_at_runtime() {
+    let ops = compile_with_analysis("let x: Any = 1; x as? Int");
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, TryCast(t) if **t == ndc_core::StaticType::Int)),
+        "expected a TryCast(Int), got: {ops:?}",
+    );
+    assert!(
+        ops.iter().all(|op| !matches!(op, CheckType(_))),
+        "an optional cast must not emit CheckType, got: {ops:?}",
+    );
+}
+
+// 1 as? Int
+//
+// A proven optional cast is always `Some`, which a TryCast to `Any` makes.
+#[test]
+fn a_proven_optional_cast_is_always_some() {
+    let ops = compile_with_analysis("1 as? Int");
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, TryCast(t) if **t == ndc_core::StaticType::Any)),
+        "expected a TryCast(Any), got: {ops:?}",
+    );
+}
+
+// let a: Any = 1; let n: Int = a as Int;
+//
+// An `Any` stored where an Int is expected takes a cast, which is the only
+// check: storing what the cast gives needs none.
+#[test]
+fn an_any_cast_for_a_typed_variable_is_checked_once() {
+    let ops = compile_with_analysis("let a: Any = 1; let n: Int = a as Int;");
+    assert_eq!(
+        ops.iter().filter(|op| matches!(op, CheckType(_))).count(),
+        1,
+        "expected a single CheckType(Int) guard, got: {ops:?}",
+    );
+}
+
+// let n: Int = 1; let m = n;
+//
+// A value whose type is known needs no check.
+#[test]
+fn a_typed_value_stored_in_a_typed_variable_is_not_checked() {
+    let ops = compile_with_analysis("let n: Int = 1; let m: Int = n;");
+    assert!(
+        ops.iter().all(|op| !matches!(op, CheckType(_))),
+        "a value of a known type must not be checked, got: {ops:?}",
     );
 }
 
@@ -574,15 +725,16 @@ fn a_captured_local_is_read_and_written_through_its_cell() {
     );
 }
 
-// fn outer() { fn f() { f } }
+// fn outer() { fn f() -> Any { f } }
 //
 // `f` captures itself before its value exists, so its slot gets a fresh cell
 // before the closure is made, and the closure is written into that cell.
-// (At the top level `f` would be a global, which needs no cell.)
+// (At the top level `f` would be a global, which needs no cell.) What it returns
+// contains itself, which only an `Any` holds.
 #[test]
 fn a_self_capturing_function_gets_its_cell_before_its_closure() {
     assert_eq!(
-        compile_nested_function("fn outer() { fn f() { f } }", &[0]),
+        compile_nested_function("fn outer() { fn f() -> Any { f } }", &[0]),
         [
             NewCell(0),
             Closure {
@@ -674,4 +826,64 @@ fn temporaries_in_a_function_come_after_its_frames_own_locals() {
     written.sort_unstable();
     written.dedup();
     assert_eq!(written, [0, 1, 2, 3, 4], "{ops:?}");
+}
+
+/// The functions `function`'s code puts on the stack, in order.
+fn nested_functions(function: &CompiledFunction) -> Vec<Rc<CompiledFunction>> {
+    function
+        .opcodes()
+        .iter()
+        .filter_map(|opcode| match opcode {
+            Constant(index)
+            | Closure {
+                constant_idx: index,
+                ..
+            } => Some(*index),
+            _ => None,
+        })
+        .filter_map(|index| match function.body().constant(index) {
+            ndc_vm::Value::Object(object) => match object.as_ref() {
+                ndc_vm::Object::Function(ndc_vm::Function::Compiled(function)) => {
+                    Some(Rc::clone(function))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// The compiled top-level code of `input`, with the standard library.
+fn compile_program_with_stdlib(input: &str) -> CompiledFunction {
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    interp
+        .compile_str_unoptimized(input)
+        .expect("compile failed")
+}
+
+// A generic function's declaration compiles each of its instances: constant
+// 0 for `adder` with Ints and 1 with Floats, in some order. A lambda in the
+// body is compiled with the instance, whose `+` is picked for its types, so
+// the two differ.
+#[test]
+fn a_function_declared_in_an_instance_uses_the_instances_picks() {
+    let program = compile_program_with_stdlib(
+        "fn adder(x) { let g = fn(y) => y + 1; g(x) } adder(1); adder(1.5);",
+    );
+    let first = nested_functions(&function_constant(&program, 0))[0].clone();
+    let second = nested_functions(&function_constant(&program, 1))[0].clone();
+    assert!(!Rc::ptr_eq(&first, &second));
+    assert_ne!(first.opcodes(), second.opcodes());
+}
+
+// A function declared in an instance that compiles the same in every
+// instance is the same function, so it keeps its identity.
+#[test]
+fn a_function_declared_in_an_instance_that_compiles_the_same_is_the_same() {
+    let program =
+        compile_program_with_stdlib("fn make(x) { x + 1; fn f() => 42; f } make(1); make(1.5);");
+    let first = nested_functions(&function_constant(&program, 0))[0].clone();
+    let second = nested_functions(&function_constant(&program, 1))[0].clone();
+    assert!(Rc::ptr_eq(&first, &second));
 }

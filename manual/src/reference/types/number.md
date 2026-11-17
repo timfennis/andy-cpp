@@ -2,13 +2,11 @@
 
 Andy C++ exposes three sibling numeric types:
 
-* `Int` stores a signed 64-bit integer. Checked arithmetic reports overflow. The remainder
-  operators `%` and `%%` are the exception: once the divisor is non-zero the result always
-  fits, even where the quotient it implies would not.
+* `Int` stores a signed 64-bit integer. Arithmetic that overflows is an error.
 * `Float` stores an IEEE 754 `f64`.
 * `Number` supports arbitrary-size integers, exact rational values, floats, and complex values.
 
-`Int`, `Float`, and `Number` share `Any` as their nearest common supertype. An `Int` does not satisfy a `Number` annotation. Use an `n` literal or the `Number` constructor when you need the advanced mode:
+`Int`, `Float`, and `Number` are separate types: an `Int` doesn't fit a `Number` annotation. Use an `n` literal or the `Number` constructor when you need a `Number`:
 
 ```ndc
 let count: Int = 42;
@@ -36,6 +34,23 @@ print(binary, octal, hexadecimal);  // 42 42 42
 ```
 
 An integer literal without `n` must fit in `i64`. The lexer reports an error and suggests the suffixed form when it does not fit.
+
+A whole number like `7` is an `Int`, but where a `Float` is expected, such as after a `Float` annotation or in a list of Floats, it is a `Float`:
+
+```ndc
+print(7 / 2);            // 3
+let f: Float = 7;
+print(f / 2, [1, 2.5]);  // 3.5 [1.0,2.5]
+```
+
+A variable keeps the type it starts with, so one that starts at `0` stays an `Int`. To keep a running total of Floats, start it at `0.0`:
+
+```ndc,fails
+let total = 0.0;
+total += 2.5;          // fine: total is a Float
+let count = 0;
+count += 2.5;          // error: mismatched types: found Float but expected Int
+```
 
 Arbitrary-radix literals such as `16r2a` remain `Int` literals and do not accept `n`. The `i` and `j` suffixes create complex `Number` values:
 
@@ -93,11 +108,6 @@ print(nan);         // NaN
 print(nan == nan);  // true
 ```
 
-Both remainder operators follow the same rule, so `5n % 0n` and `5n %% 0n` are
-`NaN` where `5 % 0` and `5 %% 0` are errors. Moving an accumulator from `Int`
-to `Number` therefore trades the zero-divisor diagnostic for a value that
-propagates.
-
 ## Equality, hashing, and ordering
 
 Numeric equality compares exact values across all three modes. Equal values produce the same map or set hash. Andy C++ converts each finite Float to its exact binary rational value for this comparison, so decimal approximation does not make values equal:
@@ -107,7 +117,8 @@ print(1 == 1.0);                     // true
 print(1.0 == 1n);                    // true
 print(1n == 1 + 0i);                 // true
 print(0.1 == 1n / 10n);              // false
-print(%{1, 1.0, 1n, 1 + 0i}.len());  // 1
+let numbers: Map<Any, ()> = %{1, 1.0, 1n, 1 + 0i};
+print(numbers.len());                // 1
 ```
 
 Positive and negative zero compare equal. All NaN values compare equal and hash alike. Real scalars sort in this order:

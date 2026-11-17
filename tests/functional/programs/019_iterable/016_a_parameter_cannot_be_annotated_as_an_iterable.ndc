@@ -1,0 +1,3 @@
+// A parameter without an annotation takes any kind of sequence already.
+// expect-error: `Iterable<T>` can't be written in a type annotation
+fn total(xs: Iterable<Int>) => 0;

@@ -8,8 +8,6 @@ pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFlo
 pub use numeric::{NumericMode, NumericRef};
 pub use string::VmString;
 
-use ndc_analysis::ResolvedVar;
-
 use crate::hash_map::{DefaultHasher, HashMap};
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
@@ -44,7 +42,7 @@ fn bounded_element_type<'a>(
         }
         let found = value.static_type_with_budget(depth, budget);
         element_type = Some(match element_type {
-            Some(previous) => previous.lub(&found),
+            Some(previous) => previous.join(&found),
             None => found,
         });
     }
@@ -81,16 +79,6 @@ pub enum Object {
     Struct {
         info: Rc<StructInfo>,
         fields: RefCell<Vec<Value>>,
-    },
-    /// A set of overload candidates the runtime narrows per call. Scalars are
-    /// walked first (first-match-wins, same shape as the master baseline);
-    /// `vec_candidates` is only consulted as a fallback for operator-form
-    /// calls when no scalar accepts the args. `vec_candidates` is empty for
-    /// non-operator call sites, so the hot path stays a single `Vec<ResolvedVar>`
-    /// walk identical to scalar-only dispatch.
-    OverloadSet {
-        scalars: Vec<ResolvedVar>,
-        vec_candidates: Vec<ResolvedVar>,
     },
     Iterator(SharedIterator),
     Deque(RefCell<VecDeque<Value>>),
@@ -129,22 +117,6 @@ impl Ord for OrdValue {
         self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
     }
 }
-
-/// Type alias for [`Value`] that signals `StaticType::Sequence` to the `#[export_module]` macro.
-///
-/// Use this instead of `ndc_vm::value::Value` in stdlib function signatures when the parameter
-/// must accept any iterable sequence. The extraction is identical (zero-copy pass-through on the
-/// VM path) but the macro emits `StaticType::Sequence(Any)` instead of `StaticType::Any`, which
-/// preserves the correct type for dispatch and static analysis.
-pub type SeqValue = Value;
-
-/// Type alias for [`Value`] that signals `StaticType::Map` to the `#[export_module]` macro.
-///
-/// Use this instead of `ndc_vm::value::Value` in stdlib function signatures when the parameter
-/// must be a map or set. The extraction is identical (zero-copy pass-through on the VM path) but
-/// the macro emits `StaticType::Map { key: Any, value: Any }` instead of `StaticType::Any`, which
-/// preserves the correct type for dispatch and static analysis.
-pub type MapValue = Value;
 
 /// An iterator that yields VM [`Value`]s from any iterable object.
 ///
@@ -206,6 +178,13 @@ impl Value {
         Self::Object(Rc::new(Object::Tuple(values)))
     }
 
+    /// `Some(value)`, or `None` when there's no value.
+    pub fn option(value: Option<Self>) -> Self {
+        value.map_or(Self::None, |value| {
+            Self::Object(Rc::new(Object::Some(value)))
+        })
+    }
+
     pub fn int(i: i64) -> Self {
         Self::Int(i)
     }
@@ -229,7 +208,7 @@ impl Value {
     /// Creates a shallow copy: scalars are copied by value; mutable collection
     /// types (String, List, Map, Deque, heaps, structs) get new independent
     /// containers with cloned contents; immutable / identity types (Tuple,
-    /// Function, Iterator, Some, `OverloadSet`) share the Rc.
+    /// Function, Iterator, Some) share the Rc.
     pub fn shallow_clone(&self) -> Self {
         match self {
             Self::Object(obj) => match obj.as_ref() {
@@ -277,10 +256,8 @@ impl Value {
     /// # Performance
     ///
     /// **O(n) for `List`, `Map`, and `Deque`** — these variants iterate all
-    /// elements to compute the element type via `lub`.  Avoid calling this in
-    /// hot paths on container values.  Use the dedicated helpers instead:
-    ///
-    /// - [`Value::is_number`] — O(1) check for numeric types
+    /// elements to join their types into the element type.  Avoid calling this in
+    /// hot paths on container values.
     pub fn static_type(&self) -> StaticType {
         let mut budget = usize::MAX;
         self.static_type_with_budget(usize::MAX, &mut budget)
@@ -311,79 +288,128 @@ impl Value {
         }
     }
 
-    /// Returns `true` if this value is an Int, Float, or Number.
-    ///
-    /// Prefer this over `self.static_type().is_number()` in hot paths — this is O(1)
-    /// and never allocates, whereas `static_type()` on containers is O(n).
-    pub fn is_number(&self) -> bool {
-        self.numeric_ref().is_some()
+    /// Whether this value is a `target`, a type that holds no other values
+    /// as a container does: a scalar, a struct, a function or an iterator.
+    /// A function is one if its own type says so (see [`Function::fit`]):
+    /// only [`Self::converted_to`] can make one that may be one a function
+    /// whose calls are checked. What an iterator makes can't be checked
+    /// without making it, so an iterator is only an `Iterator<Any>`.
+    fn is_a(&self, target: &StaticType) -> bool {
+        if let StaticType::Function { .. } = target
+            && let Self::Object(object) = self
+            && let Object::Function(function) = object.as_ref()
+        {
+            return function.fit(target) == FunctionFit::Proven;
+        }
+        self.static_type() == *target
     }
 
-    /// Check whether this value satisfies a function parameter type at runtime,
-    /// avoiding full container iteration for common cases.
+    /// This value as a `target`, if it is one, checking every element of a
+    /// container: a function that may be a function `target` is wrapped so
+    /// that each call checks what it returns.
+    pub fn converted_to(&self, target: &StaticType) -> Option<Self> {
+        if let StaticType::Function { .. } = target
+            && let Self::Object(object) = self
+            && let Object::Function(function) = object.as_ref()
+        {
+            return match function.fit(target) {
+                FunctionFit::Proven => Some(self.clone()),
+                FunctionFit::IfChecked => Some(Self::function(Function::Checked {
+                    function: Rc::new(function.unchecked().clone()),
+                    typ: Box::new(target.clone()),
+                })),
+                FunctionFit::No => None,
+            };
+        }
+        self.conforms_to(target).then(|| self.clone())
+    }
+
+    /// The kind of the first container a cast of this value to `target`
+    /// gives a new type that's held by anything but this value, or, deeper
+    /// in, by anything but the container holding it: another holder could
+    /// still write what the old type allowed. `None` if there's none.
     ///
-    /// When `param` is a container type whose inner types are all `Any` (e.g.
-    /// `Sequence(Any)`, `Map { Any, Any }`, `List(Any)`), only the outer kind is
-    /// checked — no element iteration occurs. Typed container parameters are
-    /// rejected rather than scanned; the remaining cases fall back to
-    /// `self.static_type().is_subtype(param)`.
-    pub fn matches_param(&self, param: &StaticType) -> bool {
-        match param {
-            StaticType::Any => true,
-            StaticType::Int => {
-                matches!(self, Self::Int(_))
+    /// It counts references, so it's conservative: a holder the program can
+    /// no longer reach, or one that's an `Any` and so can't write to the
+    /// container without a cast of its own, counts as well.
+    ///
+    /// A tuple or option can't be written to, so sharing one is harmless by
+    /// itself; what's in a shared one is reachable from elsewhere, though.
+    /// `(1, None)` held twice passes as a `(Int, Option<List<Int>>)`, and
+    /// `(1, Some([2]))` held twice doesn't.
+    pub fn shared_container(&self, target: &StaticType) -> Option<&'static str> {
+        self.held_elsewhere(target, false)
+    }
+
+    /// [`Self::shared_container`], for a value that's `reached_elsewhere` when a
+    /// tuple or option holding it is shared.
+    fn held_elsewhere(&self, target: &StaticType, reached_elsewhere: bool) -> Option<&'static str> {
+        /// The first of `values` with a shared container, looked for only when
+        /// `target`, the type of each, can hold one.
+        fn inside<'v>(
+            values: impl IntoIterator<Item = &'v Value>,
+            target: &StaticType,
+            reached_elsewhere: bool,
+        ) -> Option<&'static str> {
+            if !target.holds_a_mutable_container() {
+                return None;
             }
-            StaticType::Float => matches!(self, Self::Float(_)),
-            StaticType::Bool => matches!(self, Self::Bool(_)),
-            StaticType::Number => matches!(self, Self::Number(_)),
-            StaticType::String => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::String(_)))
+            values
+                .into_iter()
+                .find_map(|value| value.held_elsewhere(target, reached_elsewhere))
+        }
+        if !target.holds_a_mutable_container() {
+            return None;
+        }
+        let Self::Object(object) = self else {
+            return None;
+        };
+        let shared = reached_elsewhere || Rc::strong_count(object) > 1;
+        let container = match object.as_ref() {
+            Object::List(_) => Some("list"),
+            Object::Map { .. } => Some("map"),
+            Object::Deque(_) => Some("deque"),
+            Object::MinHeap(_) | Object::MaxHeap(_) => Some("heap"),
+            _ => None,
+        };
+        if shared && container.is_some() {
+            return container;
+        }
+        // Past here, `shared` only holds for a tuple or option.
+        match (target, object.as_ref()) {
+            (StaticType::List(element), Object::List(values)) => {
+                inside(values.borrow().iter(), element, false)
             }
-            StaticType::List(t) if matches!(t.as_ref(), StaticType::Any) => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::List(_)))
+            (StaticType::Deque(element), Object::Deque(values)) => {
+                inside(values.borrow().iter(), element, false)
             }
-            StaticType::Deque(t) if matches!(t.as_ref(), StaticType::Any) => {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Deque(_)))
+            (StaticType::MinHeap(element), Object::MinHeap(values)) => inside(
+                values.borrow().iter().map(|value| &value.0.0),
+                element,
+                false,
+            ),
+            (StaticType::MaxHeap(element), Object::MaxHeap(values)) => {
+                inside(values.borrow().iter().map(|value| &value.0), element, false)
             }
-            StaticType::Map { key, value }
-                if matches!(
-                    (key.as_ref(), value.as_ref()),
-                    (StaticType::Any, StaticType::Any)
-                ) =>
-            {
-                matches!(self, Self::Object(o) if matches!(o.as_ref(), Object::Map { .. }))
+            (StaticType::Map { key, value }, Object::Map { entries, default }) => {
+                let entries = entries.borrow();
+                inside(entries.keys(), key, false)
+                    .or_else(|| inside(entries.values().chain(default.iter()), value, false))
             }
-            StaticType::Sequence(t) if matches!(t.as_ref(), StaticType::Any) => {
-                matches!(self, Self::Object(o) if matches!(
-                    o.as_ref(),
-                    Object::List(_)
-                        | Object::Tuple(_)
-                        | Object::String(_)
-                        | Object::Deque(_)
-                        | Object::Map { .. }
-                        | Object::Iterator(_)
-                        | Object::MinHeap(_)
-                        | Object::MaxHeap(_)
-                ))
-            }
-            // These container params require element-type scanning to verify — skip to
-            // avoid O(N) cost. The analyser should resolve typed container params at
-            // compile time; if it falls through to dynamic dispatch, return false.
-            StaticType::List(_)
-            | StaticType::Deque(_)
-            | StaticType::Sequence(_)
-            | StaticType::Map { .. }
-            | StaticType::Tuple(_) => false,
-            _ => self.static_type().is_subtype(param),
+            (StaticType::Option(inner), Object::Some(value)) => value.held_elsewhere(inner, shared),
+            (StaticType::Tuple(elements), Object::Tuple(values)) => elements
+                .iter()
+                .zip(values)
+                .find_map(|(element, value)| value.held_elsewhere(element, shared)),
+            _ => None,
         }
     }
 
     /// Check whether this value conforms to `target`, scanning container
     /// elements recursively. Empty containers conform to any element type.
     ///
-    /// Unlike [`Value::matches_param`] this scans the value by design: it backs
-    /// the runtime check of `as` casts, where the caller explicitly opted into
-    /// the scan. Shared container aliases are memoized by object and target
+    /// It backs the runtime check of `as` casts, where the caller explicitly
+    /// opted into the scan. Shared container aliases are memoized by object and target
     /// type. Iterators can't be inspected without consuming them, so they only
     /// conform to targets with `Any` elements.
     pub fn conforms_to(&self, target: &StaticType) -> bool {
@@ -391,8 +417,23 @@ impl Value {
     }
 
     fn conforms_to_cached(&self, target: &StaticType, cache: &mut ConformanceCache) -> bool {
+        // Only a container target looks inside the value, which may be shared
+        // or cyclic; checking against another type takes no time to redo.
+        let looks_inside = matches!(
+            target,
+            StaticType::Option(_)
+                | StaticType::List(_)
+                | StaticType::Deque(_)
+                | StaticType::Tuple(_)
+                | StaticType::Map { .. }
+                | StaticType::MinHeap(_)
+                | StaticType::MaxHeap(_)
+                | StaticType::Iterable(_)
+        );
         let cache_key = match self {
-            Self::Object(object) => Some((Rc::as_ptr(object), std::ptr::from_ref(target))),
+            Self::Object(object) if looks_inside => {
+                Some((Rc::as_ptr(object), std::ptr::from_ref(target)))
+            }
             _ => None,
         };
         if let Some(cache_key) = cache_key
@@ -404,7 +445,7 @@ impl Value {
         // Static types are finite trees, so this pair cannot be re-entered
         // before its result is stored.
         let result = match target {
-            StaticType::Any => true,
+            target if target.is_unknown() => true,
             StaticType::Option(inner) => match self {
                 Self::None => true,
                 Self::Object(object) => match object.as_ref() {
@@ -465,7 +506,7 @@ impl Value {
                 Self::Object(object) if matches!(object.as_ref(), Object::MaxHeap(values)
                     if values.borrow().iter().all(|OrdValue(value)| value.conforms_to_cached(element, cache)))
             ),
-            StaticType::Sequence(element) => match self {
+            StaticType::Iterable(element) => match self {
                 Self::Object(object) => match object.as_ref() {
                     Object::List(values) => values
                         .borrow()
@@ -478,7 +519,7 @@ impl Value {
                         .borrow()
                         .iter()
                         .all(|value| value.conforms_to_cached(element, cache)),
-                    Object::String(_) => StaticType::String.is_subtype(element),
+                    Object::String(_) => StaticType::String.fits(element),
                     Object::Map { entries, .. } => {
                         entries
                             .borrow()
@@ -489,7 +530,7 @@ impl Value {
                                     key.conforms_to_cached(&elements[0], cache)
                                         && value.conforms_to_cached(&elements[1], cache)
                                 }
-                                StaticType::Sequence(inner) => {
+                                StaticType::Iterable(inner) => {
                                     key.conforms_to_cached(inner, cache)
                                         && value.conforms_to_cached(inner, cache)
                                 }
@@ -527,7 +568,7 @@ impl Value {
                 {
                     false
                 }
-                _ => self.static_type().is_subtype(target),
+                _ => self.is_a(target),
             },
         };
 
@@ -542,8 +583,10 @@ impl Value {
     /// Returns `None` for non-iterable types (`Int`, `Float`, `Bool`, `None`,
     /// functions, numbers, …).
     ///
-    /// For `Map`, yields `(key, value)` tuples — the same behaviour as
-    /// iterating a map in a for-loop.
+    /// For `Map`, yields `(key, value)` tuples, and for a heap the elements
+    /// in the order the heap gives them, smallest first for a `MinHeap` and
+    /// largest first for a `MaxHeap`: the same behaviour as iterating them
+    /// in a for-loop.
     ///
     /// Uses `Rc::unwrap_or_clone` so no extra clone occurs when this value
     /// holds the sole reference to its object.
@@ -565,6 +608,27 @@ impl Value {
                 Some(ValueIter::List(chars.into_iter()))
             }
             Object::Map { entries, .. } => Some(ValueIter::Map(entries.into_inner().into_iter())),
+            Object::MinHeap(heap) => {
+                // Sorted by `Reverse`, so the largest first.
+                let mut values: Vec<Self> = heap
+                    .into_inner()
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|Reverse(OrdValue(value))| value)
+                    .collect();
+                values.reverse();
+                Some(ValueIter::List(values.into_iter()))
+            }
+            Object::MaxHeap(heap) => {
+                let mut values: Vec<Self> = heap
+                    .into_inner()
+                    .into_sorted_vec()
+                    .into_iter()
+                    .map(|OrdValue(value)| value)
+                    .collect();
+                values.reverse();
+                Some(ValueIter::List(values.into_iter()))
+            }
             _ => None,
         }
     }
@@ -590,11 +654,6 @@ impl Value {
             Self::Number(value) => Some(NumericRef::Number(value.as_ref())),
             Self::Bool(_) | Self::None | Self::Object(_) | Self::Cell(_) => None,
         }
-    }
-
-    /// Wrap an advanced numeric payload as a Number value.
-    pub fn from_number(n: AdvancedNumber) -> Self {
-        Self::number(n)
     }
 }
 
@@ -646,16 +705,16 @@ impl Object {
                     Self::Iterator(Rc::clone(shared))
                 }
             }
-            // Immutable / identity types: clone the Rc via Object's derive.
-            other => other.clone(),
+            // A function is shared.
+            function @ Self::Function(_) => function.clone(),
         }
     }
 
     /// Returns the best static type descriptor for this runtime value.
     ///
     /// `[1, 2]` reports `List<Int>` and `%{"a": 1}` reports `Map<String, Int>`:
-    /// lists and deques join their element types into a least upper bound, while
-    /// maps do so separately for keys and values. Tuples preserve each position's
+    /// lists and deques join their element types, the type they share or else
+    /// `Any`, while maps do so separately for keys and values. Tuples preserve each position's
     /// type, and `Some` wraps the type of its inner value. Empty lists, deques, and
     /// maps report `Any` for the types they cannot infer.
     ///
@@ -729,11 +788,11 @@ impl Object {
                     }
                     let found_value = value.static_type_with_budget(depth - 1, budget);
                     key_type = Some(match key_type {
-                        Some(previous) => previous.lub(&found_key),
+                        Some(previous) => previous.join(&found_key),
                         None => found_key,
                     });
                     value_type = Some(match value_type {
-                        Some(previous) => previous.lub(&found_value),
+                        Some(previous) => previous.join(&found_value),
                         None => found_value,
                     });
                 }
@@ -743,7 +802,6 @@ impl Object {
                 }
             }
             Self::Function(f) => f.static_type(),
-            Self::OverloadSet { .. } => StaticType::Any,
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
             Self::Deque(elements) => {
                 if depth == 0 {
@@ -779,87 +837,104 @@ impl fmt::Display for Value {
     }
 }
 
+thread_local! {
+    /// The containers being displayed, outermost first, so that one that
+    /// holds itself displays as `[...]` there instead of without end.
+    static DISPLAYING: RefCell<Vec<*const Object>> = const { RefCell::new(Vec::new()) };
+}
+
 impl fmt::Display for Object {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Some(v) => write!(f, "Some({v:?})"),
-            // Strings display without quotes at the top level.
-            Self::String(s) => write!(f, "{}", s.borrow()),
-            Self::List(vs) => {
-                let vs = vs.borrow();
-                write!(f, "[")?;
-                for (i, v) in vs.iter().enumerate() {
-                    // Use Debug (repr) for elements so strings appear quoted inside lists.
-                    write!(f, "{v:?}")?;
-                    if i + 1 < vs.len() {
-                        write!(f, ",")?;
-                    }
-                }
-                write!(f, "]")
-            }
-            // Empty tuple is the unit value, which prints as nothing on its
-            // own; inside another value it shows as `()`.
-            Self::Tuple(vs) if vs.is_empty() => Ok(()),
-            Self::Tuple(vs) => {
-                write!(f, "(")?;
-                for (i, v) in vs.iter().enumerate() {
-                    write!(f, "{v:?}")?;
-                    if i + 1 < vs.len() {
-                        write!(f, ",")?;
-                    }
-                }
-                // `(1,)` is a tuple, `(1)` is just 1.
-                if vs.len() == 1 {
+        let this = std::ptr::from_ref(self);
+        if DISPLAYING.with_borrow(|displaying| displaying.contains(&this)) {
+            return f.write_str(match self {
+                Self::List(_) => "[...]",
+                Self::Tuple(_) => "(...)",
+                Self::Map { .. } => "%{...}",
+                Self::Some(_) => "Some(...)",
+                _ => "{...}",
+            });
+        }
+        DISPLAYING.with_borrow_mut(|displaying| displaying.push(this));
+        let result = display_contents(self, f);
+        DISPLAYING.with_borrow_mut(|displaying| displaying.pop());
+        result
+    }
+}
+
+/// What [`Object`]'s `Display` shows of `object`, which isn't one it's
+/// displaying already.
+fn display_contents(object: &Object, f: &mut Formatter<'_>) -> fmt::Result {
+    match object {
+        Object::Some(v) => write!(f, "Some({v:?})"),
+        // Strings display without quotes at the top level.
+        Object::String(s) => write!(f, "{}", s.borrow()),
+        Object::List(vs) => {
+            let vs = vs.borrow();
+            write!(f, "[")?;
+            for (i, v) in vs.iter().enumerate() {
+                // Use Debug (repr) for elements so strings appear quoted inside lists.
+                write!(f, "{v:?}")?;
+                if i + 1 < vs.len() {
                     write!(f, ",")?;
                 }
-                write!(f, ")")
             }
-            Self::Map { entries, .. } => {
-                write!(f, "%{{")?;
-                let entries = entries.borrow();
-                // A set is a map whose values are all `()`: `%{1,2}`.
-                let is_set = entries.values().all(Value::is_unit);
-                for (i, (k, v)) in entries.iter().enumerate() {
-                    if is_set {
-                        write!(f, "{k:?}")?;
-                    } else {
-                        write!(f, "{k:?}: {v:?}")?;
-                    }
-                    if i + 1 < entries.len() {
-                        write!(f, ",")?;
-                    }
+            write!(f, "]")
+        }
+        // Empty tuple is the unit value, which prints as nothing on its
+        // own; inside another value it shows as `()`.
+        Object::Tuple(vs) if vs.is_empty() => Ok(()),
+        Object::Tuple(vs) => {
+            write!(f, "(")?;
+            for (i, v) in vs.iter().enumerate() {
+                write!(f, "{v:?}")?;
+                if i + 1 < vs.len() {
+                    write!(f, ",")?;
                 }
-                write!(f, "}}")
             }
-            Self::Function(func) => write!(f, "{func}"),
-            Self::OverloadSet {
-                scalars,
-                vec_candidates,
-            } => write!(
-                f,
-                "<overload set ({} candidates)>",
-                scalars.len() + vec_candidates.len()
-            ),
-            Self::Iterator(iter) => match iter.borrow().len() {
-                Some(n) => write!(f, "<iterator (len={n})>"),
-                None => write!(f, "<iterator>"),
-            },
-            Self::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
-            Self::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
-            Self::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
-            Self::Struct { info, fields } => {
-                let length = info.fields.len();
-                write!(f, "{} {{", info.name)?;
-                for (i, ((field, _type), v)) in
-                    info.fields.iter().zip(fields.borrow().iter()).enumerate()
-                {
-                    write!(f, "{field}: {v:?}")?;
-                    if i + 1 < length {
-                        write!(f, ", ")?;
-                    }
+            // `(1,)` is a tuple, `(1)` is just 1.
+            if vs.len() == 1 {
+                write!(f, ",")?;
+            }
+            write!(f, ")")
+        }
+        Object::Map { entries, .. } => {
+            write!(f, "%{{")?;
+            let entries = entries.borrow();
+            // A set is a map whose values are all `()`: `%{1,2}`.
+            let is_set = entries.values().all(Value::is_unit);
+            for (i, (k, v)) in entries.iter().enumerate() {
+                if is_set {
+                    write!(f, "{k:?}")?;
+                } else {
+                    write!(f, "{k:?}: {v:?}")?;
                 }
-                write!(f, "}}")
+                if i + 1 < entries.len() {
+                    write!(f, ",")?;
+                }
             }
+            write!(f, "}}")
+        }
+        Object::Function(func) => write!(f, "{func}"),
+        Object::Iterator(iter) => match iter.borrow().len() {
+            Some(n) => write!(f, "<iterator (len={n})>"),
+            None => write!(f, "<iterator>"),
+        },
+        Object::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
+        Object::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
+        Object::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
+        Object::Struct { info, fields } => {
+            let length = info.fields.len();
+            write!(f, "{} {{", info.name)?;
+            for (i, ((field, _type), v)) in
+                info.fields.iter().zip(fields.borrow().iter()).enumerate()
+            {
+                write!(f, "{field}: {v:?}")?;
+                if i + 1 < length {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "}}")
         }
     }
 }
@@ -894,14 +969,6 @@ impl fmt::Debug for Object {
                 .field("default", default)
                 .finish(),
             Self::Function(func) => write!(f, "{func:?}"),
-            Self::OverloadSet {
-                scalars,
-                vec_candidates,
-            } => f
-                .debug_struct("OverloadSet")
-                .field("scalars", scalars)
-                .field("vec_candidates", vec_candidates)
-                .finish(),
             Self::Iterator(iter) => match iter.borrow().len() {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
@@ -948,12 +1015,13 @@ impl PartialOrd for Object {
 
 impl Value {
     /// Like `partial_cmp`, but says why two values can't be compared.
+    #[inline]
     pub fn try_cmp(&self, other: &Self) -> Result<Ordering, String> {
         self.partial_cmp(other).ok_or_else(|| {
             format!(
-                "{} cannot be compared to {}",
-                self.static_type(),
-                other.static_type()
+                "cannot compare {} and {}",
+                self.diagnostic_type(),
+                other.diagnostic_type()
             )
         })
     }
@@ -1042,7 +1110,7 @@ impl PartialEq for Object {
             ) => a_entries.borrow().eq(&*b_entries.borrow()),
             (Self::Function(a), Self::Function(b)) => {
                 // Compare function values by identity (pointer equality)
-                match (a, b) {
+                match (a.unchecked(), b.unchecked()) {
                     (Function::Compiled(a), Function::Compiled(b)) => {
                         std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
                     }
@@ -1068,9 +1136,6 @@ impl PartialEq for Object {
                     fields: b_fields,
                 },
             ) => Rc::ptr_eq(a_info, b_info) && a_fields.borrow().eq(&*b_fields.borrow()),
-            (Self::OverloadSet { .. }, Self::OverloadSet { .. }) => {
-                panic!("OverloadSet cannot be used as a map key")
-            }
             (Self::Iterator(a), Self::Iterator(b)) => {
                 // Compare iterators by pointer identity
                 std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
@@ -1088,6 +1153,8 @@ impl PartialEq for Object {
 
 impl Eq for Object {}
 
+/// A sequence hashes its length first, so that `[[[]]]` and `[[], []]` hash
+/// apart.
 impl Hash for Object {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
@@ -1101,13 +1168,16 @@ impl Hash for Object {
             }
             Self::List(vs) => {
                 state.write_u8(6);
-                for v in vs.borrow().iter() {
+                let vs = vs.borrow();
+                state.write_usize(vs.len());
+                for v in vs.iter() {
                     v.hash(state);
                 }
             }
             Self::Tuple(vs) => {
                 state.write_u8(7);
-                for v in vs.iter() {
+                state.write_usize(vs.len());
+                for v in vs {
                     v.hash(state);
                 }
             }
@@ -1115,9 +1185,11 @@ impl Hash for Object {
                 state.write_u8(8);
                 // Order-independent hash: XOR-fold of pair hashes
                 // NOTE: the default value is not part of the identity of the map
+                let entries = entries.borrow();
+                state.write_usize(entries.len());
                 let mut acc = 0u64;
                 let mut cube_acc = 0u64;
-                for (key, value) in entries.borrow().iter() {
+                for (key, value) in entries.iter() {
                     let mut hasher = DefaultHasher::default();
                     key.hash(&mut hasher);
                     value.hash(&mut hasher);
@@ -1131,7 +1203,7 @@ impl Hash for Object {
             }
             Self::Function(f) => {
                 state.write_u8(9);
-                match f {
+                match f.unchecked() {
                     Function::Compiled(func) => {
                         state.write_u8(1);
                         Rc::as_ptr(func).hash(state);
@@ -1148,10 +1220,8 @@ impl Hash for Object {
                         state.write_u8(4);
                         Rc::as_ptr(cache).hash(state);
                     }
+                    Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
                 }
-            }
-            Self::OverloadSet { .. } => {
-                panic!("OverloadSet cannot be used as a map key")
             }
             Self::Iterator(iter) => {
                 state.write_u8(11);
@@ -1159,7 +1229,9 @@ impl Hash for Object {
             }
             Self::Deque(d) => {
                 state.write_u8(12);
-                for v in d.borrow().iter() {
+                let d = d.borrow();
+                state.write_usize(d.len());
+                for v in d.iter() {
                     v.hash(state);
                 }
             }
@@ -1255,26 +1327,11 @@ mod tests {
         let mut cache = ConformanceCache::default();
 
         assert!(value.conforms_to_cached(&target, &mut cache));
-        assert_eq!(cache.len(), 4);
+        // One entry per list level; the `Any` inside needs no looking into.
+        assert_eq!(cache.len(), 3);
 
         // Break the reference cycle so the test does not leak its allocations.
         elements.borrow_mut().clear();
-    }
-
-    #[test]
-    fn runtime_parameter_matching_does_not_scan_lists() {
-        let list = Rc::new(Object::List(RefCell::new(vec![Value::Int(1)])));
-        let value = Value::Object(Rc::clone(&list));
-        let Object::List(elements) = list.as_ref() else {
-            unreachable!();
-        };
-
-        // Holding a mutable borrow makes any attempted element scan panic.
-        // Dynamic dispatch must only inspect the outer container kind.
-        let _borrow = elements.borrow_mut();
-        assert!(value.matches_param(&StaticType::List(Box::new(StaticType::Any))));
-        assert!(value.matches_param(&StaticType::Sequence(Box::new(StaticType::Any,))));
-        assert!(!value.matches_param(&StaticType::List(Box::new(StaticType::Int,))));
     }
 
     #[test]

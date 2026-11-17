@@ -1,0 +1,12 @@
+// A `while true` that no `break` leaves never ends, so a function ending in
+// one returns what its `return`s do: a list of pairs, whose sum is typed.
+// expect-output: 4
+fn grow(pairs) {
+    while true {
+        if pairs.len > 2 {
+            return pairs;
+        }
+        pairs.push((1, 1));
+    }
+}
+print([hi - lo + 1 for (lo, hi) in grow([(1, 2)])].sum);

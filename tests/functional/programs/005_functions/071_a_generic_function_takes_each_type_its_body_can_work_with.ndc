@@ -1,0 +1,10 @@
+// A function declared in the program takes any argument its body can work
+// with, and each call gets the type the body makes of its own arguments:
+// `inc(1)` is an Int and `inc(2.5)` a Float.
+// expect-output: 2 3.5 Int Float
+fn inc(x) => x + 1;
+let a = inc(1);
+let b = inc(2.5);
+let c: Int = a;
+let d: Float = b;
+print(a, b, "Int", "Float");

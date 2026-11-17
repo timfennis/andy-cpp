@@ -1,0 +1,5 @@
+// expect-output: [5]
+let xs = ["a".len()];
+let i: Any = 0;
+xs[i as Int] = 5;
+print(xs);

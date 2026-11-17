@@ -1,0 +1,6 @@
+// A function whose result is checked as it is called.
+// expect-error: expected the function to return Int but it returned String
+fn text(x) => "s";
+let a: Any = text;
+let f = (a as? Fn(Int) -> Int).unwrap();
+print(f(1));

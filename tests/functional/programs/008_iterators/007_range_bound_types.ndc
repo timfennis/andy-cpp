@@ -1,4 +1,4 @@
-// Every non-Int bound used to claim the integer was too large. Only an
-// integer that genuinely does not fit is a size problem.
-// expect-error: range bounds must be Int, got Number
+// Every non-Int bound used to claim the integer was too large. A range
+// counts in Ints, so a Number bound is reported before the program runs.
+// expect-error: mismatched types: found Number but expected Int
 for i in 0n..3n { print(i); }

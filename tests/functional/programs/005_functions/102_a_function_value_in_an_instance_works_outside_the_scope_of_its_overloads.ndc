@@ -1,0 +1,12 @@
+// A function value an instance picks the overload of is that function, so it
+// works where it's called, outside the scope of the overloads.
+// expect-output: int
+fn make(x) {
+    fn choose(y: Int) => "int";
+    fn choose(y: Float) => "float";
+    let g = choose;
+    fn() => g(x)
+}
+let m: Fn(Int) -> Fn() -> String = make;
+let h = m(1);
+print(h());

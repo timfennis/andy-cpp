@@ -1,4 +1,5 @@
-fn foo(n) {
+// The body's `false` is never reached, but a Bool and an Int share no type.
+fn foo(n) -> Any {
     fn bar() {
         return 6;
     }

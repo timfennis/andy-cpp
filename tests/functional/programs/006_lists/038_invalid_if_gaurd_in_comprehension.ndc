@@ -1,2 +1,2 @@
-// expect-error: mismatched types: expected Bool, found Int
+// expect-error: mismatched types: found Int but expected Bool
 [x for x in 0..10, if x]

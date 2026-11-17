@@ -1288,6 +1288,7 @@ dependencies = [
 name = "ndc_macros"
 version = "0.1.0"
 dependencies = [
+ "ndc_core",
  "proc-macro2",
  "quote",
  "syn",
@@ -1323,6 +1324,7 @@ dependencies = [
  "factorial",
  "itertools 0.15.0",
  "md5",
+ "ndc_analyser",
  "ndc_core",
  "ndc_macros",
  "ndc_vm",

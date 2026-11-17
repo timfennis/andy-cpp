@@ -1,0 +1,6 @@
+// The list in the tuple is held only by the tuple, but `alias` holds the
+// tuple, so the list is reachable through it with its old type.
+// expect-error: the list is also held by something else
+let value: Any = (1, Some([2]));
+let alias = value;
+value as (Int, Option<List<Int>>)

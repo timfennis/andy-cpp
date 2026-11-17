@@ -1,0 +1,3 @@
+// The other values of a list don't say which `abs` is meant.
+// expect-error: 'abs' has several overloads, and nothing here says which one is meant
+let fs = [len, abs];

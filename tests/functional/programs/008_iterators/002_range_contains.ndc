@@ -24,13 +24,6 @@ assert_eq(-1 in (-10..=-1), true);   // -1 is at the upper bound
 assert_eq(-1 in (-10..-1), false);   // 0 is outside the negative range
 assert_eq(0 in (-10..=-1), false);   // 0 is outside the negative range
 
-// Invalid types
-assert_eq("string" in (1..10), false);     // Non-integer type
-assert_eq(3.14 in (1..10), false);         // Float type
-assert_eq(true in (1..10), false);         // Boolean type
-assert_eq(() in (1..10), false);         // Null type
-assert_eq([1, 2, 3] in (1..10), false);    // Array type
-
 // Boundary cases
 assert_eq(1 in (1..=1), true);  // Single-value inclusive range
 assert_eq(1 in (1..1), false);  // Single-value exclusive range

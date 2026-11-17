@@ -1,28 +1,40 @@
+use crate::types::Unshared;
 use itertools::Itertools;
 use ndc_core::StaticType;
 use ndc_core::static_type::StaticTypeConstructionError;
 use ndc_lexer::Span;
 use ndc_resolver::NameResolutionError;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 #[error("{text}")]
 pub struct AnalysisError {
     text: String,
     span: Span,
     help_text: Option<String>,
+    /// Other places that explain the error, each with what it says there.
+    notes: Vec<(Span, String)>,
 }
 
 impl From<NameResolutionError> for AnalysisError {
     fn from(error: NameResolutionError) -> Self {
         Self {
-            text: error.to_string(),
-            span: error.span(),
             help_text: error.help_text(),
+            ..Self::new(error.to_string(), error.span())
         }
     }
 }
 
 impl AnalysisError {
+    /// An error that says `text` at `span`, with no help or notes.
+    fn new(text: impl Into<String>, span: Span) -> Self {
+        Self {
+            text: text.into(),
+            span,
+            help_text: None,
+            notes: Vec::new(),
+        }
+    }
+
     pub fn span(&self) -> Span {
         self.span
     }
@@ -33,50 +45,261 @@ impl AnalysisError {
         self.help_text.as_deref()
     }
 
-    pub(crate) fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
+    /// Other places that explain the error, each with what it says there.
+    pub fn notes(&self) -> &[(Span, String)] {
+        &self.notes
+    }
+
+    /// This error, found in a generic function's body while checking a call
+    /// of it, as the call's error. `calls` are the calls it came through,
+    /// outermost first, each with the function it calls: in
+    /// `fn yy(l) => l.len(); yy(5)`, the call `yy(5)` gets the error that
+    /// there's no `len(Int)`, with a note at `l.len()`.
+    pub(crate) fn through_calls<'a>(
+        mut self,
+        calls: impl IntoIterator<Item = (&'a str, Span)>,
+    ) -> Self {
+        let calls = calls.into_iter().collect::<Vec<_>>();
+        let Some(&(_, outermost)) = calls.first() else {
+            return self;
+        };
+        let mut notes = calls
+            .windows(2)
+            .map(|pair| {
+                let [(caller, _), (callee, call)] = pair else {
+                    unreachable!("windows of two");
+                };
+                (*call, format!("`{caller}` calls `{callee}` here"))
+            })
+            .collect::<Vec<_>>();
+        let (innermost, _) = calls[calls.len() - 1];
+        notes.push((self.span, format!("`{innermost}` needs this")));
+        notes.append(&mut self.notes);
+        self.notes = notes;
+        self.span = outermost;
+        self
+    }
+
+    /// This error with `help` as its help.
+    pub(crate) fn with_help(self, help: impl Into<String>) -> Self {
         Self {
-            text: err.to_string(),
-            span,
-            help_text: Some(err.help_text().to_string()),
+            help_text: Some(help.into()),
+            ..self
         }
+    }
+
+    pub(crate) fn invalid_type_annotation(err: &StaticTypeConstructionError, span: Span) -> Self {
+        Self::new(err.to_string(), span).with_help(err.help_text())
     }
 
     pub(crate) fn type_does_not_take_generic_args(name: &str, span: Span) -> Self {
-        Self {
-            text: format!("type `{name}` does not take generic arguments"),
+        Self::new(
+            format!("type `{name}` does not take generic arguments"),
             span,
-            help_text: None,
-        }
+        )
     }
 
-    pub(crate) fn tuple_arity_mismatch(
-        ident_len: usize,
-        annotation_len: usize,
-        span: Span,
-    ) -> Self {
-        Self {
-            text: format!(
-                "mismatched tuple arity: found a len={ident_len} identifier and a len={annotation_len} annotation."
+    /// A pattern of `names` names for a tuple of `values` values, the value
+    /// or the annotation of `let (a, b): (Int, Int, Int) = …`.
+    pub(crate) fn tuple_arity_mismatch(names: usize, values: usize, span: Span) -> Self {
+        Self::new(
+            format!(
+                "mismatched tuple arity: {names} names can't take apart a tuple of {values} values"
             ),
             span,
-            help_text: None,
-        }
+        )
     }
 
     pub(crate) fn mismatched_types(found: &StaticType, expected: &StaticType, span: Span) -> Self {
         Self {
-            text: format!("mismatched types: found {found} but expected {expected}"),
-            span,
-            help_text: None,
+            help_text: if *found == StaticType::Any {
+                Some(cast_out_of_any(&expected.to_string()))
+            } else {
+                has_unknown(std::slice::from_ref(found)).then(annotate_the_unknown)
+            },
+            ..Self::new(
+                format!("mismatched types: found {found} but expected {expected}"),
+                span,
+            )
         }
     }
 
-    pub(crate) fn impossible_cast(found: &StaticType, target: &StaticType, span: Span) -> Self {
+    pub(crate) fn values_share_no_type(unshared: &Unshared) -> Self {
+        Self::new(
+            format!(
+                "values of different types: {} and {} share no type",
+                unshared.first, unshared.second
+            ),
+            unshared.span,
+        )
+        .with_help(
+            "Give them one type, as with `String(n)` for a number among strings, or, as values of different types are an `Any`, which has to be said, annotate it, as in `let x: Any = …`, `-> Any` or `List<Any>`",
+        )
+    }
+
+    pub(crate) fn not_iterable(typ: &StaticType, span: Span) -> Self {
         Self {
-            text: format!("invalid cast: {found} can never be {target}"),
-            span,
-            help_text: None,
+            help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("List<Int>")),
+            ..Self::new(format!("{typ} is not iterable"), span)
         }
+    }
+
+    /// A call in the body of the generic function `function` that could be
+    /// the function itself or another overload of its name, while its
+    /// return type isn't written.
+    pub(crate) fn overloaded_recursion_needs_return_type(function: &str, span: Span) -> Self {
+        Self::new(
+            format!(
+                "`{function}` calls itself here, where another `{function}` could be meant too, so its return type has to be written"
+            ),
+            span,
+        )
+        .with_help(format!(
+            "Which `{function}` this call is depends on types that are only known when `{function}` is called, so what `{function}` returns can't be worked out from its body. Write what it returns, as in `fn {function}(...) -> Int`, or the types of its parameters, so the call is decided in the body"
+        ))
+    }
+
+    /// A function whose result would have a type that contains itself.
+    pub(crate) fn return_type_contains_itself(function: &str, span: Span) -> Self {
+        Self::new(
+            format!(
+                "What `{function}` returns would have a type that contains itself, as it returns itself or a value built from what it returns"
+            ),
+            span,
+        )
+        .with_help(format!(
+            "Only an `Any` can hold it, which has to be written: `fn {function}(...) -> Any`"
+        ))
+    }
+
+    pub(crate) fn recursion_changes_types(function: &str, span: Span) -> Self {
+        Self::new(
+            format!(
+                "`{function}` calls itself with types bigger than the ones it was given, so each call could need a version of `{function}` for bigger types"
+            ),
+            span,
+        )
+        .with_help(
+            "A recursive call has to pass the types the function was called with. Annotate the parameter with `Any` to let them change as the program runs",
+        )
+    }
+
+    /// A generic function's name used as a value where nothing says which
+    /// types it takes, as `inc` in `let f: Any = inc` with
+    /// `fn inc(x) => x + 1`, whose type is `Fn(A) -> B`: "say which types it
+    /// takes, as in `inc as Fn(A) -> B` with types in place of `A` and `B`",
+    /// which lists the type parameters of `typ` alphabetically.
+    pub(crate) fn generic_function_value(function: &str, typ: &StaticType, span: Span) -> Self {
+        let mut names = typ.type_parameters();
+        names.sort();
+        let parameters = names
+            .iter()
+            .map(|name| format!("`{name}`"))
+            .collect::<Vec<_>>();
+        let in_place = match &parameters[..] {
+            [] => String::new(),
+            [only] => format!(" with a type in place of {only}"),
+            [rest @ .., last] => format!(" with types in place of {} and {last}", rest.join(", ")),
+        };
+        Self::new(
+            format!(
+                "`{function}` is generic, and its value here doesn't say which types it takes"
+            ),
+            span,
+        )
+        .with_help(format!(
+            "A generic function's value is its version for one set of types, which must be known. Say which types it takes, as in `{function} as {typ}`{in_place}"
+        ))
+    }
+
+    /// A use of a generic function whose types make `parameter` of the
+    /// `pure fn` `function`, which is or is in it, take `typ`, which holds
+    /// `part`: a function, an iterator or an `Any`. `function` is `None` for
+    /// a lambda.
+    pub(crate) fn pure_fn_given_more_than_data(
+        function: Option<&str>,
+        parameter: &str,
+        typ: &StaticType,
+        part: &StaticType,
+        span: Span,
+    ) -> Self {
+        let function = function.map_or_else(
+            || "A `pure fn`".to_string(),
+            |name| format!("`{name}` is a `pure fn`, which"),
+        );
+        Self::new(
+            format!(
+                "{function} only takes data, but here its parameter `{parameter}` would have type `{typ}`"
+            ),
+            span,
+        )
+        .with_help(Self::pure_fn_takes_data(part))
+    }
+
+    /// A parameter of a `pure fn` whose type `typ` holds `part`: a
+    /// function, an iterator or an `Any`. `function` is `None` for a lambda.
+    pub(crate) fn pure_fn_parameter_takes_more_than_data(
+        function: Option<&str>,
+        parameter: &str,
+        typ: &StaticType,
+        part: &StaticType,
+        span: Span,
+    ) -> Self {
+        let function = function.map_or_else(
+            || "This `pure fn`".to_string(),
+            |name| format!("`{name}` is a `pure fn`, which"),
+        );
+        Self::new(
+            format!("{function} only takes data, but its parameter `{parameter}` has type `{typ}`"),
+            span,
+        )
+        .with_help(Self::pure_fn_takes_data(part))
+    }
+
+    /// Why a `pure fn` can't take a value with `part` in it.
+    fn pure_fn_takes_data(part: &StaticType) -> String {
+        let why = match part {
+            StaticType::Function { .. } => {
+                "`==` says two functions are equal only when they're the same one."
+            }
+            StaticType::Iterator(_) => {
+                "`==` says two iterators are equal only when they're the same one."
+            }
+            StaticType::MinHeap(_) | StaticType::MaxHeap(_) => {
+                "`==` says two heaps are equal only when they're the same one."
+            }
+            _ => "An `Any` could hold a function, an iterator or a heap.",
+        };
+        format!(
+            "A `pure fn` gives a call the result of an earlier one with equal arguments, so it only takes values `==` compares by what they hold. {why}"
+        )
+    }
+
+    pub(crate) fn type_too_large(function: &str, limit: usize, span: Span) -> Self {
+        Self::new(
+            format!("The type of `{function}` has more than {limit} parts, too many to work with"),
+            span,
+        )
+        .with_help(
+            "Each call through it makes a bigger type. Annotate a parameter or the return type with `Any` to stop it growing",
+        )
+    }
+
+    pub(crate) fn tuple_index_out_of_bounds(index: i64, length: usize, span: Span) -> Self {
+        Self::new(
+            format!("Index {index} is out of bounds for a tuple of {length} elements"),
+            span,
+        )
+    }
+
+    pub(crate) fn iterable_in_an_annotation(span: Span) -> Self {
+        Self::new("`Iterable<T>` can't be written in a type annotation", span).with_help(
+            "A parameter without an annotation takes any kind of sequence. Say which kind a value is, as in `List<Int>`",
+        )
+    }
+
+    pub(crate) fn impossible_cast(found: &StaticType, target: &StaticType, span: Span) -> Self {
+        Self::new(format!("invalid cast: {found} can never be {target}"), span)
     }
 
     pub(crate) fn function_redefinition(
@@ -88,29 +311,68 @@ impl AnalysisError {
             Some(types) => format!("({})", types.iter().join(", ")),
             None => "variadic parameters".to_string(),
         };
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "Illegal redefinition of function '{name}' with parameters {parameters_desc} in the same scope"
             ),
             span,
-            help_text: Some(
-                "Overloads in one scope need different parameter types, so annotate a parameter's type to tell them apart".to_string(),
+        )
+        .with_help(
+            "Overloads in one scope need different parameter types, so annotate a parameter's type to tell them apart",
+        )
+    }
+
+    /// A call that several overloads take, none more specific than the
+    /// others: `f(1, 2)` with `f(a, b)` and `f(a: Any, b: Any)`.
+    pub(crate) fn ambiguous_call(
+        name: &str,
+        arguments: &[StaticType],
+        overloads: &[String],
+        span: Span,
+    ) -> Self {
+        Self::new(
+            format!(
+                "The call {name}({}) is ambiguous: {} all take it, and none is more specific than the others",
+                arguments.iter().join(", "),
+                overloads.join(", "),
             ),
-        }
+            span,
+        )
+        .with_help(
+            "Annotate the parameters of one of them so it's more specific, or cast an argument so only one takes it",
+        )
+    }
+
+    pub(crate) fn tied_overloads(
+        name: &str,
+        parameters: &[String],
+        earlier: &[String],
+        span: Span,
+    ) -> Self {
+        Self::new(
+            format!(
+                "A call could fit both {name}({}) and {name}({}), declared earlier in the same scope, and neither is more specific",
+                parameters.join(", "),
+                earlier.join(", "),
+            ),
+            span,
+        )
+        .with_help(
+            "A parameter without a type annotation (`_` here) takes any argument the body can work with. Annotate the parameters so that one overload is more specific, or so that they take different arguments",
+        )
     }
 
     pub(crate) fn unable_to_index_into(typ: &StaticType, span: Span) -> Self {
-        Self {
-            text: format!("Unable to index into {typ}"),
-            span,
-            help_text: None,
-        }
+        Self::new(format!("Unable to index into {typ}"), span)
     }
+
     pub(crate) fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
         Self {
-            text: format!("Invalid unpacking of {typ}"),
-            span,
-            help_text: None,
+            help_text: (*typ == StaticType::Any).then(|| {
+                "An `Any` could hold anything. Cast it to say what it holds, as in `value as (Int, Int)`"
+                    .to_string()
+            }),
+            ..Self::new(format!("Invalid unpacking of {typ}"), span)
         }
     }
 
@@ -130,26 +392,79 @@ impl AnalysisError {
             ),
             other => format!("The variable '{name}' is {other}, which can't be called"),
         };
-        Self {
-            text,
-            span,
-            help_text: hides_functions.then(|| {
+        let help_text = if hides_functions {
+            Some(format!(
+                "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
+            ))
+        } else if *variable_type == StaticType::Any {
+            Some(cast_out_of_any("Fn(Int) -> Int"))
+        } else if let StaticType::Function {
+            parameters: Some(parameters),
+            ..
+        } = variable_type
+        {
+            let takes = parameters.iter().join(", ");
+            Some(if has_unknown(parameters) {
                 format!(
-                    "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
+                    "'{name}' takes ({takes}): nothing said what its parameters are when it was made, as on a REPL line of its own. Annotate them, as in `fn(x: Int) => …`"
                 )
-            }),
+            } else {
+                format!(
+                    "A function stored in a variable has one type: '{name}' takes ({takes}). One declared as `fn {name}(…)` takes the types each call gives it"
+                )
+            })
+        } else {
+            None
+        };
+        Self {
+            help_text,
+            ..Self::new(text, span)
         }
     }
 
     pub(crate) fn function_not_found(ident: &str, types: &[StaticType], span: Span) -> Self {
-        Self {
-            text: format!(
+        Self::new(
+            format!(
                 "No function called '{ident}' found that matches the arguments '{}'",
                 types.iter().join(", ")
             ),
             span,
-            help_text: None,
+        )
+    }
+
+    /// This error with help saying what the overloads of `name` take, given
+    /// as `(Int, String)` each, if any.
+    pub(crate) fn with_overloads(self, name: &str, overloads: &[String]) -> Self {
+        match overloads {
+            [] => self,
+            [only] => self.with_help(format!("`{name}` takes {only}")),
+            several => self.with_help(format!(
+                "The overloads of `{name}` take {}",
+                several.join(", ")
+            )),
         }
+    }
+
+    /// Same as [`Self::function_not_found`], for a call with an argument of
+    /// type `Any` that only overloads taking something else could take:
+    /// `a + 1` with `a: Any`.
+    pub(crate) fn function_not_found_for_any(
+        ident: &str,
+        types: &[StaticType],
+        span: Span,
+    ) -> Self {
+        Self::function_not_found(ident, types, span).with_help(cast_out_of_any("Int"))
+    }
+
+    /// Same as [`Self::function_not_found`], for a call given what an empty
+    /// literal holds when nothing says what, which only a type parameter or
+    /// an `Any` takes.
+    pub(crate) fn function_not_found_for_unknown(
+        ident: &str,
+        types: &[StaticType],
+        span: Span,
+    ) -> Self {
+        Self::function_not_found(ident, types, span).with_help(annotate_the_unknown())
     }
 
     /// Same as [`Self::function_not_found`], for a call an overload would
@@ -159,47 +474,92 @@ impl AnalysisError {
         types: &[StaticType],
         span: Span,
     ) -> Self {
-        Self {
-            help_text: Some(
-                concat!(
-                    "An overload would accept a narrower argument type. ",
-                    "Cast to say what the value holds, as in `value as List<Int>`.",
-                )
-                .to_string(),
-            ),
-            ..Self::function_not_found(ident, types, span)
-        }
+        Self::function_not_found(ident, types, span).with_help(concat!(
+            "An overload would accept a narrower argument type. ",
+            "Cast to say what the value holds, as in `value.clone() as List<Int>`: ",
+            "a container is cast as a copy while something else still holds it.",
+        ))
+    }
+
+    /// `example` is one of the overloads' types, to show how to say which
+    /// one is meant.
+    pub(crate) fn ambiguous_function_value(
+        name: &str,
+        expected: &StaticType,
+        example: &StaticType,
+        span: Span,
+    ) -> Self {
+        let text = if *expected == StaticType::Any {
+            format!("'{name}' has several overloads, and nothing here says which one is meant")
+        } else {
+            format!(
+                "'{name}' has several overloads that are a {expected}, and nothing here says which one is meant"
+            )
+        };
+        Self::new(text, span).with_help(format!(
+            "Say which one with a function type, as in `let f: {example} = {name}`"
+        ))
+    }
+
+    pub(crate) fn no_overload_fits(name: &str, expected: &StaticType, span: Span) -> Self {
+        Self::new(format!("No overload of '{name}' is a {expected}"), span)
     }
 
     pub(crate) fn break_outside_loop(span: Span) -> Self {
-        Self {
-            text: "unexpected break statement outside of loop".to_string(),
-            span,
-            help_text: None,
-        }
+        Self::new("unexpected break statement outside of loop", span)
     }
 
     pub(crate) fn continue_outside_loop(span: Span) -> Self {
-        Self {
-            text: "unexpected continue statement outside of loop".to_string(),
-            span,
-            help_text: None,
-        }
+        Self::new("unexpected continue statement outside of loop", span)
     }
 
     pub(crate) fn return_outside_function(span: Span) -> Self {
-        Self {
-            text: "unexpected return statement outside of function body".to_string(),
+        Self::new("unexpected return statement outside of function body", span)
+    }
+
+    pub(crate) fn callee_rejects_arguments(
+        callee: &StaticType,
+        types: &[StaticType],
+        span: Span,
+    ) -> Self {
+        Self::new(
+            format!(
+                "A function of type {callee} doesn't accept the arguments '{}'",
+                types.iter().join(", ")
+            ),
             span,
-            help_text: None,
-        }
+        )
     }
 
     pub(crate) fn not_callable(typ: &StaticType, span: Span) -> Self {
         Self {
-            text: format!("Unable to invoke {typ} as a function."),
-            span,
-            help_text: None,
+            help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("Fn(Int) -> Int")),
+            ..Self::new(format!("Unable to invoke {typ} as a function."), span)
         }
     }
+}
+
+/// Whether any of `types` has [`StaticType::Unknown`] in it.
+pub(crate) fn has_unknown(types: &[StaticType]) -> bool {
+    types
+        .iter()
+        .any(|typ| typ.contains(&|part| *part == StaticType::Unknown))
+}
+
+fn annotate_the_unknown() -> String {
+    concat!(
+        "`Unknown` is the type of what nothing in the program says the type of, such as a parameter ",
+        "of a function that's never called or what an empty `[]`, `%{}` or `None` holds. ",
+        "Only a type parameter or an `Any` takes it. ",
+        "Annotate it, as in `fn(x: Int) => x + 1` or `let xs: List<Int> = []`",
+    )
+    .to_string()
+}
+
+/// Help for a value of type `Any` used where `example`, or another type,
+/// is expected.
+fn cast_out_of_any(example: &str) -> String {
+    format!(
+        "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `value as {example}`, or `value as? {example}` to get an Option"
+    )
 }

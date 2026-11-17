@@ -1,0 +1,15 @@
+// A generic `pure fn` is compiled once for each type it's called with, and
+// each of those copies has a cache of its own. The second direct call finds
+// what the first computed, and so does a call through a value of the
+// function used at the same types, which is the same copy.
+// expect-output: 10 10 10 1
+let calls = 0;
+pure fn add(x, y) {
+    calls += 1;
+    x + y
+}
+let first = add(5, 5);
+let again = add(5, 5);
+let f = add;
+let through_value = f(5, 5);
+print(first, again, through_value, calls);

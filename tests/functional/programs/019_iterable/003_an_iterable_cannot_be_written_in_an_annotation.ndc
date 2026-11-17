@@ -1,0 +1,3 @@
+// A value has a kind of sequence, which an annotation has to say.
+// expect-error: `Iterable<T>` can't be written in a type annotation
+let xs: Iterable<Int> = [1];

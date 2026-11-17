@@ -42,35 +42,43 @@ print(x); // 3
 
 ## Reassignment
 
-The `=` operator can be used to reassign a value to an existing variable. When you reassign a variable to a value of a different type, the variable's type is widened to the least upper bound (LUB) of the old and new types.
+The `=` operator assigns a new value to an existing variable. A variable keeps the type of the value it starts with, so a new value has to have that type too:
 
-```ndc
-let x = 1;     // the initializer and declaration have type Int
-x = 2;         // subsequent reads still have type Int
-x = 3.14;      // subsequent reads have type Any (Int and Float are siblings)
-print(x);      // 3.14
+```ndc,fails
+let n = 1;   // n is an Int
+n = 2;       // fine
+n = 3.14;    // error: mismatched types: found Float but expected Int
 ```
 
-Augmented assignment widens an inferred binding from the operation's result in the same way:
+So to keep a running total of Floats, start it at `0.0` rather than `0`. The same goes for [augmented assignment](../features/augmented-assignment.md), like `n += 0.5`.
 
-```ndc
-let total = 3;
-total += 0.5;  // Int + Float returns Float, so subsequent reads have type Any
-print(total);  // 3.5
+An empty list or map gets its type from the first thing you put in it:
+
+```ndc,fails
+let counts = %{};
+counts["a"] = 1;      // counts is a Map<String, Int> from here on
+counts["b"] = "two";  // error: mismatched types: found String but expected Int
 ```
 
+A variable that only gets its real value later can hold an `Option`:
+
 ```ndc
-let pos = ();        // type is ()
-pos = (1, 2);        // type widens to Sequence<Any>
-pos = ("a", "b");    // type is still Sequence<Any>
-print(pos);          // ("a","b")
+let pos = None;
+pos = Some((1, 2));
+print(pos);    // Some((1,2))
 ```
 
-> **Tip:** For the best type inference, initialize variables with a value that matches the intended type. For example, use `let pos = (0, 0);` instead of `let pos = ();` if you intend to store a 2-tuple of numbers.
+To store values of different types in one variable, annotate it with `Any`:
+
+```ndc
+let x: Any = 1;
+x = "text";    // fine
+print(x);      // text
+```
 
 ## Type annotations
 
-You can pin a variable's type by adding `: Type` after the name. The initialiser still has to fit, the analyser just checks it for you up front.
+You can give a variable a type by adding `: Type` after its name. The value has to fit it:
 
 ```ndc
 let count: Int = 0;
@@ -79,47 +87,19 @@ let xs: List<Int> = [1, 2, 3];
 print(count, name, xs);  // 0 world [1,2,3]
 ```
 
-A subtype is fine. All concrete types fit where `Any` is requested:
-
-```ndc
-let n: Number = 3n;
-let x: Any = "anything";  // every value fits Any
-print(n, x);              // 3 anything
-```
-
-A mismatch is rejected with a `mismatched types` error:
-
 ```ndc,fails
 let x: Int = "hello";   // ERROR: mismatched types: found String but expected Int
 ```
 
-An empty container literal adopts the annotated type — there are no elements to infer
-from, so the annotation decides:
+An annotation is the way to say what an empty list or map will hold:
 
 ```ndc
-let xs: List<Int> = [];        // xs is List<Int>, not List<Any>
-let m: Map<Int, Int> = %{};    // m is Map<Int, Int>
-let nested: List<List<Int>> = [[]];
-print(xs, m, nested);          // [] %{} [[]]
+let xs: List<Int> = [];
+let m: Map<String, Int> = %{};
+print(xs, m);          // [] %{}
 ```
 
-Once a binding has an annotation, it stays locked to that type. Reassignment and augmented assignment can't widen it the way they widen an inferred binding:
-
-```ndc,fails
-let x: Int = 5;
-x = "test";   // ERROR: mismatched types
-```
-
-```ndc,fails
-let x: Int = 5;
-x += 0.5;     // ERROR: the Float result doesn't fit in Int
-```
-
-If you want a binding that widens freely, just leave the annotation off. Annotations are opt-in.
-
-The same syntax shows up on function parameters and return types — see the [Function](./types/function.md) page.
-
-See [Types](./types.md) for the full list of names you can use, including generics like `List<T>`, `Map<K, V>`, and tuple shorthand `(Int, String)`.
+The same syntax works on function parameters and return types (see [Function](./types/function.md)). See [Types](./types.md) for the names you can use.
 
 ## Destructuring
 
@@ -140,4 +120,11 @@ You can also destructure nested patterns:
 ```ndc
 let [a, (b, c)] = (1, [2, 3]);
 print(a, b, c);  // 1 2 3
+```
+
+Ranges and deques destructure too, as long as they have exactly as many elements as there are names:
+
+```ndc
+let low, high = 0..2;
+print(low, high);  // 0 1
 ```

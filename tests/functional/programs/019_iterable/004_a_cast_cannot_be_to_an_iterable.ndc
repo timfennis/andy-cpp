@@ -1,0 +1,2 @@
+// expect-error: `Iterable<T>` can't be written in a type annotation
+print([1] as Iterable<Int>);

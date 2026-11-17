@@ -1,0 +1,9 @@
+// A generic function used as a value is its instance for the type it's used
+// at, whose types pick the overload a function value in its body means: the
+// most specific one that takes the argument, as a call would.
+// expect-output: int
+fn choose(x: Int) => "int";
+fn choose(x: Any) => "any";
+fn apply(x) { let g = choose; g(x) }
+let h: Fn(Int) -> String = apply;
+print(h(1));

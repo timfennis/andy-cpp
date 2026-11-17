@@ -1,0 +1,6 @@
+// expect-error: mismatched types: found Any but expected String
+let a: Any = "five";
+let n = 0;
+let s = "";
+(n, s) = (a, a);
+print(n, s);

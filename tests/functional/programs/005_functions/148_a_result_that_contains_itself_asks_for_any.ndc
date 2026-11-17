@@ -1,0 +1,4 @@
+// `f` returns a list of what it returns, a type that would contain itself.
+// expect-error: What `f` returns would have a type that contains itself
+fn f(x, n) => if n == 0 { [x] } else { [f(x, n - 1)] };
+print(f(1, 3));

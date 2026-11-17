@@ -4,7 +4,7 @@ use ndc_interpreter::Interpreter;
 /// collected stdout output after all lines have been executed.
 fn repl_output(lines: &[&str]) -> String {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -19,7 +19,7 @@ fn repl_output(lines: &[&str]) -> String {
 /// containing the given substring.
 fn repl_error(lines: &[&str], expected_error: &str) {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -72,7 +72,7 @@ fn error_on_undefined_variable() {
 #[test]
 fn expression_result_is_returned() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -83,7 +83,7 @@ fn expression_result_is_returned() {
 #[test]
 fn statement_returns_unit() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -94,7 +94,7 @@ fn statement_returns_unit() {
 #[test]
 fn let_returns_unit() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -109,7 +109,7 @@ fn let_returns_unit() {
 #[test]
 fn a_failed_evaluation_starts_the_session_over() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -138,7 +138,7 @@ fn a_failed_evaluation_starts_the_session_over() {
 #[test]
 fn a_syntax_error_keeps_the_session() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -152,7 +152,7 @@ fn a_syntax_error_keeps_the_session() {
 #[test]
 fn output_of_a_failed_evaluation_is_kept() {
     let mut interp = {
-        let mut i = Interpreter::capturing();
+        let mut i = Interpreter::capturing().line_by_line();
         i.configure(ndc_stdlib::register);
         i
     };
@@ -201,7 +201,7 @@ fn functions_share_globals_with_later_lines() {
 #[test]
 fn closures_keep_the_loop_variables_of_a_finished_line() {
     let out = repl_output(&[
-        "let fs = []; let i = 0;",
+        "let fs: List<Fn() -> Int> = []; let i = 0;",
         "while i < 3 { let j = i; fs.push(fn() { j }); i += 1; }",
         "print([f() for f in fs])",
     ]);
@@ -217,4 +217,187 @@ fn configure_after_a_line_ran_updates_the_globals() {
     interp.eval("print(1)").unwrap();
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
     assert_eq!(out.trim(), "1");
+}
+
+#[test]
+fn a_generic_function_from_an_earlier_line_takes_a_call_with_new_types() {
+    // The line that declared `inc` compiled its instance for Ints. A later
+    // line calls it with a Float, which compiles the instance for Floats.
+    let out = repl_output(&[
+        "fn inc(x) => x + 1;",
+        "print(inc(1));",
+        "print(inc(2.5), inc(1));",
+    ]);
+    assert_eq!(out.trim(), "2\n3.5 2");
+}
+
+#[test]
+fn a_generic_function_on_one_line_uses_its_instances() {
+    let out = repl_output(&["fn inc(x) => x + 1; print(inc(1), inc(2.5));"]);
+    assert_eq!(out.trim(), "2 3.5");
+}
+
+#[test]
+fn a_later_line_gets_the_instance_for_any_of_an_earlier_lines_function() {
+    let out = repl_output(&[
+        r#"fn pick(x: Int) => 1; fn pick(x: Any) => "fallback"; fn wrap(x) => pick(x);"#,
+        "let a: Any = 1; let s: String = wrap(a); print(s);",
+    ]);
+    assert_eq!(out.trim(), "fallback");
+}
+
+#[test]
+fn a_later_line_gets_an_instance_whose_lambda_takes_its_types() {
+    let out = repl_output(&[
+        "fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }",
+        "print(is_safe([1, 2]))",
+    ]);
+    assert_eq!(out.trim(), "true");
+}
+
+#[test]
+fn an_earlier_lines_function_used_as_a_value_is_the_instance_for_its_type() {
+    let out = repl_output(&[
+        "fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }",
+        "print([[1, 2]].count(is_safe))",
+    ]);
+    assert_eq!(out.trim(), "1");
+}
+
+#[test]
+fn a_later_line_reuses_the_instance_an_earlier_line_made() {
+    let out = repl_output(&[
+        "fn inc(x) => x + 1;",
+        "print(inc(2.5));",
+        "print(inc(3.5), [1.5].map(inc));",
+    ]);
+    assert_eq!(out.trim(), "3.5\n4.5 [2.5]");
+}
+
+#[test]
+fn an_instance_of_an_earlier_line_calls_the_instances_its_types_need() {
+    let out = repl_output(&[
+        "fn inc(x) => x + 1;",
+        "fn twice(x) => inc(inc(x));",
+        "print(twice(1), twice(0.5));",
+    ]);
+    assert_eq!(out.trim(), "3 2.5");
+}
+
+#[test]
+fn a_function_value_in_an_earlier_lines_generic_body_takes_the_instances_overload() {
+    let out = repl_output(&[
+        r#"fn choose(x: Int) => "int"; fn choose(x: Any) => "any";"#,
+        "fn apply(x) { let g = choose; g(x) }",
+        "print(apply(1))",
+    ]);
+    assert_eq!(out.trim(), "int");
+}
+
+#[test]
+fn an_earlier_lines_generic_function_used_as_a_value_is_an_instance() {
+    let out = repl_output(&[
+        "fn signs(xs) => xs.map(signum);",
+        "print([[1, -2]].map(signs))",
+    ]);
+    assert_eq!(out.trim(), "[[1,-1]]");
+}
+
+#[test]
+fn a_function_value_from_an_earlier_lines_generic_body_cast_from_any_is_checked() {
+    repl_error(
+        &[
+            "fn bad(x) { let g = abs; g(x); let a: Any = g; let b = a as Fn(Int) -> String; b(1) }",
+            "print(bad(1))",
+        ],
+        "cannot cast Fn(Int) -> Int to Fn(Int) -> String",
+    );
+}
+
+#[test]
+fn a_failed_line_takes_the_instances_it_made_with_it() {
+    let mut interp = Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    interp.eval("fn inc(x) => x + 1;").unwrap();
+    assert!(interp.eval("print(inc(2.5)); [1][5]").is_err());
+    interp.eval("fn inc(x) => x + 1;").unwrap();
+    interp.eval("print(inc(2.5))").unwrap();
+    let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
+    assert_eq!(out.trim(), "3.5\n3.5");
+}
+
+#[test]
+fn an_instance_of_an_earlier_line_calls_the_instance_its_types_need_of_another() {
+    let out = repl_output(&[
+        r#"fn pick(x: Int) => 1; fn pick(x: Any) => "fallback"; fn wrap(x) => pick(x);"#,
+        "fn outer(x) => wrap(x);",
+        "let a: Any = 1; let s: String = outer(a); print(s);",
+    ]);
+    assert_eq!(out.trim(), "fallback");
+}
+
+#[test]
+fn a_later_line_settles_what_an_empty_list_holds() {
+    let out = repl_output(&["let xs = [];", "xs.push(1);", "print(xs);"]);
+    assert_eq!(out.trim(), "[1]");
+}
+
+#[test]
+fn a_later_line_settles_what_an_empty_map_holds() {
+    let out = repl_output(&["let m = %{};", r#"m["a"] = 1;"#, "print(m);"]);
+    assert_eq!(out.trim(), r#"%{"a": 1}"#);
+}
+
+#[test]
+fn a_later_line_settles_what_none_will_hold() {
+    let out = repl_output(&["let best = None;", "best = Some(3);", "print(best);"]);
+    assert_eq!(out.trim(), "Some(3)");
+}
+
+#[test]
+fn a_lambdas_type_is_settled_on_its_line() {
+    // The function is made with its type, which a cast checks against as
+    // the program runs, so a later line can't change it.
+    repl_error(
+        &["let identity = fn(x) => x;", "identity(1);"],
+        "doesn't accept the arguments 'Int'",
+    );
+}
+
+#[test]
+fn a_pure_lambdas_parameter_is_settled_on_its_line() {
+    repl_error(
+        &["let same = pure fn(x) => x;", "same(fn(n: Int) => n);"],
+        "doesn't accept the arguments",
+    );
+}
+
+#[test]
+fn what_a_functions_type_mentions_is_settled_on_its_line() {
+    repl_error(
+        &["let xs = [];", "let get = fn() => xs;", "xs.push(1);"],
+        "List<Unknown>, Int",
+    );
+}
+
+#[test]
+fn a_type_a_later_line_settled_is_checked_on_the_next() {
+    repl_error(
+        &["let xs = [];", "xs.push(1);", r#"xs.push("a");"#],
+        "List<Int>, String",
+    );
+}
+
+#[test]
+fn a_lambda_whose_body_needs_its_parameter_type_is_settled_on_its_line() {
+    // The line runs before the next one exists, so `*` is picked now.
+    repl_error(&["let double = fn(x) => x * 2;"], "Unknown, Int");
+}
+
+#[test]
+fn a_lambda_with_a_parameter_its_line_said_nothing_about_asks_for_an_annotation() {
+    repl_error(
+        &["let identity = fn(x) => x;", "identity(1);"],
+        "nothing said what its parameters are when it was made",
+    );
 }

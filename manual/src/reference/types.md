@@ -1,8 +1,42 @@
 # Types
 
-Andy C++ runs as a dynamically typed language — values carry their types at runtime and most checking happens then. You can also attach type annotations to variables, function parameters, and return values, and the analyser will use them to flag obvious mismatches before the program runs.
+Every value in Andy C++ has a type, but you rarely have to write one down. Before the program runs, Andy C++ works out the type of everything in it and reports code that can't work. Annotations on variables, parameters and return values are optional.
 
-The type system is hierarchical with `Any` at the root:
+## Mistakes found before the program runs
+
+A mistake is found even in code that never runs, and the error points through the calls to the line that can't work. This program prints nothing:
+
+```ndc,fails
+fn inc(x) => x + 1;
+fn shout(s) => inc(s) ++ "!";
+print("hello");
+if false {
+    shout("a");  // error: No function called '+' found that matches the arguments 'String, Int'
+}
+```
+
+An anonymous function knows the types of its parameters:
+
+```ndc,fails
+struct Player { name: String, score: Int }
+let players = [Player("ann", 3), Player("bob", 5)];
+players.map(fn(p) => p.score ++ " points");
+// error: No function called '++' found that matches the arguments 'Int, String'
+```
+
+An empty list gets its type from what you put in it:
+
+```ndc,fails
+let xs = [];
+xs.push(1);
+xs.push("two");  // error: No function called 'push' found that matches the arguments 'List<Int>, String'
+```
+
+If nothing is put in it, annotate it: `let xs: List<Int> = [];`.
+
+## The types
+
+Every value is an `Any`. The other types are:
 
 * `Any`
   * [`Option<T>`](./types/option.md)
@@ -10,7 +44,7 @@ The type system is hierarchical with `Any` at the root:
   * [`Int`](./types/number.md) — checked signed 64-bit integers
   * [`Float`](./types/number.md) — IEEE 754 `f64` values
   * [`Number`](./types/number.md) — arbitrary-size, rational, floating-point, and complex values
-  * `Sequence<T>`
+  * Sequences, which a `for` loop iterates over:
     * [`String`](./types/string.md): a mutable list of characters
     * [`List<T>`](./types/list.md): a mutable list
     * [`Tuple<T, ...>`](./types/tuple.md): an immutable list
@@ -19,7 +53,7 @@ The type system is hierarchical with `Any` at the root:
     * [`Deque<T>`](./types/deque.md): a double-ended queue
     * [`MinHeap<T>` / `MaxHeap<T>`](./types/min-max-heap.md): min/max heap
     * `Iterator<T>`: produces values when consumed (currently only from range expressions like `5..100`)
-  * [`Function`](./types/function.md)
+  * [`Fn(A, B) -> C`](./types/function.md): a function taking an `A` and a `B` and returning a `C`
   * [Structs](./types/struct.md): user-defined record types, one per `struct` declaration
 
 These are also the names you write in annotations. Generic types take their parameters in angle brackets:
@@ -27,21 +61,15 @@ These are also the names you write in annotations. Generic types take their para
 ```ndc
 let xs: List<Int> = [1, 2, 3];
 let table: Map<String, Int> = %{"a": 1, "b": 2};
-let maybe: Option<Any> = Some("hi");
+let maybe: Option<String> = Some("hi");
 let pair: Tuple<Int, String> = (1, "hi");
 let pair2: (Int, String) = (1, "hi");  // tuple shorthand
-
-print(maybe, pair2);  // Some("hi") (1,"hi")
-```
-
-Nested generics work too — the parser handles the `>>` ambiguity for you:
-
-```ndc
 let grid: List<List<Int>> = [[1, 2], [3, 4]];
-print(grid);  // [[1,2],[3,4]]
+
+print(maybe, pair2, grid);  // Some("hi") (1,"hi") [[1,2],[3,4]]
 ```
 
-[Struct](./types/struct.md) names are type names like any other, including inside generics:
+[Struct](./types/struct.md) names are type names like any other:
 
 ```ndc
 struct Point { x: Int, y: Int }
@@ -51,11 +79,46 @@ let points: List<Point> = [Point(1, 2), Point(3, 4)];
 print(points.map(manhattan));  // [3,7]
 ```
 
-A struct name refers to the struct declared earlier in an enclosing scope; it cannot be
-used before (or inside) its own declaration, and it goes out of scope together with the
-block or function that declared it. See [Struct](./types/struct.md) for the scoping
-rules.
+## Values of different types
 
-> **Note:** `Any` is the base type for every other type, so an `Any`-annotated binding will accept anything. When a parameter or value has no annotation and the analyser can't infer a type, it falls back to `Any`. There is also a `Never` type used internally for things like `break` that don't produce a value — you'll rarely need to write it by hand.
+The elements of a list, the keys and values of a map, the branches of an `if`, and the values a function returns all share one type. Numbers mix: `[1, 2.5]` is a list of Floats. Values that share no type are an error:
 
-To go the other way — recover a precise type from an `Any`-typed value — use a [cast](../features/casts.md): `value as List<Int>`.
+```ndc,fails
+let mixed = [1, "a"];  // error: values of different types: Int and String share no type
+```
+
+To mix them, say that they are `Any`s:
+
+```ndc
+let b: Any = if true { 1 } else { "a" };
+let xs: List<Any> = [1, "a"];
+let m: Map<String, Any> = %{"a": 1, "b": "two"};
+print(b, xs, m["b"]);  // 1 [1,"a"] two
+```
+
+Write the `Any` where the list or map is made: a list made as a `List<String>` can't be used as a `List<Any>` later.
+
+## Getting a value out of an `Any`
+
+Anything can go into an `Any`, but to get a value back out you need a [cast](../features/casts.md). `value as Int` checks that the value is an Int, and `value as? Int` gives an `Option<Int>`:
+
+```ndc,fails
+let a: Any = 5;
+let n: Int = a;  // error: mismatched types: found Any but expected Int
+```
+
+```ndc
+let a: Any = 5;
+let n: Int = a as Int;
+print(n + 1);           // 6
+print(a as? String);    // None
+```
+
+The same goes for operators and functions: `a + 1` needs `(a as Int) + 1`. Functions that take any value, like `print`, `string` and `==`, take an `Any` as it is.
+
+Indexing is the exception: `a[i]` works on an `Any` and gives an `Any`, so you can read nested data and cast what you find:
+
+```ndc
+let data: Map<String, Any> = %{"scores": [3, 5]};
+print(data["scores"][1] as Int + 1);  // 6
+```

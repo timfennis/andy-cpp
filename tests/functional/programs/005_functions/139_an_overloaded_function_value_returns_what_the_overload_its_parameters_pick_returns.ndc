@@ -1,0 +1,9 @@
+// Nothing says what `x` is, so it's `Unknown`, which only `pick(Any)`
+// takes: that's the `pick` `f` is, and it returns a String. What `f`
+// returns waits for that pick rather than falling back itself.
+// expect-output: ok
+fn pick(x: Int) => 1;
+fn pick(x: Any) => "any";
+let f = pick;
+let g = fn(x) => f(x);
+print("ok");

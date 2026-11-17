@@ -25,6 +25,14 @@ fn spaces_go_around_operators_and_after_commas() {
 }
 
 #[test]
+fn a_cast_keeps_its_operator() {
+    assert_formats(
+        "let a = x   as Int;let b = x  as?  List<Int>;",
+        "let a = x as Int;\nlet b = x as? List<Int>;\n",
+    );
+}
+
+#[test]
 fn statements_are_indented_by_four_spaces() {
     assert_formats(
         "fn f(x) {\n  if x > 0 {\n x\n  } else {\n  0\n }\n}\n",

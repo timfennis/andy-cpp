@@ -1,0 +1,6 @@
+// A lambda's parameters are settled by its uses like any variable's type,
+// so it can't be called with an Int and then with a Float.
+// expect-error: doesn't accept the arguments 'Float'
+let twice = fn(x) => x * 2;
+print(twice("abc".len()));
+print(twice(2.5));

@@ -1,0 +1,7 @@
+assert_eq("key=value".split_once("="), ("key", "value"));
+assert_eq("a=b=c".split_once("="), ("a", "b=c"));
+assert_eq("=b".split_once("="), ("", "b"));
+assert_eq("key=value".split_once?("="), Some(("key", "value")));
+assert_eq("keyvalue".split_once?("="), None);
+let (key, value) = "port: 80".split_once(": ");
+assert_eq(key ++ value, "port80");

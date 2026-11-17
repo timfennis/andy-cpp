@@ -1,2 +1,3 @@
-json_encode([1, None, 2]);
+let values: List<Any> = [1, None, 2];
+json_encode(values);
 // expect-error: cannot convert None to JSON

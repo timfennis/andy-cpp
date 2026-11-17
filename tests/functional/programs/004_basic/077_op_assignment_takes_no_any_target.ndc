@@ -1,0 +1,7 @@
+// The target of `a op= b` is passed to the operator, which takes an Int, so
+// a target of type `Any` doesn't fit.
+// expect-error: No function called 'choose' found that matches the arguments 'Any, Int'
+fn choose(a: Int, b: Int) => a;
+let x: Any = "wrong";
+x choose= 1;
+print(x);

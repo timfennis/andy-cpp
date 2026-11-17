@@ -1,0 +1,6 @@
+// A function taking an `Any` is an argument for a parameter of a function
+// type that passes an Int and takes back an `Any`.
+// expect-output: 1
+fn apply(f: Fn(Int) -> Any, x: Int) => f(x);
+fn show(x: Any) => x;
+print(apply(show, 1));

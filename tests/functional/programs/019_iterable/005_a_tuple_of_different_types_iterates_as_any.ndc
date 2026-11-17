@@ -1,0 +1,5 @@
+// expect-output: 1
+// expect-output: a
+for x in (1, "a") {
+    print(x);
+}

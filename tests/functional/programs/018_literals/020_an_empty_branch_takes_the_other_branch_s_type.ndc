@@ -1,0 +1,4 @@
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'
+let xs = ["a".len()];
+let r = if true { xs } else { [] };
+r.push("s");

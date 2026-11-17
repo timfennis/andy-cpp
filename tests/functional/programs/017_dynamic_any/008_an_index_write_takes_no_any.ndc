@@ -1,0 +1,5 @@
+// expect-error: mismatched types: found Any but expected Int
+let xs = [1, 2];
+let a: Any = 3;
+xs[0] = a;
+print(xs);

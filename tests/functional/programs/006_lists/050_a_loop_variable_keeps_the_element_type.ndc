@@ -1,0 +1,6 @@
+// A loop variable keeps the element type: `line` is a String, so it can't
+// hold the list `split` returns. Give the list a name of its own.
+// expect-error: mismatched types: found List<String> but expected String
+for line in ["a b c"] {
+    line = line.split(" ");
+}

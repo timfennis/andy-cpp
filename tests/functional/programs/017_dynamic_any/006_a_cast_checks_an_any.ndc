@@ -1,0 +1,9 @@
+// expect-error: cannot cast List<String> to List<Int>
+fn first(xs: Any) -> Int {
+    let ints = xs as List<Int>;
+    if ints.len() == 0 {
+        return 0;
+    }
+    ints[0]
+}
+print(first(["three"]));

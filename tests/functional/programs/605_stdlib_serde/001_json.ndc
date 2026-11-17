@@ -1,4 +1,4 @@
-let object = %{
+let object: Map<String, Any> = %{
     "foo": "bar",
     "int": 123,
     "float": 123.123,
@@ -10,7 +10,7 @@ let object = %{
     "list": [1,2,3,4],
 };
 
-let result = %{
+let result: Map<String, Any> = %{
     "float": 123.123,
     "foo": "bar",
     "unit": (),

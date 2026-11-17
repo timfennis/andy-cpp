@@ -1,0 +1,5 @@
+// A MinHeap<String> pops Strings, so adding an Int to a popped value is an error.
+// expect-error: No function called '+' found that matches the arguments 'String, Int'
+let heap = MinHeap();
+heap.push("a");
+heap.pop() + 1;

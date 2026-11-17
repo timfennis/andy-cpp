@@ -1,0 +1,8 @@
+// expect-error: No function called 'len' found that matches the arguments 'Bool'
+// What iterating gives comes from the failed call, so nothing built from it
+// is reported.
+let n = len(true);
+let words: List<String> = [x for x in n];
+for x in n.map(fn(i) => [i]) {
+    print(x.sum());
+}

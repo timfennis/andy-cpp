@@ -1,0 +1,9 @@
+// An `if` without an `else` has no value when its condition is false, so
+// it's `()` either way.
+// expect-output: true true
+fn is_positive(n) {
+    return if n >= 0 {
+        true
+    };
+}
+print(is_positive(3) == (), is_positive(-5) == ());

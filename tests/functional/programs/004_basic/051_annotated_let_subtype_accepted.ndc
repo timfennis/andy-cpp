@@ -1,3 +1,0 @@
-// expect-output: 42
-let x: Number = 42n;
-print(x);

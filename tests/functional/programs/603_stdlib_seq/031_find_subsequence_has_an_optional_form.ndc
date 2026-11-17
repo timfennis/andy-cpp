@@ -1,0 +1,4 @@
+// `find_subsequence` gives where a subsequence starts, and `find_subsequence?`
+// gives `None` when it isn't there.
+// expect-output: 2 Some(0) None
+print([1, 2, 3, 4].find_subsequence([3, 4]), [1, 2].find_subsequence?([1]), [1, 2].find_subsequence?([5]));

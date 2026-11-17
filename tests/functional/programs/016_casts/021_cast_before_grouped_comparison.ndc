@@ -1,7 +1,7 @@
 // A `>` inside the grouped right operand does not close type arguments opened
-// by the earlier `<`; the cast ends at `Int` and this reaches the VM as a
-// comparison between Int and Bool.
-// expect-error: cannot compare Int and Bool
+// by the earlier `<`; the cast ends at `Int` and this is a comparison between
+// Int and Bool.
+// expect-error: No function called '<' found that matches the arguments 'Int, Bool'
 let value: Any = 3;
 let y = 2;
 let z = 1;

@@ -1,0 +1,4 @@
+// The annotation makes `7` a Float, so the division is a Float's.
+// expect-output: 3.5
+let f: Float = 7;
+print(f / 2);

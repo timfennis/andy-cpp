@@ -1,7 +1,7 @@
 // `s.f()` is method-call syntax (it lowers to `f(s)`), so calling a function
 // stored in a field requires parentheses: `(s.f)()` evaluates the getter and
 // calls its result. This used to silently lower to `f(s)` as well.
-struct S { f: Any, n: Int }
+struct S { f: Fn(Int) -> Int, n: Int }
 let s = S(fn (a) => a * 2, 5);
 
 assert_eq((s.f)(21), 42);

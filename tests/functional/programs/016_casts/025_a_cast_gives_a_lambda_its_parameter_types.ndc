@@ -1,0 +1,5 @@
+// Casting a lambda to a function type settles the parameters nothing else
+// settled, so the cast holds when the program runs.
+// expect-output: 1
+let f = (fn(x) => x) as Fn(Int) -> Int;
+print(f(1));

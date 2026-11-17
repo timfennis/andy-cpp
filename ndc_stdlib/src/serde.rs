@@ -122,7 +122,7 @@ fn object_to_json(
         Object::MaxHeap(_) | Object::MinHeap(_) => {
             bail!("cannot convert a heap to JSON, convert it to a list first")
         }
-        Object::Function(_) | Object::OverloadSet { .. } => {
+        Object::Function(_) => {
             bail!("cannot convert a function to JSON")
         }
         Object::String(s) => Ok(json!(&*s.borrow())),
@@ -227,6 +227,7 @@ mod inner {
     /// heaps, structs, functions, maps with non-string keys or a default value,
     /// and values that contain themselves. Use `json_encode_lossy` to convert
     /// those anyway.
+    #[function(signature = "<A>(A) -> String")]
     pub fn json_encode(input: Value) -> anyhow::Result<String> {
         let v = value_to_json(&input, false, &mut HashSet::new())?;
         Ok(v.to_string())
@@ -242,6 +243,7 @@ mod inner {
     /// `None` and non-finite floats become `null`. There is no lossy
     /// counterpart for `json_decode` because these conversions cannot be
     /// reversed. Functions and values that contain themselves are still errors.
+    #[function(signature = "<A>(A) -> String")]
     pub fn json_encode_lossy(input: Value) -> anyhow::Result<String> {
         let v = value_to_json(&input, true, &mut HashSet::new())?;
         Ok(v.to_string())

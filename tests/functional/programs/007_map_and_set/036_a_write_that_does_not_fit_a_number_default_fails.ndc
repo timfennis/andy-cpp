@@ -1,0 +1,6 @@
+let counts = %{:0};
+for word in "the cat the".split(" ") {
+    counts[word] += 1;
+}
+counts["dog"] = "many";
+// expect-error: found String but expected Int

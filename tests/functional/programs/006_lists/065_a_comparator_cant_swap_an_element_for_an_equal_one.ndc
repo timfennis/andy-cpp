@@ -1,0 +1,8 @@
+// The list holds another object afterwards, though an equal one.
+// expect-error: the list changed while `sort_by` sorted it
+let xs = [[2], [1]];
+let replacement = [2];
+xs.sort_by(fn(a, b) {
+    xs[0] = replacement;
+    a[0] <=> b[0]
+});

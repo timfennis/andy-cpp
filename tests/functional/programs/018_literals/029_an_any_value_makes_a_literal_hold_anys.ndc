@@ -1,0 +1,8 @@
+// An Int goes into an `Any`, so a literal holding an `Any` is a List<Any>,
+// and a cast makes it a List<Int>.
+// expect-output: any any int
+fn f(xs: List<Int>) => "int";
+fn f(xs: List<Any>) => "any";
+let n: Int = 1;
+let a: Any = 2;
+print(f([n, a]), f([3, a]), f([n, a as Int]));

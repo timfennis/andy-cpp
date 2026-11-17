@@ -29,6 +29,18 @@ fn names(annotation: &TypeExpr, found: &mut Vec<(String, NodeId)>) {
                 names(element, found);
             }
         }
+        TypeExpr::Function {
+            parameters,
+            return_type,
+            ..
+        } => {
+            for parameter in parameters {
+                names(parameter, found);
+            }
+            if let Some(return_type) = return_type {
+                names(return_type, found);
+            }
+        }
     }
 }
 
@@ -88,4 +100,37 @@ fn a_cast_target_before_a_comparison_gets_its_own_id() {
         *id
     });
     assert_distinct(ids);
+}
+
+#[test]
+fn a_function_type_has_parameters_and_an_optional_return_type() {
+    for (source, shown) in [
+        (
+            "let f: Fn(Int, String) -> Bool = g",
+            "Fn(Int, String) -> Bool",
+        ),
+        ("let f: Fn() = g", "Fn()"),
+        (
+            "let f: Fn(Fn(Int) -> Int) -> List<Int> = g",
+            "Fn(Fn(Int) -> Int) -> List<Int>",
+        ),
+        (
+            "fn h(f: Fn(Int) -> Int, x: Int) -> Fn(Int) -> Int { f }",
+            "Fn(Int) -> Int",
+        ),
+    ] {
+        let expression = parse_one(source);
+        let annotation = match expression.expression {
+            Expression::VariableDeclaration {
+                annotated_type: Some(annotation),
+                ..
+            } => annotation,
+            Expression::FunctionDeclaration { parameters, .. } => parameters[0]
+                .annotation
+                .clone()
+                .expect("the first parameter is annotated"),
+            other => panic!("unexpected expression {other:?}"),
+        };
+        assert_eq!(annotation.to_string(), shown, "{source}");
+    }
 }

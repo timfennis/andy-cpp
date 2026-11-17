@@ -1,0 +1,11 @@
+// A variable declared outside a function has one type, though the function
+// is generic: the first call decides what `seen` holds, and so what
+// `remember` takes.
+// expect-error: No function called 'remember' found that matches the arguments 'String'
+let seen = [];
+fn remember(n) {
+    seen.push(n);
+    n
+}
+remember(1);
+remember("a");

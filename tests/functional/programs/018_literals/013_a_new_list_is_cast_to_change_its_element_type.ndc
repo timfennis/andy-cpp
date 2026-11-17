@@ -1,0 +1,6 @@
+// Nothing else holds the list `split` makes, so a cast can give it another
+// element type.
+// expect-output: ["a","b",1]
+let anything = "a b".split(" ") as List<Any>;
+anything.push(1);
+print(anything);

@@ -1,0 +1,7 @@
+// `words` holds Strings. If the cast gave the same list as a `List<Any>`,
+// a push of an Int through `anything` would put an Int in `words` too.
+// expect-error: cannot cast to List<Any>: the list is also held by something else
+let words = "a b".split(" ");
+let any: Any = words;
+let anything = any as List<Any>;
+anything.push(1);

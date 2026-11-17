@@ -1,0 +1,14 @@
+// `Fn(A, B) -> C` is the type of a function taking an A and a B and
+// returning a C. Without `-> …` it returns `()`.
+let twice: Fn(Int) -> Int = fn(x: Int) => x * 2;
+fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn make_adder(n: Int) -> Fn(Int) -> Int { fn(x: Int) => x + n }
+let log: Fn(String) = fn(s: String) { print(s); };
+log("start");
+print(apply(twice, 4));
+print(apply(make_adder(10), 1));
+print(apply(fn(x) => x - 1, 1));
+// expect-output: start
+// expect-output: 8
+// expect-output: 11
+// expect-output: 0

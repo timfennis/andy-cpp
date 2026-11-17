@@ -1,0 +1,5 @@
+// The `1` and `2` are of one type, so no type they can both be takes a
+// String: the list doesn't become a list of Any.
+// expect-error: No function called 'push' found that matches the arguments 'List<Int>, String'
+let xs = [1, 2];
+xs.push("a");

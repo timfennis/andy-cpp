@@ -1,0 +1,9 @@
+// `get` returns the captured `xs`, so once `xs` is settled as a List<Int>,
+// a call of `get` is a List<Int> as well, and picks the same overload.
+fn f(x: List<Int>) { "int" }
+fn f(x: List<Any>) { "any" }
+let xs = [];
+fn get() { xs }
+xs ++= [1];
+print(f(xs), f(get()));
+// expect-output: int int

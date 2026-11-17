@@ -1,0 +1,5 @@
+// No `++` takes a `List<Int>` and an `Any`, so `a op= b` doesn't either.
+// expect-error: No function called '++' found that matches the arguments 'List<Int>, Any'
+fn opaque(x) -> Any => x;
+let values = [1];
+values ++= opaque([0.5]);

@@ -1,0 +1,6 @@
+// A function value that an instance picks the overload of can be passed on.
+// expect-output: 1
+fn invoke(g, x) => g(x);
+fn apply(x) => invoke(abs, x);
+let h: Fn(Int) -> Int = apply;
+print(h(1));

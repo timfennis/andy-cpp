@@ -1,0 +1,12 @@
+// A function value in an instance is the overload its types pick, so cast
+// from `Any` it is that overload's type, which doesn't return a String.
+// expect-error: cannot cast Fn(Int) -> Int to Fn(Int) -> String
+fn bad(x) {
+    let g = abs;
+    g(x);
+    let a: Any = g;
+    let b = a as Fn(Int) -> String;
+    b(1)
+}
+let h: Fn(Int) -> String = bad;
+print(h(1));

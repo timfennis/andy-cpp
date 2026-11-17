@@ -1,0 +1,4 @@
+// Nothing says which `split` is meant, so the program has to say it with a
+// function type.
+// expect-error: 'split' has several overloads, and nothing here says which one is meant
+let g = split;

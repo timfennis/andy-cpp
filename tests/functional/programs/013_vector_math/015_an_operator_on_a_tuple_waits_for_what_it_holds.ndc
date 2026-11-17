@@ -1,0 +1,5 @@
+// `cs[0]` isn't known when `-` is reached, but it's a tuple of Ints, so
+// the result is one too.
+// expect-output: 6
+let cs = [(x, y) for (x, y) in [[3, 4]]];
+print((cs[0] - (1, 1)).product());

@@ -1,0 +1,5 @@
+// The default and the values of a map literal have one type, so the `0`
+// is a Float like the 2.5.
+// expect-output: 2.5 0.0
+let prices = %{:0, "tea": 2.5};
+print(prices["tea"], prices["coffee"]);

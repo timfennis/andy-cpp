@@ -1,0 +1,8 @@
+// A checked function that returns a function makes that one checked too, when
+// its own type doesn't show it fits.
+// expect-output: 1
+fn id(x) => x;
+fn make() => id;
+let a: Any = make;
+let f = a as Fn() -> Fn(Int) -> Int;
+print(f()(1));

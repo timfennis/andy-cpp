@@ -83,6 +83,7 @@ pub enum Token {
     FatArrow,     // =>
     // Keywords
     As,
+    AsOptional, // as?
     Break,
     Continue,
     Else,
@@ -155,6 +156,7 @@ impl fmt::Display for Token {
             Self::GreaterGreater => ">>",
             Self::Bang => "!",
             Self::As => "as",
+            Self::AsOptional => "as?",
             Self::Break => "break",
             Self::Continue => "continue",
             Self::Else => "else",
@@ -332,6 +334,7 @@ impl From<String> for Token {
             // Normal keywords
             "and" => Self::LogicAnd,
             "as" => Self::As,
+            "as?" => Self::AsOptional,
             "break" => Self::Break,
             "continue" => Self::Continue,
             "else" => Self::Else,

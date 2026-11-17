@@ -1,0 +1,4 @@
+// `Some(1)` is an Option<Int>, so the variable can't later hold an Option<String>.
+// expect-error: mismatched types: found Option<String> but expected Option<Int>
+let o = Some(1);
+o = Some("a");

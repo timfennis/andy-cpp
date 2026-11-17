@@ -1,0 +1,5 @@
+// `first`, `last` and `zip` are typed for tuples of up to twelve elements.
+// expect-output: 2 z! [(1,2,3,4,5)]
+let t = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, "z");
+let zipped: List<(Int, Int, Int, Int, Int)> = zip([1], [2], [3], [4], [5]);
+print(t.first + 1, t.last ++ "!", zipped);

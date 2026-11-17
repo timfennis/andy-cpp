@@ -1,4 +1,4 @@
-let h = MaxHeap();
+let h: MaxHeap<Any> = MaxHeap();
 h.push(h);
 json_encode_lossy(h);
 // expect-error: cannot convert a value that contains itself to JSON

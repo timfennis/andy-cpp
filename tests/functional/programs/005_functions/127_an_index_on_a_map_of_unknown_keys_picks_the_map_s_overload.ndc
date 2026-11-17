@@ -1,0 +1,9 @@
+// `seen[k]` is the map's `[]`, whatever `k` is, so the inner `%{}` holds
+// what `data` is, which each call of `solve` says.
+// expect-output: %{0: %{[1]}} %{"a": %{"b"}}
+fn solve(data, k) {
+    let seen = %{:fn() => %{}};
+    seen[k].insert(data);
+    seen
+}
+print(solve([1], 0), solve("b", "a"));
