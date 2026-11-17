@@ -7,9 +7,18 @@
 use ndc_interpreter::{Interpreter, InterpreterError, StaticType};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-/// Natives this test doesn't call: they print, read files, stop the program,
-/// or take any number of arguments.
-const SKIPPED: &[&str] = &["print", "dbg", "read_file", "panic", "docs", "[any]", "zip"];
+/// Natives this test doesn't call: they print, read files or input, stop the
+/// program, or take any number of arguments.
+const SKIPPED: &[&str] = &[
+    "print",
+    "dbg",
+    "read_file",
+    "read_stdin",
+    "panic",
+    "docs",
+    "[any]",
+    "zip",
+];
 
 /// What a runtime error about a value's type says, as opposed to one about
 /// its value: the natives' own words, and, with [`is_about_a_type`], the

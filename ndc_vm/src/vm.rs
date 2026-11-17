@@ -12,7 +12,7 @@ use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
-use std::io::Write;
+use std::io::{IsTerminal, Read, Write};
 use std::rc::Rc;
 
 /// Output destination for the VM's I/O built-ins (`print`, `dbg`, etc.).
@@ -37,12 +37,63 @@ impl Write for OutputSink {
     }
 }
 
+/// Where `read_stdin` reads from.
+pub enum InputSource {
+    /// The process's standard input.
+    Stdin,
+    /// Input given up front, as a test gives it.
+    Buffer(String),
+    /// No input at all, as in the REPL, whose standard input is the prompt.
+    None,
+}
+
+impl InputSource {
+    /// Everything left to read, which leaves nothing for the next read.
+    // The hint for a terminal goes to stderr, keeping stdout for the program.
+    #[allow(clippy::print_stderr)]
+    fn read_to_end(&mut self) -> Result<String, VmError> {
+        let input = match self {
+            Self::Stdin => {
+                let stdin = std::io::stdin();
+                if stdin.is_terminal() {
+                    eprintln!("{TERMINAL_HINT}");
+                }
+                let mut input = String::new();
+                stdin.lock().read_to_string(&mut input).map_err(|err| {
+                    VmError::native(match err.kind() {
+                        std::io::ErrorKind::InvalidData => {
+                            "standard input isn't valid UTF-8".to_string()
+                        }
+                        _ => format!("failed to read standard input: {err}"),
+                    })
+                })?;
+                input
+            }
+            Self::Buffer(input) => std::mem::take(input),
+            Self::None => return Err(VmError::native("there is no standard input to read here")),
+        };
+        *self = Self::Buffer(String::new());
+        Ok(input)
+    }
+}
+
+/// What a program reading standard input from a terminal says first, as it
+/// would otherwise seem to hang: run without `< input.txt`, it waits for
+/// input that has to be typed.
+const TERMINAL_HINT: &str = if cfg!(windows) {
+    "reading input from the terminal: type it and end it with Ctrl-Z and Enter, or run with `< input.txt`"
+} else {
+    "reading input from the terminal: type it and end it with Ctrl-D, or run with `< input.txt`"
+};
+
 pub struct Vm {
     stack: Vec<Value>,
     globals: Vec<Value>,
     frames: Vec<CallFrame>,
     /// Output sink for `print`, `dbg`, and similar I/O built-ins.
     output: OutputSink,
+    /// Input source for `read_stdin`.
+    input: InputSource,
     #[cfg(feature = "trace")]
     source: Option<String>,
     #[cfg(feature = "trace")]
@@ -119,6 +170,7 @@ impl Vm {
                 returns: None,
             }],
             output: OutputSink::Stdout,
+            input: InputSource::Stdin,
             #[cfg(feature = "trace")]
             source: None,
             #[cfg(feature = "trace")]
@@ -143,6 +195,23 @@ impl Vm {
             OutputSink::Stdout => None,
             OutputSink::Buffer(buf) => Some(buf),
         }
+    }
+
+    /// Replace the input source used by `read_stdin`. Call this before
+    /// `run()` to read from somewhere other than stdin.
+    pub fn with_input(mut self, input: InputSource) -> Self {
+        self.input = input;
+        self
+    }
+
+    /// The input source, with what is left of it to read.
+    pub fn take_input(&mut self) -> InputSource {
+        std::mem::replace(&mut self.input, InputSource::None)
+    }
+
+    /// Reads everything left on the VM's input source.
+    pub fn read_input(&mut self) -> Result<String, VmError> {
+        self.input.read_to_end()
     }
 
     /// Write a pre-formatted string to the VM's output sink.

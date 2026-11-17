@@ -1,0 +1,2 @@
+// expect-output: 0
+print(read_stdin().len);

@@ -1,0 +1,13 @@
+// stdin: L68
+// stdin: R30
+// stdin:
+// stdin: 7 8 9
+// expect-output: ["L68","R30"]
+// expect-output: ["7 8 9"]
+// expect-output: ""
+let input = read_stdin();
+for paragraph in input.trim().paragraphs {
+    print(paragraph.lines);
+}
+// The first read took everything.
+dbg(read_stdin());

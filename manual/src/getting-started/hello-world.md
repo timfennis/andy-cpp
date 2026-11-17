@@ -22,3 +22,27 @@ creating a file. Errors in it are reported against `<eval>`:
 $ ndc run --eval 'print("Hello, world!");'
 Hello, world!
 ```
+
+## Reading input
+
+`read_stdin()` reads everything on standard input and returns it as a string.
+Split it with `lines`, `words` or `paragraphs`. Save this as `sum.ndc`:
+
+```ndc,norun
+let total = 0;
+for line in read_stdin().lines {
+    total += int(line);
+}
+print(total);
+```
+
+Then give it a file to read with `<`:
+
+```bash
+$ printf '1\n2\n3\n' > numbers.txt
+$ ndc sum.ndc < numbers.txt
+6
+```
+
+If you leave out `< numbers.txt`, the program reads what you type instead, until you
+press Ctrl-D.
