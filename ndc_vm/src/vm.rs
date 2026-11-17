@@ -233,6 +233,16 @@ impl Vm {
                     self.stack
                         .push(frame.closure.prototype.body.constant(idx).clone());
                 }
+                OpCode::MakeString(idx) => {
+                    let Value::Object(object) = frame.closure.prototype.body.constant(*idx) else {
+                        unreachable!("MakeString's constant is a string");
+                    };
+                    let Object::String(text) = object.as_ref() else {
+                        unreachable!("MakeString's constant is a string");
+                    };
+                    let string = Value::string(text.borrow().as_str());
+                    self.stack.push(string);
+                }
                 OpCode::CheckType(target) => {
                     if !convert_top(&mut self.stack, target) {
                         let value = self.stack.last().expect("stack underflow");

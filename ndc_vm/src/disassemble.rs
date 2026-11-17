@@ -48,7 +48,9 @@ fn constant_annotation(
         return Some(format!("<fn {fn_name}>"));
     }
     match op {
-        OpCode::Constant(_) | OpCode::Closure { .. } => Some(format!("{val}")),
+        OpCode::Constant(_) | OpCode::MakeString(_) | OpCode::Closure { .. } => {
+            Some(format!("{val}"))
+        }
         _ => None,
     }
 }

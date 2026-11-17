@@ -1,0 +1,15 @@
+// A string can be changed in place, so a string literal makes a new string
+// each time it runs: in a loop, and in each call of a function.
+// expect-output: x
+// expect-output: x
+// expect-output: ab ab
+// expect-output: ba ba
+for i in 0..2 {
+    let s = "";
+    s ++= "x";
+    print(s);
+}
+fn f() { let s = "a"; s.append("b"); s }
+print(f(), f());
+fn g() { let s = "ab"; s.reverse(); s }
+print(g(), g());
