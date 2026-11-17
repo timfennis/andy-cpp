@@ -1901,8 +1901,10 @@ impl Analyser {
         let typ = self.vars.instantiate_with(&declared, &mut made);
         // A copy of a function's own constraint that calls the function
         // again, as a recursive call its body couldn't decide does, is
-        // checked by the copies the outer call already made: recursion
-        // doesn't change the types.
+        // checked by the copies the outer call already made, for the types
+        // it was called with. A recursive call with other types, as an
+        // overload that waited can make it, needs another instance, whose
+        // constraints are checked as it's solved.
         let recursive = self
             .copied_through
             .iter()

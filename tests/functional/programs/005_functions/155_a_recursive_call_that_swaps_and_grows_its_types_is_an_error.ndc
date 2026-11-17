@@ -1,0 +1,14 @@
+// Each instance of `f` would call one for bigger types than its own, so
+// making them would never end: a recursive call may only pass types as big
+// as the ones it was given.
+// expect-error: `f` calls itself with types bigger than the ones it was given
+fn pass(x: Bool) => x;
+fn pass(x) => x;
+fn wrapq(x: Bool) => x;
+fn wrapq(x) => [x];
+fn f(a: Bool, b: Bool, n: Int) -> Int => 0;
+fn f(x, y, n) -> Int {
+    if n == 0 { return 0; }
+    f(pass(y), wrapq(x), n - 1) + 1
+}
+print(f(1, "s", 3));

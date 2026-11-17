@@ -275,6 +275,17 @@ impl StaticType {
         matches!(parameter, Self::Any) || self.matches(parameter, false, true)
     }
 
+    /// How many parts this type has, itself included: `List<(Int, String)>`
+    /// has four.
+    pub fn size(&self) -> usize {
+        let parts = std::cell::Cell::new(0);
+        self.contains(&|_| {
+            parts.set(parts.get() + 1);
+            false
+        });
+        parts.get()
+    }
+
     /// Whether a value of this type might be passed where `parameter` is
     /// expected, once what isn't known about it is: as [`Self::fits`],
     /// except that the parts of this type not known yet stand for any type

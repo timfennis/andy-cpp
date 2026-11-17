@@ -66,6 +66,8 @@ pub struct Analyser {
     /// The instance of each generic function for each set of types of its
     /// key that a call gave it.
     instances: AHashMap<(SymbolId, Vec<StaticType>), SymbolId>,
+    /// What each of those instances is for, by the instance.
+    made_instances: AHashMap<SymbolId, instances::MadeInstance>,
     /// The instance whose constraints are being solved, which gets the
     /// picks they make.
     recording: Option<SymbolId>,
@@ -178,6 +180,7 @@ impl Analyser {
             pending: Pending::default(),
             uses: Vec::new(),
             instances: AHashMap::new(),
+            made_instances: AHashMap::new(),
             recording: None,
             declared_in_batch: AHashSet::new(),
             declaring: None,
@@ -289,22 +292,25 @@ impl Analyser {
 
     /// Records an analysis error. The analyser continues with a fallback type
     /// (usually [`StaticType::Error`], which nothing reports again) so that
-    /// the rest of the program is still checked. An error in
-    /// a copy of a generic function's constraint is the call's: it's
-    /// reported there, with notes pointing into the function.
+    /// the rest of the program is still checked. An error in a generic
+    /// function's body, found by a copy of its constraints at a call or by
+    /// the instance a call needs, is the call's: it's reported there, with
+    /// notes pointing into the function. The same error is reported once.
     fn emit(&mut self, err: AnalysisError) {
-        // An instance's constraints were checked where they were copied to
-        // its calls.
-        if self.recording.is_some() {
-            return;
+        let mut calls = self
+            .recording
+            .map(|instance| self.calls_needing(instance))
+            .unwrap_or_default();
+        calls.extend(
+            self.copied_through
+                .iter()
+                .flat_map(|frames| frames.iter())
+                .map(|frame| (frame.name.clone(), frame.call)),
+        );
+        let err = err.through_calls(calls.iter().map(|(name, call)| (name.as_str(), *call)));
+        if !self.result.errors.contains(&err) {
+            self.result.errors.push(err);
         }
-        let err = match &self.copied_through {
-            Some(frames) => {
-                err.through_calls(frames.iter().map(|frame| (frame.name.as_str(), frame.call)))
-            }
-            None => err,
-        };
-        self.result.errors.push(err);
     }
 
     /// Analyses `condition`, which says whether an `if`, a `while` or a
