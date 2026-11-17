@@ -1,3 +1,5 @@
+use crate::StaticType;
+
 /// A built-in function the compiler writes as bytecode at each call, instead
 /// of calling a Rust implementation: `cast::<Int>(x)` checks `x` in place.
 /// Used as a value, as in `xs.map(cast::<Int>)`, it's a small function the
@@ -18,4 +20,14 @@ impl Intrinsic {
             Self::Cast | Self::TryCast => 1,
         }
     }
+}
+
+/// An intrinsic as a program sees it: what it's called, its signature and
+/// its documentation, as a native has.
+#[derive(Debug, Clone)]
+pub struct IntrinsicFunction {
+    pub name: String,
+    pub documentation: Option<String>,
+    pub static_type: StaticType,
+    pub intrinsic: Intrinsic,
 }

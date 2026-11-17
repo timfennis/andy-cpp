@@ -337,7 +337,9 @@ impl Compiler {
                 let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { .. } => self.compile_binding(&self.binding(id), id, span)?,
+            Expression::Identifier { .. } => {
+                self.compile_named_binding(&self.binding(id), id, span)?;
+            }
             Expression::Cast {
                 value, optional, ..
             } => {
@@ -387,7 +389,7 @@ impl Compiler {
                     value: container,
                     index,
                 } => {
-                    self.compile_binding(&self.setter(l_value.id), l_value.id, span)?;
+                    self.compile_binding(&self.setter(l_value.id), span)?;
                     self.compile_expr(*container)?;
                     self.compile_expr(*index)?;
                     self.compile_expr(*value)?;
@@ -411,7 +413,7 @@ impl Compiler {
                     member_span,
                     ..
                 } => {
-                    self.compile_binding(&self.setter(l_value.id), l_value.id, member_span)?;
+                    self.compile_binding(&self.setter(l_value.id), member_span)?;
                     self.compile_expr(*receiver)?;
                     self.compile_expr(*value)?;
                     self.ir.write(OpCode::Call(2), member_span);
@@ -426,7 +428,7 @@ impl Compiler {
                 };
 
                 let opcode = Self::call_opcode_for(&binding, 2);
-                self.compile_binding(&binding, id, span)?;
+                self.compile_binding(&binding, span)?;
                 target.emit_read(self)?;
                 self.compile_expr(*r_value)?;
                 self.ir.write(opcode, span);
@@ -553,7 +555,7 @@ impl Compiler {
                 let getter = self
                     .getter(id)
                     .expect("internal error: every member access is analysed before it's compiled");
-                self.compile_binding(&getter, id, member_span)?;
+                self.compile_binding(&getter, member_span)?;
                 self.compile_expr(*receiver)?;
                 self.ir.write(OpCode::Call(1), member_span);
             }
@@ -658,7 +660,7 @@ impl Compiler {
                 let tmp_value = self.allocate_temp();
                 self.write_temp(tmp_value, span, OpCode::SetLocal);
 
-                self.compile_binding(&self.setter(l_value.id), l_value.id, span)?;
+                self.compile_binding(&self.setter(l_value.id), span)?;
                 self.compile_expr(*value)?;
                 self.compile_expr(*index)?;
                 self.write_temp(tmp_value, span, OpCode::GetLocal);
@@ -764,12 +766,27 @@ impl Compiler {
     /// Emit code that puts the resolved callee on top of the stack: the
     /// function, or for an operator whose tuple positions take different
     /// overloads, the tuple of them, which `CallVec` applies position by
-    /// position. `site` is the node the binding belongs to, which keys what an
-    /// intrinsic used there needs.
-    fn compile_binding(
+    /// position. For a binding no name refers to, as a getter's, which can't
+    /// be an intrinsic.
+    fn compile_binding(&mut self, resolved: &Binding, span: Span) -> Result<(), CompileError> {
+        self.emit_binding(resolved, None, span)
+    }
+
+    /// [`Self::compile_binding`] for the identifier at `site`, which may name
+    /// an intrinsic.
+    fn compile_named_binding(
         &mut self,
         resolved: &Binding,
         site: NodeId,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        self.emit_binding(resolved, Some(site), span)
+    }
+
+    fn emit_binding(
+        &mut self,
+        resolved: &Binding,
+        site: Option<NodeId>,
         span: Span,
     ) -> Result<(), CompileError> {
         match resolved {
@@ -785,30 +802,31 @@ impl Compiler {
         Ok(())
     }
 
-    /// Emit code that puts `callee` on top of the stack as a function value.
-    /// An intrinsic is stored nowhere, so it becomes a small function around
-    /// its bytecode: `cast::<Int>` in `xs.map(cast::<Int>)` is
-    /// `fn(x) => cast::<Int>(x)`.
+    /// Emit code that puts `callee`, named at `site`, on top of the stack as
+    /// a function value. An intrinsic is stored nowhere, so it becomes a
+    /// small function around its bytecode: `cast::<Int>` in
+    /// `xs.map(cast::<Int>)` is `fn(x) => cast::<Int>(x)`.
     fn emit_callee(
         &mut self,
         callee: Callee,
-        site: NodeId,
+        site: Option<NodeId>,
         span: Span,
     ) -> Result<(), CompileError> {
-        match callee {
-            Callee::Var(var) => self.emit_get_var(var, span),
-            Callee::Intrinsic(intrinsic) => {
+        match (callee, site) {
+            (Callee::Var(var), _) => self.emit_get_var(var, span),
+            (Callee::Intrinsic(intrinsic), Some(site)) => {
                 let function = self.intrinsic_function(intrinsic, site, span)?;
                 let idx = self
                     .ir
                     .add_constant(Value::function(Function::Compiled(Rc::new(function))));
                 self.ir.write(OpCode::Constant(idx), span);
             }
+            (Callee::Intrinsic(_), None) => return Err(CompileError::unnamed_intrinsic(span)),
         }
         Ok(())
     }
 
-    /// The function value of `intrinsic` used at `site`: its arguments, the
+    /// The function value of `intrinsic` named at `site`: its arguments, the
     /// intrinsic's bytecode, and a return. It's compiled in the instance being
     /// compiled, so what it reads of the instance's picks is that instance's.
     fn intrinsic_function(
@@ -827,39 +845,16 @@ impl Compiler {
                 parameters: Some(vec![StaticType::Any; arity]),
                 return_type: Box::new(StaticType::Any),
             });
-        let mut fn_compiler = Self {
-            ir: Default::default(),
-            source_locals: arity,
-            temp_count: 0,
-            temp_uses: Vec::new(),
-            loop_stack: vec![],
-            allow_return: true,
-            optimize: self.optimize,
-            analysis: Rc::clone(&self.analysis),
-            instance: self.instance,
-            used_instance: Cell::new(false),
-            prototypes: Rc::clone(&self.prototypes),
-            functions: None,
-        };
+        let mut fn_compiler = self.nested(arity, self.instance);
         for slot in 0..arity {
             fn_compiler.ir.write(OpCode::GetLocal(slot), span);
         }
         fn_compiler.emit_intrinsic(intrinsic, site, span)?;
-        fn_compiler.ir.write(OpCode::Return, Span::synthetic());
-        if fn_compiler.optimize {
-            fn_compiler.ir.peephole();
-        }
-        if fn_compiler.used_instance.get() {
+        let (compiled, used_instance) = fn_compiler.finish_function(None, static_type);
+        if used_instance {
             self.used_instance.set(true);
         }
-        let num_locals = fn_compiler.num_locals();
-        Ok(CompiledFunction {
-            name: None,
-            static_type,
-            body: fn_compiler.ir.into_chunk(),
-            num_locals,
-            num_globals: 0,
-        })
+        Ok(compiled)
     }
 
     /// Emit `intrinsic` used at `site`, its arguments on top of the stack,
@@ -1249,40 +1244,57 @@ impl Compiler {
                 .unwrap_or(shared),
         }
         .clone();
-        let mut fn_compiler = Self {
+        let mut fn_compiler = self.nested(self.analysis.frame_size(id), instance.or(self.instance));
+        fn_compiler.compile_expr(body)?;
+        Ok(fn_compiler.finish_function(name, static_type))
+    }
+
+    /// A compiler for the body of a function declared in the code this one
+    /// compiles, whose own variables take `source_locals` slots, compiled
+    /// with the picks of `instance`.
+    fn nested(&self, source_locals: usize, instance: Option<InstanceAt>) -> Self {
+        Self {
             ir: Default::default(),
-            source_locals: self.analysis.frame_size(id),
+            source_locals,
             temp_count: 0,
             temp_uses: Vec::new(),
             loop_stack: vec![],
             allow_return: true,
             optimize: self.optimize,
             analysis: Rc::clone(&self.analysis),
-            instance: instance.or(self.instance),
+            instance,
             used_instance: Cell::new(false),
             prototypes: Rc::clone(&self.prototypes),
             functions: None,
-        };
-        fn_compiler.compile_expr(body)?;
-        fn_compiler.ir.write(OpCode::Return, Span::synthetic());
-        fn_compiler.layout_temporaries();
+        }
+    }
 
-        if fn_compiler.optimize {
-            fn_compiler.ir.peephole();
+    /// Ends a function's body with `Return`, and returns the function and
+    /// whether its body used a pick of the instance it's compiled in.
+    fn finish_function(
+        mut self,
+        name: Option<String>,
+        static_type: StaticType,
+    ) -> (CompiledFunction, bool) {
+        self.ir.write(OpCode::Return, Span::synthetic());
+        self.layout_temporaries();
+
+        if self.optimize {
+            self.ir.peephole();
         }
 
-        let num_locals = fn_compiler.num_locals();
-        let used_instance = fn_compiler.used_instance.get();
-        Ok((
+        let num_locals = self.num_locals();
+        let used_instance = self.used_instance.get();
+        (
             CompiledFunction {
                 name,
                 static_type,
-                body: fn_compiler.ir.into_chunk(),
+                body: self.ir.into_chunk(),
                 num_locals,
                 num_globals: 0,
             },
             used_instance,
-        ))
+        )
     }
 
     fn compile_for(
@@ -1464,7 +1476,6 @@ enum PreparedAssignmentTarget {
         cached_index: TempSlot,
         container_span: Span,
         index_span: Span,
-        site: NodeId,
         getter: Binding,
         setter: Binding,
     },
@@ -1472,7 +1483,6 @@ enum PreparedAssignmentTarget {
         cached_receiver: TempSlot,
         receiver_span: Span,
         member_span: Span,
-        site: NodeId,
         getter: Binding,
         setter: Binding,
     },
@@ -1504,7 +1514,6 @@ impl PreparedAssignmentTarget {
                     cached_index,
                     container_span,
                     index_span,
-                    site: l_value.id,
                     getter: compiler.target_getter(l_value.id),
                     setter: compiler.setter(l_value.id),
                 })
@@ -1524,7 +1533,6 @@ impl PreparedAssignmentTarget {
                     cached_receiver,
                     receiver_span,
                     member_span,
-                    site: l_value.id,
                     getter: compiler.target_getter(l_value.id),
                     setter: compiler.setter(l_value.id),
                 })
@@ -1543,11 +1551,10 @@ impl PreparedAssignmentTarget {
                 cached_index,
                 container_span,
                 index_span,
-                site,
                 getter,
                 ..
             } => {
-                compiler.compile_binding(getter, *site, *index_span)?;
+                compiler.compile_binding(getter, *index_span)?;
                 compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
                 compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
                 compiler
@@ -1558,11 +1565,10 @@ impl PreparedAssignmentTarget {
                 cached_receiver,
                 receiver_span,
                 member_span,
-                site,
                 getter,
                 ..
             } => {
-                compiler.compile_binding(getter, *site, *member_span)?;
+                compiler.compile_binding(getter, *member_span)?;
                 compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
                 compiler.ir.write(OpCode::Call(1), *member_span);
             }
@@ -1578,7 +1584,6 @@ impl PreparedAssignmentTarget {
                 cached_index,
                 container_span,
                 index_span,
-                site,
                 setter,
                 ..
             } => {
@@ -1586,7 +1591,7 @@ impl PreparedAssignmentTarget {
                 let target_span = container_span.merge(*index_span);
 
                 compiler.write_temp(cached_value, target_span, OpCode::SetLocal);
-                compiler.compile_binding(setter, *site, target_span)?;
+                compiler.compile_binding(setter, target_span)?;
                 compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
                 compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
                 compiler.write_temp(cached_value, target_span, OpCode::GetLocal);
@@ -1597,14 +1602,13 @@ impl PreparedAssignmentTarget {
                 cached_receiver,
                 receiver_span,
                 member_span,
-                site,
                 setter,
                 ..
             } => {
                 let cached_value = compiler.allocate_temp();
 
                 compiler.write_temp(cached_value, *member_span, OpCode::SetLocal);
-                compiler.compile_binding(setter, *site, *member_span)?;
+                compiler.compile_binding(setter, *member_span)?;
                 compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
                 compiler.write_temp(cached_value, *member_span, OpCode::GetLocal);
                 compiler.ir.write(OpCode::Call(2), *member_span);
@@ -1635,6 +1639,13 @@ impl CompileError {
             text:
                 "encountered unresolved cast during compilation, this is probably an internal error"
                     .to_string(),
+            span,
+        }
+    }
+
+    fn unnamed_intrinsic(span: Span) -> Self {
+        Self {
+            text: "encountered an intrinsic used other than by name during compilation, this is probably an internal error".to_string(),
             span,
         }
     }

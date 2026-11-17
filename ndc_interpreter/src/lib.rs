@@ -1,6 +1,7 @@
 use ndc_analyser::Analyser;
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
+pub use ndc_core::IntrinsicFunction;
 /// The type of a value as the analyser sees it, which each of
 /// [`Interpreter::functions`] has as its `static_type`.
 pub use ndc_core::StaticType;
@@ -123,19 +124,25 @@ impl Interpreter {
 
     /// An analyser that knows the registered functions and nothing else.
     fn new_analyser(&self) -> Analyser {
-        let functions = self
+        let natives = self
             .function_registry
             .iter()
-            .map(|fun| (fun.name.clone(), fun.static_type.clone(), fun.intrinsic()))
-            .collect();
-        Analyser::with_natives(functions)
+            .map(|fun| (fun.name.clone(), fun.static_type.clone(), None));
+        let intrinsics = self.function_registry.intrinsics().map(|fun| {
+            (
+                fun.name.clone(),
+                fun.static_type.clone(),
+                Some(fun.intrinsic),
+            )
+        });
+        Analyser::with_natives(natives.chain(intrinsics).collect())
     }
 
     /// Forgets everything evaluated so far, keeping only what was printed.
     fn start_over(&mut self) {
         self.analyser = self.new_analyser();
         self.session = Session::default();
-        self.globals = ndc_vm::native_globals(self.function_registry.iter());
+        self.globals = ndc_vm::native_globals(&self.function_registry);
     }
 
     #[cfg(feature = "trace")]
@@ -143,8 +150,14 @@ impl Interpreter {
         self.tracer = Some(tracer);
     }
 
+    /// The registered natives, in global slot order.
     pub fn functions(&self) -> impl Iterator<Item = &Rc<NativeFunction>> {
         self.function_registry.iter()
+    }
+
+    /// The registered intrinsics, in global slot order, after the natives.
+    pub fn intrinsics(&self) -> impl Iterator<Item = &IntrinsicFunction> {
+        self.function_registry.intrinsics()
     }
 
     /// Returns the captured output, or `None` if this interpreter writes to stdout.

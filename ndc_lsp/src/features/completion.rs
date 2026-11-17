@@ -21,17 +21,22 @@ pub struct FunctionInfo {
 }
 
 impl FunctionInfo {
-    /// Snapshot every function registered in an interpreter.
+    /// Snapshot every function registered in an interpreter, in global
+    /// slot order: the natives, then the intrinsics.
     pub fn collect(interpreter: &Interpreter) -> Vec<Self> {
-        interpreter
-            .functions()
-            .map(|fun| Self {
-                name: fun.name.clone(),
-                static_type: fun.static_type.clone(),
-                documentation: fun.documentation.clone(),
-                intrinsic: fun.intrinsic(),
-            })
-            .collect()
+        let natives = interpreter.functions().map(|fun| Self {
+            name: fun.name.clone(),
+            static_type: fun.static_type.clone(),
+            documentation: fun.documentation.clone(),
+            intrinsic: None,
+        });
+        let intrinsics = interpreter.intrinsics().map(|fun| Self {
+            name: fun.name.clone(),
+            static_type: fun.static_type.clone(),
+            documentation: fun.documentation.clone(),
+            intrinsic: Some(fun.intrinsic),
+        });
+        natives.chain(intrinsics).collect()
     }
 }
 
