@@ -1,0 +1,5 @@
+// `zip` takes two or more sequences, so zipping numbers is an error before the
+// program runs.
+// expect-error: No function called 'zip' found that matches the arguments 'Int, Int'
+print("never printed");
+print(zip(5, 6));

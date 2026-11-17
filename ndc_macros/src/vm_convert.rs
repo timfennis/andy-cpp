@@ -21,15 +21,16 @@ pub struct VmInputArg {
 }
 
 /// What an argument holds a borrow of while the native runs. One that's
-/// changed is borrowed after every argument that's only read, so
-/// `extend(xs, xs)` reads `xs` before it appends to it. A native that takes
-/// a callback holds none, as the callback is the program's code, which may
-/// use the same value.
+/// only read is copied instead when the call changes the same value as
+/// another argument, so `m.remove(m)` reads a copy of `m` while it removes
+/// from it. A native that takes a callback holds none, as the callback is
+/// the program's code, which may use the same value.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Borrow {
     /// It's copied out, or isn't in a `RefCell`.
     None,
-    /// Its `RefCell` is borrowed to be read.
+    /// Its `RefCell` is borrowed to be read, or copied when `vm_alias{N}`
+    /// says an argument the call changes is the same value.
     Read,
     /// Its `RefCell` is borrowed to be changed.
     Write,
@@ -82,10 +83,7 @@ fn refcell_collection_arg(
             quote! { &mut *#guard },
         )
     } else {
-        (
-            quote! { let #guard = #rc.try_borrow().map_err(|_| #in_use)?; },
-            quote! { &*#guard },
-        )
+        read_borrow(position, &rc, &in_use)
     };
 
     VmInputArg {
@@ -102,6 +100,34 @@ fn refcell_collection_arg(
         static_type,
         borrow: if mutable { Borrow::Write } else { Borrow::Read },
     }
+}
+
+/// The code that borrows the `RefCell` `rc` of the argument at `position`
+/// to be read, and what's passed for it: a copy of what it holds when
+/// `vm_alias{position}` says the call changes it as another argument.
+fn read_borrow(
+    position: usize,
+    rc: &proc_macro2::Ident,
+    in_use: &TokenStream,
+) -> (TokenStream, TokenStream) {
+    let alias = format_ident!("vm_alias{position}");
+    let guard = format_ident!("vm_temp{position}_guard");
+    let copy = format_ident!("vm_temp{position}_copy");
+    let read = format_ident!("vm_temp{position}_read");
+    (
+        quote! {
+            let #copy;
+            let #guard;
+            let #read = if #alias {
+                #copy = (*#rc.try_borrow().map_err(|_| #in_use)?).clone();
+                &#copy
+            } else {
+                #guard = #rc.try_borrow().map_err(|_| #in_use)?;
+                &*#guard
+            };
+        },
+        quote! { #read },
+    )
 }
 
 /// Try to generate extraction code for a single parameter type.
@@ -355,7 +381,7 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
             let err = arg_error(position, "map");
             let in_use = in_use_error(position, "map");
             let rc = format_ident!("{temp}_rc");
-            let guard = format_ident!("{temp}_guard");
+            let (borrow, pass) = read_borrow(position, &rc, &in_use);
             VmInputArg {
                 extract: quote! {
                     let ndc_vm::value::Value::Object(ref #rc) = *#raw else {
@@ -364,9 +390,9 @@ pub fn try_vm_input(ty: &syn::Type, position: usize) -> Option<VmInputArg> {
                     let ndc_vm::value::Object::Map { entries: ref #rc, .. } = *#rc.as_ref() else {
                         return Err(#err);
                     };
-                    let #guard = #rc.try_borrow().map_err(|_| #in_use)?;
+                    #borrow
                 },
-                pass: quote! { &*#guard },
+                pass,
                 static_type: quote! {
                     ndc_core::StaticType::Map {
                         key: Box::new(ndc_core::StaticType::Any),

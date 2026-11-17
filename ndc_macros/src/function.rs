@@ -381,6 +381,7 @@ fn try_generate_vm_native(
     use crate::vm_convert::{Borrow, try_vm_input, try_vm_return};
 
     let mut extracts = Vec::new();
+    let mut borrows = Vec::new();
     let mut passes = Vec::new();
     let mut param_types = Vec::new();
     let mut has_vm_callable = false;
@@ -398,14 +399,52 @@ fn try_generate_vm_native(
             has_vm_callable = true;
         }
         let conv = try_vm_input(ty, i)?;
+        borrows.push(conv.borrow);
         extracts.push((conv.borrow, conv.extract));
         passes.push(conv.pass);
         param_types.push(conv.static_type);
     }
 
     // Every argument that's only read is taken before any that's changed,
-    // so `extend(xs, xs)` reads `xs` before it borrows it to append.
+    // and copied if it's one of them, so `m.remove(m)` reads a copy of `m`
+    // before it borrows `m` to remove from it. Two arguments the call
+    // changes can't be the same value: `xs.append(xs)` would have to move
+    // the elements of `xs` and keep them.
     extracts.sort_by_key(|(borrow, _)| *borrow == Borrow::Write);
+    let changed = (0..borrows.len())
+        .filter(|&i| borrows[i] == Borrow::Write)
+        .collect::<Vec<_>>();
+    let same_value = |a: usize, b: usize| {
+        let (a, b) = (&raw_args[a], &raw_args[b]);
+        quote! {
+            matches!(
+                (#a, #b),
+                (ndc_vm::value::Value::Object(a), ndc_vm::value::Value::Object(b))
+                    if std::rc::Rc::ptr_eq(a, b)
+            )
+        }
+    };
+    let mut alias_checks = Vec::new();
+    for (i, borrow) in borrows.iter().enumerate() {
+        if *borrow != Borrow::Read {
+            continue;
+        }
+        let alias = format_ident!("vm_alias{i}");
+        let aliases = changed.iter().map(|&w| same_value(i, w));
+        alias_checks.push(quote! { let #alias = false #(|| #aliases)*; });
+    }
+    for (index, &first) in changed.iter().enumerate() {
+        for &second in &changed[index + 1..] {
+            let same = same_value(first, second);
+            let message =
+                format!("arg {second} is the same value as arg {first}, and the call changes both");
+            alias_checks.push(quote! {
+                if #same {
+                    return Err(ndc_vm::error::VmError::native(#message.to_string()));
+                }
+            });
+        }
+    }
     let holds_a_borrow = extracts.iter().any(|(borrow, _)| *borrow != Borrow::None);
     let extracts = extracts
         .into_iter()
@@ -431,6 +470,7 @@ fn try_generate_vm_native(
         quote! {
             ndc_vm::value::NativeFunc::WithVm(Box::new(|args, _vm| match args {
                 [#(#raw_args),*] => {
+                    #(#alias_checks)*
                     #(#extracts)*
                     let result = #inner_ident(#(#passes),*);
                     #return_code
@@ -442,6 +482,7 @@ fn try_generate_vm_native(
         quote! {
             ndc_vm::value::NativeFunc::Simple(Box::new(|args| match args {
                 [#(#raw_args),*] => {
+                    #(#alias_checks)*
                     #(#extracts)*
                     let result = #inner_ident(#(#passes),*);
                     #return_code
