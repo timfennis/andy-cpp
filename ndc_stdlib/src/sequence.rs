@@ -1,3 +1,18 @@
+//! Functions over sequences.
+//!
+//! A function that returns groups of elements returns each group as a tuple when its signature
+//! alone fixes the group's size, and as a list when the size depends on a value only known at
+//! runtime:
+//!
+//! - `[1, 2, 3].pairwise()` gives `[(1, 2), (2, 3)]`: always pairs, typed `List<(T, T)>`.
+//! - `"ab".enumerate()` gives `(0, "a")`, `(1, "b")`: different element types need a tuple.
+//! - `[1, 2, 3].windows(2)` gives `[[1, 2], [2, 3]]`: the size comes from the `Int` argument.
+//! - `[1, 2, 3].prefixes()` gives `[[1], [1, 2], [1, 2, 3]]`: the sizes come from the input.
+//!
+//! A tuple type records its length and the type of each element, so the type checker can reject
+//! `let (a, b, c) = xs.pairwise()[0]`. A `List<T>` records neither, which is all it can promise
+//! when the size isn't fixed.
+
 #![allow(clippy::ptr_arg)]
 
 use anyhow::anyhow;
@@ -718,12 +733,12 @@ mod inner {
         transpose(seq)
     }
 
-    /// Return a list of all windows, wrapping back to the first elements when the window would otherwise exceed the length of source list, producing tuples of size 2.
+    /// Returns each element paired with the next, wrapping around from the last element to the first: `[1, 2, 3]` gives `[(1, 2), (2, 3), (3, 1)]`.
     #[function(signature = "<T>(Iterable<T>) -> List<(T, T)>")]
-    pub fn circular_tuple_windows(seq: Value) -> anyhow::Result<Value> {
+    pub fn circular_pairwise(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
-                .ok_or_else(|| anyhow!("circular_tuple_windows requires a sequence"))?
+                .ok_or_else(|| anyhow!("circular_pairwise requires a sequence"))?
                 .collect::<Vec<_>>()
                 .iter()
                 .circular_tuple_windows::<(_, _)>()
@@ -733,14 +748,14 @@ mod inner {
     }
 
     /// Returns a list of all size-2 windows in `seq`.
-    #[function(signature = "<T>(Iterable<T>) -> List<List<T>>")]
+    #[function(signature = "<T>(Iterable<T>) -> List<(T, T)>")]
     pub fn pairwise(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
                 .ok_or_else(|| anyhow!("pairwise requires a sequence"))?
                 .collect::<Vec<_>>()
                 .windows(2)
-                .map(|w| Value::list(w.to_vec()))
+                .map(|w| Value::tuple(w.to_vec()))
                 .collect::<Vec<_>>(),
         ))
     }
