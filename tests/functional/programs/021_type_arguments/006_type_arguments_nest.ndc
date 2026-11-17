@@ -1,0 +1,6 @@
+// Closing angle brackets can run together, as in `Option<Option<Int>>>`.
+// expect-output: None
+// expect-output: true
+fn id<T>(x: T) -> T { x }
+print(id::<Option<Option<Int>>>(None));
+print(id::<Int>(3) >= 2);

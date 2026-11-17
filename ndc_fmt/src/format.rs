@@ -13,6 +13,7 @@ use ndc_lexer::{Span, Token};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
     ExpressionLocation, ForBody, ForIteration, FunctionParameter, StructField, TypeExpr,
+    TypeParameter,
 };
 use std::ops::Range;
 use std::rc::Rc;
@@ -198,7 +199,11 @@ impl<'a> Formatter<'a> {
             Expression::StringLiteral(_) | Expression::NumericLiteral(_) => {
                 text(&self.source.text[range])
             }
-            Expression::Identifier { name, .. } => text(name),
+            Expression::Identifier {
+                name,
+                type_arguments,
+                ..
+            } => concat([text(name), turbofish(type_arguments)]),
             Expression::Statement(inner) => {
                 let semicolon = self
                     .source
@@ -248,13 +253,15 @@ impl<'a> Formatter<'a> {
             }
             Expression::FunctionDeclaration {
                 name,
+                type_parameters,
                 parameters,
                 parameters_span,
                 body,
                 return_annotation,
                 pure,
             } => self.function(
-                name.as_deref(),
+                name.as_deref()
+                    .map(|name| (name, type_parameters.as_slice())),
                 parameters,
                 *parameters_span,
                 body,
@@ -330,13 +337,19 @@ impl<'a> Formatter<'a> {
                     .split_first()
                     .expect("a method call has a receiver");
                 let receiver = self.expr(receiver);
-                let Expression::Identifier { name, .. } = &function.expression else {
+                let Expression::Identifier {
+                    name,
+                    type_arguments,
+                    ..
+                } = &function.expression
+                else {
                     unreachable!("a method is named");
                 };
                 concat([
                     receiver,
                     text("."),
                     text(name),
+                    turbofish(type_arguments),
                     self.arguments(arguments, close_at),
                 ])
             }
@@ -664,7 +677,8 @@ impl<'a> Formatter<'a> {
 
     fn function(
         &mut self,
-        name: Option<&str>,
+        // A named function's name and the type parameters it declares.
+        name: Option<(&str, &[TypeParameter])>,
         parameters: &[FunctionParameter],
         parameters_span: Span,
         body: &ExpressionLocation,
@@ -673,9 +687,15 @@ impl<'a> Formatter<'a> {
     ) -> Doc {
         let brackets = Brackets::new("(", ")", parameters_span.end() - 1);
         let mut docs = vec![text(if pure { "pure fn" } else { "fn" })];
-        if let Some(name) = name {
+        if let Some((name, type_parameters)) = name {
             docs.push(text(" "));
             docs.push(text(name));
+            if !type_parameters.is_empty() {
+                let names = type_parameters
+                    .iter()
+                    .map(|parameter| parameter.name.as_str());
+                docs.push(text(format!("<{}>", names.collect::<Vec<_>>().join(", "))));
+            }
         }
         docs.push(self.delimited(brackets, parameters, Self::parameter));
         if let Some(annotation) = return_annotation {
@@ -921,6 +941,15 @@ enum MapEntry<'e> {
 
 fn type_expr(annotation: &TypeExpr) -> Doc {
     text(annotation.to_string())
+}
+
+/// The type arguments `::<Int, String>` after a name, nothing if it has none.
+fn turbofish(type_arguments: &[TypeExpr]) -> Doc {
+    if type_arguments.is_empty() {
+        return text("");
+    }
+    let arguments = type_arguments.iter().map(ToString::to_string);
+    text(format!("::<{}>", arguments.collect::<Vec<_>>().join(", ")))
 }
 
 /// A comment after code, at the end of its line

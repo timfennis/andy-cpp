@@ -20,6 +20,27 @@ fn add(a, b) { a + b }
         right: (identifier)))))
 
 ==================
+function definition with type parameters
+==================
+
+fn id<T>(x: T) -> T { x }
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    type_parameters: (type_parameters
+      (type_identifier))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (type_identifier)
+    body: (block
+      (identifier))))
+
+==================
 typed let with arithmetic precedence
 ==================
 

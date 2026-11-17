@@ -591,7 +591,7 @@ impl Analyser {
             let reachable = self.overloads().reachable_symbols(call.candidates());
             let mut takers = Vec::new();
             for candidate in reachable {
-                if self.could_accept(candidate, call.arguments()) {
+                if self.could_accept(candidate, call.type_arguments(), call.arguments()) {
                     takers.push(candidate);
                 }
             }

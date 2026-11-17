@@ -33,6 +33,14 @@ fn a_cast_keeps_its_operator() {
 }
 
 #[test]
+fn type_arguments_and_type_parameters_keep_their_brackets() {
+    assert_formats(
+        "fn pair < A,B > (a: A, b: B) => (a, b);let p = pair :: < Int , [String] > (1, [\"a\"]);let f = id::<Int>;x.f::<Int>(1);",
+        "fn pair<A, B>(a: A, b: B) => (a, b);\nlet p = pair::<Int, [String]>(1, [\"a\"]);\nlet f = id::<Int>;\nx.f::<Int>(1);\n",
+    );
+}
+
+#[test]
 fn statements_are_indented_by_four_spaces() {
     assert_formats(
         "fn f(x) {\n  if x > 0 {\n x\n  } else {\n  0\n }\n}\n",

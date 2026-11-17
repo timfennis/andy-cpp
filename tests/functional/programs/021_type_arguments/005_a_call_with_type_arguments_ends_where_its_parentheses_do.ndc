@@ -1,0 +1,12 @@
+// After `::<…>(…)`, a `<` compares: none of these is a type argument list.
+// expect-output: true true
+// expect-output: (true,true)
+// expect-output: [true,true]
+// expect-output: [true] true
+fn id<T>(x: T) -> T { x }
+let y = 2;
+let z = 3;
+print(id::<Int>(1) < y, z > 1);
+print((id::<Int>(1) < y, z > 1));
+print([id::<Int>(1) < y, z > 1]);
+print([id::<Int>(1) < y], [id::<Int>(1) < y] > [false]);

@@ -159,7 +159,7 @@ fn kind(
         // cover declarations and code that doesn't parse yet.
         Token::Identifier(_)
             if function_spans.contains(&token.span.offset())
-                || matches!(next, Some(Token::LeftParentheses))
+                || matches!(next, Some(Token::LeftParentheses | Token::ColonColon))
                 || matches!(previous, Some(Token::Fn)) =>
         {
             Kind::Function
@@ -177,7 +177,8 @@ fn kind(
         | Token::MapOpen
         | Token::Semicolon
         | Token::Comma
-        | Token::Colon => Kind::Punctuation,
+        | Token::Colon
+        | Token::ColonColon => Kind::Punctuation,
         _ => Kind::Operator,
     }
 }
@@ -260,6 +261,15 @@ mod tests {
                 ("// last", Kind::Comment),
             ]
         );
+    }
+
+    #[test]
+    fn a_name_with_type_arguments_is_a_function() {
+        let kinds = kinds("f::<Int>(x); g::<Int>; x.h::<Int>(1)");
+        for name in ["f", "g", "h"] {
+            assert!(kinds.contains(&(name, Kind::Function)), "{name}: {kinds:?}");
+        }
+        assert!(kinds.contains(&("::", Kind::Punctuation)));
     }
 
     #[test]

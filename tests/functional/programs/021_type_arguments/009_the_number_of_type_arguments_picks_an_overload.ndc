@@ -1,0 +1,5 @@
+// Like the number of arguments, the number of type arguments narrows the overloads a call can mean.
+// expect-output: one two
+fn which<T>(x: T, y: Int) -> String { "one" }
+fn which<A, B>(x: A, y: B) -> String { "two" }
+print(which::<String>("a", 1), which::<String, Int>("a", 1));

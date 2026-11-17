@@ -312,6 +312,18 @@ mod tests {
     }
 
     #[test]
+    fn two_colons_are_one_token() {
+        assert_eq!(
+            lex("f::<"),
+            [
+                (Token::Identifier("f".to_string()), 0..1),
+                (Token::ColonColon, 1..3),
+                (Token::Less, 3..4),
+            ]
+        );
+    }
+
+    #[test]
     fn a_comment_marker_inside_a_string_is_not_a_comment() {
         assert_eq!(
             lex(r#""// no""#),

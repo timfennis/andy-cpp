@@ -4,7 +4,7 @@ use ndc_core::{Intrinsic, NodeId};
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForBody, ForIteration, StructField, TypeExpr,
+    ExpressionLocation, ForBody, ForIteration, StructField, TypeExpr, TypeParameter,
 };
 
 /// A scope in the resolver's scope tree.
@@ -74,6 +74,9 @@ pub struct NameResolver {
     type_names: AHashMap<NodeId, SymbolId>,
     /// What each struct declaration binds, keyed by the declaration's node.
     structs: AHashMap<NodeId, StructSymbols>,
+    /// The type each type parameter a function declares binds, keyed by the
+    /// type parameter's node. In `fn f<T>(x: T)`, the `T` node.
+    type_parameters: AHashMap<NodeId, SymbolId>,
     /// Each native's position in the function registry, which is also its
     /// global slot in the VM. With `new(["len", "+"])`, `len` is 0 and `+` is 1.
     native_slots: AHashMap<SymbolId, usize>,
@@ -115,6 +118,10 @@ pub enum NameResolutionError {
     VariableIsNotAFunction { name: String, span: Span },
     #[error("Can't assign to the function '{name}'")]
     AssignToFunction { name: String, span: Span },
+    #[error("Illegal redefinition of type parameter {name}")]
+    DuplicateTypeParameter { name: String, span: Span },
+    #[error("Type parameter '{name}' is not allowed to shadow the built-in type '{name}'")]
+    TypeParameterShadowsBuiltinType { name: String, span: Span },
 }
 
 impl NameResolutionError {
@@ -155,7 +162,9 @@ impl NameResolutionError {
             | Self::IllegalStructRedefinition { span, .. }
             | Self::AssignToBuiltin { span, .. }
             | Self::VariableIsNotAFunction { span, .. }
-            | Self::AssignToFunction { span, .. } => *span,
+            | Self::AssignToFunction { span, .. }
+            | Self::DuplicateTypeParameter { span, .. }
+            | Self::TypeParameterShadowsBuiltinType { span, .. } => *span,
         }
     }
 }
@@ -439,6 +448,7 @@ impl NameResolver {
             setters: Default::default(),
             type_names: Default::default(),
             structs: Default::default(),
+            type_parameters: Default::default(),
             native_slots,
             intrinsics,
             errors: Default::default(),
@@ -607,6 +617,11 @@ impl NameResolver {
         self.scopes.function_scopes[&function]
     }
 
+    /// The type the type parameter declared at `node` binds.
+    pub fn type_parameter_symbol(&self, node: NodeId) -> SymbolId {
+        self.type_parameters[&node]
+    }
+
     /// The type symbol the name in an annotation at `node` refers to.
     pub fn type_name_symbol(&self, node: NodeId) -> SymbolId {
         self.type_names[&node]
@@ -647,7 +662,14 @@ impl NameResolver {
             | Expression::NumericLiteral(_)
             | Expression::Break
             | Expression::Continue => {}
-            Expression::Identifier { name, .. } => {
+            Expression::Identifier {
+                name,
+                type_arguments,
+                ..
+            } => {
+                for argument in type_arguments {
+                    self.resolve_type(argument)?;
+                }
                 let candidates = self.use_name(name, loc.span)?;
                 self.references.insert(loc.id, candidates);
                 self.record_use_site(loc.id);
@@ -739,9 +761,17 @@ impl NameResolver {
                 function,
                 arguments,
             } => {
-                let Expression::Identifier { name, .. } = &function.expression else {
+                let Expression::Identifier {
+                    name,
+                    type_arguments,
+                    ..
+                } = &function.expression
+                else {
                     unreachable!("the parser only builds method calls with a named callee");
                 };
+                for argument in type_arguments {
+                    self.resolve_type(argument)?;
+                }
                 let candidates = self.use_function_name(name, function.span)?;
                 self.references.insert(function.id, candidates);
                 self.record_use_site(function.id);
@@ -787,6 +817,7 @@ impl NameResolver {
             }
             Expression::FunctionDeclaration {
                 name,
+                type_parameters,
                 parameters,
                 body,
                 return_annotation,
@@ -806,6 +837,7 @@ impl NameResolver {
                 // Parameter lists are short, so a linear scan beats hashing.
                 let mut names = Vec::new();
                 self.in_scope(ScopeKind::Function(loc.id), |resolver| {
+                    resolver.declare_type_parameters(type_parameters)?;
                     for parameter in parameters {
                         let param_name = parameter.name();
                         if names.contains(&param_name) {
@@ -815,9 +847,8 @@ impl NameResolver {
                             });
                         }
                         names.push(param_name);
-                        // Only struct declarations add types, and none can appear among
-                        // the parameters, so this scope sees the same types as the
-                        // enclosing one.
+                        // Besides the type parameters, only struct declarations add
+                        // types, and none can appear among the parameters.
                         if let Some(annotation) = &parameter.annotation {
                             resolver.resolve_type(annotation)?;
                         }
@@ -1021,6 +1052,36 @@ impl NameResolver {
             constructor,
             accessors,
         })
+    }
+
+    /// Declares the type parameters of a function, as `T` and `U` in
+    /// `fn f<T, U>(…)`, as types of the current scope, its parameter scope.
+    fn declare_type_parameters(
+        &mut self,
+        type_parameters: &[TypeParameter],
+    ) -> Result<(), NameResolutionError> {
+        for (index, parameter) in type_parameters.iter().enumerate() {
+            let name = &parameter.name;
+            if type_parameters[..index]
+                .iter()
+                .any(|earlier| earlier.name == *name)
+            {
+                return Err(NameResolutionError::DuplicateTypeParameter {
+                    name: name.clone(),
+                    span: parameter.span,
+                });
+            }
+            if self.scopes.builtin_type(name, &self.symbols).is_some() {
+                return Err(NameResolutionError::TypeParameterShadowsBuiltinType {
+                    name: name.clone(),
+                    span: parameter.span,
+                });
+            }
+            let symbol = self.symbols.declare(name.clone(), BindingKind::Type);
+            self.scopes.bind_type(symbol);
+            self.type_parameters.insert(parameter.id, symbol);
+        }
+        Ok(())
     }
 
     /// Resolves every type name in `annotation`. In `Option<(Int, P)>`, that's

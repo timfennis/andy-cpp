@@ -1,0 +1,4 @@
+// Without type arguments, the arguments say what the type parameters are.
+// expect-output: 4.5 a
+fn id<T>(x: T) -> T { x }
+print(id(4.5), id("a"));

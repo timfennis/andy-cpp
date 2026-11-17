@@ -214,6 +214,42 @@ fn show(x: Any) => "got " <> x;
 print(show(1), show("a"));  // got 1 got a
 ```
 
+### Type parameters and type arguments
+
+To say that two values have the same type, whatever it is, name the type in angle brackets after the function's name. `T` stands for any type, and the same type everywhere `T` is written:
+
+```ndc
+fn first<T>(xs: [T], fallback: T) -> T {
+    if xs.len() > 0 { xs[0] } else { fallback }
+}
+print(first([3, 4], 0));    // 3
+print(first([], "none"));   // none
+```
+
+A call works out what `T` is from its arguments. To say it yourself, write the type after the name and `::`. These are type arguments, and they go in the order the function declares its type parameters:
+
+```ndc
+fn pair<A, B>(a: A, b: B) -> (A, B) { (a, b) }
+print(pair::<Int, String>(1, "x"));   // (1,"x")
+
+fn id<T>(x: T) -> T { x }
+print(id::<Float>(1));                // 1.0
+```
+
+Built-in functions take type arguments too. `ndc docs` shows their type parameters in order, as in `map<T, U>`:
+
+```ndc
+print([1, 2].map::<Int, String>(fn(x) => x.string()));   // ["1","2"]
+```
+
+The type arguments come before the call's parentheses, so `id::<Int>` without a call is the function itself:
+
+```ndc
+fn id<T>(x: T) -> T { x }
+let f = id::<String>;
+print(f("hi"));   // hi
+```
+
 ## Recursion
 
 A function can call itself. Calls can go a million deep. A program that goes

@@ -109,22 +109,29 @@ impl Constraint {
     }
 
     /// Every type the constraint waits on or settles: its inputs, then its
-    /// outputs.
+    /// outputs, then a call's type arguments, which are known when it's made.
     pub(super) fn types(&self) -> impl Iterator<Item = &StaticType> {
-        self.inputs().iter().chain(self.outputs())
+        let type_arguments = match self {
+            Self::Call(call) => call.type_arguments.as_slice(),
+            Self::FunctionValue(value) => value.type_arguments(),
+            _ => &[],
+        };
+        self.inputs()
+            .iter()
+            .chain(self.outputs())
+            .chain(type_arguments)
     }
 
     /// The constraint with `replace` applied to each of its types.
     pub(super) fn map_types(&self, replace: &mut impl FnMut(&StaticType) -> StaticType) -> Self {
         match self {
             Self::Call(call) => Self::Call(CallConstraint {
+                type_arguments: call.type_arguments.iter().map(&mut *replace).collect(),
                 arguments: call.arguments.iter().map(&mut *replace).collect(),
                 result: replace(&call.result),
                 ..call.clone()
             }),
-            Self::FunctionValue(value) => {
-                Self::FunctionValue(value.with_expected(replace(value.expected())))
-            }
+            Self::FunctionValue(value) => Self::FunctionValue(value.map_types(replace)),
             Self::Iterate {
                 sequence,
                 element,
@@ -225,6 +232,9 @@ enum LiteralOperands {
 pub(super) struct CallConstraint {
     site: CallSite,
     candidates: Candidates,
+    /// The type arguments written after the callee's name: `Int` in
+    /// `f::<Int>(x)`. Empty when none are written.
+    type_arguments: Vec<StaticType>,
     arguments: Vec<StaticType>,
     /// The call's type, which the picked overload's return type settles.
     result: StaticType,
@@ -239,6 +249,10 @@ pub(super) struct CallConstraint {
 impl CallConstraint {
     pub(super) fn arguments(&self) -> &[StaticType] {
         &self.arguments
+    }
+
+    pub(super) fn type_arguments(&self) -> &[StaticType] {
+        &self.type_arguments
     }
 
     pub(super) fn span(&self) -> Span {
@@ -261,10 +275,12 @@ impl CallConstraint {
             && self.candidates == other.candidates
             && self.tuple_index == other.tuple_index
             && self.arguments.len() == other.arguments.len()
+            && self.type_arguments.len() == other.type_arguments.len()
             && self
                 .arguments
                 .iter()
-                .zip(&other.arguments)
+                .chain(&self.type_arguments)
+                .zip(other.arguments.iter().chain(&other.type_arguments))
                 .all(|(a, b)| vars.resolve(a) == vars.resolve(b))
     }
 }
@@ -281,7 +297,29 @@ impl Analyser {
         name: &str,
         span: Span,
     ) -> StaticType {
-        self.constrain_index_call(site, arguments, kind, name, span, None)
+        self.constrain_index_call(site, Vec::new(), arguments, kind, name, span, None)
+    }
+
+    /// [`Self::constrain_call`] for a call with the type arguments
+    /// `type_arguments`, as `f::<Int>(x)`, which only the overloads that take
+    /// that many can take, with their type parameters bound to them.
+    pub(super) fn constrain_explicit_call(
+        &mut self,
+        site: CallSite,
+        type_arguments: Vec<StaticType>,
+        arguments: Vec<StaticType>,
+        name: &str,
+        span: Span,
+    ) -> StaticType {
+        self.constrain_index_call(
+            site,
+            type_arguments,
+            arguments,
+            CallKind::Regular,
+            name,
+            span,
+            None,
+        )
     }
 
     /// [`Self::constrain_call`], for `[]` with the index `tuple_index` when
@@ -291,6 +329,7 @@ impl Analyser {
     pub(super) fn constrain_index_call(
         &mut self,
         site: CallSite,
+        type_arguments: Vec<StaticType>,
         arguments: Vec<StaticType>,
         kind: CallKind,
         name: &str,
@@ -300,6 +339,7 @@ impl Analyser {
         let mut call = CallConstraint {
             candidates: self.site_candidates(site).clone(),
             site,
+            type_arguments,
             arguments,
             result: StaticType::Never,
             kind,
@@ -467,6 +507,7 @@ impl Analyser {
     ) -> Option<StaticType> {
         let Some(typ) = self.commit_call(
             &Binding::Resolved(Candidate::Scalar(picked)),
+            &call.type_arguments,
             arguments,
             StaticType::Any,
         ) else {
@@ -514,7 +555,12 @@ impl Analyser {
                         continue;
                     }
                     let binding = self
-                        .resolve_overloads(&call.candidates, &arguments, call.kind)
+                        .resolve_overloads(
+                            &call.candidates,
+                            &call.type_arguments,
+                            &arguments,
+                            call.kind,
+                        )
                         .binding;
                     // A call that nothing takes any more is one an error
                     // was reported for, and a program with errors doesn't
@@ -1203,9 +1249,9 @@ impl Analyser {
             && self.copied_through.is_none()
             && self.recording.is_none()
             && reachable.contains(&function)
-            && reachable
-                .iter()
-                .all(|&symbol| symbol == function || !self.could_accept(symbol, &arguments))
+            && reachable.iter().all(|&symbol| {
+                symbol == function || !self.could_accept(symbol, &call.type_arguments, &arguments)
+            })
             && let StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -1281,7 +1327,8 @@ impl Analyser {
             && let ResolvedCall {
                 binding: Binding::Resolved(Candidate::Scalar(picked)),
                 ..
-            } = self.resolve_overloads(&call.candidates, &as_any, call.kind)
+            } =
+                self.resolve_overloads(&call.candidates, &call.type_arguments, &as_any, call.kind)
         {
             // An overload picked through a type parameter that the `Any`
             // fits, as `push([T], T)` with a Float for `[1, "a"]`, may
@@ -1293,7 +1340,12 @@ impl Analyser {
             self.vars.rollback(snapshot);
         }
 
-        match self.early_overload(&call.candidates, &arguments, call.kind) {
+        match self.early_overload(
+            &call.candidates,
+            &call.type_arguments,
+            &arguments,
+            call.kind,
+        ) {
             // A write that nothing takes may still fit once its target's
             // type is known, which also says better what's wrong.
             EarlyOverload::NoneFits
@@ -1479,10 +1531,20 @@ impl Analyser {
     /// `x[0] == x[2]` whole, tuples or not, while `(String, String)` takes
     /// no tuple for `x` in `x ++ "!"`, and neither does `<T>(T, Iterable<T>)`
     /// in `x in "aeiou"`, as `x` must be a String there.
-    fn takes_whole_tuples(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+    fn takes_whole_tuples(
+        &mut self,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+        arguments: &[StaticType],
+    ) -> bool {
         let declared = self.vars.resolve(self.types.get_type(symbol));
         let snapshot = self.vars.snapshot();
-        let takes = match self.vars.instantiate_with(&declared, &mut Vec::new()) {
+        let mut made = Vec::new();
+        if !self.bind_type_arguments(symbol, type_arguments, &mut made) {
+            self.vars.rollback(snapshot);
+            return false;
+        }
+        let takes = match self.vars.instantiate_with(&declared, &mut made) {
             StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -1534,6 +1596,7 @@ impl Analyser {
     pub(super) fn early_overload(
         &mut self,
         candidates: &Candidates,
+        type_arguments: &[StaticType],
         arguments: &[StaticType],
         kind: CallKind,
     ) -> EarlyOverload {
@@ -1545,26 +1608,32 @@ impl Analyser {
         let viable = reachable
             .iter()
             .copied()
-            .filter(|&symbol| self.could_accept(symbol, arguments))
+            .filter(|&symbol| self.could_accept(symbol, type_arguments, arguments))
             .collect::<Vec<_>>();
         match viable[..] {
             // A literal may still become `Any`, which an overload that can't
             // take it now might take: `[1, "s"]` holds `Any`s, which
             // `p(x: String)` may get.
-            [] if literals && self.fits_once_any(&reachable, arguments, None) => {
+            [] if literals && self.fits_once_any(&reachable, type_arguments, arguments, None) => {
                 EarlyOverload::Undecided
             }
             [] => EarlyOverload::NoneFits,
             [only]
                 if (!self.operand_could_be_a_tuple(kind, arguments)
-                    || self.takes_whole_tuples(only, arguments))
+                    || self.takes_whole_tuples(only, type_arguments, arguments))
                     && self.iterables_known(only, arguments)
-                    && !(literals && self.fits_once_any(&reachable, arguments, Some(only))) =>
+                    && !(literals
+                        && self.fits_once_any(
+                            &reachable,
+                            type_arguments,
+                            arguments,
+                            Some(only),
+                        )) =>
             {
                 EarlyOverload::Only(only)
             }
             [_] => EarlyOverload::Undecided,
-            _ => match self.dominant(candidates, &viable, arguments, kind) {
+            _ => match self.dominant(candidates, &viable, type_arguments, arguments, kind) {
                 Some(dominant) => EarlyOverload::Only(dominant),
                 None => EarlyOverload::Undecided,
             },
@@ -1585,6 +1654,7 @@ impl Analyser {
         &mut self,
         candidates: &Candidates,
         viable: &[SymbolId],
+        type_arguments: &[StaticType],
         arguments: &[StaticType],
         kind: CallKind,
     ) -> Option<SymbolId> {
@@ -1621,7 +1691,12 @@ impl Analyser {
             .unique()
             .collect::<Vec<_>>();
         let snapshot = self.vars.snapshot();
-        let free = match self.vars.instantiate_with(&declared, &mut Vec::new()) {
+        let mut made = Vec::new();
+        if !self.bind_type_arguments(narrowest, type_arguments, &mut made) {
+            self.vars.rollback(snapshot);
+            return None;
+        }
+        let free = match self.vars.instantiate_with(&declared, &mut made) {
             StaticType::Function {
                 parameters: Some(parameters),
                 ..
@@ -1701,6 +1776,7 @@ impl Analyser {
     fn fits_once_any(
         &mut self,
         reachable: &[SymbolId],
+        type_arguments: &[StaticType],
         arguments: &[StaticType],
         except: Option<SymbolId>,
     ) -> bool {
@@ -1708,7 +1784,7 @@ impl Analyser {
         reachable
             .iter()
             .filter(|&&symbol| Some(symbol) != except)
-            .any(|&symbol| self.could_accept(symbol, &as_any))
+            .any(|&symbol| self.could_accept(symbol, type_arguments, &as_any))
     }
 
     /// The overload a call with arguments of these types means, which
@@ -1719,10 +1795,11 @@ impl Analyser {
     pub(super) fn resolve_overloads(
         &mut self,
         candidates: &Candidates,
+        type_arguments: &[StaticType],
         arguments: &[StaticType],
         kind: CallKind,
     ) -> ResolvedCall {
-        match self.pick_overload(candidates, arguments) {
+        match self.pick_overload(candidates, type_arguments, arguments) {
             Pick::One(symbol) => {
                 return ResolvedCall {
                     binding: Binding::Resolved(Candidate::Scalar(symbol)),
@@ -1746,7 +1823,7 @@ impl Analyser {
             let mut overloads = Vec::with_capacity(axis);
             for position in 0..axis {
                 let elements = Overloads::at_position(arguments, position);
-                match self.pick_overload(candidates, &elements) {
+                match self.pick_overload(candidates, type_arguments, &elements) {
                     Pick::One(symbol) => overloads.push(symbol),
                     Pick::Tied(tied) => {
                         return ResolvedCall {
@@ -1779,11 +1856,16 @@ impl Analyser {
     /// parameters, as a redefinition does. What `return` gives fits any
     /// parameter, so it doesn't pick between overloads: `(return 5) + 1`
     /// is ambiguous, as it is in Rust.
-    fn pick_overload(&mut self, candidates: &Candidates, arguments: &[StaticType]) -> Pick {
+    fn pick_overload(
+        &mut self,
+        candidates: &Candidates,
+        type_arguments: &[StaticType],
+        arguments: &[StaticType],
+    ) -> Pick {
         for group in self.overloads().reachable_groups(candidates) {
             let viable = group
                 .into_iter()
-                .filter(|&symbol| self.could_accept(symbol, arguments))
+                .filter(|&symbol| self.could_accept(symbol, type_arguments, arguments))
                 .collect::<Vec<_>>();
             let Some(&first) = viable.first() else {
                 continue;
@@ -1824,7 +1906,7 @@ impl Analyser {
             binding,
             return_type,
             tied,
-        } = self.resolve_overloads(&call.candidates, arguments, call.kind);
+        } = self.resolve_overloads(&call.candidates, &call.type_arguments, arguments, call.kind);
         if !tied.is_empty() {
             self.report_ambiguous_call(call, arguments, &tied);
             self.record_pick(call.site, Binding::None, arguments);
@@ -1837,7 +1919,7 @@ impl Analyser {
         {
             let in_place = self.resolver.augmented_candidates(id).in_place.clone();
             let in_place = self
-                .resolve_overloads(&in_place, arguments, call.kind)
+                .resolve_overloads(&in_place, &[], arguments, call.kind)
                 .binding;
             if !matches!(in_place, Binding::None) {
                 self.record_augmented_pick(id, in_place);
@@ -1849,7 +1931,7 @@ impl Analyser {
             self.record_pick(call.site, binding, arguments);
             return StaticType::Error;
         }
-        let typ = self.commit_call(&binding, arguments, return_type);
+        let typ = self.commit_call(&binding, &call.type_arguments, arguments, return_type);
         self.record_pick(call.site, binding, arguments);
         if let Some(typ) = typ {
             self.flush_copies(Some(call.site), call.span);
@@ -1868,12 +1950,13 @@ impl Analyser {
     fn commit_call(
         &mut self,
         binding: &Binding<SymbolId>,
+        type_arguments: &[StaticType],
         arguments: &[StaticType],
         return_type: StaticType,
     ) -> Option<StaticType> {
         let overloads = match binding {
             Binding::Resolved(Candidate::Scalar(symbol)) => {
-                return self.commit_overload(*symbol, arguments, return_type);
+                return self.commit_overload(*symbol, type_arguments, arguments, return_type);
             }
             Binding::Resolved(Candidate::Vec(symbol)) => std::slice::from_ref(symbol),
             Binding::PerPosition(overloads) => overloads.as_slice(),
@@ -1888,7 +1971,12 @@ impl Analyser {
         for position in 0..length {
             let overload = overloads.get(position).unwrap_or(&overloads[0]);
             let arguments = Overloads::at_position(arguments, position);
-            returns.push(self.commit_overload(*overload, &arguments, StaticType::Any)?);
+            returns.push(self.commit_overload(
+                *overload,
+                type_arguments,
+                &arguments,
+                StaticType::Any,
+            )?);
         }
         Some(StaticType::Tuple(returns))
     }
@@ -1903,11 +1991,12 @@ impl Analyser {
     fn commit_overload(
         &mut self,
         symbol: SymbolId,
+        type_arguments: &[StaticType],
         arguments: &[StaticType],
         return_type: StaticType,
     ) -> Option<StaticType> {
         let pending = self.pending.len();
-        let signature = self.instantiate_function(symbol);
+        let signature = self.instantiate_explicit(symbol, type_arguments)?;
         match signature {
             StaticType::Function {
                 parameters: Some(_),
@@ -1943,14 +2032,32 @@ impl Analyser {
     /// same variables, and wait in [`Self::pending`] until
     /// [`Self::flush_copies`] knows which call they're for.
     pub(super) fn instantiate_function(&mut self, symbol: SymbolId) -> StaticType {
+        self.instantiate_explicit(symbol, &[])
+            .expect("internal error: every function takes no type arguments")
+    }
+
+    /// [`Self::instantiate_function`] with `type_arguments` for the type
+    /// parameters `symbol` takes them for, or `None`, settling nothing, if
+    /// it doesn't take that many or they don't fit.
+    pub(super) fn instantiate_explicit(
+        &mut self,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+    ) -> Option<StaticType> {
         let declared = self.vars.resolve(self.types.get_type(symbol));
-        let mut made = self.schemes.get(&symbol).map_or_else(Vec::new, |scheme| {
-            scheme
-                .contents
-                .iter()
-                .map(|name| (name.clone(), self.vars.fresh_contents()))
-                .collect()
-        });
+        let snapshot = self.vars.snapshot();
+        let mut made = Vec::new();
+        if !self.bind_type_arguments(symbol, type_arguments, &mut made) {
+            self.vars.rollback(snapshot);
+            return None;
+        }
+        if let Some(scheme) = self.schemes.get(&symbol) {
+            for name in scheme.contents.iter() {
+                if !made.iter().any(|(bound, _)| bound == name) {
+                    made.push((name.clone(), self.vars.fresh_contents()));
+                }
+            }
+        }
         let typ = self.vars.instantiate_with(&declared, &mut made);
         // A copy of a function's own constraint that calls the function
         // again, as a recursive call its body couldn't decide does, is
@@ -1964,7 +2071,7 @@ impl Analyser {
             .flat_map(|frames| frames.iter())
             .any(|frame| frame.function == symbol);
         let Some(scheme) = self.schemes.get(&symbol).cloned() else {
-            return typ;
+            return Some(typ);
         };
         if !recursive {
             for waiting in scheme.constraints.iter() {
@@ -1987,7 +2094,7 @@ impl Analyser {
                 .collect();
             self.pending.uses.push((symbol, key));
         }
-        typ
+        Some(typ)
     }
 
     /// Adds the constraints [`Self::instantiate_function`] copied for a call
@@ -2164,9 +2271,11 @@ impl Analyser {
             binding,
             return_type,
             ..
-        } = self.resolve_overloads(&call.candidates, arguments, call.kind);
+        } = self.resolve_overloads(&call.candidates, &call.type_arguments, arguments, call.kind);
         let fits = !matches!(binding, Binding::None)
-            && self.commit_call(&binding, arguments, return_type).is_some();
+            && self
+                .commit_call(&binding, &call.type_arguments, arguments, return_type)
+                .is_some();
         self.vars.rollback(snapshot);
         self.pending.clear();
         fits
@@ -2191,10 +2300,21 @@ impl Analyser {
 
     /// Whether `symbol` can accept arguments of these types, where each part
     /// not known yet fits anything.
-    pub(super) fn could_accept(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+    pub(super) fn could_accept(
+        &mut self,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+        arguments: &[StaticType],
+    ) -> bool {
         let function = self.vars.resolve(self.types.get_type(symbol));
         let snapshot = self.vars.snapshot();
-        let Some(parameters) = self.vars.instantiate_parameters(&function) else {
+        let mut made = Vec::new();
+        if !self.bind_type_arguments(symbol, type_arguments, &mut made) {
+            self.vars.rollback(snapshot);
+            return false;
+        }
+        let Some(parameters) = self.vars.instantiate_parameters(&function, &mut made) else {
+            self.vars.rollback(snapshot);
             return matches!(
                 function,
                 StaticType::Function { .. }
@@ -2206,6 +2326,44 @@ impl Analyser {
         let fits = self.vars.bind_arguments(&parameters, arguments);
         self.vars.rollback(snapshot);
         fits
+    }
+
+    /// The type parameters `symbol` takes type arguments for, in order:
+    /// see [`Analyser::type_parameters`].
+    pub(super) fn explicit_type_parameters(&self, symbol: SymbolId) -> &[StaticType] {
+        self.type_parameters.get(&symbol).map_or(&[], Vec::as_slice)
+    }
+
+    /// Binds `symbol`'s type parameters to `type_arguments`, in order: a
+    /// type parameter of its type goes in `made`, for instantiating the type
+    /// with, and one that's still a variable, as while its body is analysed,
+    /// is unified with its argument. Returns `false` if it doesn't take that
+    /// many type arguments or one doesn't fit, which may have settled some.
+    /// No type arguments bind nothing: the call's arguments settle them.
+    pub(super) fn bind_type_arguments(
+        &mut self,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+        made: &mut Vec<(Box<str>, StaticType)>,
+    ) -> bool {
+        if type_arguments.is_empty() {
+            return true;
+        }
+        let parameters = self.explicit_type_parameters(symbol).to_vec();
+        if parameters.len() != type_arguments.len() {
+            return false;
+        }
+        for (parameter, argument) in parameters.iter().zip(type_arguments) {
+            match self.vars.resolve(parameter) {
+                StaticType::Generic(name) => made.push((name, argument.clone())),
+                parameter => {
+                    if !self.vars.try_unify(&parameter, argument) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 
     fn site_candidates(&self, site: CallSite) -> &Candidates {
@@ -2252,7 +2410,8 @@ impl Analyser {
                     .map(|argument| self.vars.resolve(argument))
                     .collect::<Vec<_>>();
                 let candidates = self.resolver.augmented_candidates(id).in_place.clone();
-                let in_place = self.resolve_overloads(&candidates, &arguments, CallKind::Operator);
+                let in_place =
+                    self.resolve_overloads(&candidates, &[], &arguments, CallKind::Operator);
                 let binding = match in_place.binding {
                     Binding::None => binding,
                     in_place => in_place,
@@ -2320,7 +2479,15 @@ impl Analyser {
                 if let CallSite::Getter(id) = call.site {
                     self.failed_reads.insert(id);
                 }
-                self.no_match(&call.candidates, &call.name, arguments, call.span)
+                // No overload takes as many type arguments as the call
+                // gives, which is what's wrong whatever the arguments are.
+                let given = call.type_arguments.len();
+                let counts = self.type_argument_counts(&call.candidates);
+                if given > 0 && !counts.contains(&given) {
+                    AnalysisError::wrong_type_argument_count(&call.name, &counts, given, call.span)
+                } else {
+                    self.no_match(&call.candidates, &call.name, arguments, call.span)
+                }
             }
             CallSite::Setter(id) | CallSite::FieldSetter(id) if self.failed_reads.contains(&id) => {
                 return;

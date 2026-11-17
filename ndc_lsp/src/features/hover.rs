@@ -160,8 +160,16 @@ fn type_hover(state: &DocumentState, id: NodeId) -> Option<String> {
     Some(format!("```ndc\n{typ}\n```"))
 }
 
-/// Render a function name plus its [`StaticType`] as `name(p1, p2) -> ret`.
+/// Render a function name plus its [`StaticType`] as `name(p1, p2) -> ret`,
+/// with its type parameters after the name, in the order type arguments
+/// bind them: `fold<T, A>(Iterable<T>, A, fn(A, T) -> A) -> A`.
 fn format_signature(name: &str, typ: &StaticType) -> String {
+    let type_parameters = typ.type_parameters();
+    let name = if type_parameters.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}<{}>", type_parameters.join(", "))
+    };
     match typ {
         StaticType::Function {
             parameters: Some(params),
@@ -261,6 +269,20 @@ mod tests {
                 "expected {signature} among the candidates, got: {value}"
             );
         }
+    }
+
+    #[test]
+    fn hover_on_a_generic_builtin_shows_the_order_of_its_type_parameters() {
+        let src = "let n = fold::<Int, Int>([1], 0, fn(a, x) => a + x);";
+        let (state, functions) = analyse(src);
+        let pos = state
+            .line_index
+            .position(&state.source, src.find("fold").unwrap());
+        let value = markdown(hover(&state, pos, &functions).expect("hover present"));
+        assert!(
+            value.contains("fold<T, A>(Iterable<T>, A, fn(A, T) -> A) -> A"),
+            "expected the type parameters in order, got: {value}"
+        );
     }
 
     #[test]

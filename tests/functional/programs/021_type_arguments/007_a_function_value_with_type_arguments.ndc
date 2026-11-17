@@ -1,0 +1,5 @@
+// `f::<T>` without a call is the function with its type parameters bound.
+// expect-output: ["a","b"]
+fn id<T>(x: T) -> T { x }
+let f = id::<String>;
+print(["a", "b"].map(f));

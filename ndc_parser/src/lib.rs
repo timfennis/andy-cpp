@@ -5,7 +5,7 @@ mod type_expr;
 
 pub use expression::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
-    ExpressionLocation, ForBody, ForIteration, FunctionParameter, StructField,
+    ExpressionLocation, ForBody, ForIteration, FunctionParameter, StructField, TypeParameter,
 };
 pub use operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 pub use parser::Error;

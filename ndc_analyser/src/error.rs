@@ -99,6 +99,97 @@ impl AnalysisError {
         )
     }
 
+    /// `name::<…>` given `given` type arguments, where the functions `name`
+    /// can mean take `counts` of them: `[0]` when none takes any.
+    pub(crate) fn wrong_type_argument_count(
+        name: &str,
+        counts: &[usize],
+        given: usize,
+        span: Span,
+    ) -> Self {
+        let plural = |count: usize| if count == 1 { "" } else { "s" };
+        let takes = match counts {
+            [] | [0] => "takes no type arguments".to_string(),
+            [count] => format!("takes {count} type argument{}", plural(*count)),
+            [fewer @ .., most] => format!(
+                "takes {} or {most} type arguments",
+                fewer.iter().map(ToString::to_string).join(", ")
+            ),
+        };
+        let text = format!(
+            "`{name}` {takes}, but {given} {} given",
+            if given == 1 { "was" } else { "were" }
+        );
+        let error = Self::new(text, span);
+        if counts.iter().all(|&count| count == 0) {
+            error.with_help(format!("call it without them: `{name}(…)`"))
+        } else {
+            error
+        }
+    }
+
+    /// A function declared in a function or a block, which has one type,
+    /// declaring type parameters, as `fn g<T>` in `fn f() { fn g<T>(x: T) {} }`.
+    pub(crate) fn type_parameters_of_a_local_function(name: &str, span: Span) -> Self {
+        Self::new(
+            format!("only a function declared at the top level can have type parameters, and `{name}` isn't"),
+            span,
+        )
+        .with_help(format!(
+            "declare `{name}` outside of any function or block, or leave out its type parameters"
+        ))
+    }
+
+    /// The type parameter `name` of `function`, which its body settled as
+    /// `typ`, or left unused, so it's no type parameter.
+    pub(crate) fn type_parameter_is_not_generic(
+        function: &str,
+        name: &str,
+        typ: &StaticType,
+        span: Span,
+    ) -> Self {
+        if *typ == StaticType::Unknown {
+            return Self::new(
+                format!("the type parameter `{name}` of `{function}` is never used"),
+                span,
+            )
+            .with_help(format!(
+                "use `{name}` in the type of a parameter or of what `{function}` returns, or leave it out"
+            ));
+        }
+        Self::new(
+            format!("the type parameter `{name}` of `{function}` is always `{typ}`"),
+            span,
+        )
+        .with_help(format!(
+            "a type parameter stands for any type the caller picks; write `{typ}` instead of `{name}` if that's the only one it can be"
+        ))
+    }
+
+    /// Two type parameters of `function`, `first` and `second`, that its
+    /// body made the same.
+    pub(crate) fn type_parameters_are_the_same(
+        function: &str,
+        first: &str,
+        second: &str,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            format!("the type parameters `{first}` and `{second}` of `{function}` are always the same type"),
+            span,
+        )
+        .with_help(format!("use `{first}` for both"))
+    }
+
+    /// `name::<…>` whose type arguments don't fit the type parameters the
+    /// function `name` is still working out, as in its own body.
+    pub(crate) fn type_arguments_do_not_fit(name: &str, span: Span) -> Self {
+        Self::new(
+            format!("the type arguments don't fit the type parameters of `{name}` here"),
+            span,
+        )
+    }
+
     /// A pattern of `names` names for a tuple of `values` values, the value
     /// or the annotation of `let (a, b): (Int, Int, Int) = …`.
     pub(crate) fn tuple_arity_mismatch(names: usize, values: usize, span: Span) -> Self {

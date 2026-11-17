@@ -57,6 +57,17 @@ pub struct Analyser {
     /// such as `+(A, Int) -> B` for `fn inc(x) => x + 1`, which a call of it
     /// copies with the types it's called with.
     schemes: AHashMap<SymbolId, Scheme>,
+    /// The type parameters each generic function takes type arguments for,
+    /// in order: `f::<Int, String>` binds the first to `Int`. A native's are
+    /// its signature's, as `T` and `A` in `<T, A>(Iterable<T>, A, …)`; a
+    /// function's are those it declares, as `T` in `fn f<T>(x: T)`, which
+    /// are variables while its body is analysed. Absent for a function
+    /// that takes none.
+    type_parameters: AHashMap<SymbolId, Vec<StaticType>>,
+    /// What each type parameter a function declares stands for in its
+    /// declaration: a variable, which ends up a type parameter of the
+    /// function's type. Keyed by the type parameter's symbol.
+    declared_type_parameters: AHashMap<SymbolId, StaticType>,
     /// What a call just copied from a generic function, until the call is
     /// known to commit to it.
     pending: Pending,
@@ -180,9 +191,20 @@ impl Analyser {
         );
         let mut types = TypeTable::default();
         let mut any_index = None;
+        let mut type_parameters = AHashMap::new();
         for ((name, typ, _), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
             if name == ndc_core::ANY_INDEX {
                 any_index = Some(symbol);
+            }
+            // A signature declares its type parameters in the order they're
+            // first used in, which is the order of `type_parameters`.
+            let declared = typ
+                .type_parameters()
+                .into_iter()
+                .map(StaticType::Generic)
+                .collect::<Vec<_>>();
+            if !declared.is_empty() {
+                type_parameters.insert(symbol, declared);
             }
             types.declare(symbol, typ);
         }
@@ -193,6 +215,8 @@ impl Analyser {
             vars: TypeVars::default(),
             waiting: BTreeMap::new(),
             schemes: AHashMap::new(),
+            type_parameters,
+            declared_type_parameters: AHashMap::new(),
             pending: Pending::default(),
             uses: Vec::new(),
             instances: AHashMap::new(),
@@ -381,6 +405,13 @@ impl Analyser {
                 let has_args = !args.is_empty();
                 let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
                 let symbol = self.resolver.type_name_symbol(*id);
+                if let Some(parameter) = self.declared_type_parameters.get(&symbol) {
+                    if has_args {
+                        self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
+                        return StaticType::Error;
+                    }
+                    return parameter.clone();
+                }
                 match self.struct_types.get(&symbol) {
                     Some(_) if has_args => {
                         self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
@@ -398,6 +429,15 @@ impl Analyser {
                 }
             }
         }
+    }
+
+    /// Lowers the type arguments written after a name, as `Int` in
+    /// `f::<Int>`, which are the types of values.
+    fn lower_type_arguments(&mut self, type_arguments: &[TypeExpr]) -> Vec<StaticType> {
+        type_arguments
+            .iter()
+            .map(|argument| self.lower_value_type(argument))
+            .collect()
     }
 
     /// Lowers an annotation of something other than a parameter, which an
@@ -489,7 +529,14 @@ impl Analyser {
                 }
                 StaticType::Never
             }
-            Expression::Identifier { name, .. } => self.analyse_value_reference(*id, name, *span),
+            Expression::Identifier {
+                name,
+                type_arguments,
+                ..
+            } => {
+                let type_arguments = self.lower_type_arguments(type_arguments);
+                self.analyse_value_reference(*id, name, type_arguments, *span)
+            }
             Expression::Statement(inner) => {
                 let typ = self.analyse_expr(inner);
                 // Diverging statements (return/break/continue) propagate Never
@@ -592,6 +639,7 @@ impl Analyser {
             } => self.analyse_op_assignment(*id, l_value, r_value, operation, *span),
             Expression::FunctionDeclaration {
                 name,
+                type_parameters,
                 parameters,
                 body,
                 return_annotation,
@@ -600,6 +648,7 @@ impl Analyser {
             } => self.analyse_function_declaration(FunctionDeclaration {
                 id: *id,
                 name: name.as_deref(),
+                type_parameters,
                 parameters,
                 body,
                 return_annotation: return_annotation.as_ref(),

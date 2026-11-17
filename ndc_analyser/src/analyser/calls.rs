@@ -101,7 +101,12 @@ impl Analyser {
         // function position, so the callee is analysed as a value. The callee
         // comes before the arguments, in source order like the resolver, so
         // declarations in it get their slots first.
-        let Expression::Identifier { name, .. } = &function.expression else {
+        let Expression::Identifier {
+            name,
+            type_arguments,
+            ..
+        } = &function.expression
+        else {
             let callee_type = self.analyse_expr(function);
             let arguments = arguments
                 .iter()
@@ -166,8 +171,12 @@ impl Analyser {
         // A named callee declares nothing, so its overload can be picked after
         // the arguments' types are known.
         let site = CallSite::Call(function.id);
-        let types = self.analyse_arguments(function.id, arguments);
+        let type_arguments = self.lower_type_arguments(type_arguments);
+        let types = self.analyse_arguments(function.id, &type_arguments, arguments);
         match arguments {
+            _ if !type_arguments.is_empty() => {
+                self.constrain_explicit_call(site, type_arguments, types, name, span)
+            }
             [_, index] if name == "[]" => self.constrain_index_read(site, types, index, kind, span),
             _ => self.constrain_call(site, types, kind, name, span),
         }
@@ -185,7 +194,15 @@ impl Analyser {
         kind: CallKind,
         span: Span,
     ) -> StaticType {
-        self.constrain_index_call(site, arguments, kind, "[]", span, literal_index(index))
+        self.constrain_index_call(
+            site,
+            Vec::new(),
+            arguments,
+            kind,
+            "[]",
+            span,
+            literal_index(index),
+        )
     }
 
     /// Analyses the arguments of a call of the function named at `callee`
@@ -197,6 +214,7 @@ impl Analyser {
     fn analyse_arguments(
         &mut self,
         callee: NodeId,
+        type_arguments: &[StaticType],
         arguments: &[ExpressionLocation],
     ) -> Vec<StaticType> {
         let mut types = arguments
@@ -210,7 +228,8 @@ impl Analyser {
             if types[position].is_some() {
                 continue;
             }
-            if let Some(expected) = self.parameters_the_overloads_agree_on(callee, &types, position)
+            if let Some(expected) =
+                self.parameters_the_overloads_agree_on(callee, type_arguments, &types, position)
                 && expected.len() == parameter_count(argument)
             {
                 self.expected_parameters.insert(argument.id, expected);
@@ -228,6 +247,7 @@ impl Analyser {
     fn parameters_the_overloads_agree_on(
         &mut self,
         callee: NodeId,
+        type_arguments: &[StaticType],
         known: &[Option<StaticType>],
         position: usize,
     ) -> Option<Vec<Option<StaticType>>> {
@@ -235,7 +255,8 @@ impl Analyser {
         let mut agreed: Option<Vec<Option<StaticType>>> = None;
         for symbol in self.overloads().reachable_symbols(&candidates) {
             let snapshot = self.vars.snapshot();
-            let expected = self.parameters_one_overload_expects(symbol, known, position);
+            let expected =
+                self.parameters_one_overload_expects(symbol, type_arguments, known, position);
             self.vars.rollback(snapshot);
             let expected = match expected {
                 Expects::Parameters(expected) => expected,
@@ -262,12 +283,17 @@ impl Analyser {
     fn parameters_one_overload_expects(
         &mut self,
         symbol: SymbolId,
+        type_arguments: &[StaticType],
         known: &[Option<StaticType>],
         position: usize,
     ) -> Expects {
         let function = self.vars.resolve(self.types.get_type(symbol));
         let first = self.vars.count();
-        let Some(parameters) = self.vars.instantiate_parameters(&function) else {
+        let mut made = Vec::new();
+        if !self.bind_type_arguments(symbol, type_arguments, &mut made) {
+            return Expects::Nothing;
+        }
+        let Some(parameters) = self.vars.instantiate_parameters(&function, &mut made) else {
             return Expects::Anything;
         };
         let takes_known = parameters.len() == known.len()

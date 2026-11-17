@@ -1,0 +1,4 @@
+// A call gives as many type arguments as the function declares type parameters.
+// expect-error: `id` takes 1 type argument, but 2 were given
+fn id<T>(x: T) -> T { x }
+id::<Int, Int>(1);

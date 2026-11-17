@@ -7,7 +7,7 @@ use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{
     BindingPattern, BindingPatternLocation, ExpressionLocation, FunctionParameter, StructField,
-    TypeExpr,
+    TypeExpr, TypeParameter,
 };
 use ndc_resolver::SymbolId;
 use std::cell::RefCell;
@@ -19,6 +19,8 @@ use std::rc::Rc;
 pub(super) struct FunctionDeclaration<'a> {
     pub id: NodeId,
     pub name: Option<&'a str>,
+    /// The type parameters it declares, as `T` in `fn f<T>(x: T)`.
+    pub type_parameters: &'a [TypeParameter],
     pub parameters: &'a [FunctionParameter],
     pub body: &'a ExpressionLocation,
     pub return_annotation: Option<&'a TypeExpr>,
@@ -52,6 +54,7 @@ impl Analyser {
         let FunctionDeclaration {
             id,
             name,
+            type_parameters,
             parameters,
             body,
             return_annotation,
@@ -63,6 +66,39 @@ impl Analyser {
         if generic {
             self.vars.enter_level();
             self.declaring = declared.map(|(_, symbol)| symbol);
+        }
+        // Each type parameter it declares is a variable of the body's, which
+        // ends up one of the function's type parameters. Only a generic
+        // function has type parameters: one in a function or a block has
+        // one type.
+        if !type_parameters.is_empty() && !generic {
+            let first = &type_parameters[0];
+            self.emit(AnalysisError::type_parameters_of_a_local_function(
+                name.unwrap_or("?"),
+                first
+                    .span
+                    .merge(type_parameters[type_parameters.len() - 1].span),
+            ));
+        }
+        let declared_type_parameters = type_parameters
+            .iter()
+            .map(|parameter| {
+                let symbol = self.resolver.type_parameter_symbol(parameter.id);
+                let var = if generic {
+                    self.vars.fresh()
+                } else {
+                    StaticType::Error
+                };
+                self.declared_type_parameters.insert(symbol, var.clone());
+                var
+            })
+            .collect::<Vec<_>>();
+        if let Some((_, symbol)) = declared
+            && generic
+            && !declared_type_parameters.is_empty()
+        {
+            self.type_parameters
+                .insert(symbol, declared_type_parameters.clone());
         }
         let first_use = self.uses.len();
         let first_cast = self.casts.len();
@@ -205,6 +241,7 @@ impl Analyser {
                     flags,
                     [first_use, first_function, first_cast],
                 );
+                self.check_type_parameters(symbol, type_parameters, &declared_type_parameters);
                 self.within_size_limit(symbol, name, typ, span)
             }
             _ => signature,
@@ -236,6 +273,54 @@ impl Analyser {
             }
             None => function_type,
         }
+    }
+
+    /// Checks that each type parameter the generic function `symbol`
+    /// declares, `declared` the variables its body had for them, ended up a
+    /// type parameter of its own: one the body settled, as `fn f<T>(x: T)
+    /// -> Int { x }` does, or made the same as another, isn't one, and is
+    /// reported. The function then takes type arguments for its type
+    /// parameters in the order they're declared.
+    fn check_type_parameters(
+        &mut self,
+        symbol: SymbolId,
+        type_parameters: &[TypeParameter],
+        declared: &[StaticType],
+    ) {
+        if type_parameters.is_empty() {
+            return;
+        }
+        let function = self.resolver.symbol_name(symbol).to_string();
+        let mut generics = Vec::with_capacity(declared.len());
+        for (index, (parameter, var)) in type_parameters.iter().zip(declared).enumerate() {
+            let resolved = self.vars.resolve(var);
+            match &resolved {
+                StaticType::Generic(_) => {
+                    if let Some(earlier) = generics
+                        .iter()
+                        .position(|earlier: &StaticType| *earlier == resolved)
+                    {
+                        self.emit(AnalysisError::type_parameters_are_the_same(
+                            &function,
+                            &type_parameters[earlier].name,
+                            &parameter.name,
+                            parameter.span,
+                        ));
+                    }
+                }
+                // A failed check was reported where it failed.
+                StaticType::Error => {}
+                _ => self.emit(AnalysisError::type_parameter_is_not_generic(
+                    &function,
+                    &parameter.name,
+                    &self.vars.shown(&resolved),
+                    parameter.span,
+                )),
+            }
+            debug_assert_eq!(generics.len(), index);
+            generics.push(resolved);
+        }
+        self.type_parameters.insert(symbol, generics);
     }
 
     /// `typ`, the type of the generic function `symbol`, unless it has more

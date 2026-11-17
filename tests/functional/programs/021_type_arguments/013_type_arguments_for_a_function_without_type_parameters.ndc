@@ -1,0 +1,5 @@
+// A function that declares no type parameters takes no type arguments, even one whose
+// arguments can have any type.
+// expect-error: `twice` takes no type arguments, but 1 was given
+fn twice(x) => (x, x);
+twice::<Int>(1);

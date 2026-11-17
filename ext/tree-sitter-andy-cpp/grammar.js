@@ -110,6 +110,7 @@ module.exports = grammar({
       optional('pure'),
       'fn',
       optional(field('name', $.identifier)),
+      optional(field('type_parameters', $.type_parameters)),
       field('parameters', $.parameters),
       optional(seq('->', field('return_type', $._type))),
       choice(
@@ -117,6 +118,14 @@ module.exports = grammar({
         seq('=>', field('body', $._expression)),
       ),
     )),
+
+    // `<T, U>` after a function's name.
+    type_parameters: $ => seq(
+      '<',
+      commaSep1($._type_name),
+      optional(','),
+      '>',
+    ),
 
     parameters: $ => seq(
       '(',
@@ -216,6 +225,7 @@ module.exports = grammar({
 
     _expression: $ => choice(
       $.identifier,
+      $.generic_name,
       $._literal,
       $.unary_expression,
       $.not_expression,
@@ -345,6 +355,22 @@ module.exports = grammar({
       seq(choice('..', '..='), field('end', $._expression)),
     )),
 
+    // A name with type arguments, as `f::<Int>` in `f::<Int>(x)`.
+    generic_name: $ => seq(
+      field('name', $.identifier),
+      field('type_arguments', $.type_arguments),
+    ),
+
+    // `::<Int, String>`: after `::<` a type always follows, so unlike a
+    // cast's type, nothing here is ambiguous.
+    type_arguments: $ => seq(
+      '::',
+      '<',
+      commaSep1($._type),
+      optional(','),
+      '>',
+    ),
+
     call: $ => prec(PREC.call, seq(
       field('function', $._expression),
       field('arguments', $.arguments),
@@ -368,7 +394,10 @@ module.exports = grammar({
       field('object', $._expression),
       '.',
       field('method', $.identifier),
-      optional(field('arguments', $.arguments)),
+      optional(seq(
+        optional(field('type_arguments', $.type_arguments)),
+        field('arguments', $.arguments),
+      )),
     )),
 
     // ------------------------------------------------------------------

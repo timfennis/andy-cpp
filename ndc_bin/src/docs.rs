@@ -106,6 +106,15 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
 
         let mut line = String::new();
         write!(line, "{}", function.name.bold().yellow())?;
+        // In the order type arguments bind them: `fold::<Int, String>`.
+        let type_parameters = function.static_type.type_parameters();
+        if !type_parameters.is_empty() {
+            write!(
+                line,
+                "{}",
+                format!("<{}>", type_parameters.join(", ")).dim()
+            )?;
+        }
         match parameters {
             None => {
                 write!(line, "{}", "(...)".dim())?;
