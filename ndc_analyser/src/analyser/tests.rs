@@ -1096,6 +1096,39 @@ fn an_operator_waits_while_an_operand_could_still_be_a_tuple() {
 }
 
 #[test]
+fn an_operator_whose_overload_takes_tuples_whole_does_not_wait() {
+    // Whatever `a` and `b` are, tuples too, `==` compares them whole.
+    let globals = natives(&[("==", "<A, B>(A, B) -> Bool")]);
+    let (_, result) = analyse_with_globals("fn same(a, b) => a == b;", globals.clone());
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let returns = result
+        .analysis
+        .inferred_return_types
+        .values()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    assert_eq!(returns, ["Bool"]);
+    assert_eq!(
+        analyse_last_type_with_globals("let one = fn(x) => x == 1; one((1, 2))", globals),
+        StaticType::Bool
+    );
+}
+
+#[test]
+fn an_operator_waits_while_a_tuple_operand_would_not_fit_its_overload() {
+    // `x` must be a String for `in` to take it whole, so a tuple of them
+    // is looked up one element at a time.
+    let globals = natives(&[("in", "<T>(T, Iterable<T>) -> Bool")]);
+    assert_eq!(
+        analyse_last_type_with_globals(
+            "let vowel = fn(x) => x in \"aeiou\"; vowel((\"a\", \"z\"))",
+            globals
+        ),
+        StaticType::Tuple(vec![StaticType::Bool, StaticType::Bool])
+    );
+}
+
+#[test]
 fn an_operator_takes_no_any_operand_that_no_overload_takes() {
     // `a` could be a tuple that `++` applies to element-wise, or a list,
     // but it takes a cast to be either.

@@ -1472,6 +1472,53 @@ impl Analyser {
             })
     }
 
+    /// Whether `symbol` takes each operand that could still be a tuple
+    /// whatever that operand turns out to be, so the operator is never
+    /// applied to each element: its parameter there is a type of its own,
+    /// shared with no other operand or literal. `==`, `<A, B>(A, B)`, takes
+    /// `x[0] == x[2]` whole, tuples or not, while `(String, String)` takes
+    /// no tuple for `x` in `x ++ "!"`, and neither does `<T>(T, Iterable<T>)`
+    /// in `x in "aeiou"`, as `x` must be a String there.
+    fn takes_whole_tuples(&mut self, symbol: SymbolId, arguments: &[StaticType]) -> bool {
+        let declared = self.vars.resolve(self.types.get_type(symbol));
+        let snapshot = self.vars.snapshot();
+        let takes = match self.vars.instantiate_with(&declared, &mut Vec::new()) {
+            StaticType::Function {
+                parameters: Some(parameters),
+                ..
+            } => {
+                self.vars.bind_arguments(&parameters, arguments) && {
+                    // The overload's own unknowns, as a parameter of a
+                    // function being checked has, may be settled later.
+                    let resolved = arguments
+                        .iter()
+                        .chain(std::iter::once(&declared))
+                        .map(|typ| self.vars.unsettled(typ))
+                        .collect::<Vec<_>>();
+                    arguments.iter().all(|argument| match argument {
+                        StaticType::Var(var) if !self.vars.is_number_literal(*var) => {
+                            match self.vars.resolve(argument) {
+                                StaticType::Var(now) => {
+                                    !self.vars.is_literal(now)
+                                        && resolved
+                                            .iter()
+                                            .filter(|vars| vars.contains(&now))
+                                            .count()
+                                            == 1
+                                }
+                                _ => false,
+                            }
+                        }
+                        _ => true,
+                    })
+                }
+            }
+            _ => false,
+        };
+        self.vars.rollback(snapshot);
+        takes
+    }
+
     /// The overload a call of `candidates` with arguments of these types
     /// commits to while the arguments aren't fully known: one that is the
     /// pick however their unknown parts turn out, so learning more can't
@@ -1480,9 +1527,10 @@ impl Analyser {
     /// `Any` among them, and each literal as any type it may become. Or it's
     /// one that wins whatever they turn out to be: see [`Self::dominant`].
     /// An operator may apply to each element of a tuple, which an unknown
-    /// operand can be: `fn(x) => x ++ "!"` can take `("a", "b")`. Function
-    /// values are picked by the same rule, as calls with the expected
-    /// parameter types.
+    /// operand can be: `fn(x) => x ++ "!"` can take `("a", "b")`, so such a
+    /// call waits, unless its overload takes a tuple there whole, as `==`
+    /// does: see [`Self::takes_whole_tuples`]. Function values are picked
+    /// by the same rule, as calls with the expected parameter types.
     pub(super) fn early_overload(
         &mut self,
         candidates: &Candidates,
@@ -1508,7 +1556,8 @@ impl Analyser {
             }
             [] => EarlyOverload::NoneFits,
             [only]
-                if !self.operand_could_be_a_tuple(kind, arguments)
+                if (!self.operand_could_be_a_tuple(kind, arguments)
+                    || self.takes_whole_tuples(only, arguments))
                     && self.iterables_known(only, arguments)
                     && !(literals && self.fits_once_any(&reachable, arguments, Some(only))) =>
             {
