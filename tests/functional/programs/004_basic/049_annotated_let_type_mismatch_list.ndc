@@ -1,2 +1,2 @@
-// expect-error: mismatched types: found List<Int> but expected List<String>
-let x: List<String> = [1, 2, 3];
+// expect-error: mismatched types: found [Int] but expected [String]
+let x: [String] = [1, 2, 3];

@@ -1,6 +1,6 @@
 // `transposed` and `multi_cartesian_product` give lists of the elements the
 // rows hold.
 // expect-output: [[1,3],[2,4]] [[1,3],[2,3]]
-let columns: List<List<Int>> = [[1, 2], [3, 4]].transposed();
-let products: List<List<Int>> = [[1, 2], [3]].multi_cartesian_product();
+let columns: [[Int]] = [[1, 2], [3, 4]].transposed();
+let products: [[Int]] = [[1, 2], [3]].multi_cartesian_product();
 print(columns, products);

@@ -1,8 +1,8 @@
-// `mk` is called for a `List<Int>` and for a `List<String>`. One cache would
+// `mk` is called for a `[Int]` and for a `[String]`. One cache would
 // give both calls the one list it made first, as two types.
 // expect-output: [1] []
 pure fn mk() => [];
-let ints: List<Int> = mk();
-let words: List<String> = mk();
+let ints: [Int] = mk();
+let words: [String] = mk();
 ints.push(1);
 print(ints, words);

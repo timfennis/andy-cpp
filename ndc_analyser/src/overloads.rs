@@ -56,7 +56,7 @@ impl ResolvedCall {
 /// its parameter types is the other's, or an instance of it, and at least
 /// one isn't the other's. An instance of a type parameter is any type, and
 /// every type is an instance of `Any`: `f(Int)` is more specific than
-/// `f(x)` and `f(Any)`, but `f(List<Int>)` and `f(List<Any>)` are
+/// `f(x)` and `f(Any)`, but `f([Int])` and `f([Any])` are
 /// unrelated. Used by `Analyser::most_specific` to order matching
 /// overloads by specificity: an overload with `more` parameters accepts
 /// strictly fewer call signatures than one with `less` parameters.
@@ -243,7 +243,7 @@ impl<'a> Overloads<'a> {
     /// Return type of a scalar candidate. Falls back to `Any` if the binding
     /// turned out not to carry a function type (e.g. `Any`-typed callee).
     ///
-    /// A type parameter such as `T` in `first<T>(List<T>) -> T` is `Any`
+    /// A type parameter such as `T` in `first<T>([T]) -> T` is `Any`
     /// here: only a call that commits to the overload knows what it stands
     /// for.
     pub(crate) fn scalar_return_type(self, symbol: SymbolId) -> StaticType {

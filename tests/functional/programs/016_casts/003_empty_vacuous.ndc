@@ -1,4 +1,4 @@
 // An empty container conforms to any element type.
-assert_eq([] as List<Int>, []);
+assert_eq([] as [Int], []);
 let value: Any = [];
-assert_eq(value.clone() as List<Int>, []);
+assert_eq(value.clone() as [Int], []);

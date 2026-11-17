@@ -4,5 +4,5 @@
 // expect-output: (4,6.5) [1,2] ab
 let t = ([1], "a");
 t ++= ([2], "b");
-let (xs, s): (List<Int>, String) = t;
+let (xs, s): ([Int], String) = t;
 print((1, 2.5) + (3, 4), xs, s);

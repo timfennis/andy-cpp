@@ -24,7 +24,7 @@ pub enum Function {
     },
 
     /// A function passed as a function type it may not have: a value of
-    /// type `Any` used as a `Fn(Int) -> Int` that holds a function whose
+    /// type `Any` used as a `fn(Int) -> Int` that holds a function whose
     /// return type isn't known. Each call checks what it returns.
     Checked {
         function: Rc<Self>,
@@ -259,7 +259,7 @@ impl Function {
     /// How this function fits `expected`, a function type. A parameter or
     /// return type that its own type leaves unknown, as `Any`, fits
     /// anything, but an unknown return type has to be checked at each call:
-    /// a lambda that returns a String doesn't fit `Fn(Int) -> Int`, and one
+    /// a lambda that returns a String doesn't fit `fn(Int) -> Int`, and one
     /// whose return type isn't known fits it if checked.
     pub fn fit(&self, expected: &StaticType) -> FunctionFit {
         let StaticType::Function {
@@ -295,7 +295,7 @@ impl Function {
     }
 
     /// Whether this function accepts the given arguments, checking every
-    /// element of a container argument against a parameter like `List<Int>`.
+    /// element of a container argument against a parameter like `[Int]`.
     pub fn conforms_value_args(&self, args: &[Value]) -> bool {
         match self.signature() {
             StaticType::Function {
@@ -349,11 +349,11 @@ impl fmt::Debug for NativeFunction {
 }
 
 /// Whether every value of type `found` is an `expected`: a function that
-/// takes `Any` takes anything, and one that returns a `List<Int>` returns an
+/// takes `Any` takes anything, and one that returns a `[Int]` returns an
 /// `Iterable<Int>`.
 fn proves(found: &StaticType, expected: &StaticType) -> bool {
     // A type parameter of a built-in's signature, as `U` in `map`'s
-    // `Fn(T) -> U`, is whatever the function gives it.
+    // `fn(T) -> U`, is whatever the function gives it.
     matches!(
         expected,
         StaticType::Any | StaticType::Generic(_) | StaticType::Var(_)

@@ -25,11 +25,11 @@ let point_x = x;
 struct Other {
     x: Int,
 }
-let other_x: Fn(Other) -> Int = x;
+let other_x: fn(Other) -> Int = x;
 
 assert(point_x != other_x);
 // The two getters have different types, so the keys are typed `Any`.
-let both: Map<Any, String> = %{point_x: "Point", other_x: "Other"};
+let both: %{Any: String} = %{point_x: "Point", other_x: "Other"};
 assert_eq(both.len(), 2);
 assert_eq(both[point_x], "Point");
 assert_eq(both[other_x], "Other");

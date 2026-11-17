@@ -420,7 +420,7 @@ impl Analyser {
     /// The one type that values of type `a` and `b` both have, as the two
     /// branches of an `if`: the type they are once made the same. `if c { 1
     /// } else { 2.5 }` is a Float, and `if c { [] } else { [1] }` a
-    /// `List<Int>`. Types that can't be made the same are held as a
+    /// `[Int]`. Types that can't be made the same are held as a
     /// literal's values are, so `if c { 1 } else { "a" }` is an `Any` where
     /// one is expected, and an error where not.
     /// A branch nothing is known about yet waits, so a lambda's parameter
@@ -1082,7 +1082,7 @@ impl Analyser {
             } => {
                 let (a, b, result) = (a.clone(), b.clone(), result.clone());
                 // A result known from outside is what's expected of each
-                // branch: in `let f: Fn(Int) -> Int = if c { abs } else
+                // branch: in `let f: fn(Int) -> Int = if c { abs } else
                 // { floor }`, it says which `abs` and `floor` are meant.
                 if !matches!(self.vars.resolve(&result), StaticType::Var(_)) {
                     for side in [&a, &b] {
@@ -1197,7 +1197,7 @@ impl Analyser {
         // the parameter it's passed for, as `nest([x], n - 1)` in `fn
         // nest(x, n)`, would need a version of itself for `x`'s type, one
         // for lists of it, one for lists of those, without end.
-        // Another overload may take the call, as `f(xs: List<Any>)` does
+        // Another overload may take the call, as `f(xs: [Any])` does
         // `f([x])`, so it's only this function's when no other can.
         if let Some(function) = self.declaring
             && self.copied_through.is_none()
@@ -1276,7 +1276,7 @@ impl Analyser {
 
         // A literal whose values share no type can only be an `Any`, which
         // is fine where the overload it picks as one asks for that: in
-        // `f([1, "a"])` with `f(xs: List<Any>)`.
+        // `f([1, "a"])` with `f(xs: [Any])`.
         if let Some(as_any) = self.unshared_literals_as_any(&arguments)
             && let ResolvedCall {
                 binding: Binding::Resolved(Candidate::Scalar(picked)),
@@ -1284,7 +1284,7 @@ impl Analyser {
             } = self.resolve_overloads(&call.candidates, &as_any, call.kind)
         {
             // An overload picked through a type parameter that the `Any`
-            // fits, as `push(List<T>, T)` with a Float for `[1, "a"]`, may
+            // fits, as `push([T], T)` with a Float for `[1, "a"]`, may
             // not take the literal itself, which then isn't an `Any`.
             let snapshot = self.vars.snapshot();
             if let Some(typ) = self.commit_early(call, &arguments, picked) {
@@ -1577,7 +1577,7 @@ impl Analyser {
     /// any unknown part of them or making two of them one, and is narrower
     /// than the others in its scope. As it always takes the call, overloads
     /// further out never get it, and nearer ones can't take it. In
-    /// `multi_cartesian_product([[f, g]])`, `(Iterable<List<T>>)` is the
+    /// `multi_cartesian_product([[f, g]])`, `(Iterable<[T]>)` is the
     /// pick over `(Iterable<Any>)` whatever `f` and `g` turn out to be. An
     /// argument nothing is known about could be an `Any`, which only the
     /// overloads taking an `Any` take, so it leaves the pick open.
@@ -1897,7 +1897,7 @@ impl Analyser {
     /// the overload it picked, and returns the call's type. The signature
     /// gets new variables for its type parameters, and each argument is
     /// passed where its parameter is expected: `push(xs, 1)` with
-    /// `push<T>(List<T>, T)` settles `xs` as a `List<Int>`, and
+    /// `push<T>([T], T)` settles `xs` as a `[Int]`, and
     /// `push(xs, "a")` then doesn't fit. Returns `None` when an argument
     /// doesn't fit, which settles nothing.
     fn commit_overload(
@@ -2005,7 +2005,7 @@ impl Analyser {
     /// Adds the constraints [`Self::instantiate_function`] copied for the
     /// function value at `id`, as [`Self::flush_copies`] does for a call.
     /// The value is the instance for the types it's used at: in
-    /// `[[1, 2]].count(is_safe)`, the one for `List<Int>`. A type of it
+    /// `[[1, 2]].count(is_safe)`, the one for `[Int]`. A type of it
     /// nothing settles, as in `let f: Any = is_safe`, is a failed check's,
     /// so it's reported once, as the value's, and not by its body. A type
     /// the body's constraints connect to its parameters that the value's
@@ -2173,7 +2173,7 @@ impl Analyser {
     }
 
     /// The one of `symbols` whose parameters are narrower than every other
-    /// one's, as `[](Map<K, V>, K)` is than `[](Any, Any)`, if there is one.
+    /// one's, as `[](%{K: V}, K)` is than `[](Any, Any)`, if there is one.
     /// A single function is the narrowest of one.
     fn most_specific(&self, symbols: &[SymbolId]) -> Option<SymbolId> {
         let parameters = symbols

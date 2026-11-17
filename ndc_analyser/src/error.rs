@@ -133,13 +133,13 @@ impl AnalysisError {
             unshared.span,
         )
         .with_help(
-            "Give them one type, as with `String(n)` for a number among strings, or, as values of different types are an `Any`, which has to be said, annotate it, as in `let x: Any = …`, `-> Any` or `List<Any>`",
+            "Give them one type, as with `String(n)` for a number among strings, or, as values of different types are an `Any`, which has to be said, annotate it, as in `let x: Any = …`, `-> Any` or `[Any]`",
         )
     }
 
     pub(crate) fn not_iterable(typ: &StaticType, span: Span) -> Self {
         Self {
-            help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("List<Int>")),
+            help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("[Int]")),
             ..Self::new(format!("{typ} is not iterable"), span)
         }
     }
@@ -186,8 +186,8 @@ impl AnalysisError {
 
     /// A generic function's name used as a value where nothing says which
     /// types it takes, as `inc` in `let f: Any = inc` with
-    /// `fn inc(x) => x + 1`, whose type is `Fn(A) -> B`: "say which types it
-    /// takes, as in `inc as Fn(A) -> B` with types in place of `A` and `B`",
+    /// `fn inc(x) => x + 1`, whose type is `fn(A) -> B`: "say which types it
+    /// takes, as in `inc as fn(A) -> B` with types in place of `A` and `B`",
     /// which lists the type parameters of `typ` alphabetically.
     pub(crate) fn generic_function_value(function: &str, typ: &StaticType, span: Span) -> Self {
         let mut names = typ.type_parameters();
@@ -294,7 +294,7 @@ impl AnalysisError {
 
     pub(crate) fn iterable_in_an_annotation(span: Span) -> Self {
         Self::new("`Iterable<T>` can't be written in a type annotation", span).with_help(
-            "A parameter without an annotation takes any kind of sequence. Say which kind a value is, as in `List<Int>`",
+            "A parameter without an annotation takes any kind of sequence. Say which kind a value is, as in `[Int]`",
         )
     }
 
@@ -397,7 +397,7 @@ impl AnalysisError {
                 "A variable hides the functions named '{name}' further out: it doesn't join their overloads"
             ))
         } else if *variable_type == StaticType::Any {
-            Some(cast_out_of_any("Fn(Int) -> Int"))
+            Some(cast_out_of_any("fn(Int) -> Int"))
         } else if let StaticType::Function {
             parameters: Some(parameters),
             ..
@@ -476,7 +476,7 @@ impl AnalysisError {
     ) -> Self {
         Self::function_not_found(ident, types, span).with_help(concat!(
             "An overload would accept a narrower argument type. ",
-            "Cast to say what the value holds, as in `value.clone() as List<Int>`: ",
+            "Cast to say what the value holds, as in `value.clone() as [Int]`: ",
             "a container is cast as a copy while something else still holds it.",
         ))
     }
@@ -533,7 +533,7 @@ impl AnalysisError {
 
     pub(crate) fn not_callable(typ: &StaticType, span: Span) -> Self {
         Self {
-            help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("Fn(Int) -> Int")),
+            help_text: (*typ == StaticType::Any).then(|| cast_out_of_any("fn(Int) -> Int")),
             ..Self::new(format!("Unable to invoke {typ} as a function."), span)
         }
     }
@@ -551,7 +551,7 @@ fn annotate_the_unknown() -> String {
         "`Unknown` is the type of what nothing in the program says the type of, such as a parameter ",
         "of a function that's never called or what an empty `[]`, `%{}` or `None` holds. ",
         "Only a type parameter or an `Any` takes it. ",
-        "Annotate it, as in `fn(x: Int) => x + 1` or `let xs: List<Int> = []`",
+        "Annotate it, as in `fn(x: Int) => x + 1` or `let xs: [Int] = []`",
     )
     .to_string()
 }

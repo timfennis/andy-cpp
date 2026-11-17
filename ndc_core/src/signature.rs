@@ -1,14 +1,14 @@
 //! Built-in function signatures written in the language's own type syntax,
-//! such as `<T>(List<T>, T) -> Option<T>`.
+//! such as `<T>([T], T) -> Option<T>`.
 
 use crate::StaticType;
 
 impl StaticType {
     /// The function type a built-in's signature describes:
-    /// `<T>(List<T>, T) -> Option<T>` declares the type parameter `T`, two
+    /// `<T>([T], T) -> Option<T>` declares the type parameter `T`, two
     /// parameters and a return type. Without `-> …` the function returns
     /// `()`. `(*)` takes any number of arguments of any type, and
-    /// `Fn(Int) -> Int` is a function type.
+    /// `fn(Int) -> Int` is a function type.
     pub fn signature(text: &str) -> Result<Self, String> {
         let mut parser = SignatureParser {
             tokens: tokenize(text)?,
@@ -29,7 +29,12 @@ fn tokenize(text: &str) -> Result<Vec<String>, String> {
     while let Some((start, c)) = chars.next() {
         match c {
             c if c.is_whitespace() => {}
-            '<' | '>' | '(' | ')' | ',' | '*' => tokens.push(c.to_string()),
+            '<' | '>' | '(' | ')' | '[' | ']' | '}' | ':' | ',' | '*' => {
+                tokens.push(c.to_string());
+            }
+            '%' if chars.next_if(|&(_, next)| next == '{').is_some() => {
+                tokens.push("%{".to_string());
+            }
             '-' if chars.next_if(|&(_, next)| next == '>').is_some() => {
                 tokens.push("->".to_string());
             }
@@ -154,7 +159,25 @@ impl SignatureParser {
                     Ok(StaticType::Tuple(elements))
                 }
             }
-            "Fn" => self.function(),
+            "[" => {
+                let element = self.typ()?;
+                self.expect("]")?;
+                Ok(StaticType::List(Box::new(element)))
+            }
+            "%{" => {
+                let key = self.typ()?;
+                let value = if self.eat(":") {
+                    self.typ()?
+                } else {
+                    StaticType::unit()
+                };
+                self.expect("}")?;
+                Ok(StaticType::Map {
+                    key: Box::new(key),
+                    value: Box::new(value),
+                })
+            }
+            "fn" => self.function(),
             name if self.generics.iter().any(|generic| generic == name) => {
                 Ok(StaticType::Generic(name.into()))
             }
@@ -188,7 +211,7 @@ mod tests {
     #[test]
     fn a_signature_declares_its_parameters_and_return_type() {
         assert_eq!(
-            StaticType::signature("<T>(List<T>, T) -> Option<T>"),
+            StaticType::signature("<T>([T], T) -> Option<T>"),
             Ok(function(
                 Some(vec![StaticType::List(Box::new(generic("T"))), generic("T")]),
                 StaticType::Option(Box::new(generic("T"))),
@@ -214,7 +237,7 @@ mod tests {
     #[test]
     fn tuples_function_types_and_variadics_parse() {
         assert_eq!(
-            StaticType::signature("<K, V>(Map<K, V>) -> List<(K, V)>"),
+            StaticType::signature("<K, V>(%{K: V}) -> [(K, V)]"),
             Ok(function(
                 Some(vec![StaticType::Map {
                     key: Box::new(generic("K")),
@@ -227,7 +250,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            StaticType::signature("<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
+            StaticType::signature("<T, U>([T], fn(T) -> U) -> [U]"),
             Ok(function(
                 Some(vec![
                     StaticType::List(Box::new(generic("T"))),
@@ -255,7 +278,7 @@ mod tests {
     #[test]
     fn a_malformed_signature_is_rejected() {
         for text in [
-            "(List<T>)",
+            "([T])",
             "<T, T>(T)",
             "(Int",
             "(Int) ->",

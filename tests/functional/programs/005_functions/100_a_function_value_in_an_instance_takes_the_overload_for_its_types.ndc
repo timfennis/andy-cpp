@@ -5,5 +5,5 @@
 fn choose(x: Int) => "int";
 fn choose(x: Any) => "any";
 fn apply(x) { let g = choose; g(x) }
-let h: Fn(Int) -> String = apply;
+let h: fn(Int) -> String = apply;
 print(h(1));

@@ -1,7 +1,7 @@
 // A container shows as `[...]` where it holds itself.
 // expect-output: [1,[...]] %{1: %{...}}
-let xs: List<Any> = [1];
+let xs: [Any] = [1];
 xs.push(xs);
-let m: Map<Int, Any> = %{};
+let m: %{Int: Any} = %{};
 m[1] = m;
 print(xs, m);

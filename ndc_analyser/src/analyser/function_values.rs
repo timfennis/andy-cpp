@@ -232,9 +232,9 @@ impl Analyser {
     }
 
     /// Whether a value of `symbol`'s type might be passed where `expected`
-    /// is, once what's not known about either is: an `Fn(Int) -> Int` might
-    /// be an `Fn(A) -> B` whose `A` and `B` aren't known yet, but an
-    /// `Fn(Int, Int) -> Int` isn't.
+    /// is, once what's not known about either is: an `fn(Int) -> Int` might
+    /// be an `fn(A) -> B` whose `A` and `B` aren't known yet, but an
+    /// `fn(Int, Int) -> Int` isn't.
     fn might_be_expected(&self, symbol: SymbolId, expected: &StaticType) -> bool {
         self.vars
             .resolve(self.types.get_type(symbol))

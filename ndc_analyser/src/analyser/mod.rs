@@ -325,7 +325,7 @@ impl Analyser {
     }
 
     /// Resolves a syntactic type annotation to a `StaticType`: `Int` becomes
-    /// `StaticType::Int`, `Map<String, Int>` becomes `StaticType::Map { .. }`,
+    /// `StaticType::Int`, `[Int]` becomes `StaticType::List(..)`,
     /// and a struct name becomes that struct's `StaticType::Struct`. The
     /// resolver has already matched each name to its type symbol. A wrong
     /// generic-argument count is reported as an analysis error at the
@@ -333,6 +333,17 @@ impl Analyser {
     /// of the program is still checked.
     fn lower_type_expr(&mut self, expr: &TypeExpr) -> StaticType {
         match expr {
+            TypeExpr::List { element, .. } => {
+                StaticType::List(Box::new(self.lower_type_expr(element)))
+            }
+            TypeExpr::Map { key, value, .. } => StaticType::Map {
+                key: Box::new(self.lower_type_expr(key)),
+                value: Box::new(
+                    value
+                        .as_ref()
+                        .map_or_else(StaticType::unit, |v| self.lower_type_expr(v)),
+                ),
+            },
             TypeExpr::Tuple { elements, .. } => {
                 StaticType::Tuple(elements.iter().map(|e| self.lower_type_expr(e)).collect())
             }
@@ -491,12 +502,12 @@ impl Analyser {
                 let target = self.lower_value_type(annotation);
                 let found = self.analyse_expr(value);
                 // What isn't known about the value yet is what the cast says
-                // it is: `(fn(x) => x) as Fn(Int) -> Int` takes an Int, and
+                // it is: `(fn(x) => x) as fn(Int) -> Int` takes an Int, and
                 // needs no check as the program runs, and `1 as Float` is a
                 // Float. Known parts are checked, and so is a value nothing
                 // is known about, like what a call that waits returns.
                 // `as?` only tests the value, which stays what it is: in `fn
-                // f(xs) { (xs as? List<Int>).is_some() }`, `xs` can still be a
+                // f(xs) { (xs as? [Int]).is_some() }`, `xs` can still be a
                 // list of Strings. A number written there is what it's cast
                 // to, as with `as`: `1 as? Float` is `Some(1.0)`.
                 let found = self.vars.resolve(&found);
@@ -518,7 +529,7 @@ impl Analyser {
                 }
                 // Whether the cast is checked as the program runs is decided
                 // once what's known about the value is: in `let xs = [];
-                // xs as? List<Int>`, a later `xs.push(1)` proves it.
+                // xs as? [Int]`, a later `xs.push(1)` proves it.
                 self.casts.push(Cast {
                     node: *id,
                     found,
@@ -837,7 +848,7 @@ impl Analyser {
 
     /// The type of the elements of the literal at `span` holding `values`,
     /// each with where it is and its type, which takes the type its uses
-    /// settle: in `let xs: List<Any> = [1, 2]`, `Any`.
+    /// settle: in `let xs: [Any] = [1, 2]`, `Any`.
     fn holding(
         &mut self,
         values: Vec<(Option<NodeId>, Span, StaticType)>,

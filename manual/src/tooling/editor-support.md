@@ -179,4 +179,4 @@ to run `ndc lsp --stdio` for `.ndc` files with the language id `andy-cpp`.
 - While the buffer is mid-edit and doesn't parse, the last successful analysis is
   retained so hints and dot-completion keep working.
 - The Tree-sitter grammar currently has trouble with doubly nested generic type
-  annotations such as `List<List<Int>>`. Single-level generics work as expected.
+  annotations such as `Option<Option<Int>>`. Single-level generics work as expected.

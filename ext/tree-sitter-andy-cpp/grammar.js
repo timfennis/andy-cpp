@@ -132,7 +132,7 @@ module.exports = grammar({
 
     struct_definition: $ => seq(
       'struct',
-      field('name', $.type_identifier),
+      field('name', $._type_name),
       '{',
       optional(seq(commaSep1($.struct_field), optional(','))),
       '}',
@@ -150,11 +150,15 @@ module.exports = grammar({
 
     _type: $ => choice(
       $.generic_type,
-      $.type_identifier,
+      $._type_name,
+      $.list_type,
+      $.map_type,
       $.tuple_type,
+      $.function_type,
     ),
 
-    type_identifier: $ => /[A-Za-z_][A-Za-z0-9_]*/,
+    // An identifier, so that keyword extraction keeps `fn` out of type names.
+    _type_name: $ => alias($.identifier, $.type_identifier),
 
     // A `<` after a type name is ambiguous in a cast: it may open a type
     // argument list or be a less-than operator. The conflict declared above
@@ -162,11 +166,30 @@ module.exports = grammar({
     // argument list whenever it parses, mirroring the recursive-descent
     // parser in `ndc_parser/src/parser.rs`.
     generic_type: $ => prec.dynamic(1, seq(
-      field('name', $.type_identifier),
+      field('name', $._type_name),
       '<',
       commaSep($._type),
       optional(','),
       '>',
+    )),
+
+    list_type: $ => seq('[', $._type, ']'),
+
+    // `%{K: V}` is a map, `%{K}` a set.
+    map_type: $ => seq(
+      '%{',
+      field('key', $._type),
+      optional(seq(':', field('value', $._type))),
+      '}',
+    ),
+
+    function_type: $ => prec.right(seq(
+      'fn',
+      '(',
+      commaSep($._type),
+      optional(','),
+      ')',
+      optional(seq('->', field('return_type', $._type))),
     )),
 
     tuple_type: $ => seq(

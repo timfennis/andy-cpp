@@ -1,5 +1,5 @@
 // A value that isn't the cast's type fails as one, held elsewhere or not.
 // expect-output: None
-let mixed: List<Any> = [1, "a"];
+let mixed: [Any] = [1, "a"];
 let any: Any = mixed;
-print(any as? List<Int>);
+print(any as? [Int]);

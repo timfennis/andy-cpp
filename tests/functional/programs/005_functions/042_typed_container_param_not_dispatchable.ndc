@@ -1,6 +1,6 @@
-// A List<Int> isn't a List<Number>, so the call is rejected at compile time.
+// A [Int] isn't a [Number], so the call is rejected at compile time.
 // A cast is how you tell the analyser what the value actually holds.
-// expect-error: No function called 'consume' found that matches the arguments 'List<Int>'
-fn consume(xs: List<Number>) => xs;
+// expect-error: No function called 'consume' found that matches the arguments '[Int]'
+fn consume(xs: [Number]) => xs;
 let xs = ["a".len()];
 consume(xs)

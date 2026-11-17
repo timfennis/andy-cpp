@@ -18,7 +18,7 @@ let element = my_list.pop();
 print(element, my_list);  // 99 [1,2,4]
 ```
 
-The values of a list share one type. To put values of different types in one list, like `[1, "a"]`, annotate it: `let xs: List<Any> = [1, "a"];` (see [Values of different types](../types.md#values-of-different-types)).
+The values of a list share one type. To put values of different types in one list, like `[1, "a"]`, annotate it: `let xs: [Any] = [1, "a"];` (see [Values of different types](../types.md#values-of-different-types)).
 
 ## Indexing
 

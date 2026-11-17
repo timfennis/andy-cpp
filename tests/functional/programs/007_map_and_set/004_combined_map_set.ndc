@@ -1,4 +1,4 @@
-let map_set: Map<String, Any> = %{
+let map_set: %{String: Any} = %{
     "key": "value",
     "just_key",
 };

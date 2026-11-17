@@ -1,6 +1,6 @@
 // A call with the same arguments gives what the first one returned, the
 // same list: a change to it is in what later calls get.
 // expect-output: [1]
-pure fn mk() -> List<Int> => [];
+pure fn mk() -> [Int] => [];
 mk().push(1);
 print(mk());

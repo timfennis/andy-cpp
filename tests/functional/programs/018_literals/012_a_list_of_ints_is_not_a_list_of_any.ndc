@@ -1,5 +1,5 @@
-// A List<Any> could get a String, which the List<String> would then hold.
+// A [Any] could get a String, which the [String] would then hold.
 // Converting goes through `Any`.
-// expect-error: mismatched types: found List<String> but expected List<Any>
+// expect-error: mismatched types: found [String] but expected [Any]
 let words = "a b".split(" ");
-let anything: List<Any> = words;
+let anything: [Any] = words;

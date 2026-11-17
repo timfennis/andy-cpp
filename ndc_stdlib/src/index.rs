@@ -58,12 +58,12 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     // An element by its index, or a slice by a range of indices. A range of a
     // deque is a list.
     for signature in [
-        "<T>(List<T>, Int) -> T",
-        "<T>(List<T>, Iterator<Int>) -> List<T>",
+        "<T>([T], Int) -> T",
+        "<T>([T], Iterator<Int>) -> [T]",
         "(String, Int) -> String",
         "(String, Iterator<Int>) -> String",
         "<T>(Deque<T>, Int) -> T",
-        "<T>(Deque<T>, Iterator<Int>) -> List<T>",
+        "<T>(Deque<T>, Iterator<Int>) -> [T]",
     ] {
         env.declare_global_fn(Rc::new(NativeFunction {
             name: "[]".to_string(),
@@ -88,7 +88,7 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]".to_string(),
         documentation: Some(doc),
-        static_type: StaticType::signature("<K, V>(Map<K, V>, K) -> V").expect("valid signature"),
+        static_type: StaticType::signature("<K, V>(%{K: V}, K) -> V").expect("valid signature"),
         func: make_get_func(),
     }));
 }
@@ -97,10 +97,7 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let doc = "Sets an element by index. Supports negative indices and range slicing for lists and strings.".to_string();
 
     // An element by its index, or a slice by a range of indices.
-    for signature in [
-        "<T>(List<T>, Int, T)",
-        "<T>(List<T>, Iterator<Int>, Iterable<T>)",
-    ] {
+    for signature in ["<T>([T], Int, T)", "<T>([T], Iterator<Int>, Iterable<T>)"] {
         env.declare_global_fn(Rc::new(NativeFunction {
             name: "[]=".to_string(),
             documentation: Some(doc.clone()),
@@ -121,7 +118,7 @@ fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     env.declare_global_fn(Rc::new(NativeFunction {
         name: "[]=".to_string(),
         documentation: Some(doc),
-        static_type: StaticType::signature("<K, V>(Map<K, V>, K, V)").expect("valid signature"),
+        static_type: StaticType::signature("<K, V>(%{K: V}, K, V)").expect("valid signature"),
         func: make_set_func(),
     }));
 }

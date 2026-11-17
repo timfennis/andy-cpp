@@ -1440,13 +1440,21 @@ impl Parser {
         };
 
         match token {
+            Token::Fn => self.function_type(),
             Token::Identifier(name)
                 if name == "Fn" && self.peek_next_token() == Some(&Token::LeftParentheses) =>
             {
-                self.function_type()
+                Err(Error::with_help(
+                    "unknown type `Fn`".to_string(),
+                    *span,
+                    "A function type is written `fn(A) -> R`, as in `fn(Int) -> String`"
+                        .to_string(),
+                ))
             }
             Token::Identifier(_) => self.named_or_generic_type(),
             Token::LeftParentheses => self.tuple_type(),
+            Token::LeftSquareBracket => self.list_type(),
+            Token::MapOpen => self.map_type(),
             _ => Err(Error::with_help(
                 format!("expected a type annotation, found `{token}`"),
                 *span,
@@ -1484,12 +1492,14 @@ impl Parser {
     }
 
     /// Scans ahead from the `<` that follows the current token to decide whether
-    /// it opens a type argument list (`List<Int>`) or is a less-than operator
+    /// it opens a type argument list (`[Int]`) or is a less-than operator
     /// (`Int < 2`). Only the tokens that may legally appear inside a type
     /// argument list are accepted; anything else means this is a comparison.
     fn peek_type_arguments(&self) -> bool {
         let mut depth = 0_usize;
         let mut parens = 0_usize;
+        let mut braces = 0_usize;
+        let mut brackets = 0_usize;
 
         for location in self.tokens.iter().skip(self.current + 1) {
             // How many `>` this token contributes, and whether consuming all of
@@ -1513,7 +1523,34 @@ impl Parser {
                     parens -= 1;
                     continue;
                 }
-                Token::Identifier(_) | Token::Comma => continue,
+                Token::MapOpen => {
+                    braces += 1;
+                    continue;
+                }
+                // Like `)`, a `}` or `:` outside a map type of ours belongs to
+                // an enclosing map literal: `%{k: x as Int < y}`.
+                Token::RightCurlyBracket => {
+                    if braces == 0 {
+                        return false;
+                    }
+                    braces -= 1;
+                    continue;
+                }
+                Token::Colon if braces > 0 => continue,
+                Token::LeftSquareBracket => {
+                    brackets += 1;
+                    continue;
+                }
+                // Like `)`, a `]` outside a list type of ours belongs to an
+                // enclosing list literal: `[x as Int < y] > [false]`.
+                Token::RightSquareBracket => {
+                    if brackets == 0 {
+                        return false;
+                    }
+                    brackets -= 1;
+                    continue;
+                }
+                Token::Identifier(_) | Token::Fn | Token::Comma => continue,
                 Token::Greater => (1, true),
                 Token::GreaterGreater => (2, true),
                 Token::GreaterEquals => (1, false),
@@ -1535,9 +1572,9 @@ impl Parser {
             }
 
             if depth == closers {
-                // A matching `>` inside parentheses belongs to the grouped
-                // expression unless every parenthesized type has closed.
-                return parens == 0;
+                // A matching `>` inside brackets belongs to the enclosing
+                // expression unless every bracketed type has closed.
+                return parens == 0 && braces == 0 && brackets == 0;
             }
 
             depth -= closers;
@@ -1571,7 +1608,7 @@ impl Parser {
     }
 
     /// Parses `<T, U, ...>` type parameter lists, handling the `>>` / `>=` / `>>=`
-    /// ambiguity that arises with nested generics like `List<List<Int>>`. Returns
+    /// ambiguity that arises with nested generics like `[[Int]]`. Returns
     /// the parsed items and the span of the closing `>`.
     fn delimited_type_params(&mut self) -> Result<(Vec<TypeExpr>, Span), Error> {
         self.require_current_token_matches(&Token::Less)?;
@@ -1634,7 +1671,7 @@ impl Parser {
         Ok(greater_span)
     }
 
-    /// Parses `Fn(A, B) -> C`, where `-> C` is optional.
+    /// Parses `fn(A, B) -> C`, where `-> C` is optional.
     fn function_type(&mut self) -> Result<TypeExpr, Error> {
         let start = self.require_current_token()?.span;
         let (parameters, parameters_span) = self.delimited_comma_separated(
@@ -1657,14 +1694,49 @@ impl Parser {
         })
     }
 
+    /// Parses `()`, `(A, B)` and the 1-tuple `(A,)`. Like in an expression,
+    /// parentheses around a single type without a comma only group it, so
+    /// `(A)` is `A`.
     pub fn tuple_type(&mut self) -> Result<TypeExpr, Error> {
-        let (elements, span) = self.delimited_comma_separated(
+        let (mut elements, span) = self.delimited_comma_separated(
             &Token::LeftParentheses,
             &Token::RightParentheses,
             Self::type_annotation,
             true,
         )?;
+        let trailing_comma = self.tokens[self.current - 2].token == Token::Comma;
+        if elements.len() == 1 && !trailing_comma {
+            return Ok(elements.remove(0));
+        }
         Ok(TypeExpr::Tuple { elements, span })
+    }
+
+    /// Parses `%{K: V}`, a map from `K` to `V`, or `%{K}`, a set of `K`.
+    fn map_type(&mut self) -> Result<TypeExpr, Error> {
+        let open = self.require_current_token_matches(&Token::MapOpen)?;
+        let key = self.type_annotation()?;
+        let value = if self.consume_token_if(&[Token::Colon]).is_some() {
+            Some(Box::new(self.type_annotation()?))
+        } else {
+            None
+        };
+        let close = self.require_current_token_matches(&Token::RightCurlyBracket)?;
+        Ok(TypeExpr::Map {
+            key: Box::new(key),
+            value,
+            span: open.span.merge(close.span),
+        })
+    }
+
+    /// Parses `[T]`, a list whose elements are `T`.
+    fn list_type(&mut self) -> Result<TypeExpr, Error> {
+        let open = self.require_current_token_matches(&Token::LeftSquareBracket)?;
+        let element = self.type_annotation()?;
+        let close = self.require_current_token_matches(&Token::RightSquareBracket)?;
+        Ok(TypeExpr::List {
+            element: Box::new(element),
+            span: open.span.merge(close.span),
+        })
     }
 
     fn struct_field(&mut self) -> Result<StructField, Error> {

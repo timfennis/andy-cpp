@@ -24,7 +24,7 @@ mod inner {
     /// Returns a list of all the keys in the map or set.
     ///
     /// Note that for a set this will return the values in the set.
-    #[function(signature = "<K, V>(Map<K, V>) -> List<K>")]
+    #[function(signature = "<K, V>(%{K: V}) -> [K]")]
     pub fn keys(map: &mut HashMap<Value, Value>) -> Value {
         Value::Object(Rc::new(Object::list(
             map.keys().cloned().collect::<Vec<_>>(),
@@ -34,7 +34,7 @@ mod inner {
     /// Returns a list of all the values in the map.
     ///
     /// Note that for sets this will return a list of unit types, you should use keys if you want the values in the set.
-    #[function(signature = "<K, V>(Map<K, V>) -> List<V>")]
+    #[function(signature = "<K, V>(%{K: V}) -> [V]")]
     pub fn values(map: &mut HashMap<Value, Value>) -> Value {
         Value::Object(Rc::new(Object::list(
             map.values().cloned().collect::<Vec<_>>(),
@@ -42,13 +42,13 @@ mod inner {
     }
 
     /// Removes a key from the map or a value from a set.
-    #[function(signature = "<K, V>(Map<K, V>, K)")]
+    #[function(signature = "<K, V>(%{K: V}, K)")]
     pub fn remove(map: &mut HashMap<Value, Value>, key: Value) {
         map.remove(&key);
     }
 
     /// Removes all keys from the `left` map/set that are present in the `right` map/set.
-    #[function(name = "remove", signature = "<K, V, W>(Map<K, V>, Map<K, W>)")]
+    #[function(name = "remove", signature = "<K, V, W>(%{K: V}, %{K: W})")]
     pub fn remove_map(left: &mut HashMap<Value, Value>, right: &HashMap<Value, Value>) {
         for (key, _) in right {
             left.remove(key);
@@ -56,28 +56,25 @@ mod inner {
     }
 
     /// Insert a value into a map.
-    #[function(name = "insert", signature = "<K, V>(Map<K, V>, K, V)")]
+    #[function(name = "insert", signature = "<K, V>(%{K: V}, K, V)")]
     pub fn insert_map(map: &mut HashMap<Value, Value>, key: Value, value: Value) {
         map.insert(key, value);
     }
 
     /// Inserts a value into a set.
-    #[function(name = "insert", signature = "<K>(Map<K, ()>, K)")]
+    #[function(name = "insert", signature = "<K>(%{K}, K)")]
     pub fn insert_set(map: &mut HashMap<Value, Value>, key: Value) {
         map.insert(key, Value::unit());
     }
 
     /// Returns true if the map or set contains no elements.
-    #[function(signature = "<K, V>(Map<K, V>) -> Bool")]
+    #[function(signature = "<K, V>(%{K: V}) -> Bool")]
     pub fn is_empty(map: &HashMap<Value, Value>) -> bool {
         map.is_empty()
     }
 
     /// Intersection-assign: retains only elements present in both maps or sets.
-    #[function(
-        name = "&=",
-        signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
-    )]
+    #[function(name = "&=", signature = "<K, V, W>(%{K: V}, %{K: W}) -> %{K: V}")]
     pub fn intersect_assign(lhs: Value, rhs: Value) -> anyhow::Result<Value> {
         change_with(&lhs, &rhs, "&=", |entries, other| {
             entries.retain(|key, _| other.contains_key(key));
@@ -86,7 +83,7 @@ mod inner {
     }
 
     /// Union-assign: adds all elements from the right map or set into the left.
-    #[function(name = "|=", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
+    #[function(name = "|=", signature = "<K, V>(%{K: V}, %{K: V}) -> %{K: V}")]
     pub fn union_assign(lhs: Value, rhs: Value) -> anyhow::Result<Value> {
         change_with(&lhs, &rhs, "|=", |entries, other| {
             for (key, value) in other {
@@ -97,10 +94,7 @@ mod inner {
     }
 
     /// Difference-assign: removes all elements from the left map or set that are present in the right.
-    #[function(
-        name = "-=",
-        signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
-    )]
+    #[function(name = "-=", signature = "<K, V, W>(%{K: V}, %{K: W}) -> %{K: V}")]
     pub fn difference_assign(lhs: Value, rhs: Value) -> anyhow::Result<Value> {
         change_with(&lhs, &rhs, "-=", |entries, other| {
             entries.retain(|key, _| !other.contains_key(key));
@@ -109,7 +103,7 @@ mod inner {
     }
 
     /// Symmetric-difference-assign: retains only elements present in exactly one of the two maps or sets.
-    #[function(name = "~=", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
+    #[function(name = "~=", signature = "<K, V>(%{K: V}, %{K: V}) -> %{K: V}")]
     pub fn symmetric_difference_assign(lhs: Value, rhs: Value) -> anyhow::Result<Value> {
         change_with(&lhs, &rhs, "~=", |entries, other| {
             *entries = symmetric_difference(entries, other);
@@ -145,7 +139,7 @@ mod inner {
     /// Returns the union (elements that are in either `left` or `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left | right`.
-    #[function(alias = "|", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
+    #[function(alias = "|", signature = "<K, V>(%{K: V}, %{K: V}) -> %{K: V}")]
     pub fn union(left: Value, right: &HashMap<Value, Value>) -> anyhow::Result<Value> {
         combine(&left, right, "|", union)
     }
@@ -153,10 +147,7 @@ mod inner {
     /// Returns the intersection (elements that are in both `left` and `right`) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left & right`.
-    #[function(
-        alias = "&",
-        signature = "<K, V, W>(Map<K, V>, Map<K, W>) -> Map<K, V>"
-    )]
+    #[function(alias = "&", signature = "<K, V, W>(%{K: V}, %{K: W}) -> %{K: V}")]
     pub fn intersection(left: Value, right: &HashMap<Value, Value>) -> anyhow::Result<Value> {
         combine(&left, right, "&", intersection)
     }
@@ -164,7 +155,7 @@ mod inner {
     /// Returns the symmetric difference (elements that are either in `left` or `right` but not both) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left ~ right`.
-    #[function(alias = "~", signature = "<K, V>(Map<K, V>, Map<K, V>) -> Map<K, V>")]
+    #[function(alias = "~", signature = "<K, V>(%{K: V}, %{K: V}) -> %{K: V}")]
     pub fn symmetric_difference(
         left: Value,
         right: &HashMap<Value, Value>,
@@ -191,7 +182,7 @@ mod inner {
     }
 
     /// Converts the given sequence to set.
-    #[function(signature = "<T>(Iterable<T>) -> Map<T, ()>")]
+    #[function(signature = "<T>(Iterable<T>) -> %{T}")]
     pub fn set(seq: Value) -> anyhow::Result<Value> {
         use ndc_vm::hash_map::HashMap;
 

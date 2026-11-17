@@ -6,5 +6,5 @@ fn f() -> Option<Never> { None }
 let b: Option<Never> = None;
 print(b as Option<Int>);
 let a: Any = f;
-let g = a as Fn() -> Option<Int>;
+let g = a as fn() -> Option<Int>;
 print(g());

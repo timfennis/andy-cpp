@@ -157,8 +157,8 @@ impl Analyser {
 
         // The body's value is returned like the values of `return`. An
         // annotated return type is what each of them returns, which can
-        // settle what the body left waiting: in `fn f() -> Fn(String) ->
-        // List<String> { split }`, it picks `split(String)`.
+        // settle what the body left waiting: in `fn f() -> fn(String) ->
+        // [String] { split }`, it picks `split(String)`.
         self.add_return(&mut returns, body, implicit_return);
         let inferred_return = returns.joined.unwrap_or(StaticType::Never);
 

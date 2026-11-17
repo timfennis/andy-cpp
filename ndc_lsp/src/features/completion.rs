@@ -193,7 +193,7 @@ fn group_overloads<'a>(
     groups
 }
 
-/// `[Int]` -> `Int`; `[List<Int>, Iterable<Int>]` -> `Iterable<Int>` (a
+/// `[Int]` -> `Int`; `[[Int], Iterable<Int>]` -> `Iterable<Int>` (a
 /// candidate subsuming all others wins); `[Int, Float, Number]` ->
 /// `Int | Float | Number` (no candidate subsumes the others).
 fn merged_type_display(candidates: &[&StaticType]) -> String {

@@ -16,7 +16,7 @@ pub enum StaticType {
     /// then, every method here treats one as `Any`.
     Var(TypeVar),
     /// A type parameter of a generic built-in's signature, such as `T` in
-    /// `push<T>(List<T>, T)`. Each call stands for its own type in place of
+    /// `push<T>([T], T)`. Each call stands for its own type in place of
     /// it, which the analyser works out from the arguments. Every method
     /// here treats one as `Any`.
     Generic(Box<str>),
@@ -33,8 +33,8 @@ pub enum StaticType {
     /// The type of what nothing in the program says the type of, as what an
     /// empty `[]`, `%{}` or `None` holds, or the parameter of a function
     /// that's never called: a type no other type is, which has no values. A type parameter or an
-    /// `Any` takes it, but a `List<Int>` or a `List<Any>` isn't a
-    /// `List<Unknown>`, so which overload `pick([])` means isn't decided by
+    /// `Any` takes it, but a `[Int]` or a `[Any]` isn't a
+    /// `[Unknown]`, so which overload `pick([])` means isn't decided by
     /// it. Only the analyser makes it.
     Unknown,
     Bool,
@@ -53,7 +53,7 @@ pub enum StaticType {
     Float,
     Int,
 
-    // What a value of a kind of sequence iterates as, which only a parameter is: `List<Int>` passes for an `Iterable<Int>`.
+    // What a value of a kind of sequence iterates as, which only a parameter is: `[Int]` passes for an `Iterable<Int>`.
     Iterable(Box<Self>),
     List(Box<Self>),
     String,
@@ -98,8 +98,8 @@ impl StaticType {
     /// Must stay in sync with its match arms; the unit test
     /// `builtin_type_names_are_constructible` guards this.
     pub const BUILTIN_TYPE_NAMES: &'static [&'static str] = &[
-        "Any", "Never", "Bool", "Number", "Float", "Int", "String", "Option", "Iterable", "List",
-        "Iterator", "MinHeap", "MaxHeap", "Deque", "Tuple", "Map",
+        "Any", "Never", "Bool", "Number", "Float", "Int", "String", "Option", "Iterable",
+        "Iterator", "MinHeap", "MaxHeap", "Deque",
     ];
 
     pub fn from_name_and_args(
@@ -120,9 +120,6 @@ impl StaticType {
             "Iterable" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Iterable(Box::new(elem)))
             }
-            "List" => {
-                Self::require_exactly_one_arg(name, args).map(|elem| Self::List(Box::new(elem)))
-            }
             "Iterator" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Iterator(Box::new(elem)))
             }
@@ -134,14 +131,6 @@ impl StaticType {
             }
             "Deque" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Deque(Box::new(elem)))
-            }
-            "Tuple" => Self::require_at_least_one_arg(name, args).map(Self::Tuple),
-            "Map" => {
-                let [key, value] = Self::require_exactly_n_args::<2>(name, args)?;
-                Ok(Self::Map {
-                    key: Box::new(key),
-                    value: Box::new(value),
-                })
             }
             _ => Err(StaticTypeConstructionError::new(
                 format!("unknown type `{name}`"),
@@ -181,24 +170,10 @@ impl StaticType {
         })
     }
 
-    fn require_at_least_one_arg(
-        name: &str,
-        args: Vec<Self>,
-    ) -> Result<Vec<Self>, StaticTypeConstructionError> {
-        if args.is_empty() {
-            Err(StaticTypeConstructionError::new(
-                format!("type `{name}` requires generic arguments"),
-                format!("Add generic arguments like `{name}<...>`."),
-            ))
-        } else {
-            Ok(args)
-        }
-    }
-
     /// The type a value of either type has: the type itself when both are
     /// the same, and otherwise `Any`. `Never` has no values, so it joins as
-    /// the other type. `List<Int>` and `List<Float>` join as `Any`, not as
-    /// `List<Any>`, which neither list is.
+    /// the other type. `[Int]` and `[Float]` join as `Any`, not as
+    /// `[Any]`, which neither list is.
     #[must_use]
     pub fn join(&self, other: &Self) -> Self {
         match (self, other) {
@@ -237,10 +212,10 @@ impl StaticType {
 
     /// Gets the element type when treating a type as a sequence.
     ///
-    /// - `List<T>`, `Iterator<T>`, etc. → `T`
+    /// - `[T]`, `Iterator<T>`, etc. → `T`
     /// - `String` → `String`
-    /// - `Tuple<T1, ..., Tn>` → the join of `T1`, ..., `Tn`
-    /// - `Map<K, V>` → `Tuple<K, V>`
+    /// - `(T1, ..., Tn)` → the join of `T1`, ..., `Tn`
+    /// - `%{K: V}` → `(K, V)`
     pub fn sequence_element_type(&self) -> Option<Self> {
         match self {
             Self::Iterable(t)
@@ -266,8 +241,8 @@ impl StaticType {
     /// two types are the same, except that `parameter` can be `Any`, which
     /// takes anything, and that its type parameters and the parts of it not
     /// known yet stand for any type. Inside a container, an `Option` or a
-    /// tuple, `Any` is just another type: a `List<Int>` doesn't fit a
-    /// `List<Any>`, as the list could then get a String. A function that
+    /// tuple, `Any` is just another type: a `[Int]` doesn't fit a
+    /// `[Any]`, as the list could then get a String. A function that
     /// takes an `Any` fits a function type with any parameter there, and
     /// any function fits one that returns `Any`. A `Iterable<T>` takes any
     /// kind of sequence of what fits `T`.
@@ -275,7 +250,7 @@ impl StaticType {
         matches!(parameter, Self::Any) || self.matches(parameter, false, true)
     }
 
-    /// How many parts this type has, itself included: `List<(Int, String)>`
+    /// How many parts this type has, itself included: `[(Int, String)]`
     /// has four.
     pub fn size(&self) -> usize {
         let parts = std::cell::Cell::new(0);
@@ -302,8 +277,8 @@ impl StaticType {
     /// function one that returns `Any`. That holds for a value and what a
     /// function returns, not inside a container, which could be given the
     /// other function, or a parameter, which flips which side takes what: a
-    /// `Fn(Fn(Any) -> Int) -> Int` may pass a String to its callback, so it
-    /// isn't a `Fn(Fn(Int) -> Int) -> Int`.
+    /// `fn(fn(Any) -> Int) -> Int` may pass a String to its callback, so it
+    /// isn't a `fn(fn(Int) -> Int) -> Int`.
     fn matches(&self, parameter: &Self, unknowns_match: bool, loose: bool) -> bool {
         let wildcard = |typ: &Self| matches!(typ, Self::Var(_) | Self::Generic(_));
         if wildcard(parameter)
@@ -383,15 +358,15 @@ impl StaticType {
         matches!(self, Self::Error)
     }
 
-    /// Whether a failed check's type is part of this type: `List<Error>`
+    /// Whether a failed check's type is part of this type: `[Error]`
     /// is the type of a list holding a value whose check failed.
     pub fn has_errors(&self) -> bool {
         self.contains(&Self::is_error)
     }
 
     /// This type with each part that `replace` gives a type for replaced by
-    /// that type, looking at the outer parts first: `List<?0>` becomes
-    /// `List<Int>` when `replace` maps `?0` to `Int`.
+    /// that type, looking at the outer parts first: `[?0]` becomes
+    /// `[Int]` when `replace` maps `?0` to `Int`.
     #[must_use]
     pub fn replace(&self, replace: &impl Fn(&Self) -> Option<Self>) -> Self {
         if let Some(replaced) = replace(self) {
@@ -478,7 +453,7 @@ impl StaticType {
     }
 
     /// The type parameters in this type, each once, outermost first: `T`
-    /// and `U` in `Fn(T) -> List<U>`.
+    /// and `U` in `fn(T) -> [U]`.
     pub fn type_parameters(&self) -> Vec<Box<str>> {
         let names = std::cell::RefCell::new(Vec::<Box<str>>::new());
         self.contains(&|part| {
@@ -505,23 +480,23 @@ impl StaticType {
     /// Checks whether some runtime value could satisfy both `self` and `other`.
     ///
     /// # Examples
-    /// - `Iterable<String>` overlaps `List<Any>`: a list of Strings is
+    /// - `Iterable<String>` overlaps `[Any]`: a list of Strings is
     ///   both
     /// - `Any` overlaps every type
-    /// - `List<Int>` does not overlap `List<String>`
+    /// - `[Int]` does not overlap `[String]`
     /// - `Int` does not overlap `String`
-    /// - `Fn(String) -> String` does not overlap `Fn(Int) -> Int`, but
-    ///   `Fn(*) -> Int`, a function that takes anything, does
+    /// - `fn(String) -> String` does not overlap `fn(Int) -> Int`, but
+    ///   `fn(*) -> Int`, a function that takes anything, does
     ///
     /// This is the question a cast asks: `as` is impossible only when no value
     /// could satisfy both the operand's type and the target, and anything else
     /// is left to the runtime check.
     ///
-    /// Element types are treated as inhabited, so `List<Int>` and `List<String>`
+    /// Element types are treated as inhabited, so `[Int]` and `[String]`
     /// count as disjoint even though the empty list inhabits both. Casting an
     /// empty container to an unrelated element type is therefore rejected —
     /// a deliberate trade, because the alternative gives up the compile-time
-    /// error on every non-empty `List<Int> as List<String>` to allow a cast
+    /// error on every non-empty `[Int] as [String]` to allow a cast
     /// that could only ever be vacuous.
     ///
     /// `Never` overlaps nothing, since no value inhabits it. A container of
@@ -641,7 +616,7 @@ impl StaticType {
     }
 
     /// Whether a value of this type is, or holds, a container a program can
-    /// write to: a list, map, deque or heap, as `Option<List<Int>>` does. A
+    /// write to: a list, map, deque or heap, as `Option<[Int]>` does. A
     /// function holds none: what it takes and returns is checked per call.
     pub fn holds_a_mutable_container(&self) -> bool {
         match self {
@@ -701,7 +676,7 @@ impl fmt::Display for StaticType {
                 return_type,
             } => write!(
                 f,
-                "Fn({}) -> {return_type}",
+                "fn({}) -> {return_type}",
                 parameters
                     .as_deref()
                     .map_or(String::from("*"), |p| p.iter().join(", "))
@@ -712,11 +687,15 @@ impl fmt::Display for StaticType {
             Self::Float => write!(f, "Float"),
             Self::Int => write!(f, "Int"),
             Self::Iterable(elem) => write!(f, "Iterable<{elem}>"),
-            Self::List(elem) => write!(f, "List<{elem}>"),
+            Self::List(elem) => write!(f, "[{elem}]"),
             Self::String => write!(f, "String"),
             Self::Tuple(tup) if tup.is_empty() => write!(f, "()"),
-            Self::Tuple(tup) => write!(f, "Tuple<{}>", tup.iter().join(", ")),
-            Self::Map { key, value } => write!(f, "Map<{key}, {value}>"),
+            Self::Tuple(tup) if tup.len() == 1 => write!(f, "({},)", tup[0]),
+            Self::Tuple(tup) => write!(f, "({})", tup.iter().join(", ")),
+            Self::Map { key, value } if matches!(value.as_ref(), Self::Tuple(t) if t.is_empty()) => {
+                write!(f, "%{{{key}}}")
+            }
+            Self::Map { key, value } => write!(f, "%{{{key}: {value}}}"),
             Self::Iterator(elem) => write!(f, "Iterator<{elem}>"),
             Self::MinHeap(elem) => write!(f, "MinHeap<{elem}>"),
             Self::MaxHeap(elem) => write!(f, "MaxHeap<{elem}>"),
@@ -728,6 +707,41 @@ impl fmt::Display for StaticType {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn lists_tuples_maps_and_functions_show_as_they_are_written() {
+        let list = |elem| StaticType::List(Box::new(elem));
+        assert_eq!(list(list(StaticType::Int)).to_string(), "[[Int]]");
+        assert_eq!(
+            StaticType::Tuple(vec![StaticType::Int, list(StaticType::String)]).to_string(),
+            "(Int, [String])"
+        );
+        assert_eq!(
+            StaticType::Tuple(vec![StaticType::Int]).to_string(),
+            "(Int,)"
+        );
+        assert_eq!(StaticType::unit().to_string(), "()");
+        let map = |key, value| StaticType::Map {
+            key: Box::new(key),
+            value: Box::new(value),
+        };
+        assert_eq!(
+            map(StaticType::String, list(StaticType::Int)).to_string(),
+            "%{String: [Int]}"
+        );
+        assert_eq!(
+            map(StaticType::Int, StaticType::unit()).to_string(),
+            "%{Int}"
+        );
+        assert_eq!(
+            StaticType::Function {
+                parameters: Some(vec![StaticType::Int]),
+                return_type: Box::new(StaticType::Bool),
+            }
+            .to_string(),
+            "fn(Int) -> Bool"
+        );
+    }
 
     #[test]
     fn a_list_fits_only_a_list_of_its_own_element_type() {
@@ -748,7 +762,7 @@ mod test {
         let list_of = |elem: StaticType| StaticType::List(Box::new(elem));
         let seq_of = |elem: StaticType| StaticType::Iterable(Box::new(elem));
 
-        // Mixed-direction relationships overlap: a List<String> inhabits both.
+        // Mixed-direction relationships overlap: a [String] inhabits both.
         assert!(seq_of(StaticType::String).overlaps(&list_of(StaticType::Any)));
         assert!(list_of(StaticType::Any).overlaps(&seq_of(StaticType::String)));
 

@@ -29,10 +29,10 @@ An empty list gets its type from what you put in it:
 ```ndc,fails
 let xs = [];
 xs.push(1);
-xs.push("two");  // error: No function called 'push' found that matches the arguments 'List<Int>, String'
+xs.push("two");  // error: No function called 'push' found that matches the arguments '[Int], String'
 ```
 
-If nothing is put in it, annotate it: `let xs: List<Int> = [];`.
+If nothing is put in it, annotate it: `let xs: [Int] = [];`.
 
 ## The types
 
@@ -46,25 +46,25 @@ Every value is an `Any`. The other types are:
   * [`Number`](./types/number.md) — arbitrary-size, rational, floating-point, and complex values
   * Sequences, which a `for` loop iterates over:
     * [`String`](./types/string.md): a mutable list of characters
-    * [`List<T>`](./types/list.md): a mutable list
-    * [`Tuple<T, ...>`](./types/tuple.md): an immutable list
+    * [`[T]`](./types/list.md): a mutable list
+    * [`(T, ...)`](./types/tuple.md): an immutable list
       * [`()`](./types/unit.md): unit, the empty tuple
-    * [`Map<K, V>`](./types/map-and-set.md): a hashmap that associates keys with values
+    * [`%{K: V}`](./types/map-and-set.md): a hashmap that associates keys with values
     * [`Deque<T>`](./types/deque.md): a double-ended queue
     * [`MinHeap<T>` / `MaxHeap<T>`](./types/min-max-heap.md): min/max heap
     * `Iterator<T>`: produces values when consumed (currently only from range expressions like `5..100`)
-  * [`Fn(A, B) -> C`](./types/function.md): a function taking an `A` and a `B` and returning a `C`
+  * [`fn(A, B) -> C`](./types/function.md): a function taking an `A` and a `B` and returning a `C`
   * [Structs](./types/struct.md): user-defined record types, one per `struct` declaration
 
 These are also the names you write in annotations. Generic types take their parameters in angle brackets:
 
 ```ndc
-let xs: List<Int> = [1, 2, 3];
-let table: Map<String, Int> = %{"a": 1, "b": 2};
+let xs: [Int] = [1, 2, 3];
+let table: %{String: Int} = %{"a": 1, "b": 2};
 let maybe: Option<String> = Some("hi");
-let pair: Tuple<Int, String> = (1, "hi");
+let pair: (Int, String) = (1, "hi");
 let pair2: (Int, String) = (1, "hi");  // tuple shorthand
-let grid: List<List<Int>> = [[1, 2], [3, 4]];
+let grid: [[Int]] = [[1, 2], [3, 4]];
 
 print(maybe, pair2, grid);  // Some("hi") (1,"hi") [[1,2],[3,4]]
 ```
@@ -75,7 +75,7 @@ print(maybe, pair2, grid);  // Some("hi") (1,"hi") [[1,2],[3,4]]
 struct Point { x: Int, y: Int }
 
 fn manhattan(p: Point) => p.x + p.y
-let points: List<Point> = [Point(1, 2), Point(3, 4)];
+let points: [Point] = [Point(1, 2), Point(3, 4)];
 print(points.map(manhattan));  // [3,7]
 ```
 
@@ -91,12 +91,12 @@ To mix them, say that they are `Any`s:
 
 ```ndc
 let b: Any = if true { 1 } else { "a" };
-let xs: List<Any> = [1, "a"];
-let m: Map<String, Any> = %{"a": 1, "b": "two"};
+let xs: [Any] = [1, "a"];
+let m: %{String: Any} = %{"a": 1, "b": "two"};
 print(b, xs, m["b"]);  // 1 [1,"a"] two
 ```
 
-Write the `Any` where the list or map is made: a list made as a `List<String>` can't be used as a `List<Any>` later.
+Write the `Any` where the list or map is made: a list made as a `[String]` can't be used as a `[Any]` later.
 
 ## Getting a value out of an `Any`
 
@@ -119,6 +119,6 @@ The same goes for operators and functions: `a + 1` needs `(a as Int) + 1`. Funct
 Indexing is the exception: `a[i]` works on an `Any` and gives an `Any`, so you can read nested data and cast what you find:
 
 ```ndc
-let data: Map<String, Any> = %{"scores": [3, 5]};
+let data: %{String: Any} = %{"scores": [3, 5]};
 print(data["scores"][1] as Int + 1);  // 6
 ```

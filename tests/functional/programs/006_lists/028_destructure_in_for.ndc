@@ -6,11 +6,11 @@ let map = %{
 };
 
 // The set holds both the Int keys and the String values.
-let set: Map<Any, ()> = %{};
+let set: %{Any} = %{};
 for key, value in map {
     set.insert(key);
     set.insert(value);
 }
 
-let expected: Map<Any, ()> = %{0,1,2,3,"foo","bar","baz","quux"};
+let expected: %{Any} = %{0,1,2,3,"foo","bar","baz","quux"};
 assert(set == expected);

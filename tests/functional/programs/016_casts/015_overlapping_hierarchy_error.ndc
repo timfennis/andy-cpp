@@ -1,5 +1,5 @@
 // The cast is possible for the type, so it reaches the runtime check — which
 // then rejects this particular value.
-// expect-error: cannot cast List<Any> to List<Int>
-let xs: List<Any> = [1, "two"];
-xs as List<Int>
+// expect-error: cannot cast [Any] to [Int]
+let xs: [Any] = [1, "two"];
+xs as [Int]

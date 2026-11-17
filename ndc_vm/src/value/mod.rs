@@ -335,7 +335,7 @@ impl Value {
     ///
     /// A tuple or option can't be written to, so sharing one is harmless by
     /// itself; what's in a shared one is reachable from elsewhere, though.
-    /// `(1, None)` held twice passes as a `(Int, Option<List<Int>>)`, and
+    /// `(1, None)` held twice passes as a `(Int, Option<[Int]>)`, and
     /// `(1, Some([2]))` held twice doesn't.
     pub fn shared_container(&self, target: &StaticType) -> Option<&'static str> {
         self.held_elsewhere(target, false)
@@ -712,7 +712,7 @@ impl Object {
 
     /// Returns the best static type descriptor for this runtime value.
     ///
-    /// `[1, 2]` reports `List<Int>` and `%{"a": 1}` reports `Map<String, Int>`:
+    /// `[1, 2]` reports `[Int]` and `%{"a": 1}` reports `%{String: Int}`:
     /// lists and deques join their element types, the type they share or else
     /// `Any`, while maps do so separately for keys and values. Tuples preserve each position's
     /// type, and `Some` wraps the type of its inner value. Empty lists, deques, and

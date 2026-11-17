@@ -7,6 +7,6 @@ fn make(x) {
     let g = choose;
     fn() => g(x)
 }
-let m: Fn(Int) -> Fn() -> String = make;
+let m: fn(Int) -> fn() -> String = make;
 let h = m(1);
 print(h());

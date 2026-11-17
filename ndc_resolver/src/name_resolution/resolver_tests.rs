@@ -973,12 +973,9 @@ fn type_names(resolver: &NameResolver) -> Vec<&str> {
 #[test]
 fn builtin_type_names_resolve_including_nested_ones() {
     let mut resolver = new_resolver([]);
-    resolve_source(&mut resolver, "let m: Map<String, (Int, List<Bool>)> = 1;").unwrap();
+    resolve_source(&mut resolver, "let m: %{String: (Int, [Bool])} = 1;").unwrap();
 
-    assert_eq!(
-        type_names(&resolver),
-        ["Bool", "Int", "List", "Map", "String"]
-    );
+    assert_eq!(type_names(&resolver), ["Bool", "Int", "String"]);
     assert!(
         resolver
             .type_names
@@ -991,7 +988,7 @@ fn builtin_type_names_resolve_including_nested_ones() {
 fn unknown_types_are_reported_in_every_annotation_position() {
     for source in [
         "let x: Nope = 1;",
-        "let x: List<Nope> = 1;",
+        "let x: [Nope] = 1;",
         "fn f(x: Nope) { 1; }",
         "fn f() -> Nope { 1; }",
         "1 as Nope;",
@@ -1003,6 +1000,22 @@ fn unknown_types_are_reported_in_every_annotation_position() {
             unreachable!("the message identifies the variant");
         };
         assert_eq!(&source[span.range()], "Nope", "{source}");
+    }
+}
+
+#[test]
+fn the_old_type_spellings_say_how_to_write_them() {
+    for (source, help) in [
+        ("let x: List<Int> = [];", "`[Int]`"),
+        ("let x: Tuple<Int, Int> = (1, 2);", "`(Int, String)`"),
+        ("let x: Map<String, Int> = %{};", "`%{String: Int}`"),
+    ] {
+        let mut resolver = new_resolver([]);
+        let error = resolve_source(&mut resolver, source).expect_err(source);
+        assert!(
+            error.help_text().is_some_and(|text| text.contains(help)),
+            "{source}"
+        );
     }
 }
 

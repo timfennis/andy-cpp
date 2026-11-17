@@ -1,2 +1,2 @@
-// expect-error: mismatched types: found Tuple<Int, Int> but expected Tuple<String, String>
+// expect-error: mismatched types: found (Int, Int) but expected (String, String)
 let x: (String, String) = (1, 2);

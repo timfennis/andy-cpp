@@ -27,8 +27,8 @@ fn spaces_go_around_operators_and_after_commas() {
 #[test]
 fn a_cast_keeps_its_operator() {
     assert_formats(
-        "let a = x   as Int;let b = x  as?  List<Int>;",
-        "let a = x as Int;\nlet b = x as? List<Int>;\n",
+        "let a = x   as Int;let b = x  as?  [Int];",
+        "let a = x as Int;\nlet b = x as? [Int];\n",
     );
 }
 

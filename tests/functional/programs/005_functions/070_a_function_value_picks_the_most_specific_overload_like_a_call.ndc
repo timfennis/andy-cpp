@@ -3,5 +3,5 @@
 // expect-output: int ["int"] int
 fn f(x: Int) { "int" }
 fn f(x) { "any" }
-let g: Fn(Int) -> String = f;
+let g: fn(Int) -> String = f;
 print(g(1), [1].map(f), f(1));

@@ -40,7 +40,7 @@ print(scale(3));               // 30
 Functions close over their environment.
 
 ```ndc
-let x: List<Int> = [];
+let x: [Int] = [];
 
 fn my_function(n) {
   // add argument n to x
@@ -162,14 +162,14 @@ print(size(3), size(10));  // 3 big
 
 ### Function types
 
-The type of a function is written `Fn(A, B) -> C`: it takes an `A` and a `B` and returns a `C`. Without `-> …` the function returns `()`:
+The type of a function is written `fn(A, B) -> C`: it takes an `A` and a `B` and returns a `C`. Without `-> …` the function returns `()`:
 
 ```ndc
-let twice: Fn(Int) -> Int = fn(x: Int) => x * 2;
-let log: Fn(String) = fn(s: String) { print(s); };
+let twice: fn(Int) -> Int = fn(x: Int) => x * 2;
+let log: fn(String) = fn(s: String) { print(s); };
 
-fn apply(f: Fn(Int) -> Int, x: Int) -> Int { f(x) }
-fn make_adder(n: Int) -> Fn(Int) -> Int { fn(x: Int) => x + n }
+fn apply(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+fn make_adder(n: Int) -> fn(Int) -> Int { fn(x: Int) => x + n }
 
 print(apply(twice, 4));           // 8
 print(apply(make_adder(10), 1));  // 11
@@ -178,7 +178,7 @@ print(apply(make_adder(10), 1));  // 11
 You rarely need to annotate the parameters of an anonymous function. They get their types from where the function is used:
 
 ```ndc
-let shout: Fn(String) -> String = fn(s) => s ++ "!";   // s is a String
+let shout: fn(String) -> String = fn(s) => s ++ "!";   // s is a String
 print(shout("hi"));  // hi!
 
 let tens = [3, 1, 2].map(fn(x) => x * 10);             // x is an Int
@@ -264,7 +264,7 @@ You can pass a function by its name, as in `xs.map(abs)`. When the name has seve
 ```ndc
 print([-1.5, 2.5].map(abs));     // [1.5,2.5]
 
-let by_pattern: Fn(String, String) -> List<String> = split;
+let by_pattern: fn(String, String) -> [String] = split;
 print(by_pattern("a:b", ":"));   // ["a","b"]
 ```
 

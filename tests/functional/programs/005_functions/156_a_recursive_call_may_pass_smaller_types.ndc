@@ -1,6 +1,6 @@
 // A recursive call may pass types smaller than the ones it was given, as
 // `f` for a list of Ints calls `f` for an Int.
-fn unwrap(xs: List<Int>) => xs[0];
+fn unwrap(xs: [Int]) => xs[0];
 fn unwrap(x: Int) => x;
 fn f(s: String, n: Int) -> Int => 0;
 fn f(x, n) -> Int {

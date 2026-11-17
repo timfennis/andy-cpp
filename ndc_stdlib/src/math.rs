@@ -521,13 +521,13 @@ fn orderable_parameters() -> Vec<String> {
     }
     parameters.push("(String, String)".to_string());
     parameters.push("(Bool, Bool)".to_string());
-    parameters.push("<T>(List<T>, List<T>)".to_string());
+    parameters.push("<T>([T], [T])".to_string());
     for arity in 1..=12 {
         let names = (0..arity)
             .map(|index| char::from(b'A' + index).to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        parameters.push(format!("<{names}>(Tuple<{names}>, Tuple<{names}>)"));
+        parameters.push(format!("<{names}>(({names},), ({names},))"));
     }
     parameters
 }

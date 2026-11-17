@@ -162,7 +162,7 @@ impl TypeVars {
     /// What an empty `[]`, `%{}` or `None` holds, which its uses settle. If
     /// nothing does, it's [`StaticType::Unknown`], which a type parameter or
     /// an `Any` takes, but no other type is: `print([])` prints `[]`, and
-    /// `pick([])` with `pick(List<Int>)` and `pick(List<Any>)` is an error.
+    /// `pick([])` with `pick([Int])` and `pick([Any])` is an error.
     /// It doesn't depend on what the calls the literal is passed to need,
     /// so it's the same whatever order they're solved in.
     pub(crate) fn fresh_contents(&mut self) -> StaticType {
@@ -259,7 +259,7 @@ impl TypeVars {
 
     /// The type of the elements of a literal at `span` holding values of
     /// the types `held`, which its uses settle as any type each value fits:
-    /// in `let xs: List<Any> = [1, "a"]`, `Any`. Unless something says
+    /// in `let xs: [Any] = [1, "a"]`, `Any`. Unless something says
     /// otherwise it's the type the values share. Values that share none
     /// are an error, as `Any` has to be asked for.
     pub(crate) fn fresh_holding(
@@ -868,7 +868,7 @@ impl TypeVars {
     }
 
     /// Whether `typ` holds the unsettled variable `var` inside a type, as
-    /// `List<?0>` holds `?0`, so that `var` can't stand for it: it would
+    /// `[?0]` holds `?0`, so that `var` can't stand for it: it would
     /// have to hold itself without end. What a literal at the top of `typ`
     /// holds counts as `typ` too: in `xs.push([xs])`, `xs`'s element type
     /// would be the type of `[xs]`, whose elements hold a list of it. What's
@@ -1042,7 +1042,7 @@ impl TypeVars {
     /// `typ` as an error shows it: a part nothing has said the type of yet
     /// is `Unknown`, as `None` is an `Option<Unknown>`, except a literal's,
     /// which is shown as what it is unless something says otherwise: `[1]`
-    /// as a `List<Int>`. `Any` is only what the program says is one.
+    /// as a `[Int]`. `Any` is only what the program says is one.
     pub(crate) fn shown(&self, typ: &StaticType) -> StaticType {
         self.resolve(typ).replace(&|part| match part {
             StaticType::Var(var) if self.is_literal(*var) => Some(self.preview(*var)),
@@ -1113,8 +1113,8 @@ impl TypeVars {
     }
 
     /// Makes `a` and `b` the same type by settling the unsettled variables in
-    /// either, and returns whether they are the same now. `List<?0>` and
-    /// `List<Int>` are, once `?0` is `Int`. `Never` fits any variable without
+    /// either, and returns whether they are the same now. `[?0]` and
+    /// `[Int]` are, once `?0` is `Int`. `Never` fits any variable without
     /// settling it, since a value of that type never arrives. On a mismatch,
     /// the variables settled before it stay settled.
     pub(crate) fn unify(&mut self, a: &StaticType, b: &StaticType) -> bool {
@@ -1173,7 +1173,7 @@ impl TypeVars {
         }
     }
 
-    /// `typ` with each type parameter, such as `T` in `<T>(List<T>, T)`,
+    /// `typ` with each type parameter, such as `T` in `<T>([T], T)`,
     /// replaced by a new variable of its own. A call does this to the
     /// signature of the overload it picked, so its arguments settle what `T`
     /// stands for at that call.
@@ -1209,9 +1209,9 @@ impl TypeVars {
     /// A type parameter passed values directly, or as what an `Iterable`
     /// holds, is the one of their types that all of them fit, whatever order
     /// the arguments come in: `in(T, Iterable<T>)` given a String and a
-    /// `List<Any>` has `T` be `Any`, while given an Int and a `List<String>`
-    /// it fits neither. A container that can be written to, as the `List<T>`
-    /// of `push(List<T>, T)`, says exactly what `T` is, which those values
+    /// `[Any]` has `T` be `Any`, while given an Int and a `[String]`
+    /// it fits neither. A container that can be written to, as the `[T]`
+    /// of `push([T], T)`, says exactly what `T` is, which those values
     /// then have to fit.
     pub(crate) fn bind_arguments(
         &mut self,
@@ -1321,12 +1321,12 @@ impl TypeVars {
 
     /// Settles the parts of `argument` that aren't known yet by passing it
     /// where a `parameter` is expected, and returns whether it fits there. In
-    /// `push(xs, 1)` with `push(List<?0>, ?0)` and `xs: List<?1>`, both
+    /// `push(xs, 1)` with `push([?0], ?0)` and `xs: [?1]`, both
     /// variables become `Int`. Passing makes the two types the same, except
     /// that a parameter of type `Any` takes anything. An argument of type
     /// `Any` only goes where an `Any` is taken: it takes a cast to be passed
     /// as anything else. Inside a container, an `Option` or a tuple, `Any`
-    /// is just another type: a `List<Int>` doesn't fit a `List<Any>`. A
+    /// is just another type: a `[Int]` doesn't fit a `[Any]`. A
     /// function that takes an `Any` takes what any function type passes, and
     /// one that returns anything fits where an `Any` is returned. An
     /// `Iterable<T>` takes any kind of sequence, and settles `T` from its
@@ -1367,7 +1367,7 @@ impl TypeVars {
                 true
             }
             // A literal passed for an `Iterable<T>` is the sequence it holds,
-            // as `["a"]` passed to `len` is a `List<String>`: only a
+            // as `["a"]` passed to `len` is a `[String]`: only a
             // parameter is ever an `Iterable` itself.
             (StaticType::Iterable(_), StaticType::Var(var)) => {
                 let Some(held) = self

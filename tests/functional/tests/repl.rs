@@ -201,7 +201,7 @@ fn functions_share_globals_with_later_lines() {
 #[test]
 fn closures_keep_the_loop_variables_of_a_finished_line() {
     let out = repl_output(&[
-        "let fs: List<Fn() -> Int> = []; let i = 0;",
+        "let fs: [fn() -> Int] = []; let i = 0;",
         "while i < 3 { let j = i; fs.push(fn() { j }); i += 1; }",
         "print([f() for f in fs])",
     ]);
@@ -307,10 +307,10 @@ fn an_earlier_lines_generic_function_used_as_a_value_is_an_instance() {
 fn a_function_value_from_an_earlier_lines_generic_body_cast_from_any_is_checked() {
     repl_error(
         &[
-            "fn bad(x) { let g = abs; g(x); let a: Any = g; let b = a as Fn(Int) -> String; b(1) }",
+            "fn bad(x) { let g = abs; g(x); let a: Any = g; let b = a as fn(Int) -> String; b(1) }",
             "print(bad(1))",
         ],
-        "cannot cast Fn(Int) -> Int to Fn(Int) -> String",
+        "cannot cast fn(Int) -> Int to fn(Int) -> String",
     );
 }
 
@@ -376,7 +376,7 @@ fn a_pure_lambdas_parameter_is_settled_on_its_line() {
 fn what_a_functions_type_mentions_is_settled_on_its_line() {
     repl_error(
         &["let xs = [];", "let get = fn() => xs;", "xs.push(1);"],
-        "List<Unknown>, Int",
+        "[Unknown], Int",
     );
 }
 
@@ -384,7 +384,7 @@ fn what_a_functions_type_mentions_is_settled_on_its_line() {
 fn a_type_a_later_line_settled_is_checked_on_the_next() {
     repl_error(
         &["let xs = [];", "xs.push(1);", r#"xs.push("a");"#],
-        "List<Int>, String",
+        "[Int], String",
     );
 }
 

@@ -51,7 +51,7 @@ impl fmt::Debug for Program {
 }
 
 /// The parameter types an overload can declare, `""` being none (`Any`).
-const PARAMETER_TYPES: [&str; 5] = ["Int", "Float", "String", "List<Int>", ""];
+const PARAMETER_TYPES: [&str; 5] = ["Int", "Float", "String", "[Int]", ""];
 
 /// What an overload can return, by the name of its parameter `x`.
 const BODIES: [&str; 6] = ["1", "2.5", "\"s\"", "x", "[x]", "true"];
@@ -178,7 +178,7 @@ fn arb_expression() -> impl Strategy<Value = String> {
             inner
                 .clone()
                 .prop_map(|e| format!("{e}.fold(0, fn(acc, a) => acc + a)")),
-            inner.clone().prop_map(|e| format!("({e} as List<Int>)")),
+            inner.clone().prop_map(|e| format!("({e} as [Int])")),
             inner.clone().prop_map(|e| format!("{e}[\"k\"]")),
             (inner.clone(), inner).prop_map(|(f, e)| format!("({f})({e})")),
         ]
@@ -189,11 +189,11 @@ fn arb_expression() -> impl Strategy<Value = String> {
 const ANNOTATIONS: [&str; 8] = [
     "Int",
     "String",
-    "List<Int>",
-    "List<String>",
-    "Fn(Int) -> Int",
-    "Fn(String) -> List<String>",
-    "List<Fn(Int) -> Int>",
+    "[Int]",
+    "[String]",
+    "fn(Int) -> Int",
+    "fn(String) -> [String]",
+    "[fn(Int) -> Int]",
     "Any",
 ];
 

@@ -56,9 +56,9 @@
     "types": {
       "patterns": [
         {
-          "comment": "built-in type names used in annotations like `let x: Int` or `-> List<Int>`",
+          "comment": "built-in type names used in annotations like `let x: Int` or `-> Option<Int>`",
           "name": "support.type.andy-cpp",
-          "match": "\\b(Any|Never|Bool|Number|Float|Int|String|Option|Sequence|List|Iterator|MinHeap|MaxHeap|Deque|Tuple|Map)\\b"
+          "match": "\\b(Any|Never|Bool|Number|Float|Int|String|Option|Sequence|Iterable|Iterator|MinHeap|MaxHeap|Deque)\\b"
         }
       ]
     },

@@ -1,6 +1,6 @@
 // expect-output: [2]
-struct Q { xs: List<Int> }
+struct Q { xs: [Int] }
 let q = Q([1]);
 let v: Any = [2];
-q.xs = v.clone() as List<Int>;
+q.xs = v.clone() as [Int];
 print(q.xs);

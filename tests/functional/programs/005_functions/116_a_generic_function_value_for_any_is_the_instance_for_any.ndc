@@ -5,6 +5,6 @@
 fn pick(x: Int) => 1;
 fn pick(x: Any) => 2;
 fn wrap(x) => pick(x);
-let f: Fn(Any) -> Int = wrap;
+let f: fn(Any) -> Int = wrap;
 let a: Any = 5;
 print(f(a), wrap(a));

@@ -3,9 +3,9 @@
 // expect-output: 1
 // expect-output: 2
 // expect-output: 3
-let f: Fn(Int) -> Int = if true { abs } else { floor };
+let f: fn(Int) -> Int = if true { abs } else { floor };
 print(f(-1));
-let fs: List<Fn(Int) -> Int> = [abs, floor];
+let fs: [fn(Int) -> Int] = [abs, floor];
 print(fs[0](-2));
 let x = if true { abs } else { abs };
 print(x(-3));

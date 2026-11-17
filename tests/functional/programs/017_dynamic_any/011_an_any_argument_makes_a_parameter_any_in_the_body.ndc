@@ -1,9 +1,9 @@
 // `put` called with an `Any` has `v` be one, which `push` takes for a list
 // of `Any`s but not for a list of Ints.
-// expect-error: No function called 'push' found that matches the arguments 'List<Int>, Any'
+// expect-error: No function called 'push' found that matches the arguments '[Int], Any'
 fn put(xs, v) { xs.push(v) }
 let a: Any = "s";
-let anything: List<Any> = ["t"];
+let anything: [Any] = ["t"];
 put(anything, a);
 print(anything);
 let numbers = [1];

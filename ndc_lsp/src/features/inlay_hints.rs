@@ -115,7 +115,7 @@ mod tests {
         // `len(true)` fails, and what it gives is shown as `Any`.
         let hints = collect_hints("let n = len(true);\nlet m = [n, n];");
         assert!(has_label(&hints, |l| l == ": Any"), "{hints:?}");
-        assert!(has_label(&hints, |l| l == ": List<Any>"), "{hints:?}");
+        assert!(has_label(&hints, |l| l == ": [Any]"), "{hints:?}");
     }
 
     #[test]

@@ -56,7 +56,7 @@ An empty list or map gets its type from the first thing you put in it:
 
 ```ndc,fails
 let counts = %{};
-counts["a"] = 1;      // counts is a Map<String, Int> from here on
+counts["a"] = 1;      // counts is a %{String: Int} from here on
 counts["b"] = "two";  // error: mismatched types: found String but expected Int
 ```
 
@@ -83,7 +83,7 @@ You can give a variable a type by adding `: Type` after its name. The value has 
 ```ndc
 let count: Int = 0;
 let name: String = "world";
-let xs: List<Int> = [1, 2, 3];
+let xs: [Int] = [1, 2, 3];
 print(count, name, xs);  // 0 world [1,2,3]
 ```
 
@@ -94,8 +94,8 @@ let x: Int = "hello";   // ERROR: mismatched types: found String but expected In
 An annotation is the way to say what an empty list or map will hold:
 
 ```ndc
-let xs: List<Int> = [];
-let m: Map<String, Int> = %{};
+let xs: [Int] = [];
+let m: %{String: Int} = %{};
 print(xs, m);          // [] %{}
 ```
 

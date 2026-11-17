@@ -3,5 +3,5 @@
 // expect-output: [1,2,3]
 fn opaque(x) -> Any => x;
 let values = [1];
-values ++= opaque([2, 3]) as List<Int>;
+values ++= opaque([2, 3]) as [Int];
 print(values)

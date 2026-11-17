@@ -1,5 +1,5 @@
-// `multi_cartesian_product` takes an `Iterable<List<T>>`. Lists of functions
-// whose types aren't known yet are a `List<T>` whatever those turn out to
+// `multi_cartesian_product` takes an `Iterable<[T]>`. Lists of functions
+// whose types aren't known yet are a `[T]` whatever those turn out to
 // be, so the call picks it, and what `op` is then comes from it.
 // expect-output: [5,6]
 fn mul(a, b) => a * b;

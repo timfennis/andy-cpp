@@ -1,2 +1,2 @@
-// expect-error: No function called '<' found that matches the arguments 'Map<Int, Int>, Map<Int, Int>'
+// expect-error: No function called '<' found that matches the arguments '%{Int: Int}, %{Int: Int}'
 print(%{1: 2} < %{3: 4});

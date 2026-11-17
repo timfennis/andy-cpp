@@ -6,7 +6,7 @@ mod inner {
     use std::rc::Rc;
 
     /// Returns the documentation string for a function, or an empty string if none is available.
-    #[function(signature = "<R>(Fn(*) -> R) -> String")]
+    #[function(signature = "<R>(fn(*) -> R) -> String")]
     pub fn docs(value: Value) -> anyhow::Result<String> {
         match &value {
             Value::Object(obj) => match obj.as_ref() {

@@ -3,5 +3,5 @@
 // default isn't part of what `==` compares.
 // expect-output: Inf Inf 1 1
 pure fn inverse(x: Float) => 1.0 / x;
-pure fn missing(m: Map<Int, Int>) => m[0];
+pure fn missing(m: %{Int: Int}) => m[0];
 print(inverse(0.0), inverse(-0.0), missing(%{: 1}), missing(%{: 2}));
