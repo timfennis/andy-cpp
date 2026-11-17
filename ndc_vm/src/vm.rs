@@ -1,6 +1,7 @@
 use crate::chunk::OpCode;
 use crate::error::VmError;
 use crate::hash_map::{DefaultHasher, HashMap};
+use crate::io::{InputSource, OutputSink};
 use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
@@ -15,34 +16,14 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::rc::Rc;
 
-/// Output destination for the VM's I/O built-ins (`print`, `dbg`, etc.).
-pub enum OutputSink {
-    Stdout,
-    Buffer(Vec<u8>),
-}
-
-impl Write for OutputSink {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self {
-            Self::Stdout => std::io::stdout().write(buf),
-            Self::Buffer(vec) => vec.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            Self::Stdout => std::io::stdout().flush(),
-            Self::Buffer(vec) => vec.flush(),
-        }
-    }
-}
-
 pub struct Vm {
     stack: Vec<Value>,
     globals: Vec<Value>,
     frames: Vec<CallFrame>,
     /// Output sink for `print`, `dbg`, and similar I/O built-ins.
     output: OutputSink,
+    /// Input source for `read_stdin`.
+    input: InputSource,
     #[cfg(feature = "trace")]
     source: Option<String>,
     #[cfg(feature = "trace")]
@@ -119,6 +100,7 @@ impl Vm {
                 returns: None,
             }],
             output: OutputSink::Stdout,
+            input: InputSource::Stdin,
             #[cfg(feature = "trace")]
             source: None,
             #[cfg(feature = "trace")]
@@ -143,6 +125,23 @@ impl Vm {
             OutputSink::Stdout => None,
             OutputSink::Buffer(buf) => Some(buf),
         }
+    }
+
+    /// Replace the input source used by `read_stdin`. Call this before
+    /// `run()` to read from somewhere other than stdin.
+    pub fn with_input(mut self, input: InputSource) -> Self {
+        self.input = input;
+        self
+    }
+
+    /// The input source, with what is left of it to read.
+    pub fn take_input(&mut self) -> InputSource {
+        std::mem::replace(&mut self.input, InputSource::None)
+    }
+
+    /// Reads everything left on the VM's input source.
+    pub fn read_input(&mut self) -> Result<String, VmError> {
+        self.input.read_to_end()
     }
 
     /// Write a pre-formatted string to the VM's output sink.

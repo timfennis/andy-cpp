@@ -1,6 +1,6 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 use itertools::Itertools;
-use ndc_interpreter::{Interpreter, InterpreterError};
+use ndc_interpreter::{InputSource, Interpreter, InterpreterError};
 use rustyline::Helper;
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
@@ -26,7 +26,10 @@ impl rustyline::highlight::Highlighter for RustylineHelper {
 }
 
 fn new_interpreter() -> Interpreter {
-    let mut interpreter = Interpreter::new().line_by_line();
+    // Standard input is the prompt, which the REPL reads lines from.
+    let mut interpreter = Interpreter::new()
+        .line_by_line()
+        .with_input(InputSource::None);
     interpreter.configure(ndc_stdlib::register);
     interpreter
 }

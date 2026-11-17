@@ -1,4 +1,4 @@
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{InputSource, Interpreter};
 use std::fs;
 use std::path::Path;
 
@@ -20,7 +20,14 @@ fn run_ndc_test(path: &Path) -> Result<(), std::io::Error> {
         .collect::<Vec<_>>()
         .join("\n");
 
-    let mut interpreter = Interpreter::capturing();
+    // Each `// stdin:` line is a line of the program's standard input.
+    let stdin = contents
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("// stdin:"))
+        .map(|s| format!("{}\n", s.strip_prefix(' ').unwrap_or(s)))
+        .collect::<String>();
+
+    let mut interpreter = Interpreter::capturing().with_input(InputSource::Buffer(stdin));
     interpreter.configure(ndc_stdlib::register);
     let interpreter_result = interpreter.eval(&contents);
 

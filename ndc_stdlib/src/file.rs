@@ -18,7 +18,8 @@ mod inner {
     }
 }
 
-pub fn register_variadic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+/// The natives that use the VM for input and output.
+pub fn register_io(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     let print_native = Rc::new(NativeFunction {
         name: "print".to_string(),
         documentation: Some(
@@ -70,6 +71,28 @@ pub fn register_variadic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         })),
     });
 
+    let read_stdin_native = Rc::new(NativeFunction {
+        name: "read_stdin".to_string(),
+        documentation: Some(
+            "Reads all of standard input and returns it as a string. A second call returns an empty string, as the first read everything."
+                .to_string(),
+        ),
+        static_type: StaticType::Function {
+            parameters: Some(vec![]),
+            return_type: Box::new(StaticType::String),
+        },
+        func: NativeFunc::WithVm(Box::new(|args, vm| {
+            if !args.is_empty() {
+                return Err(VmError::native(format!(
+                    "expected 0 arguments, got {}",
+                    args.len()
+                )));
+            }
+            Ok(Value::string(vm.read_input()?))
+        })),
+    });
+
     env.declare_global_fn(print_native);
     env.declare_global_fn(dbg_native);
+    env.declare_global_fn(read_stdin_native);
 }

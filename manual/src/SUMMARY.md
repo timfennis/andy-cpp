@@ -35,6 +35,7 @@
 - [Method call syntax](./features/method-call-syntax.md)
 - [Slices](./features/slices.md)
 - [Memoization](./features/memoization.md)
+- [Reading input](./features/reading-input.md)
 - [Tracing](./features/tracing.md)
 
 # Tooling

@@ -185,6 +185,15 @@ fn a_struct_declared_on_a_failed_line_is_gone() {
     assert_eq!(printed, ["42"]);
 }
 
+// The REPL reads its lines from standard input, so a line reading standard
+// input would take the lines after it.
+#[test]
+fn read_stdin_fails_without_taking_the_next_lines() {
+    let (printed, errors) = repl_with_errors(&["read_stdin()", "print(1)"]);
+    assert_eq!(printed, ["1"]);
+    assert!(errors.contains("no standard input"), "{errors}");
+}
+
 #[test]
 fn what_a_failed_line_printed_stays_printed() {
     assert_eq!(repl(&["print(\"before\"); [1][5]"]), ["before"]);

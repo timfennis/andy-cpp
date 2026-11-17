@@ -31,7 +31,7 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     crypto::register(env);
     deque::register(env);
     file::register(env);
-    file::register_variadic(env);
+    file::register_io(env);
     hash_map::register(env);
     heap::register(env);
     index::register(env);

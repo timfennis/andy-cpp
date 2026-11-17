@@ -6,6 +6,7 @@ use ndc_core::FunctionRegistry;
 pub use ndc_core::StaticType;
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
+pub use ndc_vm::InputSource;
 use ndc_vm::compiler::{Compiler, Session};
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
@@ -42,19 +43,24 @@ pub struct Interpreter {
     line_by_line: bool,
     /// What the evaluations printed, if output is captured.
     output: Vec<u8>,
+    /// What `read_stdin` reads, with what is left of it after the
+    /// evaluations so far.
+    input: InputSource,
     #[cfg(feature = "trace")]
     tracer: Option<Box<dyn tracer::VmTracer>>,
 }
 
 impl Interpreter {
-    /// Create an interpreter that writes output to stdout.
+    /// Create an interpreter that writes output to stdout and reads input
+    /// from stdin.
     #[must_use]
     pub fn new() -> Self {
         Self::from_capturing(false)
     }
 
     /// Create an interpreter that captures output into an internal buffer,
-    /// retrievable via [`get_output`].
+    /// retrievable via [`get_output`], and has no input unless given some
+    /// with [`with_input`](Self::with_input).
     #[must_use]
     pub fn capturing() -> Self {
         Self::from_capturing(true)
@@ -71,6 +77,11 @@ impl Interpreter {
             resumable: true,
             line_by_line: false,
             output: Vec::new(),
+            input: if capturing {
+                InputSource::None
+            } else {
+                InputSource::Stdin
+            },
             #[cfg(feature = "trace")]
             tracer: None,
         }
@@ -97,6 +108,12 @@ impl Interpreter {
             line_by_line: true,
             ..self
         }
+    }
+
+    /// This interpreter, with `read_stdin` reading from `input`.
+    #[must_use]
+    pub fn with_input(self, input: InputSource) -> Self {
+        Self { input, ..self }
     }
 
     pub fn configure<F: FnOnce(&mut FunctionRegistry<Rc<NativeFunction>>)>(&mut self, f: F) {
@@ -300,7 +317,10 @@ impl Interpreter {
         } else {
             OutputSink::Stdout
         };
-        let mut vm = Vm::new(code, std::mem::take(&mut self.globals)).with_output(output);
+        let stdin = std::mem::replace(&mut self.input, InputSource::None);
+        let mut vm = Vm::new(code, std::mem::take(&mut self.globals))
+            .with_output(output)
+            .with_input(stdin);
         #[cfg(feature = "trace")]
         {
             vm = vm.with_source(input);
@@ -313,6 +333,7 @@ impl Interpreter {
         if let Some(output) = vm.get_output() {
             self.output.extend_from_slice(output);
         }
+        self.input = vm.take_input();
         let value = vm.last_value(num_locals);
         self.globals = vm.into_globals();
         run?;
