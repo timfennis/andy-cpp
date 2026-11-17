@@ -174,14 +174,19 @@ impl Analyser {
             .filter(|node| self.pure_functions.contains_key(node))
             .map(|&node| self.vars.resolve(self.result.analysis.function_type(node)))
             .collect::<Vec<_>>();
-        // A cast the types of an instance may prove needs no check there.
+        // A cast whose check depends on the types of an instance, as `x as
+        // List<Int>` does on what `x` is, is decided by each instance. One
+        // its value's type proves whatever the type parameters are, as `x as
+        // Any`, needs no check anywhere.
         let casts = self.casts[first_cast..]
             .iter()
             .map(|cast| Cast {
                 found: self.vars.resolve(&cast.found),
                 ..cast.clone()
             })
-            .filter(|cast| !cast.found.type_parameters().is_empty())
+            .filter(|cast| {
+                !cast.found.type_parameters().is_empty() && !cast.found.fits(&cast.target)
+            })
             .collect::<Vec<_>>();
         let mut parameters = Vec::new();
         for typ in own.into_iter().chain(declared_pure) {
