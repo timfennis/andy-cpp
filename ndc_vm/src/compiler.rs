@@ -342,7 +342,10 @@ impl Compiler {
                 value, optional, ..
             } => {
                 self.compile_expr(*value)?;
-                let check = match self.analysis.cast_checks.get(&id) {
+                let check = match self
+                    .instance_pick(|instance| instance.cast_checks.get(&id))
+                    .or_else(|| self.analysis.cast_checks.get(&id))
+                {
                     None => return Err(CompileError::unresolved_cast(span)),
                     Some(check) => check.clone().map(Rc::new),
                 };

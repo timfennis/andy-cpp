@@ -42,6 +42,18 @@ pub(super) struct Scheme {
     /// The functions its body declares, with the types they're declared
     /// with, which an instance makes what its own types make them.
     pub(super) functions: Rc<[(NodeId, StaticType)]>,
+    /// The casts in its body of values whose types depend on its type
+    /// parameters, which each instance checks only where its types don't
+    /// prove them.
+    pub(super) casts: Rc<[Cast]>,
+}
+
+/// A cast of a value of type `found` to `target`, at `node`.
+#[derive(Debug, Clone)]
+pub(super) struct Cast {
+    pub(super) node: NodeId,
+    pub(super) found: StaticType,
+    pub(super) target: StaticType,
 }
 
 /// An instance [`Analyser::instance_for`] made, which waits to be solved.
@@ -365,7 +377,20 @@ impl Analyser {
             });
         }
         self.settle_waiting(first);
+        for cast in scheme.casts.iter() {
+            let found = self.vars.instantiate_with(&cast.found, &mut made);
+            let check = self.cast_check(&found, &cast.target);
+            if let Some(picks) = self.picks.instances.get_mut(&instance) {
+                picks.cast_checks.insert(cast.node, check);
+            }
+        }
         self.recording = outer;
+    }
+
+    /// The type a cast of a value of type `found` to `target` checks the
+    /// value against as the program runs, unless `found` proves it is one.
+    pub(super) fn cast_check(&self, found: &StaticType, target: &StaticType) -> Option<StaticType> {
+        (!self.vars.resolve(found).fits(target)).then(|| target.clone())
     }
 
     /// Reports the parameter of the function `node` declares, if it's a

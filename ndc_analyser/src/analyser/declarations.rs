@@ -65,6 +65,7 @@ impl Analyser {
             self.declaring = declared.map(|(_, symbol)| symbol);
         }
         let first_use = self.uses.len();
+        let first_cast = self.casts.len();
         let annotations = parameters
             .iter()
             .map(|param| self.lower_annotation(param.annotation.as_ref()))
@@ -197,8 +198,13 @@ impl Analyser {
                     pure,
                     return_annotated: annotated_return.is_some(),
                 };
-                let typ =
-                    self.generalize(symbol, &signature, id, flags, [first_use, first_function]);
+                let typ = self.generalize(
+                    symbol,
+                    &signature,
+                    id,
+                    flags,
+                    [first_use, first_function, first_cast],
+                );
                 self.within_size_limit(symbol, name, typ, span)
             }
             _ => signature,

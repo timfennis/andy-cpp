@@ -52,6 +52,8 @@ pub struct InstancePicks {
     /// As [`Analysis::function_types`], for the functions the instance's
     /// body declares, with the instance's types.
     pub function_types: AHashMap<NodeId, StaticType>,
+    /// As [`Analysis::cast_checks`], for the casts in the instance's body.
+    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
 }
 
 impl InstancePicks {
@@ -63,6 +65,7 @@ impl InstancePicks {
             setters: AHashMap::new(),
             augmented_assignments: AHashMap::new(),
             function_types: AHashMap::new(),
+            cast_checks: AHashMap::new(),
         }
     }
 }
@@ -163,6 +166,7 @@ impl<'a> Layout<'a> {
                     .map(locate_binding)
                     .collect(),
                 function_types: picks.function_types,
+                cast_checks: picks.cast_checks,
             };
             analysis
                 .instances

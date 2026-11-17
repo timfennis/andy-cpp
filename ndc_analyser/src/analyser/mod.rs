@@ -24,7 +24,7 @@ mod solver;
 use assignments::DeferredWrite;
 use declarations::FunctionDeclaration;
 pub use generics::tied_natives;
-use instances::{GenericUse, Pending, Scheme};
+use instances::{Cast, GenericUse, Pending, Scheme};
 use solver::{Constraint, EarlyPick, Origin, Waiting};
 #[cfg(test)]
 mod tests;
@@ -81,6 +81,9 @@ pub struct Analyser {
     /// The functions the batch declares, in the order their declarations
     /// start, so a generic function knows the ones its body declares.
     declared_functions: Vec<NodeId>,
+    /// The casts the batch makes, whose checks are decided once their types
+    /// are settled.
+    casts: Vec<Cast>,
     /// Every `pure fn` declared so far, by its declaration, see
     /// [`Self::check_pure_functions`].
     pure_functions: AHashMap<NodeId, declarations::PureFunction>,
@@ -184,6 +187,7 @@ impl Analyser {
             recursive_calls: Vec::new(),
             waiting_function_values: AHashSet::new(),
             declared_functions: Vec::new(),
+            casts: Vec::new(),
             pure_functions: AHashMap::new(),
             pure_in_batch: Vec::new(),
             declared_overloads: Vec::new(),
@@ -240,6 +244,10 @@ impl Analyser {
             "a write waits for literals that are all settled"
         );
         self.instantiate_uses();
+        for cast in std::mem::take(&mut self.casts) {
+            let check = self.cast_check(&cast.found, &cast.target);
+            self.result.analysis.cast_checks.insert(cast.node, check);
+        }
         self.keep_own_picks();
         self.check_pure_functions();
         self.check_overlaps();
@@ -508,8 +516,14 @@ impl Analyser {
                     let found = self.vars.shown(&found);
                     self.emit(AnalysisError::impossible_cast(&found, &target, *span));
                 }
-                let check = (!found.fits(&target)).then(|| target.clone());
-                self.result.analysis.cast_checks.insert(*id, check);
+                // Whether the cast is checked as the program runs is decided
+                // once what's known about the value is: in `let xs = [];
+                // xs as? List<Int>`, a later `xs.push(1)` proves it.
+                self.casts.push(Cast {
+                    node: *id,
+                    found,
+                    target: target.clone(),
+                });
                 // `as?` is the same cast, with `None` where `as` would fail.
                 // One that can never succeed is an error like `as`: it would
                 // always be `None`.
