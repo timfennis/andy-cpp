@@ -49,6 +49,20 @@ fn bounded_element_type<'a>(
     element_type.unwrap_or(StaticType::Any)
 }
 
+/// Whether every value `iterator` makes is an `element`. That can't be
+/// checked without making them, so it's only known of an `Any`, and of an
+/// `Int` for a range: `0..3` is an `Iterator<Int>`, and `take([1], 1)` only
+/// an `Iterator<Any>`.
+fn iterates_as(iterator: &SharedIterator, element: &StaticType) -> bool {
+    match element {
+        StaticType::Any => true,
+        StaticType::Int => iterator.try_borrow().is_ok_and(|iterator| {
+            iterator.range_bounds().is_some() || iterator.unbounded_range_start().is_some()
+        }),
+        _ => false,
+    }
+}
+
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
 #[derive(Clone)]
@@ -295,19 +309,21 @@ impl Value {
     /// as a container does: a scalar, a struct, a function or an iterator.
     /// A function is one if its own type says so (see [`Function::fit`]):
     /// only [`Self::converted_to`] can make one that may be one a function
-    /// whose calls are checked. What an iterator makes can't be checked
-    /// without making it.
+    /// whose calls are checked. An iterator is one if what it makes is known
+    /// to be (see [`iterates_as`]).
     fn is_a(&self, target: &StaticType) -> bool {
-        if let StaticType::Function { .. } = target
-            && let Self::Object(object) = self
-            && let Object::Function(function) = object.as_ref()
-        {
-            return function.fit(target) == FunctionFit::Proven;
+        if let Self::Object(object) = self {
+            match (target, object.as_ref()) {
+                (StaticType::Function { .. }, Object::Function(function)) => {
+                    return function.fit(target) == FunctionFit::Proven;
+                }
+                (StaticType::Iterator(element), Object::Iterator(iterator)) => {
+                    return iterates_as(iterator, element);
+                }
+                _ => {}
+            }
         }
-        match (target, self.static_type()) {
-            (StaticType::Iterator(_), StaticType::Iterator(_)) => true,
-            (target, found) => found == *target,
-        }
+        self.static_type() == *target
     }
 
     /// This value as a `target`, if it is one, checking every element of a
@@ -417,7 +433,7 @@ impl Value {
     /// It backs the runtime check of `as` casts, where the caller explicitly
     /// opted into the scan. Shared container aliases are memoized by object and target
     /// type. Iterators can't be inspected without consuming them, so they only
-    /// conform to targets with `Any` elements.
+    /// conform to targets with `Any` elements, or with `Int` ones for a range.
     pub fn conforms_to(&self, target: &StaticType) -> bool {
         self.conforms_to_cached(target, &mut ConformanceCache::default())
     }
@@ -551,7 +567,7 @@ impl Value {
                         .borrow()
                         .iter()
                         .all(|OrdValue(value)| value.conforms_to_cached(element, cache)),
-                    Object::Iterator(_) => matches!(element.as_ref(), StaticType::Any),
+                    Object::Iterator(iterator) => iterates_as(iterator, element),
                     _ => false,
                 },
                 _ => false,

@@ -1,0 +1,7 @@
+// `m.remove(m)` reads the map it changes, as `m -= m` does.
+// expect-output: %{} %{3: 4}
+let m = %{1: 2};
+m.remove(m);
+let n = %{1: 2, 3: 4};
+n.remove(%{1: "a"});
+print(m, n);

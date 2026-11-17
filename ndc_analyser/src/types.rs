@@ -1359,11 +1359,27 @@ impl TypeVars {
             // check failed leaves the literal's type what the literal says.
             (StaticType::Var(var), StaticType::Error) if self.is_literal(*var) => true,
             (StaticType::Var(var), StaticType::Any) if self.is_literal(*var) => false,
+            // A tuple yields each of its elements, so it's a sequence of a
+            // type each of them is: `(1..3, "ab")` is one of sequences. A
+            // type parameter is instead the one type they all are: see
+            // `element_type`.
+            (StaticType::Iterable(p), StaticType::Tuple(elements))
+                if !elements.is_empty() && self.unsettled(p).is_empty() =>
+            {
+                elements
+                    .iter()
+                    .all(|element| self.bind_argument(p, element))
+            }
             (StaticType::Iterable(_), StaticType::Var(var)) if !self.is_literal(*var) => true,
             // So does a tuple whose elements aren't known yet: `(x, 1)`
             // iterates as Ints once `x` is one.
             (StaticType::Iterable(_), StaticType::Tuple(_)) if self.waits_to_iterate(&argument) => {
                 true
+            }
+            // A number never iterates, whatever kind of number it becomes:
+            // `[1, 2]` isn't a sequence of sequences.
+            (StaticType::Iterable(_), StaticType::Var(var)) if self.is_number_literal(*var) => {
+                false
             }
             // A literal passed for an `Iterable<T>` is the sequence it holds,
             // as `["a"]` passed to `len` is a `List<String>`: only a

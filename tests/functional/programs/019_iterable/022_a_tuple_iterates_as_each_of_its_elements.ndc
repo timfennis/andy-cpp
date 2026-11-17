@@ -1,0 +1,6 @@
+// A tuple yields each of its elements, so a tuple of different kinds of
+// sequences is a sequence of sequences.
+// expect-output: [[1,"a",true],[1,"b",true],[2,"a",true],[2,"b",true]]
+// expect-output: [[1,"a"],[2,"b"]]
+print(multi_cartesian_product((1..=2, "ab", [true])));
+print(transposed((1..=2, "ab")));

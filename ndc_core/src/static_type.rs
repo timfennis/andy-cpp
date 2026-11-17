@@ -333,6 +333,16 @@ impl StaticType {
         match (self, parameter) {
             (Self::Never, _) => true,
             (Self::Iterable(a), Self::Iterable(p)) => a.fits(p) || matches(a, p),
+            // A tuple yields each of its elements, so it's a sequence of a
+            // type each of them is. A type parameter is instead the one type
+            // they all are, below.
+            (Self::Tuple(elements), Self::Iterable(p))
+                if !elements.is_empty() && !p.contains(&wildcard) =>
+            {
+                elements
+                    .iter()
+                    .all(|element| element.fits(p) || matches(element, p))
+            }
             (argument, Self::Iterable(p)) if Self::is_sequence(argument) => {
                 let element = argument
                     .sequence_element_type()

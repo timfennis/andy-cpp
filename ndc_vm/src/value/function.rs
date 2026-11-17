@@ -311,9 +311,13 @@ impl Function {
         }
     }
 
-    /// Whether this function accepts the given arguments, checking every
-    /// element of a container argument against a parameter like `List<Int>`.
-    pub fn conforms_value_args(&self, args: &[Value]) -> bool {
+    /// Whether this function accepts the given arguments, passed as the
+    /// `expected` parameter types of the function type it's used as. An
+    /// argument is checked, every element of a container against a
+    /// parameter like `List<Int>`, unless its expected type proves it's
+    /// what the function takes: an iterator can't be checked, so it's only
+    /// taken as an `Iterator<Int>` where it's passed as one.
+    pub fn conforms_value_args(&self, expected: Option<&[StaticType]>, args: &[Value]) -> bool {
         match self.signature() {
             StaticType::Function {
                 parameters: Some(params),
@@ -323,7 +327,13 @@ impl Function {
                     && params
                         .iter()
                         .zip(args)
-                        .all(|(param, arg)| arg.conforms_to(param))
+                        .enumerate()
+                        .all(|(i, (param, arg))| {
+                            expected
+                                .and_then(|expected| expected.get(i))
+                                .is_some_and(|expected| proves(expected, param))
+                                || arg.conforms_to(param)
+                        })
             }
             StaticType::Function {
                 parameters: None, ..

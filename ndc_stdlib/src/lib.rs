@@ -70,7 +70,8 @@ mod tests {
 
     /// `Iterable<T>` takes any kind of sequence, which only a parameter can
     /// do, or what a function passed for one returns, as `flat_map`'s
-    /// callback does. What a function returns is one kind of sequence.
+    /// callback does, or what a sequence passed for one holds, as the rows
+    /// `transposed` takes. What a function returns is one kind of sequence.
     #[test]
     fn an_iterable_is_only_a_parameter() {
         let iterable =
@@ -92,7 +93,10 @@ mod tests {
             );
             for parameter in parameters.iter().flatten() {
                 let nested = match parameter {
-                    StaticType::Iterable(element) => iterable(element),
+                    StaticType::Iterable(element) => match &**element {
+                        StaticType::Iterable(row) => iterable(row),
+                        element => iterable(element),
+                    },
                     StaticType::Function {
                         parameters,
                         return_type,

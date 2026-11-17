@@ -1604,10 +1604,31 @@ impl Analyser {
                     .iter()
                     .zip(arguments)
                     .all(|(parameter, argument)| match parameter {
-                        StaticType::Iterable(_) => !self.vars.waits_to_iterate(argument),
+                        StaticType::Iterable(element) => self.iteration_known(argument, element),
                         _ => true,
                     })
             })
+    }
+
+    /// Whether the kind of `sequence`, passed for an `Iterable<element>`, is
+    /// known, and that of what it holds when that's passed for an
+    /// `Iterable` in turn, as the rows `transposed` takes are.
+    fn iteration_known(&self, sequence: &StaticType, element: &StaticType) -> bool {
+        if self.vars.waits_to_iterate(sequence) {
+            return false;
+        }
+        let StaticType::Iterable(inner) = self.vars.resolve(element) else {
+            return true;
+        };
+        match self.vars.resolve(sequence) {
+            // A tuple yields each of its elements: see `bind_argument`.
+            StaticType::Tuple(elements) if self.vars.unsettled(element).is_empty() => elements
+                .iter()
+                .all(|held| self.iteration_known(held, &inner)),
+            sequence => sequence
+                .sequence_element_type()
+                .is_none_or(|held| self.iteration_known(&held, &inner)),
+        }
     }
 
     /// `arguments` with each literal among them whose values share no type
@@ -2047,38 +2068,70 @@ impl Analyser {
         parameters: &[StaticType],
         arguments: &[StaticType],
     ) -> Vec<(StaticType, StaticType)> {
-        parameters
-            .iter()
-            .zip(arguments)
-            .filter_map(|(parameter, argument)| {
-                let (element, sequence) =
-                    match (self.vars.resolve(parameter), self.vars.resolve(argument)) {
-                        (StaticType::Iterable(element), sequence) => (*element, sequence),
-                        (
-                            StaticType::Function { return_type, .. },
-                            StaticType::Function {
-                                return_type: returns,
-                                ..
-                            },
-                        ) => match *return_type {
-                            StaticType::Iterable(element) => (*element, *returns),
-                            _ => return None,
-                        },
-                        _ => return None,
-                    };
-                match sequence {
-                    // A literal whose type isn't known yet either, as the
-                    // element of `[1][0]` is, waits like any other value.
-                    StaticType::Var(_) => Some((sequence, element)),
-                    // So does a tuple whose elements aren't known yet, as
-                    // `(x, x)` in `[0].flat_map(fn(_) => (x, x))`.
-                    StaticType::Tuple(_) if self.vars.waits_to_iterate(&sequence) => {
-                        Some((sequence, element))
-                    }
-                    _ => None,
+        let mut waited = Vec::new();
+        for (parameter, argument) in parameters.iter().zip(arguments) {
+            match (self.vars.resolve(parameter), self.vars.resolve(argument)) {
+                (StaticType::Iterable(element), sequence) => {
+                    self.iteration_waited_for(&sequence, &element, &mut waited);
                 }
-            })
-            .collect()
+                (
+                    StaticType::Function { return_type, .. },
+                    StaticType::Function {
+                        return_type: returns,
+                        ..
+                    },
+                ) => {
+                    if let StaticType::Iterable(element) = *return_type {
+                        self.iteration_waited_for(&returns, &element, &mut waited);
+                    }
+                }
+                _ => {}
+            }
+        }
+        waited
+    }
+
+    /// [`Self::iterations_waited_for`] of one `sequence` passed for an
+    /// `Iterable<element>`, and of what it holds when that's passed for an
+    /// `Iterable` in turn, as the rows `transposed` takes are.
+    fn iteration_waited_for(
+        &self,
+        sequence: &StaticType,
+        element: &StaticType,
+        waited: &mut Vec<(StaticType, StaticType)>,
+    ) {
+        let sequence = self.vars.resolve(sequence);
+        let element = self.vars.resolve(element);
+        // A tuple yields each of its elements, which are passed for a type
+        // without type parameters one by one: see `bind_argument`.
+        let each_element = self.vars.unsettled(&element).is_empty();
+        match &sequence {
+            // A literal whose type isn't known yet either, as the element of
+            // `[1][0]` is, waits like any other value.
+            StaticType::Var(_) => waited.push((sequence, element)),
+            // So does a tuple whose elements aren't known yet, as `(x, x)` in
+            // `[0].flat_map(fn(_) => (x, x))`.
+            StaticType::Tuple(_) if !each_element && self.vars.waits_to_iterate(&sequence) => {
+                waited.push((sequence, element));
+            }
+            _ => {
+                let StaticType::Iterable(inner) = element else {
+                    return;
+                };
+                match sequence {
+                    StaticType::Tuple(elements) if each_element => {
+                        for held in &elements {
+                            self.iteration_waited_for(held, &inner, waited);
+                        }
+                    }
+                    sequence => {
+                        if let Some(held) = sequence.sequence_element_type() {
+                            self.iteration_waited_for(&held, &inner, waited);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// The type of calling a value whose type isn't known yet, like `g` in

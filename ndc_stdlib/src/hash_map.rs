@@ -49,10 +49,10 @@ mod inner {
 
     /// Removes all keys from the `left` map/set that are present in the `right` map/set.
     #[function(name = "remove", signature = "<K, V, W>(Map<K, V>, Map<K, W>)")]
-    pub fn remove_map(left: &mut HashMap<Value, Value>, right: &HashMap<Value, Value>) {
-        for (key, _) in right {
-            left.remove(key);
-        }
+    pub fn remove_map(left: Value, right: Value) -> anyhow::Result<()> {
+        change_with(&left, &right, "remove", |entries, other| {
+            entries.retain(|key, _| !other.contains_key(key));
+        })
     }
 
     /// Insert a value into a map.

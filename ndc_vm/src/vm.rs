@@ -679,13 +679,17 @@ impl Vm {
         typ: StaticType,
         args: usize,
     ) -> Result<Dispatch, VmError> {
-        let StaticType::Function { return_type, .. } = typ else {
+        let StaticType::Function {
+            parameters,
+            return_type,
+        } = typ
+        else {
             unreachable!("a checked function is used as a function type");
         };
         // The function type it's used as may take more than the function
         // does, as `Fn(Any) -> Int` would of a function taking an Int.
         let arguments = &self.stack[self.stack.len() - args..];
-        if !function.conforms_value_args(arguments) {
+        if !function.conforms_value_args(parameters.as_deref(), arguments) {
             return Err(VmError::native(format!(
                 "the function doesn't take the arguments ({})",
                 arguments

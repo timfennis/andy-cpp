@@ -1,0 +1,7 @@
+// The function type a function is cast to says what its arguments are, so an
+// iterator passed as an `Iterator<Int>` needs no check.
+// expect-output: [1,2]
+fn f(x: Iterator<Int>) -> Any { x.list() }
+let a: Any = f;
+let g = a as Fn(Iterator<Int>) -> List<Int>;
+print(g(1..3));
