@@ -47,6 +47,7 @@ impl std::fmt::Debug for JumpTarget {
 /// | Instruction   | Stack effect                            | Notes                                      |
 /// |---------------|-----------------------------------------|--------------------------------------------|
 /// | `Constant`    | `[… → … value]`                        | +1                                         |
+/// | `MakeString`  | `[… → … string]`                       | +1 (a new string with a constant's text)   |
 /// | `Pop`         | `[… value → …]`                        | −1                                         |
 /// | `GetLocal`    | `[… → … value]`                        | +1 (copies from slot)                      |
 /// | `GetCell`     | `[… → … value]`                        | +1 (reads through the slot's cell)         |
@@ -96,6 +97,11 @@ pub enum OpCode {
     JumpIfFalse(JumpTarget),
     /// Pushes a constant. `[… → … value]`
     Constant(usize),
+    /// Pushes a new string with the text of a constant string: a string
+    /// literal makes a new string each time it's evaluated, as a list
+    /// literal makes a new list, since strings can be changed in place.
+    /// `[… → … string]`
+    MakeString(usize),
     /// Copies local slot onto stack. `[… → … value]`
     GetLocal(usize),
     /// Reads a captured local onto the stack: through the cell in its slot,
@@ -169,6 +175,7 @@ impl OpCode {
             Self::JumpIfTrue(_) => "JumpIfTrue",
             Self::JumpIfFalse(_) => "JumpIfFalse",
             Self::Constant(_) => "Constant",
+            Self::MakeString(_) => "MakeString",
             Self::GetLocal(_) => "GetLocal",
             Self::GetCell(_) => "GetCell",
             Self::GetUpvalue(_) => "GetUpvalue",
@@ -215,6 +222,7 @@ impl OpCode {
             // the branch they land in pops it instead.
             Self::Jump(_) | Self::JumpIfTrue(_) | Self::JumpIfFalse(_) => 0,
             Self::Constant(_)
+            | Self::MakeString(_)
             | Self::GetLocal(_)
             | Self::GetCell(_)
             | Self::GetUpvalue(_)
@@ -266,6 +274,7 @@ impl std::fmt::Debug for OpCode {
             Self::JumpIfTrue(n) => write!(f, "JumpIfTrue({n:?})"),
             Self::JumpIfFalse(n) => write!(f, "JumpIfFalse({n:?})"),
             Self::Constant(n) => write!(f, "Constant({n})"),
+            Self::MakeString(n) => write!(f, "MakeString({n})"),
             Self::GetLocal(n) => write!(f, "GetLocal({n})"),
             Self::SetLocal(n) => write!(f, "SetLocal({n})"),
             Self::GetGlobal(n) => write!(f, "GetGlobal({n})"),
@@ -395,6 +404,7 @@ impl OptimizerIr {
                     && matches!(
                         self.code[i].1,
                         OpCode::Constant(_)
+                            | OpCode::MakeString(_)
                             | OpCode::GetGlobal(_)
                             | OpCode::GetLocal(_)
                             | OpCode::GetCell(_)
@@ -517,11 +527,12 @@ impl Chunk {
     }
 
     /// Iterates opcodes as `(index, opcode, constant_value)` where `constant_value`
-    /// is `Some` for `Constant(idx)` and `Closure(idx)` opcodes.
+    /// is `Some` for `Constant(idx)`, `MakeString(idx)` and `Closure(idx)` opcodes.
     pub fn iter(&self) -> impl Iterator<Item = (usize, &OpCode, Option<&Value>)> {
         self.code.iter().enumerate().map(|(i, op)| {
             let val = match op {
                 OpCode::Constant(idx)
+                | OpCode::MakeString(idx)
                 | OpCode::Closure {
                     constant_idx: idx, ..
                 } => Some(&self.constants[*idx]),

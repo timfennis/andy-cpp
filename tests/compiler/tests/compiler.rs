@@ -277,6 +277,17 @@ fn or_short_circuits_on_a_true_left_operand() {
 //
 // 0: Constant(0)      push `5` (block result)
 // 1: Halt
+// "abc"
+//
+// 0: MakeString(0)    push a new string with the text of constant 0, as a
+//                     string can be changed in place and a literal is
+//                     evaluated again in a loop or a second call
+// 1: Halt
+#[test]
+fn a_string_literal_makes_a_new_string() {
+    assert_eq!(compile("\"abc\""), [MakeString(0), Halt]);
+}
+
 #[test]
 fn a_block_yields_its_last_expression() {
     assert_eq!(compile("{ 5 }"), [Constant(0), Halt]);

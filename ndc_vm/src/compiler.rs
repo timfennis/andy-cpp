@@ -312,7 +312,7 @@ impl Compiler {
             }
             Expression::StringLiteral(s) => {
                 let idx = self.ir.add_constant(Value::string(s));
-                self.ir.write(OpCode::Constant(idx), span);
+                self.ir.write(OpCode::MakeString(idx), span);
             }
             Expression::NumericLiteral(literal) => {
                 let value = match literal {
