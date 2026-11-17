@@ -70,13 +70,20 @@ pub struct CallFrame {
 pub fn native_globals<'a>(natives: impl IntoIterator<Item = &'a Rc<NativeFunction>>) -> Vec<Value> {
     natives
         .into_iter()
-        .map(|native| {
-            Value::Object(Rc::new(Object::Function(Function::Native(Rc::clone(
+        .map(|native| match native.func {
+            // The compiler writes an intrinsic as bytecode where it's used
+            // and never reads its slot.
+            NativeFunc::Intrinsic(_) => Value::unit(),
+            _ => Value::Object(Rc::new(Object::Function(Function::Native(Rc::clone(
                 native,
-            )))))
+            ))))),
         })
         .collect()
 }
+
+/// Why no function value is ever an intrinsic: see [`native_globals`].
+const INTRINSIC_IS_NO_VALUE: &str =
+    "internal error: an intrinsic's slot holds no function value, so nothing calls it";
 
 impl Vm {
     pub fn new(function: CompiledFunction, mut globals: Vec<Value>) -> Self {
@@ -740,6 +747,7 @@ impl Vm {
                         self.stack.pop(); // callee slot
                         f(&call_args, self)?
                     }
+                    NativeFunc::Intrinsic(_) => unreachable!("{INTRINSIC_IS_NO_VALUE}"),
                 };
                 if let Some((cache, key)) = memo {
                     cache.borrow_mut().insert(key, result.clone());
@@ -790,6 +798,7 @@ impl Vm {
             match &native.func {
                 NativeFunc::Simple(f) => f(args),
                 NativeFunc::WithVm(f) => f(args, self),
+                NativeFunc::Intrinsic(_) => unreachable!("{INTRINSIC_IS_NO_VALUE}"),
             }
         } else {
             let depth = self.frames.len();

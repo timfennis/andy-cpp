@@ -242,10 +242,10 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
     let registry = build_stdlib_registry();
     let scope = registry
         .iter()
-        .map(|f| (f.name.clone(), f.static_type.clone()))
+        .map(|f| (f.name.clone(), f.static_type.clone(), f.intrinsic()))
         .collect();
 
-    let mut analyser = Analyser::new(scope);
+    let mut analyser = Analyser::with_natives(scope);
     for e in &expressions {
         analyser.analyse(e);
     }

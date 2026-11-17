@@ -4,7 +4,7 @@
 
 use ahash::AHashMap;
 use ndc_core::r#struct::StructInfo;
-use ndc_core::{NodeId, StaticType};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 
 /// What the analyser worked out about one batch of statements: a whole program,
 /// or one line of the REPL.
@@ -195,9 +195,9 @@ impl Analysis {
 }
 
 /// What a use of a name refers to. The analyser picks symbols, and the layout
-/// turns each into the [`ResolvedVar`] the compiler reads.
+/// turns each into the [`Callee`] the compiler reads.
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Binding<V = ResolvedVar> {
+pub enum Binding<V = Callee> {
     None,
     Resolved(Candidate<V>),
     /// An operator applied to each element of tuple arguments whose positions
@@ -238,6 +238,15 @@ pub struct FieldAccessors {
     pub setter: ResolvedVar,
 }
 
+/// What a binding refers to: a value stored in a variable, or an intrinsic,
+/// which the compiler writes as bytecode where it's used and which isn't
+/// stored anywhere.
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum Callee {
+    Var(ResolvedVar),
+    Intrinsic(Intrinsic),
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
     Local {
@@ -261,7 +270,7 @@ pub enum ResolvedVar {
 /// what kind of call this candidate is — a direct scalar call, or an element-wise
 /// tuple broadcast over the scalar overload that `var()` returns.
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum Candidate<V = ResolvedVar> {
+pub enum Candidate<V = Callee> {
     Scalar(V),
     /// Element-wise tuple broadcast. The inner value points to the scalar
     /// overload that fires for each element pair.

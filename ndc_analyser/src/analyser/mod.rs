@@ -4,7 +4,7 @@ use crate::types::{TypeTable, TypeVars};
 use ahash::{AHashMap, AHashSet};
 use ndc_analysis::Analysis;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
-use ndc_core::{NodeId, StaticType, TypeVar};
+use ndc_core::{Intrinsic, NodeId, StaticType, TypeVar};
 use ndc_layout::{Layout, Picks};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, TypeExpr};
@@ -161,13 +161,26 @@ impl Analyser {
     /// An analyser for programs that can call `natives`, given as name and
     /// type in registry order: the first is the native in global slot 0.
     pub fn new(natives: Vec<(String, StaticType)>) -> Self {
+        Self::with_natives(
+            natives
+                .into_iter()
+                .map(|(name, typ)| (name, typ, None))
+                .collect(),
+        )
+    }
+
+    /// [`Self::new`] for natives some of which are intrinsics, which the
+    /// compiler writes as bytecode where they're used.
+    pub fn with_natives(natives: Vec<(String, StaticType, Option<Intrinsic>)>) -> Self {
         let resolver = NameResolver::new(
-            natives.iter().map(|(name, _)| name.as_str()),
+            natives
+                .iter()
+                .map(|(name, _, intrinsic)| (name.as_str(), *intrinsic)),
             StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
         );
         let mut types = TypeTable::default();
         let mut any_index = None;
-        for ((name, typ), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
+        for ((name, typ, _), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
             if name == ndc_core::ANY_INDEX {
                 any_index = Some(symbol);
             }

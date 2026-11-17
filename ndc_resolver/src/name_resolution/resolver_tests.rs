@@ -9,7 +9,10 @@ use ndc_parser::Parser;
 
 /// A resolver that knows the given functions and the built-in types.
 fn new_resolver<'a>(functions: impl IntoIterator<Item = &'a str>) -> NameResolver {
-    NameResolver::new(functions, StaticType::BUILTIN_TYPE_NAMES.iter().copied())
+    NameResolver::new(
+        functions.into_iter().map(|name| (name, None)),
+        StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
+    )
 }
 
 fn resolve_source(resolver: &mut NameResolver, source: &str) -> Result<(), NameResolutionError> {
@@ -1328,4 +1331,35 @@ fn natives_record_their_registry_slot() {
     // Program symbols aren't natives.
     let [x] = declared(&resolver);
     assert!(!resolver.native_slots.contains_key(&x));
+}
+
+#[test]
+fn an_intrinsic_is_a_native_with_its_registry_slot() {
+    let mut resolver = NameResolver::new(
+        [("len", None), ("cast", Some(ndc_core::Intrinsic::Cast))],
+        StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
+    );
+    resolve_source(&mut resolver, "cast;").unwrap();
+
+    let cast = builtin(&resolver, "cast");
+    assert_eq!(only_reference(&resolver).0, vec![vec![cast]]);
+    assert_eq!(resolver.native_slot(cast), Some(1));
+    assert_eq!(resolver.intrinsic(cast), Some(ndc_core::Intrinsic::Cast));
+    assert_eq!(resolver.intrinsic(builtin(&resolver, "len")), None);
+}
+
+#[test]
+fn a_function_declared_with_an_intrinsics_name_shadows_it_like_a_native() {
+    let mut resolver = NameResolver::new(
+        [("cast", Some(ndc_core::Intrinsic::Cast))],
+        StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
+    );
+    let native_cast = builtin(&resolver, "cast");
+    resolve_source(&mut resolver, "fn cast() { 1 } cast;").unwrap();
+
+    let [declared_cast] = declared(&resolver);
+    assert_eq!(
+        only_reference(&resolver).0,
+        vec![vec![declared_cast], vec![native_cast]]
+    );
 }

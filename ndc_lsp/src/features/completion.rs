@@ -3,7 +3,7 @@ use ls_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
     Documentation, MarkupContent, MarkupKind, Position,
 };
-use ndc_core::StaticType;
+use ndc_core::{Intrinsic, StaticType};
 use ndc_interpreter::Interpreter;
 
 use crate::scope_resolve::{collect_declarations, file_scope, is_visible};
@@ -16,6 +16,8 @@ pub struct FunctionInfo {
     pub name: String,
     pub static_type: StaticType,
     pub documentation: Option<String>,
+    /// What the compiler writes in its place, if it's an intrinsic.
+    pub intrinsic: Option<Intrinsic>,
 }
 
 impl FunctionInfo {
@@ -27,6 +29,7 @@ impl FunctionInfo {
                 name: fun.name.clone(),
                 static_type: fun.static_type.clone(),
                 documentation: fun.documentation.clone(),
+                intrinsic: fun.intrinsic(),
             })
             .collect()
     }
@@ -434,6 +437,7 @@ mod tests {
                 return_type: Box::new(ret),
             },
             documentation: None,
+            intrinsic: None,
         }
     }
 

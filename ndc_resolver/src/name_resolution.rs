@@ -1,6 +1,6 @@
 use crate::symbols::{BindingKind, SymbolId, SymbolTable};
 use ahash::{AHashMap, AHashSet};
-use ndc_core::NodeId;
+use ndc_core::{Intrinsic, NodeId};
 use ndc_lexer::Span;
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -77,6 +77,9 @@ pub struct NameResolver {
     /// Each native's position in the function registry, which is also its
     /// global slot in the VM. With `new(["len", "+"])`, `len` is 0 and `+` is 1.
     native_slots: AHashMap<SymbolId, usize>,
+    /// The natives the compiler writes as bytecode where they're used, as
+    /// `cast`. Each still has its registry position in [`Self::native_slots`].
+    intrinsics: AHashMap<SymbolId, Intrinsic>,
     /// Errors from statements that failed to resolve. Resolution carries on with
     /// the next statement, so `a; b;` reports both unknown names.
     errors: Vec<NameResolutionError>,
@@ -395,21 +398,26 @@ impl ScopeTree {
 
 impl NameResolver {
     /// Creates a new name resolver with the supplied `builtins` and `builtin_types` declared
-    /// in a scope outside the program. With `new(["len"], ["Int"])`, a top-level
+    /// in a scope outside the program. With `new([("len", None)], ["Int"])`, a top-level
     /// `let len = 99` shadows the native instead of sharing its scope, so a later `len`
     /// resolves to `[[let len], [native len]]`, and `x: Int` names the built-in type.
+    /// A builtin given an [`Intrinsic`] is one the compiler writes as bytecode.
     pub fn new<'a>(
-        builtins: impl IntoIterator<Item = &'a str>,
+        builtins: impl IntoIterator<Item = (&'a str, Option<Intrinsic>)>,
         builtin_types: impl IntoIterator<Item = &'a str>,
     ) -> Self {
         let mut scopes = ScopeTree::new();
         let mut symbols = SymbolTable::default();
 
         let mut native_slots = AHashMap::default();
-        for (slot, builtin) in builtins.into_iter().enumerate() {
+        let mut intrinsics = AHashMap::default();
+        for (slot, (builtin, intrinsic)) in builtins.into_iter().enumerate() {
             let symbol = symbols.declare(builtin.to_string(), BindingKind::Function);
             scopes.bind(symbol);
             native_slots.insert(symbol, slot);
+            if let Some(intrinsic) = intrinsic {
+                intrinsics.insert(symbol, intrinsic);
+            }
         }
         for name in builtin_types {
             let symbol = symbols.declare(name.to_string(), BindingKind::Type);
@@ -432,6 +440,7 @@ impl NameResolver {
             type_names: Default::default(),
             structs: Default::default(),
             native_slots,
+            intrinsics,
             errors: Default::default(),
         }
     }
@@ -580,6 +589,12 @@ impl NameResolver {
     /// slot in the VM. `None` for anything that isn't a native.
     pub fn native_slot(&self, symbol: SymbolId) -> Option<usize> {
         self.native_slots.get(&symbol).copied()
+    }
+
+    /// What the compiler writes in place of a use of `symbol`, if it's an
+    /// intrinsic.
+    pub fn intrinsic(&self, symbol: SymbolId) -> Option<Intrinsic> {
+        self.intrinsics.get(&symbol).copied()
     }
 
     /// How many natives the resolver was created with.

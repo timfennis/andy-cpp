@@ -1,8 +1,10 @@
+mod intrinsic;
 mod node_id;
 mod signature;
 pub mod static_type;
 pub mod r#struct;
 
+pub use intrinsic::Intrinsic;
 pub use node_id::NodeId;
 pub use static_type::{StaticType, TypeVar};
 use std::slice::Iter;

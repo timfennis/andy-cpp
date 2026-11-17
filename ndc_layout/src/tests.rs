@@ -1,14 +1,14 @@
 use crate::{Layout, Picks};
 use Slot::{Global, Local};
-use ndc_analysis::{Analysis, Binding, Candidate, CaptureSource, ResolvedVar};
-use ndc_core::StaticType;
+use ndc_analysis::{Analysis, Binding, Callee, Candidate, CaptureSource, ResolvedVar};
+use ndc_core::{Intrinsic, StaticType};
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::{Expression, ExpressionLocation, Parser};
 use ndc_resolver::{NameResolver, ScopeKind};
 
 fn resolve_with_natives(source: &str, natives: &[&str]) -> NameResolver {
     let mut resolver = NameResolver::new(
-        natives.iter().copied(),
+        natives.iter().map(|&name| (name, None)),
         StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
     );
     resolve_batch(&mut resolver, source);
@@ -321,8 +321,8 @@ fn a_captured_local_is_a_cell_in_its_frame_and_an_upvalue_in_the_closure() {
         .bindings
         .values()
         .map(|binding| match binding {
-            Binding::Resolved(candidate) => candidate.var(),
-            other => panic!("expected one candidate, got {other:?}"),
+            Binding::Resolved(Candidate::Scalar(Callee::Var(var))) => *var,
+            other => panic!("expected one variable, got {other:?}"),
         })
         .collect::<Vec<_>>();
     locations.sort_by_key(|location| matches!(location, ResolvedVar::Upvalue { .. }));
@@ -333,4 +333,43 @@ fn a_captured_local_is_a_cell_in_its_frame_and_an_upvalue_in_the_closure() {
             ResolvedVar::Upvalue { slot: 0 }
         ]
     );
+}
+
+#[test]
+fn a_use_of_an_intrinsic_is_the_intrinsic_not_its_slot() {
+    let mut resolver = NameResolver::new(
+        [("len", None), ("cast", Some(Intrinsic::Cast))],
+        StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
+    );
+    let statements = resolve_batch(&mut resolver, "len; cast; let x = 1;");
+    let mut picks = Picks::default();
+    for name in ["len", "cast"] {
+        let [use_of_name] = identifiers(&statements, name)[..] else {
+            panic!("expected one use of {name}");
+        };
+        let symbol = resolver.innermost_reference(use_of_name.id);
+        picks
+            .bindings
+            .insert(use_of_name.id, Binding::Resolved(Candidate::Scalar(symbol)));
+    }
+    let mut analysis = Analysis::default();
+    Layout::new(&resolver).lay_out(picks, 0, &mut analysis);
+
+    let picked = |name| {
+        analysis
+            .binding(identifiers(&statements, name)[0].id)
+            .clone()
+    };
+    assert_eq!(
+        picked("len"),
+        Binding::Resolved(Candidate::Scalar(Callee::Var(ResolvedVar::Global {
+            slot: 0
+        })))
+    );
+    assert_eq!(
+        picked("cast"),
+        Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(Intrinsic::Cast)))
+    );
+    // The intrinsic keeps its slot, so `x` comes after both natives.
+    assert_eq!(analysis.global_count, 3);
 }

@@ -1,6 +1,6 @@
 use super::*;
 use itertools::Itertools;
-use ndc_analysis::{Binding, Candidate};
+use ndc_analysis::{Binding, Callee, Candidate};
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 
@@ -944,9 +944,9 @@ fn an_op_assignment_waits_for_its_operands_like_any_call() {
             .augmented_assignments
             .values()
             .collect::<Vec<_>>(),
-        vec![&Binding::Resolved(Candidate::Scalar(
+        vec![&Binding::Resolved(Candidate::Scalar(Callee::Var(
             ndc_analysis::ResolvedVar::Global { slot: 2 }
-        ))]
+        )))]
     );
 }
 
@@ -1738,7 +1738,8 @@ fn an_instance_calls_the_instances_its_types_need() {
         twice
             .bindings
             .values()
-            .all(|binding| *binding == Binding::Resolved(Candidate::Scalar(inc.variable))),
+            .all(|binding| *binding
+                == Binding::Resolved(Candidate::Scalar(Callee::Var(inc.variable)))),
         "{twice:?}"
     );
 }
@@ -1770,7 +1771,9 @@ fn an_instance_calls_itself_where_its_body_recurses() {
     let calls_itself = instance
         .bindings
         .values()
-        .filter(|binding| **binding == Binding::Resolved(Candidate::Scalar(instance.variable)))
+        .filter(|binding| {
+            **binding == Binding::Resolved(Candidate::Scalar(Callee::Var(instance.variable)))
+        })
         .count();
     assert_eq!(calls_itself, 2, "{instance:?}");
 }

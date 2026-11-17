@@ -64,6 +64,9 @@ pub enum NativeFunc {
     /// HOF path: args are drained off the stack before the call so `&mut Vm`
     /// can be passed safely. Use for functions with `&VmCallable` params.
     WithVm(Box<WithVmFn>),
+    /// No Rust implementation: the compiler writes the function as bytecode
+    /// where it's used, and its global slot holds no function value.
+    Intrinsic(ndc_core::Intrinsic),
 }
 
 pub struct CompiledFunction {
@@ -83,6 +86,17 @@ pub struct ClosureFunction {
     /// The cells of the variables the closure captured, each shared with the
     /// frame that declared it, see [`Value::Cell`].
     pub(crate) upvalues: Vec<Rc<RefCell<Value>>>,
+}
+
+impl NativeFunction {
+    /// What the compiler writes in place of this native, if it's an intrinsic.
+    #[must_use]
+    pub fn intrinsic(&self) -> Option<ndc_core::Intrinsic> {
+        match self.func {
+            NativeFunc::Intrinsic(intrinsic) => Some(intrinsic),
+            NativeFunc::Simple(_) | NativeFunc::WithVm(_) => None,
+        }
+    }
 }
 
 impl CompiledFunction {

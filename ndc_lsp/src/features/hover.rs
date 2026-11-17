@@ -1,5 +1,5 @@
 use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
-use ndc_analysis::{Analysis, Binding, ResolvedVar};
+use ndc_analysis::{Analysis, Binding, Callee, ResolvedVar};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::Expression;
@@ -45,7 +45,7 @@ pub fn hover(
 /// function whose instances pick for their own types, as `abs` in
 /// `fn f(x) { abs(x) } f(1); f(2.5);` does, that's every overload they pick:
 /// `abs(Int)` and `abs(Float)`.
-fn overloads_at(analysis: &Analysis, id: NodeId) -> Vec<ResolvedVar> {
+fn overloads_at(analysis: &Analysis, id: NodeId) -> Vec<Callee> {
     let binding = analysis.binding(id);
     let bindings: Vec<&Binding> = if *binding == Binding::None {
         analysis
@@ -77,14 +77,20 @@ fn overloads_at(analysis: &Analysis, id: NodeId) -> Vec<ResolvedVar> {
 /// signature and documentation of each overload it picked. `None` unless every
 /// one is a built-in, so a local that shadows one (e.g. `let len = 1; len`)
 /// shows the local's type.
-fn native_hover(overloads: &[ResolvedVar], functions: &[FunctionInfo]) -> Option<String> {
+fn native_hover(overloads: &[Callee], functions: &[FunctionInfo]) -> Option<String> {
     // A built-in's global slot is its position in the registry, which is the
     // order of `functions`.
     let markdown = overloads
         .iter()
         .map(|overload| match overload {
-            ResolvedVar::Global { slot } => functions.get(*slot).map(function_markdown),
-            _ => None,
+            Callee::Var(ResolvedVar::Global { slot }) => {
+                functions.get(*slot).map(function_markdown)
+            }
+            Callee::Intrinsic(intrinsic) => functions
+                .iter()
+                .find(|function| function.intrinsic == Some(*intrinsic))
+                .map(function_markdown),
+            Callee::Var(_) => None,
         })
         .collect::<Option<Vec<_>>>()?;
     (!markdown.is_empty()).then(|| markdown.join("\n\n---\n\n"))

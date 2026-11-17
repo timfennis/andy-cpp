@@ -126,9 +126,9 @@ impl Interpreter {
         let functions = self
             .function_registry
             .iter()
-            .map(|fun| (fun.name.clone(), fun.static_type.clone()))
+            .map(|fun| (fun.name.clone(), fun.static_type.clone(), fun.intrinsic()))
             .collect();
-        Analyser::new(functions)
+        Analyser::with_natives(functions)
     }
 
     /// Forgets everything evaluated so far, keeping only what was printed.
