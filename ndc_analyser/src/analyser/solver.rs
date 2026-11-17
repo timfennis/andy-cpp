@@ -4,6 +4,7 @@
 
 use super::Analyser;
 use super::function_values::{Choice, FunctionValue};
+use super::generics::redefinable_parameters;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads, ResolvedCall, is_strictly_more_specific};
 use crate::types::TypeVars;
@@ -284,7 +285,8 @@ impl Analyser {
     }
 
     /// [`Self::constrain_call`], for `[]` with the index `tuple_index` when
-    /// it's a number written in the code, which picks a tuple's element.
+    /// it's a number written in the code, which picks a tuple's element: see
+    /// [`Self::constrain_index_read`].
     #[allow(clippy::too_many_arguments)]
     pub(super) fn constrain_index_call(
         &mut self,
@@ -1753,7 +1755,9 @@ impl Analyser {
             // later one redefines the earlier, which a call then means.
             let redefined = tied
                 .iter()
-                .map(|&symbol| self.overloads().parameters_of(symbol))
+                .map(|&symbol| {
+                    redefinable_parameters(self.overloads().parameters_of(symbol).as_deref())
+                })
                 .all_equal();
             return match narrowest {
                 Some(symbol) => Pick::One(symbol),
