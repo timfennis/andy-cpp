@@ -115,3 +115,10 @@ print(a as? String);    // None
 ```
 
 The same goes for operators and functions: `a + 1` needs `(a as Int) + 1`. Functions that take any value, like `print`, `string` and `==`, take an `Any` as it is.
+
+Indexing is the exception: `a[i]` works on an `Any` and gives an `Any`, so you can read nested data and cast what you find:
+
+```ndc
+let data: Map<String, Any> = %{"scores": [3, 5]};
+print(data["scores"][1] as Int + 1);  // 6
+```
