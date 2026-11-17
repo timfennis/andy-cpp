@@ -296,7 +296,7 @@ impl Value {
     /// A function is one if its own type says so (see [`Function::fit`]):
     /// only [`Self::converted_to`] can make one that may be one a function
     /// whose calls are checked. What an iterator makes can't be checked
-    /// without making it.
+    /// without making it, so an iterator is only an `Iterator<Any>`.
     fn is_a(&self, target: &StaticType) -> bool {
         if let StaticType::Function { .. } = target
             && let Self::Object(object) = self
@@ -304,10 +304,7 @@ impl Value {
         {
             return function.fit(target) == FunctionFit::Proven;
         }
-        match (target, self.static_type()) {
-            (StaticType::Iterator(_), StaticType::Iterator(_)) => true,
-            (target, found) => found == *target,
-        }
+        self.static_type() == *target
     }
 
     /// This value as a `target`, if it is one, checking every element of a
