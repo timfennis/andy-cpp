@@ -524,7 +524,10 @@ impl StaticType {
     /// error on every non-empty `List<Int> as List<String>` to allow a cast
     /// that could only ever be vacuous.
     ///
-    /// `Never` overlaps nothing, since no value inhabits it.
+    /// `Never` overlaps nothing, since no value inhabits it. A container of
+    /// `Never` is empty, though, and an empty container of one kind is a
+    /// container of anything: `Option<Never>` overlaps `Option<Int>`, as
+    /// `None` is both.
     pub fn overlaps(&self, other: &Self) -> bool {
         // Never has no inhabitants, so nothing can satisfy it — not even
         // another Never.
@@ -539,8 +542,8 @@ impl StaticType {
         }
 
         match (self, other) {
-            // Iterable<T> overlaps every sequence-family type whose element
-            // type overlaps T.
+            // Iterable<T> overlaps every sequence-family type whose elements
+            // could be Ts.
             (
                 Self::Iterable(t),
                 Self::List(u)
@@ -557,37 +560,37 @@ impl StaticType {
                 | Self::MaxHeap(u)
                 | Self::Deque(u),
                 Self::Iterable(t),
-            ) => t.overlaps(u),
+            ) => Self::held_overlap(t, u),
             (Self::Iterable(t), Self::String) | (Self::String, Self::Iterable(t)) => {
-                Self::String.overlaps(t)
+                Self::held_overlap(t, &Self::String)
             }
             (Self::Iterable(t), Self::Tuple(elems)) | (Self::Tuple(elems), Self::Iterable(t)) => {
                 elems.iter().all(|elem| elem.overlaps(t))
             }
             (Self::Iterable(t), Self::Map { key, value })
             | (Self::Map { key, value }, Self::Iterable(t)) => {
-                Self::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]).overlaps(t)
+                let pair = Self::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]);
+                Self::held_overlap(t, &pair)
             }
 
-            // Covariant containers of the same shape overlap when their
-            // element types do.
+            // Containers of the same kind overlap when what they hold could be
+            // the same.
             (Self::Option(s), Self::Option(t))
             | (Self::List(s), Self::List(t))
             | (Self::Iterator(s), Self::Iterator(t))
             | (Self::MinHeap(s), Self::MinHeap(t))
             | (Self::MaxHeap(s), Self::MaxHeap(t))
-            | (Self::Deque(s), Self::Deque(t)) => s.overlaps(t),
+            | (Self::Deque(s), Self::Deque(t)) => Self::held_overlap(s, t),
             (Self::Tuple(s_elems), Self::Tuple(t_elems)) => {
                 s_elems.len() == t_elems.len()
                     && s_elems.iter().zip(t_elems).all(|(s, t)| s.overlaps(t))
             }
             (Self::Map { key: k1, value: v1 }, Self::Map { key: k2, value: v2 }) => {
-                k1.overlaps(k2) && v1.overlaps(v2)
+                Self::held_overlap(k1, k2) && Self::held_overlap(v1, v2)
             }
 
             // A function that takes anything, `(*)`, could be one of any
-            // parameter list. One that never returns could be one that
-            // returns anything.
+            // parameter list.
             (
                 Self::Function {
                     parameters: p1,
@@ -604,14 +607,19 @@ impl StaticType {
                     }
                     _ => true,
                 };
-                parameters
-                    && (matches!(r1.as_ref(), Self::Never)
-                        || matches!(r2.as_ref(), Self::Never)
-                        || r1.overlaps(r2))
+                parameters && Self::held_overlap(r1, r2)
             }
 
             _ => false,
         }
+    }
+
+    /// Whether what two containers hold, or two functions return, could be
+    /// the same: the types overlap, or one is `Never`, so there's nothing
+    /// there, which the other could have too. An `Option<Never>` is `None`,
+    /// and a function returning `Never` doesn't return.
+    fn held_overlap(a: &Self, b: &Self) -> bool {
+        matches!(a, Self::Never) || matches!(b, Self::Never) || a.overlaps(b)
     }
 
     pub fn index_element_type(&self) -> Option<Self> {
@@ -763,6 +771,22 @@ mod test {
         assert!(function(None, StaticType::Int).overlaps(&int_to_int));
         assert!(function(Some(vec![StaticType::Int]), StaticType::Never).overlaps(&int_to_int));
         assert!(function(Some(vec![StaticType::Any]), StaticType::Any).overlaps(&int_to_int));
+
+        // A container of `Never` is empty, which a container of anything
+        // could be, but a tuple with a `Never` in it has no value at all.
+        let option_of = |elem: StaticType| StaticType::Option(Box::new(elem));
+        assert!(!StaticType::Never.overlaps(&StaticType::Int));
+        assert!(option_of(StaticType::Never).overlaps(&option_of(StaticType::Int)));
+        assert!(list_of(StaticType::Int).overlaps(&list_of(StaticType::Never)));
+        assert!(seq_of(StaticType::Never).overlaps(&StaticType::String));
+        assert!(
+            !StaticType::Tuple(vec![StaticType::Never, StaticType::Int])
+                .overlaps(&StaticType::Tuple(vec![StaticType::Int, StaticType::Int]))
+        );
+        assert!(
+            function(Some(vec![]), option_of(StaticType::Never))
+                .overlaps(&function(Some(vec![]), option_of(StaticType::Int)))
+        );
 
         // Element types are treated as inhabited, so concrete containers with
         // disjoint element types are disjoint.

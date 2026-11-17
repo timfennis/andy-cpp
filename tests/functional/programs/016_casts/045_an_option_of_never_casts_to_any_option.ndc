@@ -1,0 +1,10 @@
+// `None` is an `Option` of every type, so an `Option<Never>` casts to any
+// `Option`, and a function returning one to a function returning any `Option`.
+// expect-output: None
+// expect-output: None
+fn f() -> Option<Never> { None }
+let b: Option<Never> = None;
+print(b as Option<Int>);
+let a: Any = f;
+let g = a as Fn() -> Option<Int>;
+print(g());
