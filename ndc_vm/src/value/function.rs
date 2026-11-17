@@ -256,17 +256,6 @@ impl Function {
         }
     }
 
-    /// The types of the parameters, when it takes a known number of them.
-    pub fn parameters(&self) -> Option<&[StaticType]> {
-        match self.signature() {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } => Some(parameters),
-            _ => None,
-        }
-    }
-
     /// How this function fits `expected`, a function type. A parameter or
     /// return type that its own type leaves unknown, as `Any`, fits
     /// anything, but an unknown return type has to be checked at each call:

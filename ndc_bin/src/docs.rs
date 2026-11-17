@@ -1,4 +1,4 @@
-use ndc_core::{Parameter, StaticType, TypeSignature};
+use ndc_core::StaticType;
 use ndc_interpreter::Interpreter;
 use std::cmp::Ordering;
 use std::fmt::Write;
@@ -85,41 +85,30 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
             println!();
         }
 
-        let (type_sig, return_type) = match &function.static_type {
+        // A function that takes any number of arguments has no parameter types.
+        let (parameters, return_type) = match &function.static_type {
             StaticType::Function {
                 parameters,
                 return_type,
-            } => {
-                let sig = match parameters {
-                    None => TypeSignature::Variadic,
-                    Some(types) => TypeSignature::Exact(
-                        types
-                            .iter()
-                            .enumerate()
-                            .map(|(i, t)| Parameter::new(format!("arg{i}"), t.clone()))
-                            .collect(),
-                    ),
-                };
-                (sig, return_type.as_ref())
-            }
-            other => (TypeSignature::Variadic, other),
+            } => (parameters.as_deref(), return_type.as_ref()),
+            other => (None, other),
         };
 
         let mut line = String::new();
         write!(line, "{}", function.name.bold().yellow())?;
-        match &type_sig {
-            TypeSignature::Variadic => {
+        match parameters {
+            None => {
                 write!(line, "{}", "(...)".dim())?;
             }
-            TypeSignature::Exact(params) => {
+            Some(parameters) => {
                 write!(line, "(")?;
-                for (i, Parameter { name, type_name }) in params.iter().enumerate() {
+                for (i, parameter) in parameters.iter().enumerate() {
                     if i > 0 {
                         write!(line, "{}", ", ".dim())?;
                     }
-                    write!(line, "{}", name.italic())?;
+                    write!(line, "{}", format!("arg{i}").italic())?;
                     write!(line, "{}", ":".dim())?;
-                    write!(line, " {}", type_name.to_string().cyan())?;
+                    write!(line, " {}", parameter.to_string().cyan())?;
                 }
                 write!(line, ")")?;
             }

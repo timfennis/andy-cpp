@@ -2,33 +2,6 @@ use crate::r#struct::StructId;
 use itertools::Itertools;
 use std::fmt;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum TypeSignature {
-    Variadic,
-    Exact(Vec<Parameter>),
-}
-
-impl Default for TypeSignature {
-    fn default() -> Self {
-        Self::Exact(vec![])
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub struct Parameter {
-    pub name: String,
-    pub type_name: StaticType,
-}
-
-impl Parameter {
-    pub fn new<N: Into<String>>(name: N, param_type: StaticType) -> Self {
-        Self {
-            name: name.into(),
-            type_name: param_type,
-        }
-    }
-}
-
 /// A type the analyser hasn't worked out yet. See [`StaticType::Var`].
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct TypeVar(pub u32);
@@ -515,10 +488,6 @@ impl StaticType {
         Self::Tuple(vec![])
     }
 
-    pub fn is_number(&self) -> bool {
-        matches!(self, Self::Number | Self::Float | Self::Int)
-    }
-
     /// Checks whether some runtime value could satisfy both `self` and `other`.
     ///
     /// # Examples
@@ -716,23 +685,7 @@ impl fmt::Display for StaticType {
     }
 }
 
-impl fmt::Display for TypeSignature {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Variadic => write!(f, "*args"),
-            Self::Exact(params) => write!(
-                f,
-                "{}",
-                params
-                    .iter()
-                    .map(|p| format!("{}: {}", p.name, p.type_name))
-                    .join(", ")
-            ),
-        }
-    }
-}
-
-#[allow(unused_imports)]
+#[cfg(test)]
 mod test {
     use super::*;
 

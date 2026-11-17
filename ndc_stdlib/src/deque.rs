@@ -38,10 +38,7 @@ mod inner {
     /// Removes and returns the first element of the `deque` as an `Option` returning `None` if the queue is empty.
     #[function(name = "pop_front?", signature = "<T>(Deque<T>) -> Option<T>")]
     pub fn maybe_pop_front(deque: &mut VecDeque<Value>) -> Value {
-        match deque.pop_front() {
-            None => Value::None,
-            Some(val) => Value::Object(std::rc::Rc::new(Object::Some(val))),
-        }
+        Value::option(deque.pop_front())
     }
 
     /// Removes and returns the last element of the `deque`.
@@ -55,10 +52,7 @@ mod inner {
     /// Removes and returns the last element of the `deque` as an `Option` returning `None` if the queue is empty.
     #[function(name = "pop_back?", signature = "<T>(Deque<T>) -> Option<T>")]
     pub fn maybe_pop_back(deque: &mut VecDeque<Value>) -> Value {
-        match deque.pop_back() {
-            None => Value::None,
-            Some(val) => Value::Object(std::rc::Rc::new(Object::Some(val))),
-        }
+        Value::option(deque.pop_back())
     }
 
     /// Returns (but does not remove) the first element of the `deque`.
@@ -73,10 +67,7 @@ mod inner {
     /// Returns (but does not remove) the first element of the `deque` as an `Option` returning `None` if the queue is empty.
     #[function(name = "front?", signature = "<T>(Deque<T>) -> Option<T>")]
     pub fn maybe_front(deque: &VecDeque<Value>) -> Value {
-        match deque.front().cloned() {
-            None => Value::None,
-            Some(val) => Value::Object(std::rc::Rc::new(Object::Some(val))),
-        }
+        Value::option(deque.front().cloned())
     }
 
     /// Returns (but does not remove) the last element of the `deque`.
@@ -91,10 +82,7 @@ mod inner {
     /// Returns (but does not remove) the last element of the `deque` as an `Option` returning `None` if the queue is empty.
     #[function(name = "back?", signature = "<T>(Deque<T>) -> Option<T>")]
     pub fn maybe_back(deque: &VecDeque<Value>) -> Value {
-        match deque.back().cloned() {
-            None => Value::None,
-            Some(val) => Value::Object(std::rc::Rc::new(Object::Some(val))),
-        }
+        Value::option(deque.back().cloned())
     }
 
     /// Returns `true` if the `deque` contains the `value` or `false` otherwise.

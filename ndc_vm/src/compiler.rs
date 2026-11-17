@@ -552,14 +552,7 @@ impl Compiler {
                     }
                     _ => OpCode::Call(arguments.len()),
                 };
-                // A named callee is looked up as a call picks it, not as a
-                // value: the overloads the program picks from stay an
-                // overload set, which a call resolves from its frame.
-                if let Expression::Identifier { .. } = function.expression {
-                    self.compile_binding(&self.binding(function.id), function_span)?;
-                } else {
-                    self.compile_expr(*function)?;
-                }
+                self.compile_expr(*function)?;
 
                 for argument in arguments {
                     self.compile_expr(argument)?;

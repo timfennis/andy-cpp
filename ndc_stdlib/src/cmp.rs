@@ -60,23 +60,15 @@ mod inner {
     /// Returns the larger of `left` and `right`, preferring `left` if they are equal.
     #[function(signature = "<T>(T, T) -> T")]
     pub fn max(left: Value, right: Value) -> anyhow::Result<Value> {
-        larger(left, right)
-    }
-
-    /// Returns the smaller of `left` and `right`, preferring `left` if they are equal.
-    #[function(signature = "<T>(T, T) -> T")]
-    pub fn min(left: Value, right: Value) -> anyhow::Result<Value> {
-        smaller(left, right)
-    }
-
-    fn larger(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.try_cmp(&right).map_err(|e| anyhow!(e))? {
             Ordering::Equal | Ordering::Greater => Ok(left),
             Ordering::Less => Ok(right),
         }
     }
 
-    fn smaller(left: Value, right: Value) -> anyhow::Result<Value> {
+    /// Returns the smaller of `left` and `right`, preferring `left` if they are equal.
+    #[function(signature = "<T>(T, T) -> T")]
+    pub fn min(left: Value, right: Value) -> anyhow::Result<Value> {
         match left.try_cmp(&right).map_err(|e| anyhow!(e))? {
             Ordering::Equal | Ordering::Less => Ok(left),
             Ordering::Greater => Ok(right),

@@ -178,6 +178,13 @@ impl Value {
         Self::Object(Rc::new(Object::Tuple(values)))
     }
 
+    /// `Some(value)`, or `None` when there's no value.
+    pub fn option(value: Option<Self>) -> Self {
+        value.map_or(Self::None, |value| {
+            Self::Object(Rc::new(Object::Some(value)))
+        })
+    }
+
     pub fn int(i: i64) -> Self {
         Self::Int(i)
     }
@@ -250,9 +257,7 @@ impl Value {
     ///
     /// **O(n) for `List`, `Map`, and `Deque`** — these variants iterate all
     /// elements to join their types into the element type.  Avoid calling this in
-    /// hot paths on container values.  Use the dedicated helpers instead:
-    ///
-    /// - [`Value::is_number`] — O(1) check for numeric types
+    /// hot paths on container values.
     pub fn static_type(&self) -> StaticType {
         let mut budget = usize::MAX;
         self.static_type_with_budget(usize::MAX, &mut budget)
@@ -281,14 +286,6 @@ impl Value {
             Self::Object(obj) => obj.static_type_with_budget(depth, budget),
             Self::Cell(cell) => cell.borrow().static_type_with_budget(depth, budget),
         }
-    }
-
-    /// Returns `true` if this value is an Int, Float, or Number.
-    ///
-    /// Prefer this over `self.static_type().is_number()` in hot paths — this is O(1)
-    /// and never allocates, whereas `static_type()` on containers is O(n).
-    pub fn is_number(&self) -> bool {
-        self.numeric_ref().is_some()
     }
 
     /// Whether this value is a `target`, a type that holds no other values

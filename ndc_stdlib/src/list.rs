@@ -44,10 +44,7 @@ mod inner {
         signature = "<T>(List<T>, List<T>) -> Option<Int>"
     )]
     pub fn maybe_find_subsequence(list: &[Value], subsequence: &[Value]) -> Value {
-        match subsequence_start(list, subsequence) {
-            None => Value::None,
-            Some(idx) => Value::Object(Rc::new(Object::Some(Value::Int(idx as i64)))),
-        }
+        Value::option(subsequence_start(list, subsequence).map(|idx| Value::Int(idx as i64)))
     }
 
     /// Inserts an element at the given index, shifting all elements after it to the right.
@@ -97,10 +94,7 @@ mod inner {
     /// Removes and returns the last element from the list, or `None` if empty.
     #[function(name = "pop?", signature = "<T>(List<T>) -> Option<T>")]
     pub fn maybe_pop(list: &mut Vec<Value>) -> Value {
-        match list.pop() {
-            None => Value::None,
-            Some(val) => Value::Object(Rc::new(Object::Some(val))),
-        }
+        Value::option(list.pop())
     }
 
     /// Removes and returns the last element from the list. Use `pop?` to get
@@ -114,10 +108,7 @@ mod inner {
     /// Removes and returns the first element from the list, or `None` if empty.
     #[function(name = "pop_left?", signature = "<T>(List<T>) -> Option<T>")]
     pub fn maybe_pop_left(list: &mut Vec<Value>) -> Value {
-        if list.is_empty() {
-            return Value::None;
-        }
-        Value::Object(Rc::new(Object::Some(list.remove(0))))
+        Value::option((!list.is_empty()).then(|| list.remove(0)))
     }
 
     /// Removes and returns the first element from the list. Use `pop_left?`
@@ -159,10 +150,7 @@ mod inner {
     /// not `None`; use `index?` for indexing from the end.
     #[function(name = "get?", signature = "<T>(List<T>, Int) -> Option<T>")]
     pub fn maybe_get(list: &[Value], index: usize) -> Value {
-        match list.get(index) {
-            None => Value::None,
-            Some(v) => Value::Object(Rc::new(Object::Some(v.clone()))),
-        }
+        Value::option(list.get(index).cloned())
     }
 
     /// Returns a copy of the element at `i`, wrapping negative indices from the
@@ -180,10 +168,7 @@ mod inner {
     /// non-throwing twin of the `[]` operator.
     #[function(name = "index?", signature = "<T>(List<T>, Int) -> Option<T>")]
     pub fn maybe_index(list: &[Value], i: &BigInt) -> Value {
-        match wrap_index(i, list.len()) {
-            Some(idx) => Value::Object(Rc::new(Object::Some(list[idx].clone()))),
-            None => Value::None,
-        }
+        Value::option(wrap_index(i, list.len()).map(|idx| list[idx].clone()))
     }
 
     /// Creates a copy of the list with its elements in reverse order
@@ -232,10 +217,7 @@ mod inner {
     /// Returns a copy of the first element, or `None` if the list is empty.
     #[function(name = "first?", signature = "<T>(List<T>) -> Option<T>")]
     pub fn maybe_first(list: &[Value]) -> Value {
-        match list.first() {
-            None => Value::None,
-            Some(v) => Value::Object(Rc::new(Object::Some(v.clone()))),
-        }
+        Value::option(list.first().cloned())
     }
 
     /// Returns a copy of the last element of the list or results in an error if the list is empty.
@@ -249,10 +231,7 @@ mod inner {
     /// Returns a copy of the last element, or `None` if the list is empty.
     #[function(name = "last?", signature = "<T>(List<T>) -> Option<T>")]
     pub fn maybe_last(list: &[Value]) -> Value {
-        match list.last() {
-            None => Value::None,
-            Some(v) => Value::Object(Rc::new(Object::Some(v.clone()))),
-        }
+        Value::option(list.last().cloned())
     }
 
     /// Returns the Cartesian product of two lists as a list of tuples.
