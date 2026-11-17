@@ -6,7 +6,7 @@
 //! the call's type as `Float`.
 
 use super::Analyser;
-use super::instances::Scheme;
+use super::instances::{Cast, Scheme};
 use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
@@ -50,7 +50,7 @@ impl Analyser {
         signature: &StaticType,
         declaration: NodeId,
         flags: Generalizing,
-        [first_use, first_function]: [usize; 2],
+        [first_use, first_function, first_cast]: [usize; 3],
     ) -> StaticType {
         let Generalizing {
             pure,
@@ -174,6 +174,20 @@ impl Analyser {
             .filter(|node| self.pure_functions.contains_key(node))
             .map(|&node| self.vars.resolve(self.result.analysis.function_type(node)))
             .collect::<Vec<_>>();
+        // A cast whose check depends on the types of an instance, as `x as
+        // List<Int>` does on what `x` is, is decided by each instance. One
+        // its value's type proves whatever the type parameters are, as `x as
+        // Any`, needs no check anywhere.
+        let casts = self.casts[first_cast..]
+            .iter()
+            .map(|cast| Cast {
+                found: self.vars.resolve(&cast.found),
+                ..cast.clone()
+            })
+            .filter(|cast| {
+                !cast.found.type_parameters().is_empty() && !cast.found.fits(&cast.target)
+            })
+            .collect::<Vec<_>>();
         let mut parameters = Vec::new();
         for typ in own.into_iter().chain(declared_pure) {
             if let StaticType::Function {
@@ -190,6 +204,7 @@ impl Analyser {
             .iter()
             .flat_map(|waiting| waiting.constraint.inputs())
             .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
+            .chain(casts.iter().map(|cast| &cast.found))
             .chain(&parameters)
         {
             for name in typ.type_parameters() {
@@ -220,6 +235,7 @@ impl Analyser {
                     .iter()
                     .map(|&node| (node, self.result.analysis.function_type(node).clone()))
                     .collect(),
+                casts: casts.into(),
             },
         );
         self.vars.resolve(signature)

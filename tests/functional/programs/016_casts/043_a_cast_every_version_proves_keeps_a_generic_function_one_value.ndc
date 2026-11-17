@@ -1,0 +1,6 @@
+// `x as Any` needs no check whatever `x` is, so it doesn't make `erase` a
+// function with a version per type of `x`: its value is one function.
+fn erase(x) => x as Any;
+let f: Any = erase;
+print(erase(1), (f as Fn(Int) -> Any)(2));
+// expect-output: 1 2
