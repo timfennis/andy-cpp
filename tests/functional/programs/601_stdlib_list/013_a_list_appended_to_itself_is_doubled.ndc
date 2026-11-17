@@ -1,9 +1,0 @@
-// `append` moves the elements of the other list, and a list appended to
-// itself is doubled.
-// expect-output: [1,1] [1,2] []
-let xs = [1];
-xs.append(xs);
-let ys = [1];
-let zs = [2];
-ys.append(zs);
-print(xs, ys, zs);

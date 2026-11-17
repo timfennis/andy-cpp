@@ -82,28 +82,10 @@ mod inner {
         list.push(elem);
     }
 
-    /// Moves elements from `other` to `list`, leaving `other` empty. A list
-    /// appended to itself is doubled.
+    /// Moves elements from `other` to `list`, leaving `other` empty.
     #[function(signature = "<T>(List<T>, List<T>)")]
-    pub fn append(list: &mut Vec<Value>, other: Value) -> anyhow::Result<()> {
-        let Value::Object(object) = &other else {
-            return Err(anyhow!("append requires two lists"));
-        };
-        let Object::List(other) = object.as_ref() else {
-            return Err(anyhow!("append requires two lists"));
-        };
-        // `list` is already borrowed from `other` when they're the same list.
-        if std::ptr::eq(list, other.as_ptr()) {
-            list.extend_from_within(..);
-            return Ok(());
-        }
-        let mut other = other.try_borrow_mut().map_err(|_borrow_err| {
-            anyhow!(
-                "the list can't be appended here, as a call that's still running is changing it"
-            )
-        })?;
-        list.append(&mut other);
-        Ok(())
+    pub fn append(list: &mut Vec<Value>, other: &mut Vec<Value>) {
+        list.append(other);
     }
 
     /// Copies elements from `other` to `list`, not touching `other`.

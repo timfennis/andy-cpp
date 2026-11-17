@@ -64,14 +64,12 @@ mod inner {
     use std::cmp::Ordering;
     use std::rc::Rc;
 
-    /// Returns `true` if the element is contained in the sequence.
+    /// Returns `true` if the element is one of the values the sequence
+    /// iterates over, or for a string, a part of it.
     #[function(name = "in", signature = "<T>(T, Iterable<T>) -> Bool")]
     pub fn op_contains(elem: Value, seq: Value) -> bool {
-        contains(&elem, &seq)
-    }
-
-    fn contains(elem: &Value, seq: &Value) -> bool {
-        match seq {
+        let elem = &elem;
+        match &seq {
             Value::Object(obj) => match obj.as_ref() {
                 Object::String(s) => match elem {
                     Value::Object(e) => match e.as_ref() {

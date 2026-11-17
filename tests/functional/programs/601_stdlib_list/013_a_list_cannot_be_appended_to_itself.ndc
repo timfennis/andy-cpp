@@ -1,0 +1,10 @@
+// `append` moves the elements of the other list, which can't be the list it
+// appends to: the elements would have to both move and stay.
+// expect-output: [1,2] []
+// expect-error: arg 1 is the same value as arg 0, and the call changes both
+let ys = [1];
+let zs = [2];
+ys.append(zs);
+print(ys, zs);
+let xs = [1];
+xs.append(xs);
