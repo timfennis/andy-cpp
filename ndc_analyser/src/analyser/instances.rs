@@ -42,6 +42,21 @@ pub(super) struct Scheme {
     /// The functions its body declares, with the types they're declared
     /// with, which an instance makes what its own types make them.
     pub(super) functions: Rc<[(NodeId, StaticType)]>,
+    /// The casts in its body of values whose types depend on its type
+    /// parameters, which an instance's types may prove.
+    pub(super) casts: Rc<[Cast]>,
+}
+
+/// A cast of a value of type `found` to `target`, at `node`, in the body of
+/// `instance` or else in the code as written. Whether it's checked as the
+/// program runs is its pick, made once `found` is settled: see
+/// [`Analyser::pick_cast_checks`].
+#[derive(Debug, Clone)]
+pub(super) struct Cast {
+    pub(super) node: NodeId,
+    pub(super) found: StaticType,
+    pub(super) target: StaticType,
+    pub(super) instance: Option<SymbolId>,
 }
 
 /// An instance [`Analyser::instance_for`] made: the generic function and the
@@ -292,12 +307,14 @@ impl Analyser {
                 getters: &mut picks.getters,
                 setters: &mut picks.setters,
                 augmented_assignments: &mut picks.augmented_assignments,
+                cast_checks: &mut picks.cast_checks,
             },
             None => PickTables {
                 bindings: &mut picks.bindings,
                 getters: &mut picks.getters,
                 setters: &mut picks.setters,
                 augmented_assignments: &mut picks.augmented_assignments,
+                cast_checks: &mut picks.cast_checks,
             },
         }
     }
@@ -415,8 +432,28 @@ impl Analyser {
                 own_pick: generic_use.own_pick.clone(),
             });
         }
+        for cast in scheme.casts.iter() {
+            self.casts.push(Cast {
+                found: self.vars.instantiate_with(&cast.found, &mut made),
+                instance: Some(instance),
+                ..cast.clone()
+            });
+        }
         self.settle_waiting(first);
         self.recording = outer;
+    }
+
+    /// Picks whether each cast of the batch is checked as the program runs:
+    /// not where the type of its value, settled now, proves it. In `fn f(ys)
+    /// => ys as List<Int>`, the instance for a `List<Int>` needs no check.
+    pub(super) fn pick_cast_checks(&mut self) {
+        for cast in std::mem::take(&mut self.casts) {
+            let check = (!self.vars.resolve(&cast.found).fits(&cast.target))
+                .then(|| self.vars.finish_open(&cast.target));
+            self.pick_tables(cast.instance)
+                .cast_checks
+                .insert(cast.node, check);
+        }
     }
 
     /// Reports the parameter of the function `node` declares, if it's a
@@ -499,6 +536,9 @@ pub(super) struct PickTables<'a> {
     getters: &'a mut AHashMap<NodeId, Binding<SymbolId>>,
     setters: &'a mut AHashMap<NodeId, Binding<SymbolId>>,
     augmented_assignments: &'a mut AHashMap<NodeId, Binding<SymbolId>>,
+    /// The type each cast checks its value against as the program runs, if
+    /// any.
+    pub(super) cast_checks: &'a mut AHashMap<NodeId, Option<StaticType>>,
 }
 
 impl<'a> PickTables<'a> {

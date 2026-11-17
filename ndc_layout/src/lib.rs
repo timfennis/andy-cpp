@@ -30,6 +30,8 @@ pub struct Picks {
     pub setters: AHashMap<NodeId, Binding<SymbolId>>,
     /// For [`Analysis::augmented_assignments`].
     pub augmented_assignments: AHashMap<NodeId, Binding<SymbolId>>,
+    /// For [`Analysis::cast_checks`].
+    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
     /// For [`Analysis::variables`].
     pub variables: AHashMap<NodeId, SymbolId>,
     /// Each struct declaration's struct, for [`Analysis::structs`], which also
@@ -52,6 +54,8 @@ pub struct InstancePicks {
     /// As [`Analysis::function_types`], for the functions the instance's
     /// body declares, with the instance's types.
     pub function_types: AHashMap<NodeId, StaticType>,
+    /// As [`Analysis::cast_checks`], for the casts in the instance's body.
+    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
 }
 
 impl InstancePicks {
@@ -63,6 +67,7 @@ impl InstancePicks {
             setters: AHashMap::new(),
             augmented_assignments: AHashMap::new(),
             function_types: AHashMap::new(),
+            cast_checks: AHashMap::new(),
         }
     }
 }
@@ -163,6 +168,7 @@ impl<'a> Layout<'a> {
                     .map(locate_binding)
                     .collect(),
                 function_types: picks.function_types,
+                cast_checks: picks.cast_checks,
             };
             analysis
                 .instances
@@ -182,6 +188,7 @@ impl<'a> Layout<'a> {
         analysis
             .augmented_assignments
             .extend(picks.augmented_assignments.into_iter().map(locate_binding));
+        analysis.cast_checks.extend(picks.cast_checks);
         // A declaration is in the frame it is made in, so only an assignment
         // target can be a use from a function further in.
         analysis.variables.extend(

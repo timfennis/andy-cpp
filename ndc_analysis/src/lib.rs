@@ -90,6 +90,9 @@ pub struct Instance {
     /// As [`Analysis::function_types`], for the functions the instance's
     /// body declares, with the instance's types.
     pub function_types: AHashMap<NodeId, StaticType>,
+    /// As [`Analysis::cast_checks`], for the casts in the instance's body,
+    /// which its types may already prove.
+    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
 }
 
 impl Analysis {
