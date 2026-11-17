@@ -175,7 +175,7 @@ impl AnalysisError {
     pub(crate) fn recursion_changes_types(function: &str, span: Span) -> Self {
         Self::new(
             format!(
-                "`{function}` calls itself with an argument built from what it was given, so each call would need a version of `{function}` for a deeper type"
+                "`{function}` calls itself with types bigger than the ones it was given, so each call could need a version of `{function}` for bigger types"
             ),
             span,
         )

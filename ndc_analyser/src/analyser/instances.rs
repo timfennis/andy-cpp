@@ -8,7 +8,7 @@
 
 use super::Analyser;
 use super::generics::named_in_order;
-use super::solver::{CallSite, Constraint, Origin, Waiting};
+use super::solver::{CallSite, Constraint, Frame, Origin, Waiting};
 use crate::error::AnalysisError;
 use ahash::AHashMap;
 use itertools::izip;
@@ -42,6 +42,15 @@ pub(super) struct Scheme {
     /// The functions its body declares, with the types they're declared
     /// with, which an instance makes what its own types make them.
     pub(super) functions: Rc<[(NodeId, StaticType)]>,
+}
+
+/// An instance [`Analyser::instance_for`] made: the generic function and the
+/// types of its key it's for, and the instance whose body first used it.
+#[derive(Debug)]
+pub(super) struct MadeInstance {
+    function: SymbolId,
+    key: Vec<StaticType>,
+    made_in: Option<SymbolId>,
 }
 
 /// An instance [`Analyser::instance_for`] made, which waits to be solved.
@@ -188,7 +197,7 @@ impl Analyser {
             self.report_unknown_instance(generic_use);
             return;
         }
-        let instance = self.instance_for(generic_use.function, key, generic_use.span, new);
+        let instance = self.instance_for(generic_use, key, new);
         if instance == generic_use.function {
             return;
         }
@@ -223,23 +232,32 @@ impl Analyser {
         ));
     }
 
-    /// Whether `generic_use`, in the body of an instance of the function it
-    /// uses, needs an instance whose key holds that instance's key inside a
-    /// bigger type: `f<List<Int>>` from `f<Int>`.
+    /// Whether `generic_use`, made in the body of an instance of the function
+    /// it uses, needs an instance for bigger types than that one's:
+    /// `f<List<Int>>` from `f<Int>`. As each instance of a function made for
+    /// its own recursion is at most as big as the one it's made from, there
+    /// are only so many, and making them ends.
     fn grows_an_instance(&self, generic_use: &GenericUse, key: &[StaticType]) -> bool {
-        let Some(outer) = generic_use.instance else {
-            return false;
-        };
-        self.instances
-            .iter()
-            .any(|((function, outer_key), &instance)| {
-                instance == outer
-                    && *function == generic_use.function
-                    && key
-                        .iter()
-                        .zip(outer_key)
-                        .any(|(new, old)| new != old && new.contains(&|part| part == old))
-            })
+        let size = |key: &[StaticType]| key.iter().map(StaticType::size).sum::<usize>();
+        self.enclosing_instance_of(generic_use.function, generic_use.instance)
+            .is_some_and(|outer| size(key) > size(&outer.key))
+    }
+
+    /// The nearest instance of `function` among `at` and the instances it
+    /// was made in the body of.
+    fn enclosing_instance_of(
+        &self,
+        function: SymbolId,
+        mut at: Option<SymbolId>,
+    ) -> Option<&MadeInstance> {
+        while let Some(instance) = at {
+            let made = &self.made_instances[&instance];
+            if made.function == function {
+                return Some(made);
+            }
+            at = made.made_in;
+        }
+        None
     }
 
     /// The tables a pick in the body of `instance` goes in, or the shared
@@ -267,11 +285,11 @@ impl Analyser {
     /// instance too, whose calls take only the overloads that take `Any`.
     fn instance_for(
         &mut self,
-        function: SymbolId,
+        generic_use: &GenericUse,
         key: Vec<StaticType>,
-        span: Span,
         new: &mut Vec<NewInstance>,
     ) -> SymbolId {
+        let function = generic_use.function;
         if let Some(&instance) = self.instances.get(&(function, key.clone())) {
             return instance;
         }
@@ -291,11 +309,19 @@ impl Analyser {
             .instances
             .insert(instance, InstancePicks::new(declaration));
         self.instances.insert((function, key.clone()), instance);
+        self.made_instances.insert(
+            instance,
+            MadeInstance {
+                function,
+                key: key.clone(),
+                made_in: generic_use.instance,
+            },
+        );
         new.push(NewInstance {
             instance,
             function,
             key,
-            span,
+            span: generic_use.span,
         });
         instance
     }
@@ -303,7 +329,9 @@ impl Analyser {
     /// Solves the constraints of `function` for the instance whose key has
     /// these types, recording the picks they make in the instance's picks.
     /// `span` is the use that needs it, where a `pure fn` that this instance
-    /// makes take more than data is reported.
+    /// makes take more than data is reported, and so is what its
+    /// constraints find if only the function's own recursion uses it: the
+    /// copies its calls made were for other types.
     fn solve_instance(
         &mut self,
         instance: SymbolId,
@@ -319,6 +347,16 @@ impl Analyser {
             .zip(key.iter().cloned())
             .collect::<Vec<_>>();
         let outer = self.recording.replace(instance);
+        let made_in = self.made_instances[&instance].made_in;
+        let unchecked = self
+            .enclosing_instance_of(function, made_in)
+            .is_some()
+            .then(|| Frame {
+                function,
+                name: self.resolver.symbol_name(function).to_string(),
+                call: span,
+            });
+        let outer_unchecked = std::mem::replace(&mut self.unchecked_instance, unchecked);
         let first = self.vars.count();
         for waiting in scheme.constraints.iter() {
             let mut copy = Waiting {
@@ -366,6 +404,7 @@ impl Analyser {
         }
         self.settle_waiting(first);
         self.recording = outer;
+        self.unchecked_instance = outer_unchecked;
     }
 
     /// Reports the parameter of the function `node` declares, if it's a

@@ -25,7 +25,7 @@ use assignments::DeferredWrite;
 use declarations::FunctionDeclaration;
 pub use generics::tied_natives;
 use instances::{GenericUse, Pending, Scheme};
-use solver::{Constraint, EarlyPick, Origin, Waiting};
+use solver::{Constraint, EarlyPick, Frame, Origin, Waiting};
 #[cfg(test)]
 mod tests;
 
@@ -66,6 +66,8 @@ pub struct Analyser {
     /// The instance of each generic function for each set of types of its
     /// key that a call gave it.
     instances: AHashMap<(SymbolId, Vec<StaticType>), SymbolId>,
+    /// What each of those instances is for, by the instance.
+    made_instances: AHashMap<SymbolId, instances::MadeInstance>,
     /// The instance whose constraints are being solved, which gets the
     /// picks they make.
     recording: Option<SymbolId>,
@@ -101,6 +103,9 @@ pub struct Analyser {
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
+    /// The recursive call that uses the instance being solved, when no
+    /// call's copies checked its constraints, see [`Self::solve_instance`].
+    unchecked_instance: Option<Frame>,
     /// The instance and the calls each literal made while solving a copy of
     /// a generic function's constraints was made in, keyed by its element
     /// type, so an error in its values is reported as one made there.
@@ -178,6 +183,7 @@ impl Analyser {
             pending: Pending::default(),
             uses: Vec::new(),
             instances: AHashMap::new(),
+            made_instances: AHashMap::new(),
             recording: None,
             declared_in_batch: AHashSet::new(),
             declaring: None,
@@ -189,6 +195,7 @@ impl Analyser {
             declared_overloads: Vec::new(),
             expected_parameters: AHashMap::new(),
             copied_through: None,
+            unchecked_instance: None,
             literal_origins: AHashMap::new(),
             deferred_writes: Vec::new(),
             next_serial: 0,
@@ -294,16 +301,23 @@ impl Analyser {
     /// reported there, with notes pointing into the function.
     fn emit(&mut self, err: AnalysisError) {
         // An instance's constraints were checked where they were copied to
-        // its calls.
+        // its calls, unless it's one only its function's recursion uses.
+        // What it copies from a recursive call of its function is what it
+        // checks itself.
+        let copied_through = self.copied_through.iter().flat_map(|frames| frames.iter());
         if self.recording.is_some() {
-            return;
-        }
-        let err = match &self.copied_through {
-            Some(frames) => {
-                err.through_calls(frames.iter().map(|frame| (frame.name.as_str(), frame.call)))
+            let Some(unchecked) = &self.unchecked_instance else {
+                return;
+            };
+            if copied_through
+                .clone()
+                .any(|frame| frame.function == unchecked.function)
+            {
+                return;
             }
-            None => err,
-        };
+        }
+        let frames = self.unchecked_instance.iter().chain(copied_through);
+        let err = err.through_calls(frames.map(|frame| (frame.name.as_str(), frame.call)));
         self.result.errors.push(err);
     }
 
