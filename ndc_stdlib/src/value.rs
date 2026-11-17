@@ -37,7 +37,7 @@ mod inner {
     /// Creates a new instance of `Some`
     #[function(name = "Some", signature = "<T>(T) -> Option<T>")]
     pub fn some(value: Value) -> Value {
-        Value::Object(Rc::new(Object::Some(value)))
+        Value::option(Some(value))
     }
 
     /// Creates a new instance of `None`

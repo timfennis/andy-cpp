@@ -25,19 +25,13 @@ mod inner {
     /// Removes and returns the smallest element from the min-heap, or `None` if empty.
     #[function(name = "pop?", signature = "<T>(MinHeap<T>) -> Option<T>")]
     pub fn maybe_min_pop(heap: &mut BinaryHeap<Reverse<OrdValue>>) -> Value {
-        match heap.pop() {
-            None => Value::None,
-            Some(Reverse(OrdValue(v))) => Value::Object(std::rc::Rc::new(Object::Some(v))),
-        }
+        Value::option(heap.pop().map(|Reverse(OrdValue(value))| value))
     }
 
     /// Removes and returns the largest element from the max-heap, or `None` if empty.
     #[function(name = "pop?", signature = "<T>(MaxHeap<T>) -> Option<T>")]
     pub fn maybe_max_pop(heap: &mut BinaryHeap<OrdValue>) -> Value {
-        match heap.pop() {
-            None => Value::None,
-            Some(OrdValue(v)) => Value::Object(std::rc::Rc::new(Object::Some(v))),
-        }
+        Value::option(heap.pop().map(|OrdValue(value)| value))
     }
 
     /// Removes and returns the smallest element from the min-heap, or errors if empty.

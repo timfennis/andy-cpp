@@ -1,5 +1,5 @@
 use ndc_macros::export_module;
-use ndc_vm::value::{Object, Value, VmString};
+use ndc_vm::value::{Value, VmString};
 
 use std::rc::Rc;
 
@@ -23,13 +23,6 @@ pub fn join_to_string(list: Value, sep: &str) -> anyhow::Result<String> {
             Ok(out)
         }
     }
-}
-
-/// `Some(value)`, or `None` when there's no value.
-fn option(value: Option<Value>) -> Value {
-    value.map_or(Value::None, |value| {
-        Value::Object(Rc::new(Object::Some(value)))
-    })
 }
 
 /// `string` without `prefix` and `suffix`, when it starts and ends with them
@@ -209,7 +202,7 @@ mod inner {
         signature = "(String, String) -> Option<(String, String)>"
     )]
     pub fn maybe_split_once(string: &str, pattern: &str) -> Value {
-        option(
+        Value::option(
             string.split_once(pattern).map(|(before, after)| {
                 Value::tuple(vec![Value::string(before), Value::string(after)])
             }),
@@ -232,7 +225,7 @@ mod inner {
         signature = "(String, String) -> Option<String>"
     )]
     pub fn maybe_strip_prefix(string: &str, prefix: &str) -> Value {
-        option(string.strip_prefix(prefix).map(Value::string))
+        Value::option(string.strip_prefix(prefix).map(Value::string))
     }
 
     /// Removes one matching suffix. It's an error if the string doesn't end
@@ -251,7 +244,7 @@ mod inner {
         signature = "(String, String) -> Option<String>"
     )]
     pub fn maybe_strip_suffix(string: &str, suffix: &str) -> Value {
-        option(string.strip_suffix(suffix).map(Value::string))
+        Value::option(string.strip_suffix(suffix).map(Value::string))
     }
 
     /// Removes one matching prefix and suffix, which must not overlap. Empty
@@ -272,7 +265,7 @@ mod inner {
         signature = "(String, String, String) -> Option<String>"
     )]
     pub fn maybe_strip_circumfix(string: &str, prefix: &str, suffix: &str) -> Value {
-        option(circumfix(string, prefix, suffix).map(Value::string))
+        Value::option(circumfix(string, prefix, suffix).map(Value::string))
     }
 
     /// Removes leading and trailing whitespace from the string.

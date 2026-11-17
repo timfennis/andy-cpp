@@ -391,13 +391,11 @@ impl Vm {
                             span,
                         ));
                     };
-                    if let Err(mut e) =
-                        self.call_elementwise(args, axis_len, name, span, |_, _, i| {
-                            at_position(i).cloned().ok_or_else(|| {
-                                VmError::new(format!("no function for tuple position {i}"), span)
-                            })
+                    if let Err(mut e) = self.call_elementwise(args, axis_len, name, span, |i| {
+                        at_position(i).cloned().ok_or_else(|| {
+                            VmError::new(format!("no function for tuple position {i}"), span)
                         })
-                    {
+                    }) {
                         e.span.get_or_insert(span);
                         return Err(e);
                     }
@@ -839,7 +837,7 @@ impl Vm {
         axis_len: usize,
         callee_name: Option<&str>,
         span: Span,
-        mut pick: impl FnMut(&mut Self, &[Value], usize) -> Result<Function, VmError>,
+        pick: impl Fn(usize) -> Result<Function, VmError>,
     ) -> Result<(), VmError> {
         // Materialise the broadcast arguments up front so the inner
         // call_callback can hold &mut self without conflicting with stack
@@ -852,7 +850,7 @@ impl Vm {
         for i in 0..axis_len {
             elem_args.clear();
             elem_args.extend(arg_values.iter().map(|arg| vec_element_at(arg, i)));
-            let scalar = pick(self, &elem_args, i)?;
+            let scalar = pick(i)?;
             let result = self.call_callback(scalar, &elem_args).map_err(|mut e| {
                 let prefix = match callee_name {
                     Some(name) => format!("while vectorising '{name}' at index {i}: "),
@@ -979,9 +977,8 @@ impl Vm {
 
 /// Find the broadcast-axis length for a vec call: the shared length of every
 /// tuple-shaped argument. Empty tuples and length mismatches return `None`,
-/// which is interpreted upstream as "vec doesn't apply" and falls through to
-/// the regular `no function found` error.
-pub(crate) fn vec_axis_len(args: &[Value]) -> Option<usize> {
+/// which `CallVec` reports as an error.
+fn vec_axis_len(args: &[Value]) -> Option<usize> {
     let mut axis: Option<usize> = None;
     for arg in args {
         if let Value::Object(obj) = arg
@@ -1002,7 +999,7 @@ pub(crate) fn vec_axis_len(args: &[Value]) -> Option<usize> {
 
 /// Pick the per-element value at vec position `i`. Tuple args contribute
 /// `tuple[i]`; non-tuple args broadcast unchanged.
-pub(crate) fn vec_element_at(arg: &Value, i: usize) -> Value {
+fn vec_element_at(arg: &Value, i: usize) -> Value {
     if let Value::Object(obj) = arg
         && let Object::Tuple(elems) = obj.as_ref()
     {
@@ -1060,10 +1057,7 @@ fn bad_range_bound(value: &Value) -> String {
 #[cold]
 fn try_cast(stack: &mut [Value], target: &StaticType) {
     let value = stack.last_mut().expect("stack underflow");
-    *value = match value.converted_to(target) {
-        Some(converted) => Value::Object(Rc::new(Object::Some(converted))),
-        None => Value::None,
-    };
+    *value = Value::option(value.converted_to(target));
 }
 
 /// Checks that the value on top of `stack` is a `target`, and makes it one:
