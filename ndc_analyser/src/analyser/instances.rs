@@ -435,6 +435,7 @@ impl Analyser {
         for cast in scheme.casts.iter() {
             self.casts.push(Cast {
                 found: self.vars.instantiate_with(&cast.found, &mut made),
+                target: self.vars.instantiate_with(&cast.target, &mut made),
                 instance: Some(instance),
                 ..cast.clone()
             });

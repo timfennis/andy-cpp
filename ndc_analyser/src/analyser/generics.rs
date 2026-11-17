@@ -197,18 +197,24 @@ impl Analyser {
             .filter(|node| self.pure_functions.contains_key(node))
             .map(|&node| self.vars.resolve(self.result.analysis.function_type(node)))
             .collect::<Vec<_>>();
-        // A cast whose check depends on the types of an instance, as `x as
-        // [Int]` does on what `x` is, is decided by each instance. One
-        // its value's type proves whatever the type parameters are, as `x as
-        // Any`, needs no check anywhere.
+        // A cast whose check depends on the types of an instance, as
+        // `cast::<[Int]>(x)` does on what `x` is and `cast::<T>(x)` on what
+        // `T` is, is decided by each instance. One its value's type proves
+        // whatever the type parameters are, as `cast::<Any>(x)`, or as
+        // `cast::<T>(x)` with `x: T`, needs no check anywhere.
         let casts = self.casts[first_cast..]
             .iter()
             .map(|cast| Cast {
                 found: self.vars.resolve(&cast.found),
+                target: self.vars.resolve(&cast.target),
                 ..cast.clone()
             })
             .filter(|cast| {
-                !cast.found.type_parameters().is_empty() && !cast.found.fits(&cast.target)
+                if cast.target.type_parameters().is_empty() {
+                    !cast.found.type_parameters().is_empty() && !cast.found.fits(&cast.target)
+                } else {
+                    cast.found != cast.target
+                }
             })
             .collect::<Vec<_>>();
         let mut parameters = Vec::new();
@@ -227,7 +233,7 @@ impl Analyser {
             .iter()
             .flat_map(|waiting| waiting.constraint.inputs())
             .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
-            .chain(casts.iter().map(|cast| &cast.found))
+            .chain(casts.iter().flat_map(|cast| [&cast.found, &cast.target]))
             .chain(&parameters)
         {
             for name in typ.type_parameters() {

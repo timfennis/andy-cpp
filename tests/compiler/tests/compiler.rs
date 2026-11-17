@@ -382,16 +382,17 @@ fn a_while_loop_discards_its_body_value_and_yields_unit() {
 // a = 5;
 //
 // A top-level declaration is a global, so the declaration stores 1 into
-// global slot 0 (there are no natives here).
+// global slot 2 (there are no natives here, and the language's intrinsics
+// `cast` and `cast?` take slots 0 and 1).
 // Assignment pushes new value, SetGlobal overwrites,
 // push unit as the expression result, Pop discards it.
 //
 // 0: Constant(0)    push `1`
-// 1: SetGlobal(0)   store in global slot 0 (declaration)
+// 1: SetGlobal(2)   store in global slot 2 (declaration)
 // 2: Constant(1)    push `()` (declaration result)
 // 3: Pop            discard (statement)
 // 4: Constant(2)    push `5`
-// 5: SetGlobal(0)   overwrite global slot 0 (assignment)
+// 5: SetGlobal(2)   overwrite global slot 2 (assignment)
 // 6: Constant(3)    push `()` (assignment result)
 // 7: Pop            discard (statement)
 // 8: Halt
@@ -401,11 +402,11 @@ fn a_top_level_variable_is_declared_and_assigned_through_its_global() {
         compile_with_analysis("let a = 1;\na = 5;"),
         [
             Constant(0),
-            SetGlobal(0),
+            SetGlobal(2),
             Constant(1),
             Pop,
             Constant(2),
-            SetGlobal(0),
+            SetGlobal(2),
             Constant(3),
             Pop,
             Halt
@@ -559,17 +560,18 @@ fn a_named_call_with_a_tuple_argument_is_a_plain_call() {
 // point.x = 2;
 //
 // A member assignment calls the field's setter `x=` with the receiver and
-// then the value. `Point`, `x` and `x=` take global slots 0 to 2, so `point`
-// is global 3. However the setter itself is loaded, the call is:
+// then the value. The intrinsics `cast` and `cast?` take global slots 0 and
+// 1, and `Point`, `x` and `x=` 2 to 4, so `point` is global 5. However the
+// setter itself is loaded, the call is:
 //
-// <setter>, GetGlobal(3), Constant(_), Call(2)
+// <setter>, GetGlobal(5), Constant(_), Call(2)
 #[test]
 fn member_assignment_calls_the_setter_with_the_receiver_and_the_value() {
     let ops = compile_with_analysis("struct Point { x: Int }\nlet point = Point(1);\npoint.x = 2;");
 
     assert!(
         ops.windows(4)
-            .any(|window| matches!(window, [_, GetGlobal(3), Constant(_), Call(2)])),
+            .any(|window| matches!(window, [_, GetGlobal(5), Constant(_), Call(2)])),
         "expected setter, receiver, value, Call(2); got: {ops:?}",
     );
 }
@@ -787,7 +789,8 @@ fn a_closure_reaches_captured_variables_through_its_upvalues() {
 // let g = 1;
 // fn f() { g = 2; g }
 //
-// A function reaches a top-level declaration as a global: `g` is global 0,
+// A function reaches a top-level declaration as a global: `g` is global 2,
+// after the intrinsics,
 // which `f` writes and reads with SetGlobal and GetGlobal. `f` captures
 // nothing, so its declaration loads it as a plain constant, with no Closure.
 #[test]
@@ -803,10 +806,10 @@ fn a_function_reaches_top_level_declarations_as_globals_without_capturing_them()
         compile_nested_function(source, &[2]),
         [
             Constant(0),
-            SetGlobal(0),
+            SetGlobal(2),
             Constant(1),
             Pop,
-            GetGlobal(0),
+            GetGlobal(2),
             Return
         ]
     );

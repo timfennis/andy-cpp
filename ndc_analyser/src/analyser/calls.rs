@@ -3,7 +3,8 @@ use super::solver::CallSite;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads};
 use itertools::Itertools;
-use ndc_core::{NodeId, StaticType};
+use ndc_analysis::{Binding, Candidate};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation};
 use ndc_resolver::{Candidates, SymbolId};
@@ -198,12 +199,95 @@ impl Analyser {
         let site = CallSite::Call(function.id);
         let type_arguments = self.lower_type_arguments(type_arguments);
         let types = self.analyse_arguments(function.id, &type_arguments, arguments);
+        if let Some((symbol, intrinsic)) =
+            self.called_intrinsic(function.id, &type_arguments, &types)
+        {
+            return self.analyse_intrinsic_call(
+                function.id,
+                symbol,
+                intrinsic,
+                &type_arguments,
+                &types,
+                name,
+                span,
+            );
+        }
         match arguments {
             _ if !type_arguments.is_empty() => {
                 self.constrain_explicit_call(site, type_arguments, types, name, span)
             }
             [_, index] if name == "[]" => self.constrain_index_read(site, types, index, kind, span),
             _ => self.constrain_call(site, types, kind, name, span),
+        }
+    }
+
+    /// The intrinsic a call of the name at `callee` with these type
+    /// arguments and arguments means, if it means one: of the nearest scope
+    /// with an overload that could take them, the only one. A function the
+    /// program declares, as `fn cast<T>(x: T)`, is nearer, and takes the
+    /// call if it can, as it would from a native.
+    fn called_intrinsic(
+        &mut self,
+        callee: NodeId,
+        type_arguments: &[StaticType],
+        arguments: &[StaticType],
+    ) -> Option<(SymbolId, Intrinsic)> {
+        let candidates = self.resolver.reference_candidates(callee).clone();
+        for group in self.overloads().reachable_groups(&candidates) {
+            let viable = group
+                .into_iter()
+                .filter(|&symbol| self.could_accept(symbol, type_arguments, arguments))
+                .collect::<Vec<_>>();
+            match viable[..] {
+                [] => {}
+                [only] => {
+                    return self
+                        .resolver
+                        .intrinsic(only)
+                        .map(|intrinsic| (only, intrinsic));
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    /// Analyses the call at `callee` of the intrinsic `symbol`, which no
+    /// signature says the type of: `cast::<T>(x)` is a cast of `x` to `T`.
+    #[allow(clippy::too_many_arguments)]
+    fn analyse_intrinsic_call(
+        &mut self,
+        callee: NodeId,
+        symbol: SymbolId,
+        intrinsic: Intrinsic,
+        type_arguments: &[StaticType],
+        arguments: &[StaticType],
+        name: &str,
+        span: Span,
+    ) -> StaticType {
+        self.record_pick(
+            CallSite::Call(callee),
+            Binding::Resolved(Candidate::Scalar(symbol)),
+            arguments,
+        );
+        match intrinsic {
+            Intrinsic::Cast | Intrinsic::TryCast => {
+                let ([target], [found]) = (type_arguments, arguments) else {
+                    for argument in arguments {
+                        self.vars
+                            .settle_unknowns_but_literals(argument, &StaticType::Error);
+                    }
+                    self.emit(AnalysisError::cast_without_a_target(name, span));
+                    return StaticType::Error;
+                };
+                self.analyse_cast(
+                    callee,
+                    found,
+                    target.clone(),
+                    intrinsic == Intrinsic::TryCast,
+                    span,
+                )
+            }
         }
     }
 

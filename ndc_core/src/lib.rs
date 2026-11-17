@@ -17,11 +17,12 @@ pub struct FunctionRegistry<T> {
     intrinsics: Vec<IntrinsicFunction>,
 }
 
+/// A registry of no natives and the language's intrinsics.
 impl<T> Default for FunctionRegistry<T> {
     fn default() -> Self {
         Self {
             functions: vec![],
-            intrinsics: vec![],
+            intrinsics: IntrinsicFunction::all(),
         }
     }
 }

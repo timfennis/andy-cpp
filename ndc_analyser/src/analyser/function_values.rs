@@ -4,11 +4,12 @@
 //! `split(String, String)`.
 
 use super::Analyser;
+use super::instances::Cast;
 use super::solver::{CallSite, Constraint, EarlyOverload};
 use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use ndc_analysis::{Binding, Candidate};
-use ndc_core::{NodeId, StaticType};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_resolver::{BindingKind, Candidates, SymbolId};
 
@@ -130,7 +131,38 @@ impl Analyser {
         }
         let typ = self.instantiate_function(symbol);
         self.flush_value_copies(id, &typ, span);
-        typ
+        self.intrinsic_value(id, symbol, &[], span).unwrap_or(typ)
+    }
+
+    /// What the value at `id` of `symbol` with `type_arguments` needs if
+    /// `symbol` is an intrinsic, whose bytecode the compiler makes into a
+    /// function there: `cast::<Int>` in `xs.map(cast::<Int>)` is a cast of
+    /// whatever it's passed, an `Any`, to `Int`. Returns the type of a
+    /// failed check if it can't be a value, as `cast` without the type it
+    /// casts to.
+    fn intrinsic_value(
+        &mut self,
+        id: NodeId,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+        span: Span,
+    ) -> Option<StaticType> {
+        match self.resolver.intrinsic(symbol)? {
+            Intrinsic::Cast | Intrinsic::TryCast => {
+                let [target] = type_arguments else {
+                    let name = self.resolver.symbol_name(symbol).to_string();
+                    self.emit(AnalysisError::cast_without_a_target(&name, span));
+                    return Some(StaticType::Error);
+                };
+                self.casts.push(Cast {
+                    node: id,
+                    found: StaticType::Any,
+                    target: target.clone(),
+                    instance: None,
+                });
+                None
+            }
+        }
     }
 
     /// The value of the one function `symbol` that `f::<…>` at `id` can
@@ -153,7 +185,8 @@ impl Analyser {
             return StaticType::Error;
         };
         self.flush_value_copies(id, &typ, span);
-        typ
+        self.intrinsic_value(id, symbol, type_arguments, span)
+            .unwrap_or(typ)
     }
 
     /// Reports `f::<…>` at `id` given `given` type arguments that no
@@ -435,6 +468,11 @@ impl Analyser {
             .expect("internal error: a function value commits to an overload that takes it");
         self.vars.bind_argument(&value.expected, &typ);
         self.flush_value_copies(value.id, &typ, value.span);
+        if let Some(failed) =
+            self.intrinsic_value(value.id, symbol, &value.type_arguments, value.span)
+        {
+            self.vars.try_unify(&value.expected, &failed);
+        }
         if early && cfg!(debug_assertions) {
             self.remember_early_function_value(value, symbol);
         }

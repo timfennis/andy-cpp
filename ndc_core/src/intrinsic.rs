@@ -31,3 +31,32 @@ pub struct IntrinsicFunction {
     pub static_type: StaticType,
     pub intrinsic: Intrinsic,
 }
+
+impl IntrinsicFunction {
+    /// The intrinsics of the language, which every program can call: `cast`
+    /// and `cast?`.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        let function = |name: &str, signature: &str, intrinsic, documentation: &str| Self {
+            name: name.to_string(),
+            documentation: Some(documentation.to_string()),
+            static_type: StaticType::signature(signature)
+                .expect("internal error: an intrinsic's signature parses"),
+            intrinsic,
+        };
+        vec![
+            function(
+                "cast",
+                "<T>(Any) -> T",
+                Intrinsic::Cast,
+                "Returns the value as a `T`: `cast::<Int>(value)`. It checks that the value is a `T` while the program runs, and never converts it. Parts of the value's type that aren't known yet are `T`'s, so `cast::<Float>(1)` is `1.0`.",
+            ),
+            function(
+                "cast?",
+                "<T>(Any) -> Option<T>",
+                Intrinsic::TryCast,
+                "Returns `Some(value)` if the value is a `T` and `None` if it isn't: `cast?::<Int>(value)`. Unlike `cast`, it only tests the value, which keeps its type.",
+            ),
+        ]
+    }
+}

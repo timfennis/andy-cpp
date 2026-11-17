@@ -338,7 +338,7 @@ impl Analyser {
         tuple_index: Option<i64>,
     ) -> StaticType {
         let mut call = CallConstraint {
-            candidates: self.site_candidates(site).clone(),
+            candidates: self.site_candidates(site),
             site,
             type_arguments,
             arguments,
@@ -2488,8 +2488,12 @@ impl Analyser {
         )
     }
 
-    fn site_candidates(&self, site: CallSite) -> &Candidates {
-        match site {
+    /// The overloads a call at `site` can mean. An intrinsic has no
+    /// signature that types it, so a call is only of one when its typing
+    /// rule picks it, as `cast::<Int>(x)` is (see
+    /// [`Analyser::analyse_call`]): `x.cast` reads no getter called `cast`.
+    fn site_candidates(&self, site: CallSite) -> Candidates {
+        let candidates = match site {
             CallSite::Call(id) => self.resolver.reference_candidates(id),
             CallSite::Getter(id) => self
                 .resolver
@@ -2497,7 +2501,20 @@ impl Analyser {
                 .expect("internal error: a getter call without getter candidates"),
             CallSite::Setter(id) | CallSite::FieldSetter(id) => self.resolver.setter_candidates(id),
             CallSite::OpAssignment(id) => &self.resolver.augmented_candidates(id).operator,
-        }
+        };
+        Candidates::from_groups(
+            candidates
+                .iter()
+                .map(|group| {
+                    group
+                        .iter()
+                        .copied()
+                        .filter(|&symbol| self.resolver.intrinsic(symbol).is_none())
+                        .collect::<Vec<_>>()
+                })
+                .filter(|group| !group.is_empty())
+                .collect(),
+        )
     }
 
     pub(super) fn record_pick(

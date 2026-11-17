@@ -181,6 +181,15 @@ impl AnalysisError {
         .with_help(format!("use `{first}` for both"))
     }
 
+    /// `cast(x)` or `cast?(x)` without the type it casts to.
+    pub(crate) fn cast_without_a_target(name: &str, span: Span) -> Self {
+        Self::new(
+            format!("`{name}` needs the type it casts to as a type argument"),
+            span,
+        )
+        .with_help(format!("write `{name}::<T>(x)`, as in `{name}::<Int>(x)`"))
+    }
+
     /// `name::<…>` in `name`'s own body with type arguments other than its
     /// own type parameters, as `f::<Int>` in `fn f<T>(x: T)`, which would
     /// need a version of `f` for them while `f` is still being worked out.

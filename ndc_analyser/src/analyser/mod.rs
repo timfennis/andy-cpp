@@ -170,18 +170,30 @@ pub(super) struct Returns {
 
 impl Analyser {
     /// An analyser for programs that can call `natives`, given as name and
-    /// type in registry order: the first is the native in global slot 0.
+    /// type in registry order: the first is the native in global slot 0. The
+    /// language's intrinsics, as `cast`, follow them.
     pub fn new(natives: Vec<(String, StaticType)>) -> Self {
+        let intrinsics = ndc_core::IntrinsicFunction::all()
+            .into_iter()
+            .map(|function| {
+                (
+                    function.name,
+                    function.static_type,
+                    Some(function.intrinsic),
+                )
+            });
         Self::with_natives(
             natives
                 .into_iter()
                 .map(|(name, typ)| (name, typ, None))
+                .chain(intrinsics)
                 .collect(),
         )
     }
 
-    /// [`Self::new`] for natives some of which are intrinsics, which the
-    /// compiler writes as bytecode where they're used.
+    /// [`Self::new`] for natives, given with the intrinsics among them,
+    /// which the compiler writes as bytecode where they're used, as a
+    /// [`ndc_core::FunctionRegistry`] lists them.
     pub fn with_natives(natives: Vec<(String, StaticType, Option<Intrinsic>)>) -> Self {
         let resolver = NameResolver::new(
             natives
@@ -431,6 +443,57 @@ impl Analyser {
         }
     }
 
+    /// The type of a cast of a value of type `found` to `target`, as
+    /// `cast::<Int>(x)`, keyed by `node`, or with `optional` of `cast?`. A
+    /// cast asserts the type and never converts. What isn't known about the
+    /// value yet is what the cast says it is: `cast::<fn(Int) -> Int>(fn(x)
+    /// => x)` takes an Int, and needs no check as the program runs, and
+    /// `cast::<Float>(1)` is a Float. Known parts are checked, and so is a
+    /// value nothing is known about, like what a call that waits returns.
+    /// `cast?` only tests the value, which stays what it is: in `fn f(xs) {
+    /// cast?::<[Int]>(xs).is_some() }`, `xs` can still be a list of Strings.
+    /// A number written there is what it's cast to, as with `cast`:
+    /// `cast?::<Float>(1)` is `Some(1.0)`.
+    fn analyse_cast(
+        &mut self,
+        node: NodeId,
+        found: &StaticType,
+        target: StaticType,
+        optional: bool,
+        span: Span,
+    ) -> StaticType {
+        let found = self.vars.resolve(found);
+        let unknown = self.vars.is_unknown(&found);
+        let literal = matches!(found, StaticType::Var(var) if self.vars.is_literal(var));
+        // Any value is an `Any`, so `cast::<Any>(1 + 2)` says nothing about
+        // what the `1` and `2` are.
+        if found.has_vars() && !unknown && (!optional || literal) && target != StaticType::Any {
+            self.vars.try_unify(&found, &target);
+        }
+        let found = self.vars.resolve(&found);
+        if !found.overlaps(&target) {
+            let found = self.vars.shown(&found);
+            self.emit(AnalysisError::impossible_cast(&found, &target, span));
+        }
+        // Whether the cast is checked as the program runs is decided once
+        // what's known about the value is: in `let xs = []; cast?::<[Int]>(xs)`,
+        // a later `xs.push(1)` proves it.
+        self.casts.push(Cast {
+            node,
+            found,
+            target: target.clone(),
+            instance: None,
+        });
+        // `cast?` is the same cast, with `None` where `cast` would fail. One
+        // that can never succeed is an error like `cast`: it would always be
+        // `None`.
+        if optional {
+            StaticType::Option(Box::new(target))
+        } else {
+            target
+        }
+    }
+
     /// Lowers the type arguments written after a name, as `Int` in
     /// `f::<Int>`, which are the types of values.
     fn lower_type_arguments(&mut self, type_arguments: &[TypeExpr]) -> Vec<StaticType> {
@@ -561,49 +624,7 @@ impl Analyser {
             } => {
                 let target = self.lower_value_type(annotation);
                 let found = self.analyse_expr(value);
-                // What isn't known about the value yet is what the cast says
-                // it is: `(fn(x) => x) as fn(Int) -> Int` takes an Int, and
-                // needs no check as the program runs, and `1 as Float` is a
-                // Float. Known parts are checked, and so is a value nothing
-                // is known about, like what a call that waits returns.
-                // `as?` only tests the value, which stays what it is: in `fn
-                // f(xs) { (xs as? [Int]).is_some() }`, `xs` can still be a
-                // list of Strings. A number written there is what it's cast
-                // to, as with `as`: `1 as? Float` is `Some(1.0)`.
-                let found = self.vars.resolve(&found);
-                let unknown = self.vars.is_unknown(&found);
-                let literal = matches!(found, StaticType::Var(var) if self.vars.is_literal(var));
-                // Any value is an `Any`, so `(1 + 2) as Any` says nothing
-                // about what the `1` and `2` are.
-                if found.has_vars()
-                    && !unknown
-                    && (!*optional || literal)
-                    && target != StaticType::Any
-                {
-                    self.vars.try_unify(&found, &target);
-                }
-                let found = self.vars.resolve(&found);
-                if !found.overlaps(&target) {
-                    let found = self.vars.shown(&found);
-                    self.emit(AnalysisError::impossible_cast(&found, &target, *span));
-                }
-                // Whether the cast is checked as the program runs is decided
-                // once what's known about the value is: in `let xs = [];
-                // xs as? [Int]`, a later `xs.push(1)` proves it.
-                self.casts.push(Cast {
-                    node: *id,
-                    found,
-                    target: target.clone(),
-                    instance: None,
-                });
-                // `as?` is the same cast, with `None` where `as` would fail.
-                // One that can never succeed is an error like `as`: it would
-                // always be `None`.
-                if *optional {
-                    StaticType::Option(Box::new(target))
-                } else {
-                    target
-                }
+                self.analyse_cast(*id, &found, target, *optional, *span)
             }
             Expression::VariableDeclaration {
                 l_value,

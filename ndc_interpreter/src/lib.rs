@@ -68,7 +68,7 @@ impl Interpreter {
     }
 
     fn from_capturing(capturing: bool) -> Self {
-        Self {
+        let mut interpreter = Self {
             function_registry: FunctionRegistry::default(),
             globals: Vec::new(),
             capturing,
@@ -85,7 +85,11 @@ impl Interpreter {
             },
             #[cfg(feature = "trace")]
             tracer: None,
-        }
+        };
+        // The analyser and the globals start from the registry, which holds
+        // the language's intrinsics.
+        interpreter.start_over();
+        interpreter
     }
 
     /// Create an interpreter for executing a complete program once.
