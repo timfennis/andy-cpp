@@ -1,3 +1,3 @@
-// expect-error: `first` is a `pure fn`, which only takes data, but its parameter `f` has type `Fn(Int) -> Int`
-pure fn first(f: Fn(Int) -> Int, xs) => xs.len();
+// expect-error: `first` is a `pure fn`, which only takes data, but its parameter `f` has type `fn(Int) -> Int`
+pure fn first(f: fn(Int) -> Int, xs) => xs.len();
 print(first(fn(n) => n, [1]));

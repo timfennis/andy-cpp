@@ -2,7 +2,7 @@
 assert(1 == 1.0);
 assert(1.0 == 1n);
 assert(1n == 1 + 0i);
-let numbers: Map<Any, ()> = %{1, 1.0, 1n, 1 + 0i};
+let numbers: %{Any} = %{1, 1.0, 1n, 1 + 0i};
 assert_eq(numbers.len(), 1);
 
 // A finite Float is compared as its exact binary value, not approximately.
@@ -13,7 +13,7 @@ assert(-0.0 == 0.0);
 let nan = 0.0 / 0.0;
 let number_nan = 0n / 0n;
 assert(nan == number_nan);
-let nans: Map<Any, ()> = %{nan, number_nan};
+let nans: %{Any} = %{nan, number_nan};
 assert_eq(nans.len(), 1);
 let negative_infinity = -1n / 0n;
 let positive_infinity = 1n / 0n;

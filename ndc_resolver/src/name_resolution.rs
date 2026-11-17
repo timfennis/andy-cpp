@@ -70,7 +70,7 @@ pub struct NameResolver {
     /// to `f`'s declaration.
     use_sites: AHashMap<NodeId, NodeId>,
     /// The type each name in an annotation refers to, keyed by the name's node.
-    /// In `let m: Map<String, P>`, the `Map`, `String` and `P` nodes.
+    /// In `let m: %{String: P}`, the `Map`, `String` and `P` nodes.
     type_names: AHashMap<NodeId, SymbolId>,
     /// What each struct declaration binds, keyed by the declaration's node.
     structs: AHashMap<NodeId, StructSymbols>,
@@ -122,6 +122,16 @@ impl NameResolutionError {
                 "A function declared with `fn` can't be replaced. \
                  To have a variable that holds a function, declare it with `let {name} = fn(...) {{ ... }}`"
             )),
+            Self::UnknownType { name, .. } if name == "List" => {
+                Some("A list type is written `[T]`, as in `[Int]`".to_string())
+            }
+            Self::UnknownType { name, .. } if name == "Tuple" => {
+                Some("A tuple type is written `(A, B)`, as in `(Int, String)`".to_string())
+            }
+            Self::UnknownType { name, .. } if name == "Map" => Some(
+                "A map type is written `%{K: V}`, as in `%{String: Int}`, and a set type `%{K}`"
+                    .to_string(),
+            ),
             Self::VariableIsNotAFunction { name, .. } => Some(format!(
                 "'{name}' is a variable, and `x.{name}` only finds functions. Call it as `{name}(x)` instead"
             )),
@@ -998,8 +1008,8 @@ impl NameResolver {
         })
     }
 
-    /// Resolves every type name in `annotation`. In `Map<String, (Int, P)>`, that's
-    /// `Map`, `String`, `Int` and `P`. Checking how many type arguments a name takes
+    /// Resolves every type name in `annotation`. In `Option<(Int, P)>`, that's
+    /// `Option`, `Int` and `P`. Checking how many type arguments a name takes
     /// belongs to the type pass.
     fn resolve_type(&mut self, annotation: &TypeExpr) -> Result<(), NameResolutionError> {
         match annotation {
@@ -1019,6 +1029,13 @@ impl NameResolver {
                 self.type_names.insert(*id, symbol);
                 for arg in args {
                     self.resolve_type(arg)?;
+                }
+            }
+            TypeExpr::List { element, .. } => self.resolve_type(element)?,
+            TypeExpr::Map { key, value, .. } => {
+                self.resolve_type(key)?;
+                if let Some(value) = value {
+                    self.resolve_type(value)?;
                 }
             }
             TypeExpr::Tuple { elements, .. } => {

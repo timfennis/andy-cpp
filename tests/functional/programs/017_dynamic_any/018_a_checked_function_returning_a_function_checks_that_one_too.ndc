@@ -4,5 +4,5 @@
 fn id(x) => x;
 fn make() => id;
 let a: Any = make;
-let f = a as Fn() -> Fn(Int) -> Int;
+let f = a as fn() -> fn(Int) -> Int;
 print(f()(1));

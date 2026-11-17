@@ -1,5 +1,5 @@
-// `[](List<T>, Int)` gives an Int, which isn't a String. A Float index would
-// reach `[](List<T>, Any)`, but that overload is a fallback, so the `0`
+// `[]([T], Int)` gives an Int, which isn't a String. A Float index would
+// reach `[]([T], Any)`, but that overload is a fallback, so the `0`
 // stays an Int and the mismatch is reported.
 // expect-error: mismatched types: found Int but expected String
 let ys = ["a".len()];

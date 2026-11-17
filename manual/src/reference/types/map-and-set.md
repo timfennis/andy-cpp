@@ -35,7 +35,19 @@ defaultdict[33] += 7; // adds 7 to 0 and associates it to key 33
 print(defaultdict[33]);  // 7
 ```
 
-The keys of a map share one type, and so do its values. To store values of different types, like `%{"a": 1, "b": "two"}`, annotate the map: `let m: Map<String, Any> = …` (see [Values of different types](../types.md#values-of-different-types)).
+## Map and set types
+
+The type of a map is written like the map itself, with the types of its keys and values: `%{String: Int}`. A set leaves out the values: `%{Int}`.
+
+```ndc
+let stock: %{String: Int} = %{};
+let seen: %{Int} = %{};
+stock["apples"] = 60;
+seen.insert(3);
+print(stock, seen);  // %{"apples": 60} %{3}
+```
+
+The keys of a map share one type, and so do its values. To store values of different types, like `%{"a": 1, "b": "two"}`, annotate the map: `let m: %{String: Any} = …` (see [Values of different types](../types.md#values-of-different-types)).
 
 > **Note:** Lists are copied by reference. If you use `[]` as a dictionary default value, every missing key gets the same list instance. Use a default function instead.
 

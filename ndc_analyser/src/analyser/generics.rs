@@ -165,7 +165,7 @@ impl Analyser {
         // instance, and a cache, of its own: the parameters' types, as `1`
         // and `1.0` are equal arguments, and the return type's, as
         // `pure fn mk() => []` would otherwise give one list to calls that
-        // want a `List<Int>` and calls that want a `List<String>`. The same
+        // want a `[Int]` and calls that want a `[String]`. The same
         // goes for each `pure fn` its body declares, which also takes only
         // data, as each instance is checked to give it.
         let own = pure.then(|| self.vars.resolve(signature));
@@ -175,7 +175,7 @@ impl Analyser {
             .map(|&node| self.vars.resolve(self.result.analysis.function_type(node)))
             .collect::<Vec<_>>();
         // A cast whose check depends on the types of an instance, as `x as
-        // List<Int>` does on what `x` is, is decided by each instance. One
+        // [Int]` does on what `x` is, is decided by each instance. One
         // its value's type proves whatever the type parameters are, as `x as
         // Any`, needs no check anywhere.
         let casts = self.casts[first_cast..]
@@ -681,7 +681,7 @@ fn type_parameter_name(index: usize) -> String {
 }
 
 /// `typ` with its type parameters named in the order they're written, as
-/// an error shows it: `Fn(B) -> A` is `Fn(A) -> B`.
+/// an error shows it: `fn(B) -> A` is `fn(A) -> B`.
 pub(super) fn named_in_order(typ: &StaticType) -> StaticType {
     let parts = match typ {
         StaticType::Function {

@@ -1,4 +1,4 @@
-// A lambda whose own type says it returns a String isn't a `Fn(Int) -> Int`.
-// expect-error: cannot cast Fn(Unknown) -> String to Fn(Int) -> Int
+// A lambda whose own type says it returns a String isn't a `fn(Int) -> Int`.
+// expect-error: cannot cast fn(Unknown) -> String to fn(Int) -> Int
 let a: Any = fn(x) => "s";
-let f = a as Fn(Int) -> Int;
+let f = a as fn(Int) -> Int;

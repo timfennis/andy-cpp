@@ -4,5 +4,5 @@
 // expect-output: 2
 // expect-output: 3
 [1, 2].map(print);
-fn apply(f: Fn(Int) -> ()) { f(3) }
+fn apply(f: fn(Int) -> ()) { f(3) }
 apply(print);

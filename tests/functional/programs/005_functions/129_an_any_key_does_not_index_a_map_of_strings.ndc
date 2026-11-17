@@ -2,7 +2,7 @@
 // are: an `Any` takes a cast.
 // expect-error: No function called 'lookup' found that matches the arguments 'Any'
 fn lookup(k) {
-    let m: Map<String, Int> = %{"a": 1};
+    let m: %{String: Int} = %{"a": 1};
     m[k]
 }
 let a: Any = "a";

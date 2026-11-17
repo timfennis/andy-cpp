@@ -1,20 +1,20 @@
 // Whether a cast is checked as the program runs depends on what's known
 // about the value once the program is analysed, and in a generic function on
-// the types each call gives it. Here every value already is a List<Int>, so
+// the types each call gives it. Here every value already is a [Int], so
 // a list held by another name casts fine.
 let xs = [];
-let c = xs as? List<Int>;
+let c = xs as? [Int];
 xs.push(1);
 print(c);
 
-fn f(ys) => ys as List<Int>;
+fn f(ys) => ys as [Int];
 let zs = [1];
 print(f(zs));
 
-let g = fn(ys) => ys as List<Int>;
+let g = fn(ys) => ys as [Int];
 print(g(zs));
 
-fn is_ints(ys) => (ys as? List<Int>).is_some();
+fn is_ints(ys) => (ys as? [Int]).is_some();
 print(is_ints(zs), is_ints(["a"]));
 // expect-output: Some([1])
 // expect-output: [1]

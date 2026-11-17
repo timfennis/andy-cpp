@@ -1,11 +1,11 @@
-// These annotations require the String overloads to infer List<String>.
-let prefixes: List<String> = "aé🦀".prefixes();
-let suffixes: List<String> = suffixes("aé🦀");
+// These annotations require the String overloads to infer [String].
+let prefixes: [String] = "aé🦀".prefixes();
+let suffixes: [String] = suffixes("aé🦀");
 assert_eq(prefixes, ["a", "aé", "aé🦀"]);
 assert_eq(suffixes, ["aé🦀", "é🦀", "🦀"]);
 
-let empty_prefixes: List<String> = "".prefixes();
-let empty_suffixes: List<String> = "".suffixes();
+let empty_prefixes: [String] = "".prefixes();
+let empty_suffixes: [String] = "".suffixes();
 assert_eq(empty_prefixes, []);
 assert_eq(empty_suffixes, []);
 

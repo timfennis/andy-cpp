@@ -2,7 +2,7 @@
 // one scope when their parameter types differ.
 fn describe(x: Int) { "int" }
 fn describe(x: String) { "string" }
-fn describe(x: List<Int>) { "list" }
+fn describe(x: [Int]) { "list" }
 print(describe(1), describe("a"), describe([1, 2]));
 // expect-output: int string list
 

@@ -2,5 +2,5 @@
 // expect-error: expected the function to return Int but it returned String
 fn text(x) => "s";
 let a: Any = text;
-let f = (a as? Fn(Int) -> Int).unwrap();
+let f = (a as? fn(Int) -> Int).unwrap();
 print(f(1));

@@ -1,8 +1,8 @@
-// A List<Any> may hold only Ints, so the cast is possible and gets checked
+// A [Any] may hold only Ints, so the cast is possible and gets checked
 // at runtime rather than rejected outright. A copy is cast, as `xs` and `m`
 // still hold their containers.
-let xs: List<Any> = [1, 2];
-assert_eq(xs.clone() as List<Int>, [1, 2]);
+let xs: [Any] = [1, 2];
+assert_eq(xs.clone() as [Int], [1, 2]);
 
-let m: Map<Int, Any> = %{1: 2};
-assert_eq(m.clone() as Map<Int, Int>, %{1: 2});
+let m: %{Int: Any} = %{1: 2};
+assert_eq(m.clone() as %{Int: Int}, %{1: 2});

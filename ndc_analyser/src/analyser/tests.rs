@@ -43,12 +43,12 @@ fn analyse_last_type(source: &str) -> StaticType {
 fn index_natives() -> Vec<(String, StaticType)> {
     // The stdlib's list and map overloads.
     [
-        ("[]", "<T>(List<T>, Int) -> T"),
-        ("[]", "<T>(List<T>, Iterator<Int>) -> List<T>"),
-        ("[]", "<K, V>(Map<K, V>, K) -> V"),
-        ("[]=", "<T>(List<T>, Int, T)"),
-        ("[]=", "<T>(List<T>, Iterator<Int>, Iterable<T>)"),
-        ("[]=", "<K, V>(Map<K, V>, K, V)"),
+        ("[]", "<T>([T], Int) -> T"),
+        ("[]", "<T>([T], Iterator<Int>) -> [T]"),
+        ("[]", "<K, V>(%{K: V}, K) -> V"),
+        ("[]=", "<T>([T], Int, T)"),
+        ("[]=", "<T>([T], Iterator<Int>, Iterable<T>)"),
+        ("[]=", "<K, V>(%{K: V}, K, V)"),
         ("[]=", "(String, Any, String)"),
     ]
     .into_iter()
@@ -177,7 +177,7 @@ fn a_function_returns_the_join_of_its_body_and_every_return() {
     let error = result.errors.iter().exactly_one().expect("one error");
     assert_eq!(
         error.to_string(),
-        "values of different types: Tuple<String, Int, Int> and Tuple<Int, String, Int> share no type"
+        "values of different types: (String, Int, Int) and (Int, String, Int) share no type"
     );
 }
 
@@ -196,8 +196,7 @@ fn annotated_identifier_augmented_assignment_rejects_widening() {
 
 #[test]
 fn an_in_place_operator_assignment_keeps_the_target_type() {
-    let append =
-        StaticType::signature("<T>(List<T>, List<T>) -> List<T>").expect("valid signature");
+    let append = StaticType::signature("<T>([T], [T]) -> [T]").expect("valid signature");
 
     assert_eq!(
         analyse_last_type_with_globals(
@@ -213,8 +212,7 @@ fn an_in_place_operator_assignment_keeps_the_target_type() {
 
 #[test]
 fn an_in_place_operator_assignment_cannot_change_the_target_type() {
-    let concat =
-        StaticType::signature("<T>(List<T>, List<T>) -> List<T>").expect("valid signature");
+    let concat = StaticType::signature("<T>([T], [T]) -> [T]").expect("valid signature");
 
     assert_analysis_error(
         "let values = [1]; values ++= [\"two\"];",
@@ -222,33 +220,33 @@ fn an_in_place_operator_assignment_cannot_change_the_target_type() {
             ("++=".to_string(), concat.clone()),
             ("++".to_string(), concat.clone()),
         ],
-        "No function called '++' found that matches the arguments 'List<Int>, List<String>'",
+        "No function called '++' found that matches the arguments '[Int], [String]'",
     );
     assert_analysis_error(
-        "let values: List<Int> = [1]; values ++= [\"two\"];",
+        "let values: [Int] = [1]; values ++= [\"two\"];",
         vec![
             ("++=".to_string(), concat.clone()),
             ("++".to_string(), concat),
         ],
-        "No function called '++' found that matches the arguments 'List<Int>, List<String>'",
+        "No function called '++' found that matches the arguments '[Int], [String]'",
     );
 }
 
 #[test]
 fn annotated_declaration_types_empty_container_literals() {
     assert_eq!(
-        analyse_last_type("let x: Map<Int, Int> = %{}; x"),
+        analyse_last_type("let x: %{Int: Int} = %{}; x"),
         StaticType::Map {
             key: Box::new(StaticType::Int),
             value: Box::new(StaticType::Int),
         },
     );
     assert_eq!(
-        analyse_last_type("let x: List<Int> = []; x"),
+        analyse_last_type("let x: [Int] = []; x"),
         StaticType::List(Box::new(StaticType::Int)),
     );
     assert_eq!(
-        analyse_last_type("let x: List<List<Int>> = [[]]; x"),
+        analyse_last_type("let x: [[Int]] = [[]]; x"),
         StaticType::List(Box::new(StaticType::List(Box::new(StaticType::Int)))),
     );
 }
@@ -256,9 +254,9 @@ fn annotated_declaration_types_empty_container_literals() {
 #[test]
 fn annotated_declaration_rejects_a_mismatched_container_literal() {
     assert_analysis_error(
-        "let x: Map<Int, Int> = %{\"a\": 1};",
+        "let x: %{Int: Int} = %{\"a\": 1};",
         vec![],
-        "mismatched types: found Map<String, Int> but expected Map<Int, Int>",
+        "mismatched types: found %{String: Int} but expected %{Int: Int}",
     );
 }
 
@@ -270,7 +268,7 @@ fn calling_an_any_takes_a_cast() {
         vec!["The variable 'f' is Any, which can't be called"]
     );
     assert_eq!(
-        analyse_last_type("fn call(f: Any) { (f as Fn(String) -> Int)(\"x\") } call"),
+        analyse_last_type("fn call(f: Any) { (f as fn(String) -> Int)(\"x\") } call"),
         function(vec![StaticType::Any], StaticType::Int)
     );
 }
@@ -406,7 +404,7 @@ fn natives_are_typed_by_their_registry_entry() {
 fn same_arity_overloads_with_different_parameter_types_are_allowed() {
     assert_eq!(
         analyse_last_type(
-            "fn f(x: Int) { 1 } fn f(x: String) { \"one\" } fn f(x: List<Int>) { [1] } f(\"a\")"
+            "fn f(x: Int) { 1 } fn f(x: String) { \"one\" } fn f(x: [Int]) { [1] } f(\"a\")"
         ),
         StaticType::String,
     );
@@ -427,7 +425,7 @@ fn a_variable_keeps_its_inferred_type() {
     ]
     .concat();
     let scalar = "mismatched types: found Float but expected Int";
-    let list = "mismatched types: found List<Float> but expected List<Int>";
+    let list = "mismatched types: found [Float] but expected [Int]";
     for (source, expected) in [
         ("let x = one(); x = 0.5;", scalar),
         ("let x = one(); x += 0.5;", scalar),
@@ -523,20 +521,20 @@ fn natives(signatures: &[(&str, &str)]) -> Vec<(String, StaticType)> {
 
 #[test]
 fn a_call_settles_its_arguments_through_the_picked_signature() {
-    let globals = natives(&[("push", "<T>(List<T>, T)")]);
+    let globals = natives(&[("push", "<T>([T], T)")]);
     assert_eq!(
         analyse_last_type_with_globals("let xs = []; push(xs, 1); xs", globals.clone()),
         StaticType::List(Box::new(StaticType::Int))
     );
     assert_eq!(
         errors("let xs = [1]; push(xs, \"a\");", globals),
-        vec!["No function called 'push' found that matches the arguments 'List<Int>, String'"]
+        vec!["No function called 'push' found that matches the arguments '[Int], String'"]
     );
 }
 
 #[test]
 fn each_call_instantiates_the_signature_afresh() {
-    let globals = natives(&[("first", "<T>(List<T>) -> T")]);
+    let globals = natives(&[("first", "<T>([T]) -> T")]);
     assert_eq!(
         analyse_last_type_with_globals("first([1.5])", globals.clone()),
         StaticType::Float
@@ -551,13 +549,13 @@ fn each_call_instantiates_the_signature_afresh() {
 fn an_any_passed_for_a_list_takes_a_cast_that_says_its_elements() {
     // `xs` could hold anything, so `reversed` doesn't take it, but a cast
     // says what it holds, which settles `T`.
-    let globals = natives(&[("reversed", "<T>(List<T>) -> List<T>")]);
+    let globals = natives(&[("reversed", "<T>([T]) -> [T]")]);
     assert_eq!(
         errors("fn f(xs: Any) { reversed(xs) }", globals.clone()),
         vec!["No function called 'reversed' found that matches the arguments 'Any'"]
     );
     assert_eq!(
-        analyse_last_type_with_globals("fn f(xs: Any) { reversed(xs as List<Int>) } f", globals),
+        analyse_last_type_with_globals("fn f(xs: Any) { reversed(xs as [Int]) } f", globals),
         function(
             vec![StaticType::Any],
             StaticType::List(Box::new(StaticType::Int))
@@ -567,7 +565,7 @@ fn an_any_passed_for_a_list_takes_a_cast_that_says_its_elements() {
 
 #[test]
 fn a_generic_built_in_used_as_a_value_has_one_type() {
-    let globals = natives(&[("push", "<T>(List<T>, T)")]);
+    let globals = natives(&[("push", "<T>([T], T)")]);
     assert_eq!(
         analyse_last_type_with_globals("let p = push; let xs = [1]; p(xs, 2); p", globals),
         StaticType::Function {
@@ -587,7 +585,7 @@ fn calling_a_function_value_checks_its_arguments() {
             "let f = fn(x: Int) { x }; let g = [f]; g[0](\"a\");",
             index_natives()
         ),
-        vec!["A function of type Fn(Int) -> Int doesn't accept the arguments 'String'"]
+        vec!["A function of type fn(Int) -> Int doesn't accept the arguments 'String'"]
     );
 }
 
@@ -598,12 +596,12 @@ fn an_index_write_checks_the_index_against_the_container() {
     for (source, expected) in [
         (
             "let m = %{1: 2}; m[\"a\"] = 3;",
-            "No function called '[]=' found that matches the arguments 'Map<Int, Int>, String, Int'",
+            "No function called '[]=' found that matches the arguments '%{Int: Int}, String, Int'",
         ),
         // Reading the old value fails first, and is the one error reported.
         (
             "let m = %{\"a\": 1}; m[0] += 3;",
-            "No function called '[]' found that matches the arguments 'Map<String, Int>, Int'",
+            "No function called '[]' found that matches the arguments '%{String: Int}, Int'",
         ),
         ("let a = 5; a[0] = 1;", "Unable to index into Int"),
     ] {
@@ -618,18 +616,18 @@ fn a_function_annotation_types_a_variable() {
         return_type: Box::new(StaticType::Int),
     };
     assert_eq!(
-        analyse_last_type("let f: Fn(Int) -> Int = fn(x: Int) => x; f"),
+        analyse_last_type("let f: fn(Int) -> Int = fn(x: Int) => x; f"),
         int_to_int
     );
     assert_eq!(
-        errors("let f: Fn(Int) -> Int = fn(x: String) => x;", vec![]),
-        vec!["mismatched types: found Fn(String) -> String but expected Fn(Int) -> Int"]
+        errors("let f: fn(Int) -> Int = fn(x: String) => x;", vec![]),
+        vec!["mismatched types: found fn(String) -> String but expected fn(Int) -> Int"]
     );
 }
 
 #[test]
 fn a_function_argument_gets_what_the_function_parameter_passes() {
-    let globals = natives(&[("map", "<T, U>(Iterable<T>, Fn(T) -> U) -> List<U>")]);
+    let globals = natives(&[("map", "<T, U>(Iterable<T>, fn(T) -> U) -> [U]")]);
     // A typed lambda fits a type parameter, and settles it.
     assert_eq!(
         analyse_last_type_with_globals(
@@ -646,23 +644,23 @@ fn a_function_argument_gets_what_the_function_parameter_passes() {
     assert_eq!(
         errors("map([1], fn(x: String) => x);", globals),
         vec![
-            "No function called 'map' found that matches the arguments 'List<Int>, Fn(String) -> String'"
+            "No function called 'map' found that matches the arguments '[Int], fn(String) -> String'"
         ]
     );
 }
 
 #[test]
 fn a_function_argument_fits_a_function_parameter_where_their_known_parts_agree() {
-    let apply = "fn apply(f: Fn(Int) -> Int) { f(1) } ";
+    let apply = "fn apply(f: fn(Int) -> Int) { f(1) } ";
     // An untyped lambda's parameters take the types `apply` passes.
     assert_eq!(
         errors(&format!("{apply}apply(fn(x) => x);"), vec![]),
         Vec::<String>::new()
     );
     for (lambda, shown) in [
-        ("fn(x: String) => 1", "Fn(String) -> Int"),
-        ("fn(x) => \"a\"", "Fn(Int) -> String"),
-        ("fn(a, b) => 1", "Fn(Unknown, Unknown) -> Int"),
+        ("fn(x: String) => 1", "fn(String) -> Int"),
+        ("fn(x) => \"a\"", "fn(Int) -> String"),
+        ("fn(a, b) => 1", "fn(Unknown, Unknown) -> Int"),
     ] {
         assert_eq!(
             errors(&format!("{apply}apply({lambda});"), vec![]),
@@ -679,18 +677,18 @@ fn a_function_value_rejects_a_callback_taking_another_number_of_arguments() {
     // Called through an expression, so no overload is matched first.
     assert_eq!(
         errors(
-            "fn apply(f: Fn(Int) -> Int) { f(1) } let fs = [apply]; fs[0](fn(a, b) => 1);",
+            "fn apply(f: fn(Int) -> Int) { f(1) } let fs = [apply]; fs[0](fn(a, b) => 1);",
             index_natives()
         ),
         vec![
-            "A function of type Fn(Fn(Int) -> Int) -> Int doesn't accept the arguments 'Fn(Unknown, Unknown) -> Int'"
+            "A function of type fn(fn(Int) -> Int) -> Int doesn't accept the arguments 'fn(Unknown, Unknown) -> Int'"
         ]
     );
 }
 
 #[test]
 fn a_lambdas_type_picks_between_overloads_taking_functions() {
-    let choose = "fn choose(f: Fn() -> Int) { 1 } fn choose(f: Fn() -> String) { \"s\" } ";
+    let choose = "fn choose(f: fn() -> Int) { 1 } fn choose(f: fn() -> String) { \"s\" } ";
     assert_eq!(
         analyse_last_type(&format!("{choose}choose(fn() => 1)")),
         StaticType::Int
@@ -709,7 +707,7 @@ fn a_lambda_takes_the_function_type_expected_where_it_is_written() {
     };
     // An annotated variable.
     assert_eq!(
-        analyse_last_type("let f: Fn(Int) -> Int = fn(x) => x; f"),
+        analyse_last_type("let f: fn(Int) -> Int = fn(x) => x; f"),
         int_to_int
     );
     // A function value's parameter. Either `+` could take `x` until the
@@ -717,14 +715,14 @@ fn a_lambda_takes_the_function_type_expected_where_it_is_written() {
     let globals = natives(&[("+", "(Int, Int) -> Int"), ("+", "(Float, Int) -> Float")]);
     assert_eq!(
         errors(
-            "let apply = fn(g: Fn(String) -> Int) { g(\"a\") }; let fs = [apply]; fs[0](fn(x) => x + 1);",
+            "let apply = fn(g: fn(String) -> Int) { g(\"a\") }; let fs = [apply]; fs[0](fn(x) => x + 1);",
             [index_natives(), globals].concat()
         ),
         vec!["No function called '+' found that matches the arguments 'String, Int'"]
     );
     // A map's default function returns the map's values.
     assert_eq!(
-        analyse_last_type("let m: Map<String, List<Int>> = %{:fn() => []}; m"),
+        analyse_last_type("let m: %{String: [Int]} = %{:fn() => []}; m"),
         StaticType::Map {
             key: Box::new(StaticType::String),
             value: Box::new(StaticType::List(Box::new(StaticType::Int))),
@@ -734,8 +732,8 @@ fn a_lambda_takes_the_function_type_expected_where_it_is_written() {
 
 #[test]
 fn an_any_parameter_settles_what_its_argument_leaves_unknown_as_any() {
-    // `keep` may store anything in the list, so it can't become a List<Int>.
-    let globals = [natives(&[("keep", "(List<Any>)")]), index_natives()].concat();
+    // `keep` may store anything in the list, so it can't become a [Int].
+    let globals = [natives(&[("keep", "([Any])")]), index_natives()].concat();
     assert_eq!(
         analyse_last_type_with_globals("let xs = []; keep(xs); xs[0] = 1; xs", globals),
         StaticType::List(Box::new(StaticType::Any))
@@ -823,7 +821,7 @@ fn a_call_commits_to_the_only_overload_that_can_take_its_arguments() {
 #[test]
 fn a_lambda_passed_to_a_function_takes_its_parameter_types_from_the_call() {
     let globals = [
-        natives(&[("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>")]),
+        natives(&[("map", "<T, U>([T], fn(T) -> U) -> [U]")]),
         ambiguous_plus(),
     ]
     .concat();
@@ -875,7 +873,7 @@ fn a_variable_holding_an_unknown_function_takes_what_it_is_called_with() {
 
 #[test]
 fn iterating_waits_until_the_kind_of_sequence_is_known() {
-    let globals = [natives(&[("push", "<T>(List<T>, T)")]), ambiguous_plus()].concat();
+    let globals = [natives(&[("push", "<T>([T], T)")]), ambiguous_plus()].concat();
     assert_eq!(
         analyse_last_type_with_globals(
             "let g = fn(rows) { let out = []; for r in rows { out.push(r + 1) }; out }; g([2.5])",
@@ -934,9 +932,9 @@ fn an_op_assignment_waits_for_its_operands_like_any_call() {
     // The in-place overload is picked along with the operator once they're
     // known, as `++=` is here: the natives' global slots are in this order.
     let globals = natives(&[
-        ("++", "<T>(List<T>, List<T>) -> List<T>"),
+        ("++", "<T>([T], [T]) -> [T]"),
         ("++", "(String, String) -> String"),
-        ("++=", "<T>(List<T>, List<T>) -> List<T>"),
+        ("++=", "<T>([T], [T]) -> [T]"),
     ]);
     let (_, result) = analyse_with_globals("let f = fn(xs) { xs ++= [1]; }; f([2]);", globals);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
@@ -980,13 +978,13 @@ fn a_call_nothing_else_settles_takes_no_narrowest_overload_when_unsure() {
         function(StaticType::Unknown, StaticType::String)
     );
     // Overloads in two scopes fit, so none settles `x`: it's `Unknown`, and
-    // `[x]` is a `List<Unknown>`, which neither takes.
+    // `[x]` is a `[Unknown]`, which neither takes.
     assert_eq!(
         errors(
-            "fn pick(xs: List<String>) => \"outer\"; { fn pick(xs: List<Int>) => 1; let f = fn(x) => pick([x]); f }",
+            "fn pick(xs: [String]) => \"outer\"; { fn pick(xs: [Int]) => 1; let f = fn(x) => pick([x]); f }",
             vec![]
         ),
-        vec!["No function called 'pick' found that matches the arguments 'List<Unknown>'"]
+        vec!["No function called 'pick' found that matches the arguments '[Unknown]'"]
     );
 }
 
@@ -1045,13 +1043,13 @@ fn a_field_write_settles_the_receiver_like_a_field_read() {
 fn an_error_shows_what_isnt_known_yet_as_unknown() {
     assert_eq!(
         errors("let f = fn(x) -> Int { [x] };", vec![]),
-        vec!["mismatched types: found List<Unknown> but expected Int"]
+        vec!["mismatched types: found [Unknown] but expected Int"]
     );
 }
 
 #[test]
 fn a_cast_settles_what_isnt_known_about_its_value() {
-    let (_, result) = analyse_with_globals("(fn(x) => x) as Fn(Int) -> Int", vec![]);
+    let (_, result) = analyse_with_globals("(fn(x) => x) as fn(Int) -> Int", vec![]);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     // `x` is an Int, so the cast holds without a check when the program runs.
     assert_eq!(
@@ -1066,11 +1064,7 @@ fn a_waiting_call_does_not_commit_to_an_overload_taking_any_instead() {
     // write, so it waits. Once they're Ints, only the catch-all takes a list
     // as an element: the element-wise `[]=` would need its `T` to be both an
     // Int and a list.
-    let globals = [
-        natives(&[("[]=", "<T>(List<T>, Any, Any)")]),
-        index_natives(),
-    ]
-    .concat();
+    let globals = [natives(&[("[]=", "<T>([T], Any, Any)")]), index_natives()].concat();
     assert_eq!(
         errors("let xs = [1]; xs[0] = [];", globals.clone()),
         Vec::<String>::new()
@@ -1078,7 +1072,7 @@ fn a_waiting_call_does_not_commit_to_an_overload_taking_any_instead() {
     // Without the catch-all, nothing takes it.
     assert_eq!(
         errors("let xs = [1]; xs[0] = [];", index_natives()),
-        vec!["mismatched types: found List<Unknown> but expected Int"]
+        vec!["mismatched types: found [Unknown] but expected Int"]
     );
 }
 
@@ -1132,13 +1126,12 @@ fn an_operator_waits_while_a_tuple_operand_would_not_fit_its_overload() {
 fn an_operator_takes_no_any_operand_that_no_overload_takes() {
     // `a` could be a tuple that `++` applies to element-wise, or a list,
     // but it takes a cast to be either.
-    let globals = natives(&[("++", "<T>(List<T>, List<T>) -> List<T>")]);
+    let globals = natives(&[("++", "<T>([T], [T]) -> [T]")]);
     assert_eq!(
         errors("let g = fn(a: Any) => a ++ [];", globals.clone()),
-        vec!["No function called '++' found that matches the arguments 'Any, List<Unknown>'"]
+        vec!["No function called '++' found that matches the arguments 'Any, [Unknown]'"]
     );
-    let (_, result) =
-        analyse_with_globals("let g = fn(a: Any) => (a as List<Int>) ++ [];", globals);
+    let (_, result) = analyse_with_globals("let g = fn(a: Any) => (a as [Int]) ++ [];", globals);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
 }
 
@@ -1193,9 +1186,9 @@ fn a_number_default_is_settled_where_the_map_is_stored() {
 /// other on a pattern.
 fn split_natives() -> Vec<(String, StaticType)> {
     natives(&[
-        ("split", "(String) -> List<String>"),
-        ("split", "(String, String) -> List<String>"),
-        ("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
+        ("split", "(String) -> [String]"),
+        ("split", "(String, String) -> [String]"),
+        ("map", "<T, U>([T], fn(T) -> U) -> [U]"),
     ])
 }
 
@@ -1220,7 +1213,7 @@ fn an_overloaded_function_value_is_the_overload_its_use_expects() {
 fn a_return_annotation_picks_the_overloaded_function_value_returned() {
     assert_eq!(
         errors(
-            "fn by_pattern() -> Fn(String, String) -> List<String> { split }",
+            "fn by_pattern() -> fn(String, String) -> [String] { split }",
             split_natives()
         ),
         Vec::<String>::new()
@@ -1230,7 +1223,7 @@ fn a_return_annotation_picks_the_overloaded_function_value_returned() {
 #[test]
 fn a_return_annotation_settles_what_the_body_left_unknown() {
     assert_eq!(
-        errors("fn f() -> List<Int> { let xs = []; xs }", vec![]),
+        errors("fn f() -> [Int] { let xs = []; xs }", vec![]),
         Vec::<String>::new()
     );
     // Each value returned has to fit the annotation.
@@ -1250,10 +1243,10 @@ fn the_help_for_an_ambiguous_function_value_names_an_overload_that_fits() {
     assert_eq!(
         help(
             "let f = push;",
-            natives(&[("push", "<T>(List<T>, T)"), ("push", "<T>(MinHeap<T>, T)")])
+            natives(&[("push", "<T>([T], T)"), ("push", "<T>(MinHeap<T>, T)")])
         ),
         Some(
-            "Say which one with a function type, as in `let f: Fn(MinHeap<Any>, Any) -> () = push`"
+            "Say which one with a function type, as in `let f: fn(MinHeap<Any>, Any) -> () = push`"
                 .to_string()
         )
     );
@@ -1264,15 +1257,15 @@ fn a_function_value_is_not_picked_by_its_return_type_before_its_parameters_are_k
     // Only `pick(Any)` returns an Int, but once `xs` holds Ints a call with
     // an Int means `pick(Int)`, so that's the one meant, and it doesn't fit.
     let globals = natives(&[
-        ("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
-        ("push", "<T>(List<T>, T)"),
+        ("map", "<T, U>([T], fn(T) -> U) -> [U]"),
+        ("push", "<T>([T], T)"),
     ]);
     assert_eq!(
         errors(
-            "fn pick(x) => 0; fn pick(x: Int) => \"s\"; let xs = []; let ys: List<Int> = xs.map(pick); xs.push(1);",
+            "fn pick(x) => 0; fn pick(x: Int) => \"s\"; let xs = []; let ys: [Int] = xs.map(pick); xs.push(1);",
             globals
         ),
-        vec!["No overload of 'pick' is a Fn(Int) -> Int"]
+        vec!["No overload of 'pick' is a fn(Int) -> Int"]
     );
 }
 
@@ -1293,13 +1286,13 @@ fn an_overloaded_function_value_nothing_picks_is_an_error() {
         vec!["'split' has several overloads, and nothing here says which one is meant"]
     );
     assert_eq!(
-        errors("let f: Fn(Int) -> Int = split;", split_natives()),
-        vec!["No overload of 'split' is a Fn(Int) -> Int"]
+        errors("let f: fn(Int) -> Int = split;", split_natives()),
+        vec!["No overload of 'split' is a fn(Int) -> Int"]
     );
     // `split(String)` takes the String, but doesn't return an Int.
     assert_eq!(
-        errors("let f: Fn(String) -> Int = split;", split_natives()),
-        vec!["No overload of 'split' is a Fn(String) -> Int"]
+        errors("let f: fn(String) -> Int = split;", split_natives()),
+        vec!["No overload of 'split' is a fn(String) -> Int"]
     );
 }
 
@@ -1308,7 +1301,7 @@ fn an_overloaded_function_value_uses_the_nearest_scope_with_an_overload_that_fit
     // The inner `pick` doesn't take an Int, so the outer one is meant.
     assert_eq!(
         analyse_last_type(
-            "fn pick(x: Int) => 1; { fn pick(x: String) => \"s\"; let f: Fn(Int) -> Int = pick; f(1) }"
+            "fn pick(x: Int) => 1; { fn pick(x: String) => \"s\"; let f: fn(Int) -> Int = pick; f(1) }"
         ),
         StaticType::Int
     );
@@ -1344,7 +1337,7 @@ fn a_join_waits_until_both_branches_are_known() {
     assert_eq!(
         analyse_last_type_with_globals(
             "let xs = if true { [] } else { [] }; xs.push(1); xs",
-            natives(&[("push", "<T>(List<T>, T)"), ("push", "<T>(MinHeap<T>, T)")])
+            natives(&[("push", "<T>([T], T)"), ("push", "<T>(MinHeap<T>, T)")])
         ),
         StaticType::List(Box::new(StaticType::Int))
     );
@@ -1512,7 +1505,7 @@ fn a_generic_function_keeps_one_copy_of_each_call_it_copies() {
 #[test]
 fn a_variable_from_outside_has_one_type_in_a_generic_function() {
     // `n` is stored in `xs`, which the first call settles.
-    let globals = natives(&[("push", "<T>(List<T>, T)")]);
+    let globals = natives(&[("push", "<T>([T], T)")]);
     assert_eq!(
         analyse_last_type_with_globals(
             "let xs = []; fn f(n) { xs.push(n) } f(1); xs",
@@ -1576,9 +1569,9 @@ fn overloads_tie_when_a_call_could_fit_both_and_neither_is_more_specific() {
         ("fn f(x: Int, y) {} fn f(x, y: Int) {}", true),
         ("fn f(x: Int, y: Any) {} fn f(x: Any, y: Int) {}", false),
         ("fn f(x: Int) {} fn f(x) {}", false),
-        ("fn f(x: List<Int>) {} fn f(x) {}", false),
+        ("fn f(x: [Int]) {} fn f(x) {}", false),
         ("fn f(x: Int) {} fn f(x: Any) {}", false),
-        ("fn f(x: List<Int>) {} fn f(x: List<String>) {}", false),
+        ("fn f(x: [Int]) {} fn f(x: [String]) {}", false),
         ("fn f(x) {} fn f(x, y) {}", false),
     ] {
         let errors = errors(source, vec![]);
@@ -1602,8 +1595,8 @@ fn a_lambda_a_generic_function_passes_on_takes_what_each_call_gives_it() {
     // `map` waits for what `xs` is, so its lambda's types are only known
     // once `incs` is called.
     let mut globals = natives(&[
-        ("map", "<T, U>(List<T>, Fn(T) -> U) -> List<U>"),
-        ("map", "<T, U>(Deque<T>, Fn(T) -> U) -> List<U>"),
+        ("map", "<T, U>([T], fn(T) -> U) -> [U]"),
+        ("map", "<T, U>(Deque<T>, fn(T) -> U) -> [U]"),
     ]);
     globals.extend(ambiguous_plus());
     assert_eq!(
@@ -1630,7 +1623,7 @@ fn an_overloaded_function_value_in_a_generic_function_is_picked_for_each_call() 
     );
     assert_eq!(
         errors(
-            "fn f(x) { let g: Fn(Int) -> Int = abs; g(x) } f(1);",
+            "fn f(x) { let g: fn(Int) -> Int = abs; g(x) } f(1);",
             globals
         ),
         Vec::<String>::new()
@@ -1790,7 +1783,7 @@ fn a_list_literal_holding_the_list_it_is_pushed_to_is_analysed() {
         "let xs = []; xs.push([xs]);",
         "let xs = [\"s\"]; xs = [xs];",
     ] {
-        let (_, result) = analyse_with_globals(source, natives(&[("push", "<T>(List<T>, T)")]));
+        let (_, result) = analyse_with_globals(source, natives(&[("push", "<T>([T], T)")]));
         assert!(result.errors.len() <= 1, "{source}: {:?}", result.errors);
     }
 }
@@ -1801,7 +1794,7 @@ fn a_call_no_overload_takes_says_what_the_overloads_take() {
     // Ints, so `put` takes an Int from then on.
     let (_, result) = analyse_with_globals(
         "let r = []; fn put(x) { r.push(x); 0 } put(1); put(\"a\");",
-        natives(&[("push", "<T>(List<T>, T)")]),
+        natives(&[("push", "<T>([T], T)")]),
     );
     let help = result
         .errors
@@ -1819,12 +1812,12 @@ fn a_call_no_overload_takes_says_what_the_overloads_take() {
 fn failed_check_natives() -> Vec<(String, StaticType)> {
     let mut globals = natives(&[
         ("len", "<T>(Iterable<T>) -> Int"),
-        ("map", "<T, U>(Iterable<T>, Fn(T) -> U) -> List<U>"),
+        ("map", "<T, U>(Iterable<T>, fn(T) -> U) -> [U]"),
         ("sum", "(Iterable<Int>) -> Int"),
         ("sum", "(Iterable<Float>) -> Float"),
         ("abs", "(Int) -> Int"),
         ("abs", "(Float) -> Float"),
-        ("++", "<T>(List<T>, List<T>) -> List<T>"),
+        ("++", "<T>([T], [T]) -> [T]"),
         ("++", "(String, String) -> String"),
     ]);
     globals.extend(index_natives());
@@ -1854,14 +1847,14 @@ fn a_failed_call_is_reported_once_wherever_its_value_goes() {
         "let x = len(true)[0]; [x].sum();",
         // Iterated.
         "for x in len(true) { [x].sum(); }",
-        "let xs: List<String> = [x for x in len(true)];",
+        "let xs: [String] = [x for x in len(true)];",
         // Passed on.
         "[len(true)].sum();",
         "len(true).map(abs);",
         "len(true).map(fn(x) => [x]).sum();",
         "abs(len(true)) ++ \"a\";",
         // Assigned to a typed variable.
-        "let xs: List<String> = [len(true)];",
+        "let xs: [String] = [len(true)];",
         "let s: String = len(true);",
         // Called.
         "let f = len(true); [f(1)].sum();",
@@ -1883,7 +1876,7 @@ fn an_error_after_a_failed_call_is_still_reported() {
         vec![
             "No function called 'len' found that matches the arguments 'Bool'",
             "mismatched types: found Int but expected String",
-            "No function called 'sum' found that matches the arguments 'List<String>'",
+            "No function called 'sum' found that matches the arguments '[String]'",
         ]
     );
 }
@@ -1911,9 +1904,6 @@ fn type_parameters_are_named_in_the_order_they_are_written() {
     let shown = |types: &AHashMap<_, StaticType>| {
         types.values().map(ToString::to_string).collect::<Vec<_>>()
     };
-    assert_eq!(shown(&result.analysis.function_types), ["Fn(A, B) -> Any"]);
-    assert_eq!(
-        shown(&result.analysis.inferred_return_types),
-        ["Tuple<B, A>"]
-    );
+    assert_eq!(shown(&result.analysis.function_types), ["fn(A, B) -> Any"]);
+    assert_eq!(shown(&result.analysis.inferred_return_types), ["(B, A)"]);
 }

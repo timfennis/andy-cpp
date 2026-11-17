@@ -7,7 +7,7 @@ b.x = 99;
 assert_eq(a.x, 1);
 assert_eq(b.x, 99);
 
-struct Holder { items: List<Int> }
+struct Holder { items: [Int] }
 let h = Holder([1]);
 
 // clone is shallow: the instance is independent but nested containers are shared.

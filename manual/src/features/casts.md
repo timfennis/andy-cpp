@@ -39,14 +39,14 @@ with `clone`:
 
 ```ndc
 let values: Any = [1, 2];
-let ints = values.clone() as List<Int>;
+let ints = values.clone() as [Int];
 print(ints.sum());  // 3
 ```
 
 ```ndc,fails
 let values: Any = [1, 2];
-values as List<Int>
-// error[vm]: cannot cast to List<Int>: the list is also held by something else, which would still expect what it held before
+values as [Int]
+// error[vm]: cannot cast to [Int]: the list is also held by something else, which would still expect what it held before
 ```
 
 A container that nothing else holds, such as what a function returns, can be
@@ -56,8 +56,8 @@ A list of `Any`s needs a cast too before you use a function that wants a list
 of something more specific, like `sum`:
 
 ```ndc
-let values: List<Any> = [1, 2, 3];
-print((values.clone() as List<Int>).sum());  // 6
+let values: [Any] = [1, 2, 3];
+print((values.clone() as [Int]).sum());  // 6
 ```
 
 ## Testing a value's type with `as?`

@@ -32,7 +32,7 @@ mod inner {
     use itertools::Itertools;
 
     /// Randomly shuffles the elements of the list in place.
-    #[function(signature = "<T>(List<T>)")]
+    #[function(signature = "<T>([T])")]
     pub fn shuffle(list: &mut [Value]) {
         list.shuffle(&mut rand::rng());
     }
@@ -40,7 +40,7 @@ mod inner {
     /// Returns a copy of the input sequence converted to a list with the elements shuffled in random order.
     ///
     /// Note: this currently does consume iterators
-    #[function(signature = "<T>(Iterable<T>) -> List<T>")]
+    #[function(signature = "<T>(Iterable<T>) -> [T]")]
     pub fn shuffled(list: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             list.try_into_iter()

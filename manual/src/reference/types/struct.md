@@ -25,7 +25,7 @@ have zero fields.
 struct Person {
     name: String,
     age: Int,
-    locations: List<String>,
+    locations: [String],
 }
 
 struct Marker { }
@@ -107,14 +107,14 @@ To call a function stored in a field, put parentheses around the field:
 call `f(s)`.
 
 ```ndc
-struct Callback { f: Fn(Int) -> Int }
+struct Callback { f: fn(Int) -> Int }
 let cb = Callback(fn (a) => a * 2);
 
 print((cb.f)(21));  // 42
 ```
 
 ```ndc,fails
-struct Callback { f: Fn(Int) -> Int }
+struct Callback { f: fn(Int) -> Int }
 let cb = Callback(fn (a) => a * 2);
 
 cb.f(21);    // ERROR: this is method-call syntax for `f(cb, 21)`

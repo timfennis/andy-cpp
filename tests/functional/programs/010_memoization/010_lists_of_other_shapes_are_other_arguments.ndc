@@ -1,4 +1,4 @@
 // The lists hold the same items in the same order, nested differently.
 // expect-output: 1 2
-pure fn count(x: List<List<List<Int>>>) => x.len();
+pure fn count(x: [[[Int]]]) => x.len();
 print(count([[[]]]), count([[], []]));

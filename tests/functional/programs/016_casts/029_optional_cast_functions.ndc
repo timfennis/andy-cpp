@@ -2,5 +2,5 @@
 // expect-output: 3 false
 fn inc(x: Int) => x + 1;
 let a: Any = inc;
-let f = (a as? Fn(Int) -> Int).unwrap();
-print(f(2), (a as? Fn(String) -> Int).is_some());
+let f = (a as? fn(Int) -> Int).unwrap();
+print(f(2), (a as? fn(String) -> Int).is_some());

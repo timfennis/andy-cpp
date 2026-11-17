@@ -38,13 +38,13 @@ print(items);  // [1,3,2]
 
 ```ndc,fails
 let values = [1];
-values ++= ["two"]; // error: No function called '++' found that matches the arguments 'List<Int>, List<String>'
+values ++= ["two"]; // error: No function called '++' found that matches the arguments '[Int], [String]'
 ```
 
 Annotate the target with `Any` to allow mixed contents:
 
 ```ndc
-let mixed: List<Any> = [1];
+let mixed: [Any] = [1];
 mixed ++= ["two"];
 print(mixed);  // [1,"two"]
 ```

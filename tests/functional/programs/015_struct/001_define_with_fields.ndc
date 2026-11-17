@@ -2,7 +2,7 @@
 struct Person {
     name: String,
     age: Int,
-    locations: List<String>
+    locations: [String]
 }
 
 // Check that it supports trailing commas

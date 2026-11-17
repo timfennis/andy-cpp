@@ -13,5 +13,5 @@ fn what(x: Any) {
         g(x)
     }
 }
-let m: Map<String, Any> = %{"a", "b": 1};
+let m: %{String: Any} = %{"a", "b": 1};
 print(g(m["a"]), what(m["a"]), what(m["b"]));

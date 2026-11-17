@@ -2,5 +2,5 @@
 // expect-output: 1
 fn invoke(g, x) => g(x);
 fn apply(x) => invoke(abs, x);
-let h: Fn(Int) -> Int = apply;
+let h: fn(Int) -> Int = apply;
 print(h(1));

@@ -14,5 +14,5 @@ fn what(x: Any) {
         g(x)
     }
 }
-let m: Map<Int, Any> = %{:"missing", x: x for x in 1..3};
+let m: %{Int: Any} = %{:"missing", x: x for x in 1..3};
 print(g(m[1]), what(m[99]), what(m[1]));

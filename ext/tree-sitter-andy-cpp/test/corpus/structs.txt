@@ -43,7 +43,7 @@ struct with generic field type
 
 struct Person {
     name: String,
-    locations: List<String>,
+    locations: Option<String>,
 }
 
 ---

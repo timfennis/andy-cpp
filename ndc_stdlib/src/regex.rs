@@ -43,7 +43,7 @@ mod inner {
     }
 
     /// Returns all capture groups from the first match of the regular expression.
-    #[function(signature = "(String, String) -> List<List<String>>")]
+    #[function(signature = "(String, String) -> [[String]]")]
     pub fn captures(haystack: &str, regex: &str) -> Result<Value, regex::Error> {
         let r = Regex::new(regex)?;
 

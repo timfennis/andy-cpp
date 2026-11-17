@@ -1,10 +1,10 @@
 // A lambda written where a function type is expected takes its parameter
 // types from it: in an annotated variable, an assignment, or an argument
 // to a function value. These lambdas need no annotations.
-let double: Fn(Int) -> Int = fn(x) => x * 2;
-let shout: Fn(String) -> String = fn(s) => s;
+let double: fn(Int) -> Int = fn(x) => x * 2;
+let shout: fn(String) -> String = fn(s) => s;
 shout = fn(s) => s ++ "!";
-let apply = fn(f: Fn(Int) -> Int, x: Int) -> Int { f(x) };
+let apply = fn(f: fn(Int) -> Int, x: Int) -> Int { f(x) };
 let calls = [apply];
 print(double(4));
 print(shout("hi"));

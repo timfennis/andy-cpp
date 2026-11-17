@@ -605,14 +605,14 @@ fn an_unproven_cast_checks_the_type_at_runtime() {
     );
 }
 
-// let x: Any = [1]; x as List<Int>; x as Int
+// let x: Any = [1]; x as [Int]; x as Int
 //
 // A cast to a container type checks that nothing else holds the container,
 // ahead of the type check. A cast to a type without a container in it has
 // nothing to check.
 #[test]
 fn a_cast_to_a_container_checks_it_is_unshared() {
-    let ops = compile_with_analysis("let x: Any = [1]; x as List<Int>; x as Int");
+    let ops = compile_with_analysis("let x: Any = [1]; x as [Int]; x as Int");
     let checks: Vec<usize> = ops
         .iter()
         .enumerate()

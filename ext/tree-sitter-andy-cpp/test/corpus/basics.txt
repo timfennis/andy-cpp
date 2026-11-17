@@ -111,7 +111,7 @@ let m = %{:0, "a": 1};
 cast expression
 ==================
 
-let k = xs as List<Int>;
+let k = xs as Option<Int>;
 
 ---
 
@@ -123,6 +123,55 @@ let k = xs as List<Int>;
       type: (generic_type
         name: (type_identifier)
         (type_identifier)))))
+
+==================
+list, tuple, map and function types
+==================
+
+let grid: [[Int]] = xs as [[Int]];
+let pair: (Int, [String]) = p;
+let m: %{String: [Int]} = %{};
+let s: %{Int} = %{};
+let f: fn(Int) -> fn() = g;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    type: (list_type
+      (list_type
+        (type_identifier)))
+    value: (cast_expression
+      value: (identifier)
+      type: (list_type
+        (list_type
+          (type_identifier)))))
+  (variable_declaration
+    name: (identifier)
+    type: (tuple_type
+      (type_identifier)
+      (list_type
+        (type_identifier)))
+    value: (identifier))
+  (variable_declaration
+    name: (identifier)
+    type: (map_type
+      key: (type_identifier)
+      value: (list_type
+        (type_identifier)))
+    value: (map))
+  (variable_declaration
+    name: (identifier)
+    type: (map_type
+      key: (type_identifier))
+    value: (map))
+  (variable_declaration
+    name: (identifier)
+    type: (function_type
+      (type_identifier)
+      return_type: (function_type))
+    value: (identifier)))
 
 ==================
 cast binds tighter than binary operators
@@ -158,7 +207,7 @@ less-than after a cast is a comparison
 generic arguments still win over less-than
 ==================
 
-[[1]] as List<List<Int>>;
+[[1]] as Option<Option<Int>>;
 
 ---
 

@@ -2,5 +2,5 @@
 // not an Int.
 // expect-error: mismatched types
 fn fallback() -> Any => 1;
-let m: Map<String, Int> = %{:fallback};
+let m: %{String: Int} = %{:fallback};
 print(m["a"]);

@@ -2,4 +2,4 @@
 // before the program runs.
 // expect-error: can never be
 fn f(s: String) -> String { s }
-let g = f as Fn(Int) -> Int;
+let g = f as fn(Int) -> Int;

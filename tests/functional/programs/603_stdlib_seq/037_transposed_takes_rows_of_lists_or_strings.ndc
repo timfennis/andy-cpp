@@ -1,4 +1,4 @@
 // `transposed` takes rows that are lists or strings, so a list of numbers is
 // an error when the program is checked, not when it runs.
-// expect-error: No function called 'transposed' found that matches the arguments 'List<Int>'
+// expect-error: No function called 'transposed' found that matches the arguments '[Int]'
 print(transposed([1, 2]));

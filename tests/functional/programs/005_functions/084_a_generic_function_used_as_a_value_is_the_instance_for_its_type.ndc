@@ -3,7 +3,7 @@
 // function, and values at different types are different functions.
 // expect-output: true false 2 2.5
 fn inc(x) => x + 1;
-let a: Fn(Int) -> Int = inc;
-let again: Fn(Int) -> Int = inc;
-let b: Fn(Float) -> Float = inc;
+let a: fn(Int) -> Int = inc;
+let again: fn(Int) -> Int = inc;
+let b: fn(Float) -> Float = inc;
 print(a == again, a == b, a(1), b(1.5));

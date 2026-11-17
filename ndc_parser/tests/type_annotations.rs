@@ -24,6 +24,13 @@ fn names(annotation: &TypeExpr, found: &mut Vec<(String, NodeId)>) {
                 names(arg, found);
             }
         }
+        TypeExpr::List { element, .. } => names(element, found),
+        TypeExpr::Map { key, value, .. } => {
+            names(key, found);
+            if let Some(value) = value {
+                names(value, found);
+            }
+        }
         TypeExpr::Tuple { elements, .. } => {
             for element in elements {
                 names(element, found);
@@ -52,7 +59,7 @@ fn assert_distinct(ids: impl IntoIterator<Item = NodeId>) {
 
 #[test]
 fn every_type_name_has_its_own_id() {
-    let expression = parse_one("let x: Map<P, (Q, List<P>)> = input");
+    let expression = parse_one("let x: %{P: (Q, Option<P>)} = input");
     let Expression::VariableDeclaration {
         annotated_type: Some(annotation),
         ..
@@ -68,7 +75,7 @@ fn every_type_name_has_its_own_id() {
             .iter()
             .map(|(name, _)| name.as_str())
             .collect::<Vec<_>>(),
-        ["Map", "P", "Q", "List", "P"]
+        ["P", "Q", "Option", "P"]
     );
     // Both `P`s are separate uses, so they get separate ids.
     assert_distinct(found.into_iter().map(|(_, id)| id));
@@ -106,17 +113,17 @@ fn a_cast_target_before_a_comparison_gets_its_own_id() {
 fn a_function_type_has_parameters_and_an_optional_return_type() {
     for (source, shown) in [
         (
-            "let f: Fn(Int, String) -> Bool = g",
-            "Fn(Int, String) -> Bool",
+            "let f: fn(Int, String) -> Bool = g",
+            "fn(Int, String) -> Bool",
         ),
-        ("let f: Fn() = g", "Fn()"),
+        ("let f: fn() = g", "fn()"),
         (
-            "let f: Fn(Fn(Int) -> Int) -> List<Int> = g",
-            "Fn(Fn(Int) -> Int) -> List<Int>",
+            "let f: fn(fn(Int) -> Int) -> [Int] = g",
+            "fn(fn(Int) -> Int) -> [Int]",
         ),
         (
-            "fn h(f: Fn(Int) -> Int, x: Int) -> Fn(Int) -> Int { f }",
-            "Fn(Int) -> Int",
+            "fn h(f: fn(Int) -> Int, x: Int) -> fn(Int) -> Int { f }",
+            "fn(Int) -> Int",
         ),
     ] {
         let expression = parse_one(source);
@@ -133,4 +140,62 @@ fn a_function_type_has_parameters_and_an_optional_return_type() {
         };
         assert_eq!(annotation.to_string(), shown, "{source}");
     }
+}
+
+#[test]
+fn list_and_tuple_types_are_written_like_their_values() {
+    for (source, shown) in [
+        ("let x: [Int] = y", "[Int]"),
+        ("let x: [[Int]] = y", "[[Int]]"),
+        ("let x: (Int, [String]) = y", "(Int, [String])"),
+        ("let x: %{String: [Int]} = y", "%{String: [Int]}"),
+        // A comma makes a 1-tuple; parentheses alone only group, as in `(1)`.
+        ("let x: (Int,) = y", "(Int,)"),
+        ("let x: (Int) = y", "Int"),
+        ("let x: () = y", "()"),
+        ("let x: %{String: [Int]} = y", "%{String: [Int]}"),
+        ("let x: %{Int} = y", "%{Int}"),
+        ("let x: fn(Int) -> %{Int} = y", "fn(Int) -> %{Int}"),
+    ] {
+        let Expression::VariableDeclaration {
+            annotated_type: Some(annotation),
+            ..
+        } = parse_one(source).expression
+        else {
+            panic!("expected an annotated declaration");
+        };
+        assert_eq!(annotation.to_string(), shown, "{source}");
+    }
+}
+
+#[test]
+fn list_map_and_function_types_inside_type_arguments_are_still_a_cast() {
+    for source in [
+        "x as Option<[Int]>",
+        "x as Option<%{String: Int}>",
+        "x as Option<fn(Int)>",
+    ] {
+        let Expression::Cast { annotation, .. } = parse_one(source).expression else {
+            panic!("expected a cast: {source}");
+        };
+        assert_eq!(format!("x as {annotation}"), source);
+    }
+}
+
+#[test]
+fn a_less_than_after_a_cast_in_a_map_literal_is_a_comparison() {
+    let Expression::Map { values, .. } = parse_one("%{k: x as Int < y, j: z > 1}").expression
+    else {
+        panic!("expected a map literal");
+    };
+    assert_eq!(values.len(), 2);
+}
+
+#[test]
+fn the_old_function_type_spelling_says_how_to_write_it() {
+    let tokens = Lexer::new("let f: Fn(Int) -> Int = abs;", SourceId::SYNTHETIC)
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let error = Parser::from_tokens(tokens).parse().unwrap_err();
+    assert!(error.to_string().contains("unknown type `Fn`"), "{error}");
 }

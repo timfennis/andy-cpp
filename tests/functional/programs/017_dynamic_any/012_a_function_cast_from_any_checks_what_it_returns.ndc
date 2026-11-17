@@ -1,4 +1,4 @@
-// A function of type `Any` cast to a `Fn(Int) -> Int` checks what each call
+// A function of type `Any` cast to a `fn(Int) -> Int` checks what each call
 // returns when its own type doesn't say: `text`'s value takes and returns
 // anything.
 // expect-error: expected the function to return Int but it returned String
@@ -6,6 +6,6 @@ fn show(x: Int) { "int" }
 fn show(x: String) { "string" }
 fn text(x) => "s";
 let a: Any = text;
-let f = a as Fn(Int) -> Int;
+let f = a as fn(Int) -> Int;
 let n: Int = f(1);
 print(show(n), n);

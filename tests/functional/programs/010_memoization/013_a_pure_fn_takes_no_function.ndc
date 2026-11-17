@@ -1,2 +1,2 @@
-// expect-error: `call` is a `pure fn`, which only takes data, but its parameter `f` has type `Fn(Int) -> Int`
-pure fn call(f: Fn(Int) -> Int, n: Int) => f(n);
+// expect-error: `call` is a `pure fn`, which only takes data, but its parameter `f` has type `fn(Int) -> Int`
+pure fn call(f: fn(Int) -> Int, n: Int) => f(n);

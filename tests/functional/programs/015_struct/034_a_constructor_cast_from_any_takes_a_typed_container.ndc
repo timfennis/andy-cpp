@@ -1,5 +1,5 @@
 // expect-output: [1,2]
-struct Q { xs: List<Int> }
+struct Q { xs: [Int] }
 let make: Any = Q;
-let q = make as Fn(List<Int>) -> Q;
+let q = make as fn([Int]) -> Q;
 print(q([1, 2]).xs);

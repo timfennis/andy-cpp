@@ -9,7 +9,7 @@ mod inner {
     use num::{BigInt, ToPrimitive};
 
     /// Converts any sequence into a list
-    #[function(signature = "<T>(Iterable<T>) -> List<T>")]
+    #[function(signature = "<T>(Iterable<T>) -> [T]")]
     pub fn list(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
             seq.try_into_iter()
@@ -19,19 +19,19 @@ mod inner {
     }
 
     /// Returns `true` if the list contains the given element.
-    #[function(signature = "<T>(List<T>, T) -> Bool")]
+    #[function(signature = "<T>([T], T) -> Bool")]
     pub fn contains(list: &[Value], elem: Value) -> bool {
         list.contains(&elem)
     }
 
     /// Returns `true` if the list contains the given subsequence. Every list contains the empty one.
-    #[function(signature = "<T>(List<T>, List<T>) -> Bool")]
+    #[function(signature = "<T>([T], [T]) -> Bool")]
     pub fn contains_subsequence(list: &[Value], subsequence: &[Value]) -> bool {
         subsequence.is_empty() || list.windows(subsequence.len()).contains(&subsequence)
     }
 
     /// Returns the starting index of the first occurrence of `subsequence` in `list`, or produces an error if there is none.
-    #[function(signature = "<T>(List<T>, List<T>) -> Int")]
+    #[function(signature = "<T>([T], [T]) -> Int")]
     pub fn find_subsequence(list: &[Value], subsequence: &[Value]) -> anyhow::Result<Value> {
         subsequence_start(list, subsequence)
             .map(|idx| Value::Int(idx as i64))
@@ -39,16 +39,13 @@ mod inner {
     }
 
     /// Returns the starting index of the first occurrence of `subsequence` in `list`, or `None` if there is none.
-    #[function(
-        name = "find_subsequence?",
-        signature = "<T>(List<T>, List<T>) -> Option<Int>"
-    )]
+    #[function(name = "find_subsequence?", signature = "<T>([T], [T]) -> Option<Int>")]
     pub fn maybe_find_subsequence(list: &[Value], subsequence: &[Value]) -> Value {
         Value::option(subsequence_start(list, subsequence).map(|idx| Value::Int(idx as i64)))
     }
 
     /// Inserts an element at the given index, shifting all elements after it to the right.
-    #[function(signature = "<T>(List<T>, Int, T)")]
+    #[function(signature = "<T>([T], Int, T)")]
     pub fn insert(list: &mut Vec<Value>, index: usize, elem: Value) -> anyhow::Result<()> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
@@ -58,7 +55,7 @@ mod inner {
     }
 
     /// Removes and returns the element at position `index` within the list, shifting all elements after it to the left.
-    #[function(signature = "<T>(List<T>, Int) -> T")]
+    #[function(signature = "<T>([T], Int) -> T")]
     pub fn remove(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
         if index >= list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
@@ -68,52 +65,52 @@ mod inner {
     }
 
     /// Removes all instances of `element` from `list`
-    #[function(signature = "<T>(List<T>, T)")]
+    #[function(signature = "<T>([T], T)")]
     pub fn remove_element(list: &mut Vec<Value>, element: Value) {
         list.retain(|cur| cur != &element);
     }
 
     /// Appends `elem` to the back of `list`
-    #[function(signature = "<T>(List<T>, T)")]
+    #[function(signature = "<T>([T], T)")]
     pub fn push(list: &mut Vec<Value>, elem: Value) {
         list.push(elem);
     }
 
     /// Moves elements from `other` to `list`, leaving `other` empty.
-    #[function(signature = "<T>(List<T>, List<T>)")]
+    #[function(signature = "<T>([T], [T])")]
     pub fn append(list: &mut Vec<Value>, other: &mut Vec<Value>) {
         list.append(other);
     }
 
     /// Copies elements from `other` to `list`, not touching `other`.
-    #[function(signature = "<T>(List<T>, List<T>)")]
+    #[function(signature = "<T>([T], [T])")]
     pub fn extend(list: &mut Vec<Value>, other: &[Value]) {
         list.extend_from_slice(other);
     }
 
     /// Removes and returns the last element from the list, or `None` if empty.
-    #[function(name = "pop?", signature = "<T>(List<T>) -> Option<T>")]
+    #[function(name = "pop?", signature = "<T>([T]) -> Option<T>")]
     pub fn maybe_pop(list: &mut Vec<Value>) -> Value {
         Value::option(list.pop())
     }
 
     /// Removes and returns the last element from the list. Use `pop?` to get
     /// `None` from an empty list instead of an error.
-    #[function(signature = "<T>(List<T>) -> T")]
+    #[function(signature = "<T>([T]) -> T")]
     pub fn pop(list: &mut Vec<Value>) -> anyhow::Result<Value> {
         list.pop()
             .ok_or_else(|| anyhow::anyhow!("the list is empty"))
     }
 
     /// Removes and returns the first element from the list, or `None` if empty.
-    #[function(name = "pop_left?", signature = "<T>(List<T>) -> Option<T>")]
+    #[function(name = "pop_left?", signature = "<T>([T]) -> Option<T>")]
     pub fn maybe_pop_left(list: &mut Vec<Value>) -> Value {
         Value::option((!list.is_empty()).then(|| list.remove(0)))
     }
 
     /// Removes and returns the first element from the list. Use `pop_left?`
     /// to get `None` from an empty list instead of an error.
-    #[function(signature = "<T>(List<T>) -> T")]
+    #[function(signature = "<T>([T]) -> T")]
     pub fn pop_left(list: &mut Vec<Value>) -> anyhow::Result<Value> {
         if list.is_empty() {
             return Err(anyhow::anyhow!("the list is empty"));
@@ -138,7 +135,7 @@ mod inner {
     /// Returns a copy of the element at `index`, or an error if the index is out
     /// of bounds. The index must be non-negative; use `index` for indexing from
     /// the end.
-    #[function(signature = "<T>(List<T>, Int) -> T")]
+    #[function(signature = "<T>([T], Int) -> T")]
     pub fn get(list: &[Value], index: usize) -> anyhow::Result<Value> {
         list.get(index)
             .cloned()
@@ -148,7 +145,7 @@ mod inner {
     /// Returns a copy of the element at `index`, or `None` if `index` is past
     /// the end of the list. A negative or oversized index is a conversion error,
     /// not `None`; use `index?` for indexing from the end.
-    #[function(name = "get?", signature = "<T>(List<T>, Int) -> Option<T>")]
+    #[function(name = "get?", signature = "<T>([T], Int) -> Option<T>")]
     pub fn maybe_get(list: &[Value], index: usize) -> Value {
         Value::option(list.get(index).cloned())
     }
@@ -156,7 +153,7 @@ mod inner {
     /// Returns a copy of the element at `i`, wrapping negative indices from the
     /// end of the list; errors if the index is out of bounds. The named form of
     /// the `[]` operator.
-    #[function(signature = "<T>(List<T>, Int) -> T")]
+    #[function(signature = "<T>([T], Int) -> T")]
     pub fn index(list: &[Value], i: &BigInt) -> anyhow::Result<Value> {
         wrap_index(i, list.len())
             .map(|idx| list[idx].clone())
@@ -166,31 +163,31 @@ mod inner {
     /// Returns a copy of the element at `i`, wrapping negative indices from the
     /// end of the list; returns `None` if the index is out of bounds. The
     /// non-throwing twin of the `[]` operator.
-    #[function(name = "index?", signature = "<T>(List<T>, Int) -> Option<T>")]
+    #[function(name = "index?", signature = "<T>([T], Int) -> Option<T>")]
     pub fn maybe_index(list: &[Value], i: &BigInt) -> Value {
         Value::option(wrap_index(i, list.len()).map(|idx| list[idx].clone()))
     }
 
     /// Creates a copy of the list with its elements in reverse order
-    #[function(signature = "<T>(List<T>) -> List<T>")]
+    #[function(signature = "<T>([T]) -> [T]")]
     pub fn reversed(list: &[Value]) -> Value {
         Value::list(list.iter().rev().cloned().collect())
     }
 
     /// Removes all values from the list
-    #[function(signature = "<T>(List<T>)")]
+    #[function(signature = "<T>([T])")]
     pub fn clear(list: &mut Vec<Value>) {
         list.clear();
     }
 
     /// Returns `true` if the list contains no elements
-    #[function(signature = "<T>(List<T>) -> Bool")]
+    #[function(signature = "<T>([T]) -> Bool")]
     pub fn is_empty(list: &[Value]) -> bool {
         list.is_empty()
     }
 
     /// Splits the collection into two at the given index.
-    #[function(signature = "<T>(List<T>, Int) -> List<T>")]
+    #[function(signature = "<T>([T], Int) -> [T]")]
     pub fn split_off(list: &mut Vec<Value>, index: usize) -> anyhow::Result<Value> {
         if index > list.len() {
             return Err(anyhow!("index {index} is out of bounds"));
@@ -201,13 +198,13 @@ mod inner {
 
     /// Shortens the list, keeping the first `len` elements and dropping the rest.
     /// If `len` is greater or equal to the length of the list, nothing happens.
-    #[function(signature = "<T>(List<T>, Int)")]
+    #[function(signature = "<T>([T], Int)")]
     pub fn truncate(list: &mut Vec<Value>, len: usize) {
         list.truncate(len);
     }
 
     /// Returns a copy of the first element of the list or results in an error if the list is empty.
-    #[function(signature = "<T>(List<T>) -> T")]
+    #[function(signature = "<T>([T]) -> T")]
     pub fn first(list: &[Value]) -> anyhow::Result<Value> {
         list.first()
             .cloned()
@@ -215,13 +212,13 @@ mod inner {
     }
 
     /// Returns a copy of the first element, or `None` if the list is empty.
-    #[function(name = "first?", signature = "<T>(List<T>) -> Option<T>")]
+    #[function(name = "first?", signature = "<T>([T]) -> Option<T>")]
     pub fn maybe_first(list: &[Value]) -> Value {
         Value::option(list.first().cloned())
     }
 
     /// Returns a copy of the last element of the list or results in an error if the list is empty.
-    #[function(signature = "<T>(List<T>) -> T")]
+    #[function(signature = "<T>([T]) -> T")]
     pub fn last(list: &[Value]) -> anyhow::Result<Value> {
         list.last()
             .cloned()
@@ -229,13 +226,13 @@ mod inner {
     }
 
     /// Returns a copy of the last element, or `None` if the list is empty.
-    #[function(name = "last?", signature = "<T>(List<T>) -> Option<T>")]
+    #[function(name = "last?", signature = "<T>([T]) -> Option<T>")]
     pub fn maybe_last(list: &[Value]) -> Value {
         Value::option(list.last().cloned())
     }
 
     /// Returns the Cartesian product of two lists as a list of tuples.
-    #[function(signature = "<T, U>(List<T>, List<U>) -> List<(T, U)>")]
+    #[function(signature = "<T, U>([T], [U]) -> [(T, U)]")]
     pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Value {
         Value::list(
             list_a
@@ -280,8 +277,7 @@ pub mod ops {
         let native = Rc::new(NativeFunction {
             name: "++".to_string(),
             documentation: Some("Concatenates two lists into a new list.".to_string()),
-            static_type: StaticType::signature("<T>(List<T>, List<T>) -> List<T>")
-                .expect("valid signature"),
+            static_type: StaticType::signature("<T>([T], [T]) -> [T]").expect("valid signature"),
             func: NativeFunc::Simple(Box::new(|args| {
                 let [left, right] = args else {
                     return Err(VmError::native(format!(
@@ -317,8 +313,7 @@ pub mod ops {
             documentation: Some(
                 "Appends all elements from the right list to the left list in place.".to_string(),
             ),
-            static_type: StaticType::signature("<T>(List<T>, List<T>) -> List<T>")
-                .expect("valid signature"),
+            static_type: StaticType::signature("<T>([T], [T]) -> [T]").expect("valid signature"),
             func: NativeFunc::Simple(Box::new(|args| {
                 let [left, right] = args else {
                     return Err(VmError::native(format!(

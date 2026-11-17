@@ -41,7 +41,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<WrappedFunction> {
                     return_type = Some(map_type(&value)?);
                     Ok(())
                 } else if meta.path.is_ident("signature") {
-                    // #[function(signature = "<T>(List<T>, T) -> Option<T>")], once
+                    // #[function(signature = "<T>([T], T) -> Option<T>")], once
                     // for each overload the one body serves.
                     signatures.push(meta.value()?.parse()?);
                     Ok(())
@@ -311,7 +311,7 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
     }
 }
 
-/// Checks that a signature such as `<T>(List<T>, T)` parses, and that it
+/// Checks that a signature such as `<T>([T], T)` parses, and that it
 /// declares as many parameters as the Rust function takes.
 fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<()> {
     let parsed = ndc_core::StaticType::signature(&signature.value())

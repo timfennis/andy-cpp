@@ -2,8 +2,8 @@
 // is, which checks the elements as the program runs. `a` and `b` still hold
 // their lists, so a copy of each is cast.
 // expect-output: ints strings
-fn process(xs: List<Int>) => "ints";
-fn process(xs: List<String>) => "strings";
+fn process(xs: [Int]) => "ints";
+fn process(xs: [String]) => "strings";
 let a: Any = [1];
 let b: Any = ["s"];
-print(process(a.clone() as List<Int>), process(b.clone() as List<String>));
+print(process(a.clone() as [Int]), process(b.clone() as [String]));

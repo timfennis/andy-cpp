@@ -189,7 +189,7 @@ impl Analyser {
     /// it's new. A use that picked another function keeps its pick. A
     /// function value is one instance, so its key must be known:
     /// `let f: Any = inc` doesn't say which `inc` it is, while
-    /// `let f: Fn(Any) -> Any = inc` is the one for `Any`.
+    /// `let f: fn(Any) -> Any = inc` is the one for `Any`.
     fn point_at_instance(&mut self, generic_use: &GenericUse, new: &mut Vec<NewInstance>) {
         let key = generic_use
             .key
@@ -253,7 +253,7 @@ impl Analyser {
 
     /// Whether `generic_use`, made in the body of an instance of the function
     /// it uses, needs an instance for bigger types than that one's:
-    /// `f<List<Int>>` from `f<Int>`. As each instance of a function made for
+    /// `f<[Int]>` from `f<Int>`. As each instance of a function made for
     /// its own recursion is at most as big as the one it's made from, there
     /// are only so many, and making them ends.
     fn grows_an_instance(&self, generic_use: &GenericUse, key: &[StaticType]) -> bool {
@@ -445,7 +445,7 @@ impl Analyser {
 
     /// Picks whether each cast of the batch is checked as the program runs:
     /// not where the type of its value, settled now, proves it. In `fn f(ys)
-    /// => ys as List<Int>`, the instance for a `List<Int>` needs no check.
+    /// => ys as [Int]`, the instance for a `[Int]` needs no check.
     pub(super) fn pick_cast_checks(&mut self) {
         for cast in std::mem::take(&mut self.casts) {
             let check = (!self.vars.resolve(&cast.found).fits(&cast.target))

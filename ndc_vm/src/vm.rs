@@ -690,7 +690,7 @@ impl Vm {
             unreachable!("a checked function is used as a function type");
         };
         // The function type it's used as may take more than the function
-        // does, as `Fn(Any) -> Int` would of a function taking an Int.
+        // does, as `fn(Any) -> Int` would of a function taking an Int.
         let arguments = &self.stack[self.stack.len() - args..];
         if !function.conforms_value_args(arguments) {
             return Err(VmError::native(format!(

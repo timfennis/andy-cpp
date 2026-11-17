@@ -1,7 +1,7 @@
 // The unit value () pairs with JSON null in both directions
 assert_eq(json_encode(()), "null");
 assert_eq(json_decode("null"), ());
-let values: List<Any> = [1, (), 2];
+let values: [Any] = [1, (), 2];
 assert_eq(json_encode(values), "[1,null,2]");
 
 // A set is a map with unit values, so it round-trips as an object with nulls
