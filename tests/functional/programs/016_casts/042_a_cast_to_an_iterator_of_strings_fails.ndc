@@ -1,0 +1,6 @@
+// expect-error: cannot cast Iterator<Any> to Iterator<String>
+let a: Any = 1..3;
+let b = a as Iterator<String>;
+for s in b {
+    print(s ++ "x");
+}
