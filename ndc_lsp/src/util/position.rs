@@ -1,4 +1,4 @@
-use lsp_types::{Position, Range};
+use ls_types::{Position, Range};
 use ndc_lexer::Span;
 
 /// Precomputed line-start byte offsets for a document, enabling O(log n)

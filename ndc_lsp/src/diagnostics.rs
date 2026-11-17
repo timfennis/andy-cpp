@@ -1,4 +1,4 @@
-use lsp_types::{Diagnostic, DiagnosticSeverity};
+use ls_types::{Diagnostic, DiagnosticSeverity};
 use ndc_interpreter::{AnalysisError, AnalysisResult, InterpreterError};
 use ndc_lexer::{SourceId, Span};
 use ndc_parser::ExpressionLocation;

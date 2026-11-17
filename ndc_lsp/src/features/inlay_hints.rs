@@ -1,4 +1,4 @@
-use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
+use ls_types::{InlayHint, InlayHintKind, InlayHintLabel};
 use ndc_analysis::Analysis;
 use ndc_core::NodeId;
 use ndc_lexer::Span;

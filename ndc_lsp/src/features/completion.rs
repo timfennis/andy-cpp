@@ -1,5 +1,5 @@
 use ahash::AHashMap;
-use lsp_types::{
+use ls_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
     Documentation, MarkupContent, MarkupKind, Position,
 };

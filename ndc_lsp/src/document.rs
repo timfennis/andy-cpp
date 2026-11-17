@@ -1,6 +1,4 @@
-use lsp_types::{
-    CompletionResponse, Diagnostic, DocumentSymbol, Hover, InlayHint, Position, Range,
-};
+use ls_types::{CompletionResponse, Diagnostic, DocumentSymbol, Hover, InlayHint, Position, Range};
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
 use ndc_interpreter::{Interpreter, NativeFunction};
@@ -39,7 +37,7 @@ pub(crate) fn analyse(
 /// playground. Positions are LSP positions: a line and a UTF-16 column.
 ///
 /// ```
-/// # use ndc_lsp::{Document, lsp_types::Position};
+/// # use ndc_lsp::{Document, ls_types::Position};
 /// let mut document = Document::new(|_| {});
 /// let diagnostics = document.set_text("let x = 1;\nx.");
 /// // `x.` doesn't parse, but completion still knows `x` from the analysis
@@ -125,7 +123,7 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lsp_types::{CompletionItem, HoverContents};
+    use ls_types::{CompletionItem, HoverContents};
 
     fn labels(response: CompletionResponse) -> Vec<String> {
         let items: Vec<CompletionItem> = match response {

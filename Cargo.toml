@@ -14,15 +14,14 @@ license = "MIT"
 
 [workspace.dependencies]
 ahash = { version = "0.8.12" }
-char_index = "0.1.5"
-anyhow = "1.0.103"
-clap = { version = "4.6.1", features = ["derive"] }
+char_index = "0.1.6"
+anyhow = "1.0.104"
+clap = { version = "4.6.8", features = ["derive"] }
 criterion = { version = "0.8.2", features = ["html_reports"] }
-derive_builder = { version = "0.20.2" }
 derive_more = { version = "2.1.1", features = ["deref", "deref_mut", "from", "display", "constructor"] }
 factorial = "0.4.0"
 itertools = "0.15.0"
-libc = "0.2.186"
+libc = "0.2.191"
 ndc_core = { path = "ndc_core" }
 ndc_diagnostics = { path = "ndc_diagnostics" }
 ndc_fmt = { path = "ndc_fmt" }
@@ -39,23 +38,21 @@ ndc_lsp = { path = "ndc_lsp" }
 ndc_macros = { path = "ndc_macros" }
 ndc_stdlib = { path = "ndc_stdlib" }
 num = "0.4.3"
-once_cell = "1.21.4"
-proptest = "1.11"
+proptest = "1.12"
 yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
-rand = "0.10.2"
+rand = "0.10.4"
 rand_chacha = "0.10.0"
-regex = "1.12.4"
-rustyline = { version = "18.0.1", features = ["derive"] }
+regex = "1.13.1"
+rustyline = { version = "19.0.0", features = ["derive"] }
 ryu = "1.0.23"
-self_cell = "1.2.2"
-serde_json = { version = "1.0.150", features = ["arbitrary_precision"] }
+serde_json = { version = "1.0.154", features = ["arbitrary_precision"] }
 strsim = "0.11.1"
 tap = "1.0.1"
-thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["full"] }
-tower-lsp = "0.20.0"
-# The version tower-lsp re-exports, so the server and the features share types.
-lsp-types = "0.94.1"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["full"] }
+tower-lsp-server = "0.23.0"
+# The version tower-lsp-server re-exports, so the server and the features share types.
+ls-types = "0.0.6"
 
 # For the browser build: LTO makes the module about 10% smaller and a bit
 # faster. opt-level "s" or "z" would save another 12-21% of the gzipped size,

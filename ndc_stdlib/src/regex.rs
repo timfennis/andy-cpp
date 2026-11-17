@@ -1,5 +1,5 @@
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 use ndc_macros::export_module;
 use ndc_vm::value::Value;
@@ -9,7 +9,7 @@ mod inner {
     /// Extracts all signed integers from the given string.
     #[function(return_type = Vec<i64>)]
     pub fn nums(haystack: &str) -> Value {
-        static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"-?\d+").unwrap());
+        static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-?\d+").unwrap());
 
         Value::list(
             RE.captures_iter(haystack)
@@ -24,7 +24,7 @@ mod inner {
     /// Extracts all unsigned integers from the given string.
     #[function(return_type = Vec<i64>)]
     pub fn unsigned_nums(haystack: &str) -> Value {
-        static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\d+").unwrap());
+        static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+").unwrap());
 
         Value::list(
             RE.captures_iter(haystack)

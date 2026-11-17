@@ -1,4 +1,4 @@
-use lsp_types::{Position, Range};
+use ls_types::{Position, Range};
 use ndc_core::NodeId;
 use ndc_lexer::{SourceId, Span};
 use ndc_parser::Expression;
