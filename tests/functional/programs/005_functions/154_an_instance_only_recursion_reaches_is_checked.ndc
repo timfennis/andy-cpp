@@ -1,0 +1,11 @@
+// `f(1, 1)` checks `f` for an Int, whose recursive call needs `f` for a
+// String: that instance is checked too, and `x + 1` fails there.
+// expect-error: No function called '+' found that matches the arguments 'String, Int'
+fn conv(x: Int) => "s";
+fn conv(x: String) => "t";
+fn f(a: Bool, n: Int) -> Int => 0;
+fn f(x, n) -> Int {
+    if n == 0 { return x + 1; }
+    f(conv(x), n - 1)
+}
+print(f(1, 1));
