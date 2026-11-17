@@ -192,6 +192,23 @@ fn a_less_than_after_a_cast_in_a_map_literal_is_a_comparison() {
 }
 
 #[test]
+fn a_less_than_after_a_cast_in_a_list_literal_is_a_comparison() {
+    let Expression::OperatorCall { arguments, .. } =
+        parse_one("[x as Int < y] > [false]").expression
+    else {
+        panic!("expected a comparison");
+    };
+    let Expression::List { values } = &arguments[0].expression else {
+        panic!("expected a list literal");
+    };
+    assert_eq!(values.len(), 1);
+    assert!(
+        matches!(values[0].expression, Expression::OperatorCall { .. }),
+        "expected a comparison inside the list"
+    );
+}
+
+#[test]
 fn the_old_function_type_spelling_says_how_to_write_it() {
     let tokens = Lexer::new("let f: Fn(Int) -> Int = abs;", SourceId::SYNTHETIC)
         .collect::<Result<Vec<_>, _>>()

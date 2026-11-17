@@ -1499,6 +1499,7 @@ impl Parser {
         let mut depth = 0_usize;
         let mut parens = 0_usize;
         let mut braces = 0_usize;
+        let mut brackets = 0_usize;
 
         for location in self.tokens.iter().skip(self.current + 1) {
             // How many `>` this token contributes, and whether consuming all of
@@ -1536,11 +1537,20 @@ impl Parser {
                     continue;
                 }
                 Token::Colon if braces > 0 => continue,
-                Token::Identifier(_)
-                | Token::Fn
-                | Token::Comma
-                | Token::LeftSquareBracket
-                | Token::RightSquareBracket => continue,
+                Token::LeftSquareBracket => {
+                    brackets += 1;
+                    continue;
+                }
+                // Like `)`, a `]` outside a list type of ours belongs to an
+                // enclosing list literal: `[x as Int < y] > [false]`.
+                Token::RightSquareBracket => {
+                    if brackets == 0 {
+                        return false;
+                    }
+                    brackets -= 1;
+                    continue;
+                }
+                Token::Identifier(_) | Token::Fn | Token::Comma => continue,
                 Token::Greater => (1, true),
                 Token::GreaterGreater => (2, true),
                 Token::GreaterEquals => (1, false),
@@ -1562,9 +1572,9 @@ impl Parser {
             }
 
             if depth == closers {
-                // A matching `>` inside parentheses belongs to the grouped
-                // expression unless every parenthesized type has closed.
-                return parens == 0 && braces == 0;
+                // A matching `>` inside brackets belongs to the enclosing
+                // expression unless every bracketed type has closed.
+                return parens == 0 && braces == 0 && brackets == 0;
             }
 
             depth -= closers;
