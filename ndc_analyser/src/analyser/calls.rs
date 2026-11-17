@@ -165,19 +165,27 @@ impl Analyser {
 
         // A named callee declares nothing, so its overload can be picked after
         // the arguments' types are known.
-        let tuple_index = match arguments {
-            [_, index] if name == "[]" => literal_index(index),
-            _ => None,
-        };
-        let arguments = self.analyse_arguments(function.id, arguments);
-        self.constrain_index_call(
-            CallSite::Call(function.id),
-            arguments,
-            kind,
-            name,
-            span,
-            tuple_index,
-        )
+        let site = CallSite::Call(function.id);
+        let types = self.analyse_arguments(function.id, arguments);
+        match arguments {
+            [_, index] if name == "[]" => self.constrain_index_read(site, types, index, kind, span),
+            _ => self.constrain_call(site, types, kind, name, span),
+        }
+    }
+
+    /// [`Self::constrain_call`] for reading through `[]`: `arguments` are
+    /// the container's type and that of `index`. An index that's a number
+    /// written in the code picks a tuple's element, with its own type, as
+    /// in `t[0]` and `t[0] += 1`.
+    pub(super) fn constrain_index_read(
+        &mut self,
+        site: CallSite,
+        arguments: Vec<StaticType>,
+        index: &ExpressionLocation,
+        kind: CallKind,
+        span: Span,
+    ) -> StaticType {
+        self.constrain_index_call(site, arguments, kind, "[]", span, literal_index(index))
     }
 
     /// Analyses the arguments of a call of the function named at `callee`

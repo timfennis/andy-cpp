@@ -629,19 +629,7 @@ impl Analyser {
                 },
             )
             .collect::<Vec<_>>();
-        let shown = |parameters: Option<&[StaticType]>| {
-            parameters.map(|parameters| {
-                parameters
-                    .iter()
-                    .map(|parameter| {
-                        parameter.replace(&|part| {
-                            matches!(part, StaticType::Var(_) | StaticType::Generic(_))
-                                .then_some(StaticType::Any)
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-        };
+        let shown = redefinable_parameters;
         for earlier in earlier {
             if shown(earlier.as_deref()) == shown(parameters) {
                 self.emit(AnalysisError::function_redefinition(
@@ -702,6 +690,23 @@ pub(super) fn named_in_order(typ: &StaticType) -> StaticType {
             .position(|other| other == name)
             .map(|index| StaticType::Generic(type_parameter_name(index).into())),
         _ => None,
+    })
+}
+
+/// Parameter types as two overloads compare them to tell whether the later
+/// redefines the earlier: one whose type the body decides takes anything, as
+/// an `Any` does, so `fn f(x)` redefines `fn f(x: Any)`.
+pub(super) fn redefinable_parameters(parameters: Option<&[StaticType]>) -> Option<Vec<StaticType>> {
+    parameters.map(|parameters| {
+        parameters
+            .iter()
+            .map(|parameter| {
+                parameter.replace(&|part| {
+                    matches!(part, StaticType::Var(_) | StaticType::Generic(_))
+                        .then_some(StaticType::Any)
+                })
+            })
+            .collect()
     })
 }
 

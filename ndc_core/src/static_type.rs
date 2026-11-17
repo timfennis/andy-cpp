@@ -308,7 +308,7 @@ impl StaticType {
     /// too. `Any` is not one of them: it goes only where `Any` is taken,
     /// and takes a cast to go anywhere else.
     pub fn may_fit(&self, parameter: &Self) -> bool {
-        self.fits(parameter) || self.matches(parameter, true, true)
+        matches!(parameter, Self::Any) || self.matches(parameter, true, true)
     }
 
     /// Whether this type is `parameter`, where what [`Self::fits`] and

@@ -76,8 +76,6 @@ pub struct Analyser {
     declaring: Option<SymbolId>,
     /// The calls its body makes of itself.
     recursive_calls: Vec<NodeId>,
-    /// The nodes of overloaded function values that waited for the type
-    /// expected of them, as `abs` in `[len, abs]` does.
     /// The functions the batch declares, in the order their declarations
     /// start, so a generic function knows the ones its body declares.
     declared_functions: Vec<NodeId>,
@@ -93,6 +91,8 @@ pub struct Analyser {
     /// The native that indexes a tuple or an `Any`: see
     /// [`ndc_core::ANY_INDEX`].
     any_index: Option<SymbolId>,
+    /// The nodes of overloaded function values that waited for the type
+    /// expected of them, as `abs` in `[len, abs]` does.
     waiting_function_values: AHashSet<NodeId>,
     /// The types an anonymous function's unannotated parameters get from
     /// the call it's passed to, by the function's node: in

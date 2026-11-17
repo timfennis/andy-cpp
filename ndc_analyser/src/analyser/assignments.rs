@@ -1,18 +1,17 @@
 use super::Analyser;
 use super::solver::{CallSite, Origin};
 use crate::error::AnalysisError;
-use crate::overloads::{CallKind, ResolvedCall};
+use crate::overloads::CallKind;
 use itertools::izip;
-use ndc_analysis::Binding;
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{AssignmentTarget, AssignmentTargetLocation, ExpressionLocation};
 use ndc_resolver::SymbolId;
 
 impl Analyser {
-    /// Analyses `l_value op= r_value`: picks the in-place overload (`+=`) if one
-    /// fits and keeps the target's type, or else the plain operator (`+`) whose
-    /// result is written back.
+    /// Analyses `l_value op= r_value` as `l_value = op(l_value, r_value)`,
+    /// which also picks the in-place overload (`+=`) where it does the same
+    /// as the operator.
     pub(super) fn analyse_op_assignment(
         &mut self,
         id: NodeId,
@@ -22,62 +21,22 @@ impl Analyser {
         span: Span,
     ) -> StaticType {
         let stored_type = self.analyse_assignment_target(l_value, span);
-        let left_type = stored_type.clone();
         let right_type = self.analyse_expr(r_value);
-        // `a op= b` is `a = op(a, b)`: the operator is a call like any other,
-        // and the in-place overload is picked along with it where it does the
-        // same (see `record_pick`).
-        let (left_type, right_type) = (
-            self.vars.resolve(&left_type),
-            self.vars.resolve(&right_type),
+        // The operator is a call like any other, and the in-place overload is
+        // picked along with it (see `record_pick`): every in-place native has
+        // its operator.
+        let result = self.constrain_call(
+            CallSite::OpAssignment(id),
+            vec![
+                self.vars.resolve(&stored_type),
+                self.vars.resolve(&right_type),
+            ],
+            CallKind::Operator,
+            operation,
+            span,
         );
-        if !self
-            .overloads()
-            .reachable_symbols(&self.resolver.augmented_candidates(id).operator)
-            .is_empty()
-        {
-            let result = self.constrain_call(
-                CallSite::OpAssignment(id),
-                vec![left_type.clone(), right_type],
-                CallKind::Operator,
-                operation,
-                span,
-            );
-            self.validate_assignment_write(l_value, &stored_type, &result, span);
-            return StaticType::unit();
-        }
-        let written = self.in_place_only(id, &left_type, &right_type, operation, span);
-        self.validate_assignment_write(l_value, &stored_type, &written, span);
+        self.validate_assignment_write(l_value, &stored_type, &result, span);
         StaticType::unit()
-    }
-
-    /// Picks the in-place overload `a op= b` calls when there's no operator
-    /// `op` to fall back on, and returns the type of the value written back
-    /// to `a`, which an in-place overload doesn't change.
-    fn in_place_only(
-        &mut self,
-        id: NodeId,
-        left_type: &StaticType,
-        right_type: &StaticType,
-        operation: &str,
-        span: Span,
-    ) -> StaticType {
-        let arguments = [left_type.clone(), right_type.clone()];
-        // An operand whose check failed was reported there.
-        if arguments.iter().any(StaticType::has_errors) {
-            return StaticType::Error;
-        }
-        let candidates = self.resolver.augmented_candidates(id).in_place.clone();
-        let ResolvedCall { binding, .. } =
-            self.resolve_overloads(&candidates, &arguments, CallKind::Operator);
-        if matches!(binding, Binding::None) {
-            self.emit(AnalysisError::function_not_found(
-                operation, &arguments, span,
-            ));
-            return StaticType::Error;
-        }
-        self.record_augmented_pick(id, binding);
-        left_type.clone()
     }
 
     /// Records where an assignment stores its value, and returns the type of
@@ -101,11 +60,11 @@ impl Analyser {
                 // written has the type that reading gives. A plain write
                 // stores a value whose type the write settles.
                 let stored = match self.resolver.getter_candidates(lvalue.id) {
-                    Some(_) => self.constrain_call(
+                    Some(_) => self.constrain_index_read(
                         CallSite::Getter(lvalue.id),
                         vec![container.clone(), index_type.clone()],
+                        index,
                         CallKind::Regular,
-                        "[]",
                         span,
                     ),
                     None => self.vars.fresh(),
@@ -197,19 +156,6 @@ impl Analyser {
         }
     }
 
-    /// [`Self::check_write`] for an assignment to a variable, whose error
-    /// says how a variable's type is decided.
-    fn check_variable_write(
-        &mut self,
-        stored_type: &StaticType,
-        value_type: &StaticType,
-        span: Span,
-    ) {
-        if !self.accepts_write(stored_type, value_type) {
-            self.emit_rejected_write(stored_type, value_type, span, true);
-        }
-    }
-
     /// Reports that a value of `value_type` can't be stored where values of
     /// `stored_type` are kept. Values that share no type, as the branches
     /// of `if c { 1 } else { "a" }`, are reported as such once they're
@@ -296,7 +242,9 @@ impl Analyser {
     }
 
     /// Checks a value that will be stored through an lvalue against the type
-    /// stored there.
+    /// stored there. What the value waited on is solved first, so a mismatch
+    /// is the write's: in `x f= 2.5` with an Int `x` and a lambda `f`, it's
+    /// the assignment that's wrong, not the lambda's body.
     pub(super) fn validate_assignment_write(
         &mut self,
         lvalue: &AssignmentTargetLocation,
@@ -304,11 +252,13 @@ impl Analyser {
         value_type: &StaticType,
         span: Span,
     ) {
+        self.solve_waiting();
         match &lvalue.target {
-            AssignmentTarget::Identifier { .. }
-                if self.picks.variables.contains_key(&lvalue.id) =>
-            {
-                self.check_variable_write(stored_type, value_type, span);
+            // A variable's error says how its type is decided.
+            AssignmentTarget::Identifier { .. } => {
+                if !self.accepts_write(stored_type, value_type) {
+                    self.emit_rejected_write(stored_type, value_type, span, true);
+                }
             }
             AssignmentTarget::Member { .. } | AssignmentTarget::Index { .. } => {
                 self.check_write(stored_type, value_type, span);
@@ -323,7 +273,6 @@ impl Analyser {
                     self.validate_assignment_write(target, stored_type, &value_type, span);
                 }
             }
-            AssignmentTarget::Identifier { .. } => {}
         }
     }
 }

@@ -1233,10 +1233,11 @@ impl TypeVars {
             .iter()
             .zip(arguments)
             .all(|(parameter, argument)| self.bind_argument(parameter, argument));
-        let passed = std::mem::replace(&mut self.deferred, outer)
+        let passed = self
+            .deferred
+            .take()
             .expect("bind_arguments set what's deferred")
             .passed;
-        let outer = self.deferred.take();
         let decided_some = !passed.is_empty();
         let mut fits = fits && self.decide_deferred(passed);
         // What an argument passes on to what it's passed, as `sorted` in
