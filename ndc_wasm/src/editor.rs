@@ -1,5 +1,5 @@
 use ndc_lsp::Document;
-use ndc_lsp::lsp_types::Position;
+use ndc_lsp::ls_types::Position;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 

@@ -1,4 +1,4 @@
-use lsp_types::{DocumentSymbol, SymbolKind};
+use ls_types::{DocumentSymbol, SymbolKind};
 use ndc_analysis::Analysis;
 use ndc_core::StaticType;
 use ndc_lexer::Span;

@@ -1,17 +1,17 @@
 use ahash::AHashMap;
 
-use lsp_types::{
+use ls_types::{
     CompletionItem, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
     InitializedParams, InlayHint, InlayHintParams, Location, MessageType, OneOf,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
     WorkDoneProgressOptions,
 };
 use tokio::sync::RwLock;
-use tower_lsp::jsonrpc::Result as JsonRPCResult;
-use tower_lsp::{Client, LanguageServer};
+use tower_lsp_server::jsonrpc::Result as JsonRPCResult;
+use tower_lsp_server::{Client, LanguageServer};
 
 use crate::document::{self, Configure};
 use crate::features::completion::FunctionInfo;
@@ -29,7 +29,7 @@ struct OpenDocument {
 
 pub struct Backend {
     pub client: Client,
-    documents: RwLock<AHashMap<Url, OpenDocument>>,
+    documents: RwLock<AHashMap<Uri, OpenDocument>>,
     configure: Configure,
     /// Native-function metadata, snapshotted once at startup. The set of native
     /// functions never changes, so completion and hover read this instead of
@@ -65,7 +65,7 @@ impl Backend {
     // reads sits at the cursor where offsets are stable for the appended `.`.
 
     /// Update the cached source text immediately and bump the document version.
-    async fn update_source(&self, uri: &Url, text: &str, version: i32) {
+    async fn update_source(&self, uri: &Uri, text: &str, version: i32) {
         let mut docs = self.documents.write().await;
         if let Some(open) = docs.get_mut(uri) {
             // The AST now predates this edit; `validate` commits a new one if
@@ -81,7 +81,7 @@ impl Backend {
     /// Run diagnostics and semantic analysis for `version` of the document, then
     /// commit the analysis and publish diagnostics only if no later edit has
     /// superseded it. `update_source` must have run for this `version` first.
-    async fn validate(&self, uri: &Url, text: &str, version: i32) {
+    async fn validate(&self, uri: &Uri, text: &str, version: i32) {
         // The interpreter uses Rc internally (non-Send); `analyse` drops it
         // before returning, so nothing non-Send lives across the next await.
         let (diagnostics, analysed) = document::analyse(self.configure, text);
@@ -116,7 +116,6 @@ impl Backend {
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> JsonRPCResult<InitializeResult> {
         Ok(InitializeResult {

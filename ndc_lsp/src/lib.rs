@@ -13,12 +13,12 @@ mod util;
 mod visitor;
 
 pub use document::{Configure, Document};
-pub use lsp_types;
+pub use ls_types;
 
 /// Serves the language server over stdin and stdout until the client exits.
 #[cfg(feature = "server")]
 pub async fn start_lsp(configure: Configure) {
-    use tower_lsp::{LspService, Server};
+    use tower_lsp_server::{LspService, Server};
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

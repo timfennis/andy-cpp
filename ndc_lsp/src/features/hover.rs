@@ -1,4 +1,4 @@
-use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
+use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 use ndc_analysis::{Analysis, Binding, ResolvedVar};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;

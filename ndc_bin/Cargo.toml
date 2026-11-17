@@ -23,7 +23,7 @@ ndc_core.workspace = true
 ndc_lsp.workspace = true
 yansi.workspace = true
 rustyline.workspace = true
-termimad = "0.34.1"
+termimad = "0.35.5"
 tokio.workspace = true
 
 [target.'cfg(unix)'.dependencies]
