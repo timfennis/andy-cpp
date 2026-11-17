@@ -349,7 +349,10 @@ impl StaticType {
                     // A function value whose parameters aren't known fits
                     // a function type that says nothing about them either.
                     (_, None) => true,
-                    (None, Some(_)) => unknowns_match,
+                    // A function that takes anything, as `print` does,
+                    // takes what any function type passes, as one that
+                    // takes `Any` does.
+                    (None, Some(_)) => loose || unknowns_match,
                     (Some(a), Some(p)) => {
                         a.len() == p.len()
                             && a.iter()
@@ -507,6 +510,8 @@ impl StaticType {
     /// - `Any` overlaps every type
     /// - `List<Int>` does not overlap `List<String>`
     /// - `Int` does not overlap `String`
+    /// - `Fn(String) -> String` does not overlap `Fn(Int) -> Int`, but
+    ///   `Fn(*) -> Int`, a function that takes anything, does
     ///
     /// This is the question a cast asks: `as` is impossible only when no value
     /// could satisfy both the operand's type and the target, and anything else
@@ -580,13 +585,29 @@ impl StaticType {
                 k1.overlaps(k2) && v1.overlaps(v2)
             }
 
-            // A function value's parameter and return types are not checkable
-            // at runtime, so only a provable arity mismatch rules overlap out.
-            (Self::Function { parameters: p1, .. }, Self::Function { parameters: p2, .. }) => {
-                match (p1, p2) {
-                    (Some(p1), Some(p2)) => p1.len() == p2.len(),
+            // A function that takes anything, `(*)`, could be one of any
+            // parameter list. One that never returns could be one that
+            // returns anything.
+            (
+                Self::Function {
+                    parameters: p1,
+                    return_type: r1,
+                },
+                Self::Function {
+                    parameters: p2,
+                    return_type: r2,
+                },
+            ) => {
+                let parameters = match (p1, p2) {
+                    (Some(p1), Some(p2)) => {
+                        p1.len() == p2.len() && p1.iter().zip(p2).all(|(a, b)| a.overlaps(b))
+                    }
                     _ => true,
-                }
+                };
+                parameters
+                    && (matches!(r1.as_ref(), Self::Never)
+                        || matches!(r2.as_ref(), Self::Never)
+                        || r1.overlaps(r2))
             }
 
             _ => false,
@@ -726,6 +747,22 @@ mod test {
         // Any overlaps everything, including containers of concrete elements.
         assert!(StaticType::Any.overlaps(&list_of(StaticType::Int)));
         assert!(list_of(StaticType::Int).overlaps(&StaticType::Any));
+
+        // Functions overlap when their parameters and returns could: one that
+        // takes anything, `(*)`, could take any parameters, and one that
+        // never returns could return anything.
+        let function =
+            |parameters: Option<Vec<StaticType>>, returns: StaticType| StaticType::Function {
+                parameters,
+                return_type: Box::new(returns),
+            };
+        let int_to_int = function(Some(vec![StaticType::Int]), StaticType::Int);
+        let string_to_string = function(Some(vec![StaticType::String]), StaticType::String);
+        assert!(!string_to_string.overlaps(&int_to_int));
+        assert!(!function(Some(vec![StaticType::Int]), StaticType::String).overlaps(&int_to_int));
+        assert!(function(None, StaticType::Int).overlaps(&int_to_int));
+        assert!(function(Some(vec![StaticType::Int]), StaticType::Never).overlaps(&int_to_int));
+        assert!(function(Some(vec![StaticType::Any]), StaticType::Any).overlaps(&int_to_int));
 
         // Element types are treated as inhabited, so concrete containers with
         // disjoint element types are disjoint.

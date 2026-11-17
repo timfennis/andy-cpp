@@ -1,0 +1,6 @@
+// The list literal takes the type it's stored as, so `fs` and `g` are one
+// `List<Fn(Int) -> ()>`, and an element of `fs` takes only Ints.
+// expect-error: doesn't accept the arguments 'String'
+let fs = [print];
+let g: List<Fn(Int) -> ()> = fs;
+for f in fs { f("a") }
