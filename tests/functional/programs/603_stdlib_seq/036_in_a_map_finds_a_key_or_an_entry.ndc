@@ -1,0 +1,5 @@
+// A map iterates as its (key, value) entries, so a pair is in a map when it
+// is one of them, while a key is in a map when the map has it.
+// expect-output: true false true false
+let m = %{1: 2};
+print((1, 2) in m, (1, 3) in m, 1 in m, 2 in m);

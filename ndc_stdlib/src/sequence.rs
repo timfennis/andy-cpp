@@ -64,14 +64,12 @@ mod inner {
     use std::cmp::Ordering;
     use std::rc::Rc;
 
-    /// Returns `true` if the element is contained in the sequence.
+    /// Returns `true` if the element is one of the values the sequence
+    /// iterates over, or for a string, a part of it.
     #[function(name = "in", signature = "<T>(T, Iterable<T>) -> Bool")]
     pub fn op_contains(elem: Value, seq: Value) -> bool {
-        contains(&elem, &seq)
-    }
-
-    fn contains(elem: &Value, seq: &Value) -> bool {
-        match seq {
+        let elem = &elem;
+        match &seq {
             Value::Object(obj) => match obj.as_ref() {
                 Object::String(s) => match elem {
                     Value::Object(e) => match e.as_ref() {
@@ -87,7 +85,16 @@ mod inner {
                 },
                 Object::List(l) => l.borrow().contains(elem),
                 Object::Tuple(t) => t.contains(elem),
-                Object::Map { entries, .. } => entries.borrow().contains_key(elem),
+                // A map iterates its entries, as `(key, value)` tuples.
+                Object::Map { entries, .. } => match elem {
+                    Value::Object(e) => match e.as_ref() {
+                        Object::Tuple(entry) if let [key, value] = entry.as_slice() => {
+                            entries.borrow().get(key) == Some(value)
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                },
                 Object::Deque(d) => d.borrow().contains(elem),
                 Object::MinHeap(h) => h.borrow().iter().any(|v| v.0.0 == *elem),
                 Object::MaxHeap(h) => h.borrow().iter().any(|v| v.0 == *elem),
@@ -124,8 +131,8 @@ mod inner {
 
     /// Returns `true` if the map contains the given key.
     #[function(name = "in", signature = "<K, V>(K, Map<K, V>) -> Bool")]
-    pub fn op_contains_key(key: Value, map: Value) -> bool {
-        contains(&key, &map)
+    pub fn op_contains_key(key: Value, map: &ndc_vm::hash_map::HashMap<Value, Value>) -> bool {
+        map.contains_key(&key)
     }
 
     /// Returns the highest key in the map.
@@ -704,10 +711,9 @@ mod inner {
         ))
     }
 
-    /// Transposes a sequence of sequences, or of strings, turning rows into columns, and returns the result as a list of lists.
+    /// Transposes a sequence of lists, or of strings, turning rows into columns, and returns the result as a list of lists.
     #[function(signature = "<T>(Iterable<List<T>>) -> List<List<T>>")]
     #[function(signature = "(Iterable<String>) -> List<List<String>>")]
-    #[function(signature = "(Iterable<Any>) -> List<List<Any>>")]
     pub fn transposed(seq: Value) -> anyhow::Result<Value> {
         transpose(seq)
     }
@@ -803,34 +809,14 @@ mod inner {
         ))
     }
 
-    /// Computes the Cartesian product of multiple iterables, returning a list of all possible combinations where each combination contains one element from each iterable.
+    /// Computes the Cartesian product of a sequence of lists, returning a list of all possible combinations where each combination contains one element from each list.
     ///
     /// Example:
     /// ```ndc
-    /// multi_cartesian_product((1..=3, "abc", [true, false]))
-    /// [
-    ///   [1,"a",true],
-    ///   [1,"a",false],
-    ///   [1,"b",true],
-    ///   [1,"b",false],
-    ///   [1,"c",true],
-    ///   [1,"c",false],
-    ///   [2,"a",true],
-    ///   [2,"a",false],
-    ///   [2,"b",true],
-    ///   [2,"b",false],
-    ///   [2,"c",true],
-    ///   [2,"c",false],
-    ///   [3,"a",true],
-    ///   [3,"a",false],
-    ///   [3,"b",true],
-    ///   [3,"b",false],
-    ///   [3,"c",true],
-    ///   [3,"c",false]
-    /// ]
+    /// multi_cartesian_product([[1, 2], [3, 4, 5]])
+    /// [[1,3],[1,4],[1,5],[2,3],[2,4],[2,5]]
     /// ```
     #[function(signature = "<T>(Iterable<List<T>>) -> List<List<T>>")]
-    #[function(signature = "(Iterable<Any>) -> List<List<Any>>")]
     pub fn multi_cartesian_product(seq: Value) -> anyhow::Result<Value> {
         cartesian_product(seq)
     }
@@ -1059,13 +1045,6 @@ pub mod extra {
                 func: NativeFunc::Simple(Box::new(zip)),
             }));
         }
-        // More make tuples as long as the number of arguments.
-        env.declare_global_fn(Rc::new(NativeFunction {
-            name: "zip".to_string(),
-            documentation: Some(ZIP_DOCUMENTATION.to_string()),
-            static_type: StaticType::signature("(*) -> List<Any>").expect("valid signature"),
-            func: NativeFunc::Simple(Box::new(zip)),
-        }));
     }
 
     const ZIP_DOCUMENTATION: &str = "Zips two or more sequences together into a list of tuples. The result length is the minimum length of the inputs.";
