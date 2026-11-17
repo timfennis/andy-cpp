@@ -202,7 +202,10 @@ fn an_in_place_operator_assignment_keeps_the_target_type() {
     assert_eq!(
         analyse_last_type_with_globals(
             "let values = [1]; values ++= [2]; values",
-            vec![("++=".to_string(), append)],
+            vec![
+                ("++=".to_string(), append.clone()),
+                ("++".to_string(), append)
+            ],
         ),
         StaticType::List(Box::new(StaticType::Int)),
     );

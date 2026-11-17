@@ -4,6 +4,7 @@
 
 use super::Analyser;
 use super::function_values::{Choice, FunctionValue};
+use super::generics::redefinable_parameters;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads, ResolvedCall, is_strictly_more_specific};
 use crate::types::TypeVars;
@@ -386,6 +387,8 @@ impl Analyser {
                 ));
                 None
             }
+            // What never arrives unpacks into parts that never arrive.
+            StaticType::Never => Some(vec![StaticType::Never; count]),
             value => {
                 let parts = value
                     .unpack()
@@ -1753,7 +1756,9 @@ impl Analyser {
             // later one redefines the earlier, which a call then means.
             let redefined = tied
                 .iter()
-                .map(|&symbol| self.overloads().parameters_of(symbol))
+                .map(|&symbol| {
+                    redefinable_parameters(self.overloads().parameters_of(symbol).as_deref())
+                })
                 .all_equal();
             return match narrowest {
                 Some(symbol) => Pick::One(symbol),

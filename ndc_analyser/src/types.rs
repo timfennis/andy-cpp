@@ -1233,10 +1233,11 @@ impl TypeVars {
             .iter()
             .zip(arguments)
             .all(|(parameter, argument)| self.bind_argument(parameter, argument));
-        let passed = std::mem::replace(&mut self.deferred, outer)
+        let passed = self
+            .deferred
+            .take()
             .expect("bind_arguments set what's deferred")
             .passed;
-        let outer = self.deferred.take();
         let decided_some = !passed.is_empty();
         let mut fits = fits && self.decide_deferred(passed);
         // What an argument passes on to what it's passed, as `sorted` in
@@ -1418,10 +1419,13 @@ impl TypeVars {
                 // A function returning an `Iterable<U>` may return any kind of
                 // sequence of `U`s, as `flat_map`'s callback does.
                 // A function's value goes where an `Any` is expected back,
-                // as any value does.
+                // as any value does, and one that never returns goes where
+                // anything is.
                 parameters
-                    && match self.shallow(p) {
-                        StaticType::Iterable(_) | StaticType::Any => self.bind_argument(p, a),
+                    && match (self.shallow(p), self.shallow(a)) {
+                        (StaticType::Var(_), _) => self.unify(p, a),
+                        (_, StaticType::Never) => true,
+                        (StaticType::Iterable(_) | StaticType::Any, _) => self.bind_argument(p, a),
                         _ => self.unify(p, a),
                     }
             }

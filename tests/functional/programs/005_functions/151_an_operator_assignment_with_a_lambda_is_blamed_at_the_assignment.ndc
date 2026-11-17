@@ -1,0 +1,5 @@
+// `x f= v` is `x = f(x, v)`: the mismatch is the assignment's, not the body's.
+// expect-error: found Float but expected Int
+let x = 1;
+let f = fn(a, b) { a + b };
+x f= 2.5;

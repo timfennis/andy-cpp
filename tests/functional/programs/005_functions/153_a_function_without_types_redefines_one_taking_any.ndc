@@ -1,0 +1,6 @@
+// `fn f(x)` takes anything, as `fn f(x: Any)` does, so it redefines it, and
+// that's the one error.
+// expect-error: Illegal redefinition of function 'f' with parameters (Any)
+fn f(x: Any) => 1;
+fn f(x) => 2;
+print(f(1));

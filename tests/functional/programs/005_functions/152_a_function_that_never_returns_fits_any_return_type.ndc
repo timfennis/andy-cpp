@@ -1,0 +1,13 @@
+// A function that never returns can stand where any function is expected,
+// and what never arrives unpacks into anything.
+fn fail(x: Int) { panic("bad") }
+fn apply(g: Fn(Int) -> Int, n: Int) -> Int { if n > 0 { g(n) } else { 0 } }
+print(apply(fail, 0));
+
+fn pick(c: Bool) -> Int {
+    let (a, b) = if c { return 1; } else { return 2; };
+    a
+}
+print(pick(true));
+// expect-output: 0
+// expect-output: 1

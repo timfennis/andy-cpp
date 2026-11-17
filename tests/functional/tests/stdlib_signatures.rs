@@ -359,3 +359,26 @@ fn a_native_without_parameters_is_called_once() {
         ]
     );
 }
+
+/// `a op= b` is analysed as `a = op(a, b)`, which picks the in-place `op=`
+/// along with `op`, so an in-place native needs its operator.
+#[test]
+fn every_in_place_operator_has_its_operator() {
+    let mut interpreter = Interpreter::one_shot();
+    interpreter.configure(ndc_stdlib::register);
+    let names = interpreter
+        .functions()
+        .map(|native| native.name.clone())
+        .collect::<Vec<_>>();
+    let comparisons = ["==", "!=", "<=", ">=", "[]="];
+    for name in &names {
+        if let Some(operator) = name.strip_suffix('=')
+            && !comparisons.contains(&name.as_str())
+        {
+            assert!(
+                names.iter().any(|other| other == operator),
+                "`{name}` has no `{operator}`"
+            );
+        }
+    }
+}

@@ -331,7 +331,7 @@ fn is_known_before(typ: &StaticType, first: usize) -> bool {
 
 /// The value of an index that's an integer written in the code, as in
 /// `t[1]` or `t[-1]`.
-fn literal_index(index: &ExpressionLocation) -> Option<i64> {
+pub(super) fn literal_index(index: &ExpressionLocation) -> Option<i64> {
     match &index.expression {
         Expression::NumericLiteral(NumericLiteral::Int64(value)) => Some(*value),
         Expression::Call {

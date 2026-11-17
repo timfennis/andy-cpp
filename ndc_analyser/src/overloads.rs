@@ -57,7 +57,7 @@ impl ResolvedCall {
 /// one isn't the other's. An instance of a type parameter is any type, and
 /// every type is an instance of `Any`: `f(Int)` is more specific than
 /// `f(x)` and `f(Any)`, but `f(List<Int>)` and `f(List<Any>)` are
-/// unrelated. Used by [`Overloads::most_specific_match`] to order matching
+/// unrelated. Used by `Analyser::most_specific` to order matching
 /// overloads by specificity: an overload with `more` parameters accepts
 /// strictly fewer call signatures than one with `less` parameters.
 pub(crate) fn is_strictly_more_specific(more: &[StaticType], less: &[StaticType]) -> bool {
