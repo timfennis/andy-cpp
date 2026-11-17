@@ -1,0 +1,4 @@
+// Taking any arguments doesn't make `print` return an Int.
+// expect-error: No function called 'apply' found
+fn apply(f: Fn(Int) -> Int) -> Int { f(1) }
+apply(print);

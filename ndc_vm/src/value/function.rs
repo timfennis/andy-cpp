@@ -276,24 +276,18 @@ impl Function {
         else {
             return FunctionFit::No;
         };
-        let (takes, takes_proven) = match (expected_parameters, parameters) {
-            (Some(expected), Some(parameters)) => (
-                expected.len() == parameters.len()
-                    && expected
-                        .iter()
-                        .zip(parameters)
-                        .all(|(expected, parameter)| could_be(expected, parameter)),
-                expected
-                    .iter()
-                    .zip(parameters)
-                    .all(|(expected, parameter)| proves(expected, parameter)),
-            ),
-            (_, None) => (true, true),
-            (None, Some(_)) => (true, false),
+        if !self.signature().overlaps(expected) {
+            return FunctionFit::No;
+        }
+        let takes_proven = match (expected_parameters, parameters) {
+            (Some(expected), Some(parameters)) => expected
+                .iter()
+                .zip(parameters)
+                .all(|(expected, parameter)| proves(expected, parameter)),
+            (_, None) => true,
+            (None, Some(_)) => false,
         };
-        if !takes || !could_be(return_type, expected_return) {
-            FunctionFit::No
-        } else if takes_proven && proves(return_type, expected_return) {
+        if takes_proven && proves(return_type, expected_return) {
             FunctionFit::Proven
         } else {
             FunctionFit::IfChecked
@@ -351,62 +345,6 @@ impl fmt::Display for Function {
 impl fmt::Debug for NativeFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "<native fn {} {:?}>", self.name, self.static_type)
-    }
-}
-
-/// Whether a value of type `found` could be an `expected`, where what isn't
-/// known in either, `Any` or a type parameter, could be anything.
-fn could_be(found: &StaticType, expected: &StaticType) -> bool {
-    let unknown = |typ: &StaticType| {
-        matches!(
-            typ,
-            StaticType::Any | StaticType::Generic(_) | StaticType::Var(_)
-        )
-    };
-    // A function that never returns returns whatever is expected.
-    if unknown(found) || unknown(expected) || *found == StaticType::Never {
-        return true;
-    }
-    match (found, expected) {
-        (StaticType::List(a), StaticType::List(b))
-        | (StaticType::Deque(a), StaticType::Deque(b))
-        | (StaticType::Option(a), StaticType::Option(b))
-        | (StaticType::Iterator(a), StaticType::Iterator(b))
-        | (StaticType::Iterable(a), StaticType::Iterable(b))
-        | (StaticType::MinHeap(a), StaticType::MinHeap(b))
-        | (StaticType::MaxHeap(a), StaticType::MaxHeap(b)) => could_be(a, b),
-        (found, StaticType::Iterable(element)) => found
-            .sequence_element_type()
-            .is_some_and(|found| could_be(&found, element)),
-        (StaticType::Tuple(a), StaticType::Tuple(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| could_be(a, b))
-        }
-        (
-            StaticType::Map { key, value },
-            StaticType::Map {
-                key: expected_key,
-                value: expected_value,
-            },
-        ) => could_be(key, expected_key) && could_be(value, expected_value),
-        (
-            StaticType::Function {
-                parameters,
-                return_type,
-            },
-            StaticType::Function {
-                parameters: expected_parameters,
-                return_type: expected_return,
-            },
-        ) => {
-            let takes = match (parameters, expected_parameters) {
-                (Some(a), Some(b)) => {
-                    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| could_be(b, a))
-                }
-                _ => true,
-            };
-            takes && could_be(return_type, expected_return)
-        }
-        (found, expected) => found == expected,
     }
 }
 

@@ -1406,15 +1406,17 @@ impl TypeVars {
                     return_type: a,
                 },
             ) => {
-                // A function type that says nothing about the parameters
-                // takes any function.
+                // `(*)` is a parameter list that isn't checked here, on either
+                // side: a function type that says nothing about the
+                // parameters takes any function, and a function that takes
+                // anything, as `print` does, takes what any function type
+                // passes.
                 let parameters = match (expected, takes) {
-                    (None, _) => true,
                     (Some(expected), Some(takes)) => {
                         expected.len() == takes.len()
                             && expected.iter().zip(takes).all(|(e, t)| self.passes(e, t))
                     }
-                    (Some(_), None) => false,
+                    _ => true,
                 };
                 // A function returning an `Iterable<U>` may return any kind of
                 // sequence of `U`s, as `flat_map`'s callback does.
