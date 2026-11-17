@@ -3,8 +3,21 @@
 Thanks for considering a contribution. This document covers how to build,
 test, and submit changes.
 
-If you used AI tools to write any part of your patch, please mention which
-parts and which models in your PR description (see [README.md](README.md)).
+## Using AI tools
+
+You're welcome to write your patch with an LLM or a coding agent. A lot of
+this codebase was written that way. Please mention which parts and which
+models in your PR description (see [README.md](README.md)).
+
+What we ask is that a person who's interested in the project stands behind
+the PR: someone who has read the change, can answer questions about it, and
+will respond to review. For anything beyond a small fix, please open an
+issue or comment on an existing one to agree on the approach first.
+
+We close PRs that look like automated drive-by contributions without
+reviewing them, for example an agent working through open issues across
+many repositories. Issues labelled `good first issue` are there to help people
+find their way into the codebase; an agent can fix them for us just as well.
 
 ## Prerequisites
 
