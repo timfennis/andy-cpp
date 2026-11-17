@@ -1,0 +1,45 @@
+name: Release Please
+
+# Keeps one release pull request open that bumps the version and updates
+# CHANGELOG.md from the Conventional Commit titles merged since the last
+# release. Nothing is released until that pull request is merged, which tags
+# `vX.Y.Z` and creates the GitHub release.
+on:
+  push:
+    branches: [ "master" ]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # A pull request opened with the default token doesn't run the other
+      # workflows, so CI only runs on the release pull request with a token of
+      # its own: a fine-grained token with write access to contents and pull
+      # requests, stored as the RELEASE_PLEASE_TOKEN secret.
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # release-please bumps the workspace version in Cargo.toml but not the
+      # workspace crates' entries in Cargo.lock, so the release pull request
+      # gets them here.
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+      - name: Update the workspace crates in Cargo.lock
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        run: |
+          cargo update --workspace
+          if ! git diff --quiet Cargo.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "chore: update Cargo.lock for the release 🔒"
+            git push
+          fi
