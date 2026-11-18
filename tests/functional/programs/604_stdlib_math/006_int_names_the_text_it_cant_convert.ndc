@@ -1,0 +1,2 @@
+// expect-error: cannot parse "12x" as Int: invalid digit found in string
+int("12x");

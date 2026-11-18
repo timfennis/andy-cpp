@@ -32,6 +32,13 @@ fn run_ndc_test(path: &Path) -> Result<(), std::io::Error> {
     let interpreter_result = interpreter.eval(&contents);
 
     let program_had_error = interpreter_result.is_err();
+    // The debug form holds every analysis error; the displayed one shows a
+    // runtime error's message as printed, without escaped quotes.
+    let displayed_error = interpreter_result
+        .as_ref()
+        .err()
+        .map(ToString::to_string)
+        .unwrap_or_default();
     let actual_error = interpreter_result.map_or_else(|err| format!("{err:?}"), |v| v.to_string());
 
     assert!(
@@ -39,7 +46,10 @@ fn run_ndc_test(path: &Path) -> Result<(), std::io::Error> {
         "Unexpected error when running program: {actual_error}"
     );
 
-    if !expect_error.is_empty() && !actual_error.trim().contains(expect_error.trim()) {
+    if !expect_error.is_empty()
+        && !actual_error.trim().contains(expect_error.trim())
+        && !displayed_error.contains(expect_error.trim())
+    {
         panic!(
             "\n\tThere was a problem running {path:?}\n\tExpected error:\t{}\n\tActual error:\t{}\n",
             expect_error.trim(),

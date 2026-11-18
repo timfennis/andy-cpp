@@ -1,0 +1,2 @@
+// expect-error: cannot parse "1,5" as Float: invalid float literal
+float("1,5");
