@@ -1951,3 +1951,55 @@ fn adding_other_types_still_says_what_plus_takes() {
         Some("The overloads of `+` take (Float, Float), (Int, Int)"),
     );
 }
+
+#[test]
+fn an_if_whose_other_branch_is_what_it_returns_is_its_first_branch() {
+    // `-` takes an Int and a Float, so `f` stays generic in `n`, but what
+    // it returns is the `1`: each branch that recurses returns what the
+    // `if` does, directly, through a `&` that returns what it's passed, or
+    // through an `if` of its own that a `return` joins.
+    let globals = [
+        natives(&[
+            ("==", "<A, B>(A, B) -> Bool"),
+            ("-", "(Int, Int) -> Int"),
+            ("-", "(Float, Int) -> Float"),
+            ("&", "(Int, Int) -> Int"),
+            ("&", "(Bool, Bool) -> Bool"),
+        ]),
+        index_natives(),
+    ]
+    .concat();
+    for (source, returns) in [
+        ("fn f(n) { if n == 0 { 1 } else { f(n - 1) } }", vec!["Int"]),
+        (
+            "fn f(n) { if n == 0 { 1 } else if n == 1 { f(n - 1) & f(n - 2) } else { f(n - 1) } }",
+            vec!["Int"],
+        ),
+        (
+            "fn f(n) { if n == 0 { return 1; } if n == 1 { f(n - 1) & f(n - 2) } else { f(n - 1) } }",
+            vec!["Int"],
+        ),
+        // A function declared in another has one type, which the one it's
+        // in settles, as with a graph of lambdas that call back into it.
+        (
+            "fn graph() {
+                 let nodes = %{};
+                 fn solve(node) { if node == 0 { 1 } else { nodes[node]() } }
+                 nodes[1] = if true { fn() => solve(0) & solve(0) } else { fn() => solve(0) };
+                 nodes
+             }",
+            vec!["%{Int: fn() -> Int}", "Int", "Int", "Int"],
+        ),
+    ] {
+        let (_, result) = analyse_with_globals(source, globals.clone());
+        assert!(result.errors.is_empty(), "{source}: {:?}", result.errors);
+        let mut shown = result
+            .analysis
+            .inferred_return_types
+            .values()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        shown.sort();
+        assert_eq!(shown, returns, "{source}");
+    }
+}
