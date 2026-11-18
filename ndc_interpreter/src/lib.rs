@@ -49,6 +49,11 @@ pub struct Interpreter {
     input: InputSource,
     #[cfg(feature = "trace")]
     tracer: Option<Box<dyn tracer::VmTracer>>,
+    /// Whether the analyser, session and globals must be made afresh before
+    /// the next evaluation. Starting over only marks them, so a program that
+    /// runs once doesn't make them again after it ends, and registering the
+    /// natives doesn't make them for the intrinsics alone first.
+    stale: bool,
 }
 
 impl Interpreter {
@@ -70,11 +75,11 @@ impl Interpreter {
     fn from_capturing(capturing: bool) -> Self {
         // The registry starts with the language's intrinsics, which the
         // analyser and the globals know from it.
-        let function_registry = FunctionRegistry::default();
         Self {
-            analyser: Self::new_analyser(&function_registry),
-            globals: ndc_vm::native_globals(&function_registry),
-            function_registry,
+            // Made with the natives before the first evaluation.
+            analyser: Analyser::with_natives(Vec::new()),
+            globals: Vec::new(),
+            function_registry: FunctionRegistry::default(),
             capturing,
             session: Session::default(),
             source_db: SourceDb::new(),
@@ -88,6 +93,7 @@ impl Interpreter {
             },
             #[cfg(feature = "trace")]
             tracer: None,
+            stale: true,
         }
     }
 
@@ -140,11 +146,20 @@ impl Interpreter {
         Analyser::with_natives(natives.chain(intrinsics).collect())
     }
 
-    /// Forgets everything evaluated so far, keeping only what was printed.
+    /// Forgets everything evaluated so far, keeping only what was printed,
+    /// from the next evaluation on.
     fn start_over(&mut self) {
-        self.analyser = Self::new_analyser(&self.function_registry);
-        self.session = Session::default();
-        self.globals = ndc_vm::native_globals(&self.function_registry);
+        self.stale = true;
+    }
+
+    /// Makes the analyser, session and globals afresh if the interpreter
+    /// started over since the last evaluation.
+    fn refresh(&mut self) {
+        if std::mem::take(&mut self.stale) {
+            self.analyser = Self::new_analyser(&self.function_registry);
+            self.session = Session::default();
+            self.globals = ndc_vm::native_globals(&self.function_registry);
+        }
     }
 
     #[cfg(feature = "trace")]
@@ -186,6 +201,7 @@ impl Interpreter {
         &mut self,
         input: &str,
     ) -> Result<(Vec<ExpressionLocation>, AnalysisResult), InterpreterError> {
+        self.refresh();
         let source_id = self.source_db.add("<input>", input);
         let tokens = Lexer::new(input, source_id).collect::<Result<Vec<TokenLocation>, _>>()?;
         let expressions = ndc_parser::Parser::from_tokens(tokens).parse()?;
@@ -280,6 +296,7 @@ impl Interpreter {
         input: &str,
         source_id: SourceId,
     ) -> Result<(Vec<ExpressionLocation>, AnalysisResult, ExecutionTimings), InterpreterError> {
+        self.refresh();
         let mut timings = ExecutionTimings::default();
 
         let tokens = measure(&mut timings, Phase::Lexing, || {

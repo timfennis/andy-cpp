@@ -243,6 +243,11 @@ fn main() -> anyhow::Result<()> {
                 ndc_diagnostics::emit_error(interpreter.source_db(), err);
                 process::exit(1);
             }
+            // The process ends here, which frees everything at once; dropping
+            // the interpreter's analyser and natives one by one first would
+            // only slow down exiting.
+            #[expect(clippy::mem_forget, reason = "the process is about to exit")]
+            std::mem::forget(interpreter);
         }
         Action::DisassembleFile(path) => {
             let string = fs::read_to_string(path)?;
