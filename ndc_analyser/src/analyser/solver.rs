@@ -1142,6 +1142,12 @@ impl Analyser {
                     }
                 }
                 let (a, b) = (self.vars.resolve(&a), self.vars.resolve(&b));
+                // Branches that became one type are that type, known or not,
+                // as in [`Self::join`].
+                if a == b {
+                    self.check_write(&result, &a, *span);
+                    return true;
+                }
                 if self.vars.is_unknown(&a) || self.vars.is_unknown(&b) {
                     return false;
                 }

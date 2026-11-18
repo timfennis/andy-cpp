@@ -349,15 +349,29 @@ impl Analyser {
             .collect()
     }
 
-    /// The generic function's variables that `constraint` waits on, leaving
-    /// out what it settles itself.
+    /// The generic function's variables that `constraint` waits on: an
+    /// `if`'s branches, and another constraint's inputs, but for the
+    /// parameters of the functions a call passes, which the call gives
+    /// them. What the constraint settles still counts where it's also what
+    /// it waits on, as nothing else may decide it: in `fn f(n) => if n == 0
+    /// { 1 } else { f(n - 1) }`, the second branch is what the `if`
+    /// returns, which only the first branch can say, and in `fn g(n) => if
+    /// n == 0 { 1 } else { g(n - 1) & g(n - 2) }`, the `&` is passed what
+    /// it returns.
     fn generic_inputs(&self, constraint: &Constraint) -> Vec<TypeVar> {
-        let outputs = self.generic_outputs(constraint);
-        constraint
-            .inputs()
+        let inputs = match constraint {
+            Constraint::Join { types, .. } => &types[..2],
+            _ => constraint.inputs(),
+        };
+        let given = self
+            .passed_functions(constraint)
             .iter()
             .flat_map(|typ| self.vars.generalizable_in(typ))
-            .filter(|var| !outputs.contains(var))
+            .collect::<Vec<_>>();
+        inputs
+            .iter()
+            .flat_map(|typ| self.vars.generalizable_in(typ))
+            .filter(|var| !given.contains(var))
             .collect()
     }
 
