@@ -57,11 +57,8 @@ impl Parser {
         }
 
         // After consuming all statements if there are any tokens remaining we can emit an error that we expected a semicolon
-        if let Some(token) = self.peek_current_token_location() {
-            return Err(Error::text(
-                format!("Expected semicolon but got {:?} instead", token.token),
-                token.span,
-            ));
+        if self.peek_current_token_location().is_some() {
+            return Err(self.missing_semicolon());
         }
 
         Ok(expressions)
@@ -73,6 +70,25 @@ impl Parser {
 
     fn peek_current_token_location(&self) -> Option<&TokenLocation> {
         self.tokens.get(self.current)
+    }
+
+    /// The error for a statement that ends without a `;` before the current
+    /// token. It points right after the statement's last token, where the `;`
+    /// goes, rather than at the token that follows, which is usually on the
+    /// next line: in `let a = 5\nprint(a);`, right after the `5`.
+    fn missing_semicolon(&self) -> Error {
+        let found = self
+            .peek_current_token_location()
+            .expect("a statement is followed by a token");
+        let span = match self.current.checked_sub(1).map(|i| &self.tokens[i]) {
+            Some(last) => Span::new(last.span.source_id(), last.span.end(), 0),
+            None => found.span,
+        };
+        Error::with_help(
+            format!("Expected token ';' but got '{}' instead", found.token),
+            span,
+            "Every statement ends with a `;`".to_string(),
+        )
     }
 
     fn peek_next_token(&self) -> Option<&Token> {
@@ -354,15 +370,11 @@ impl Parser {
         // Require the terminating semicolon but leave it for
         // `expression_or_statement` to consume, so the declaration is wrapped
         // in a Statement like any other `;`-terminated expression.
-        if let Some(token) = self.peek_current_token()
-            && token != &Token::Semicolon
+        if self
+            .peek_current_token()
+            .is_some_and(|token| token != &Token::Semicolon)
         {
-            return Err(Error::text(
-                format!("Expected token ';' but got '{token}' instead"),
-                self.peek_current_token_location()
-                    .expect("token exists")
-                    .span,
-            ));
+            return Err(self.missing_semicolon());
         }
 
         Ok(declaration.to_location(let_token.span.merge(end)))
