@@ -23,7 +23,12 @@ impl StaticType {
         // type parameters in the order they're declared, which is the order
         // they're first used in, so the type alone says it.
         let used = signature.type_parameters();
-        if *parser.generics != *used.iter().map(|name| name.to_string()).collect::<Vec<_>>() {
+        if !parser
+            .generics
+            .iter()
+            .copied()
+            .eq(used.iter().map(AsRef::as_ref))
+        {
             return Err(format!(
                 "declare the type parameters of '{text}' in the order they're first used in: <{}>",
                 used.join(", ")
@@ -33,20 +38,21 @@ impl StaticType {
     }
 }
 
-fn tokenize(text: &str) -> Result<Vec<String>, String> {
+/// The tokens of `text`, as slices of it: `[T]` is `[`, `T` and `]`.
+fn tokenize(text: &str) -> Result<Vec<&str>, String> {
     let mut tokens = Vec::new();
     let mut chars = text.char_indices().peekable();
     while let Some((start, c)) = chars.next() {
         match c {
             c if c.is_whitespace() => {}
             '<' | '>' | '(' | ')' | '[' | ']' | '}' | ':' | ',' | '*' => {
-                tokens.push(c.to_string());
+                tokens.push(&text[start..start + 1]);
             }
             '%' if chars.next_if(|&(_, next)| next == '{').is_some() => {
-                tokens.push("%{".to_string());
+                tokens.push(&text[start..start + 2]);
             }
             '-' if chars.next_if(|&(_, next)| next == '>').is_some() => {
-                tokens.push("->".to_string());
+                tokens.push(&text[start..start + 2]);
             }
             c if c.is_alphabetic() || c == '_' => {
                 let mut end = start + c.len_utf8();
@@ -55,7 +61,7 @@ fn tokenize(text: &str) -> Result<Vec<String>, String> {
                 {
                     end = index + next.len_utf8();
                 }
-                tokens.push(text[start..end].to_string());
+                tokens.push(&text[start..end]);
             }
             other => return Err(format!("unexpected '{other}' in signature '{text}'")),
         }
@@ -63,23 +69,21 @@ fn tokenize(text: &str) -> Result<Vec<String>, String> {
     Ok(tokens)
 }
 
-struct SignatureParser {
-    tokens: Vec<String>,
+struct SignatureParser<'a> {
+    tokens: Vec<&'a str>,
     position: usize,
     /// The type parameters the signature declared, such as `T` in `<T>`.
-    generics: Vec<String>,
+    generics: Vec<&'a str>,
 }
 
-impl SignatureParser {
-    fn peek(&self) -> Option<&str> {
-        self.tokens.get(self.position).map(String::as_str)
+impl<'a> SignatureParser<'a> {
+    fn peek(&self) -> Option<&'a str> {
+        self.tokens.get(self.position).copied()
     }
 
-    fn next(&mut self) -> Result<String, String> {
+    fn next(&mut self) -> Result<&'a str, String> {
         let token = self
-            .tokens
-            .get(self.position)
-            .cloned()
+            .peek()
             .ok_or_else(|| "the signature ends too early".to_string())?;
         self.position += 1;
         Ok(token)
@@ -156,13 +160,12 @@ impl SignatureParser {
 
     fn typ(&mut self) -> Result<StaticType, String> {
         let token = self.next()?;
-        match token.as_str() {
+        match token {
             // `()` is unit, `(A, B)` and `(A,)` are tuples, and `(A)` is just `A`.
             "(" => {
                 let start = self.position;
                 let mut elements = self.list(")")?;
-                let trailing_comma = self.tokens[start..self.position]
-                    .ends_with(&[",".to_string(), ")".to_string()]);
+                let trailing_comma = self.tokens[start..self.position].ends_with(&[",", ")"]);
                 if elements.len() == 1 && !trailing_comma {
                     Ok(elements.remove(0))
                 } else {
@@ -188,9 +191,7 @@ impl SignatureParser {
                 })
             }
             "fn" => self.function(),
-            name if self.generics.iter().any(|generic| generic == name) => {
-                Ok(StaticType::Generic(name.into()))
-            }
+            name if self.generics.contains(&name) => Ok(StaticType::Generic(name.into())),
             name => {
                 let arguments = if self.eat("<") {
                     self.list(">")?
