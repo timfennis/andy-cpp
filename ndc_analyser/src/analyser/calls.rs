@@ -37,6 +37,10 @@ impl Analyser {
             AnalysisError::function_not_found_for_any(name, types, span)
         } else if overloads.a_cast_could_resolve(candidates, types) {
             AnalysisError::function_not_found_suggest_cast(name, types, span)
+        } else if name == "+"
+            && let Some(help) = crate::error::adding_a_string(types)
+        {
+            AnalysisError::function_not_found(name, types, span).with_help(help)
         } else {
             AnalysisError::function_not_found(name, types, span).with_overloads(
                 name,
