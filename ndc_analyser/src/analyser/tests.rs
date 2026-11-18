@@ -1914,3 +1914,40 @@ fn type_parameters_are_named_in_the_order_they_are_written() {
     assert_eq!(shown(&result.analysis.function_types), ["fn(A, B) -> Any"]);
     assert_eq!(shown(&result.analysis.inferred_return_types), ["(B, A)"]);
 }
+
+/// The help of the first error analysing `source` with numeric `+` reports.
+fn plus_help(source: &str) -> Option<String> {
+    let (_, result) = analyse_with_globals(
+        source,
+        natives(&[("+", "(Int, Int) -> Int"), ("+", "(Float, Float) -> Float")]),
+    );
+    let error = result.errors.first().expect("an error");
+    error.help_text().map(str::to_string)
+}
+
+#[test]
+fn adding_two_strings_points_to_concatenation() {
+    assert_eq!(
+        plus_help("\"ab\" + \"cd\";").as_deref(),
+        Some("`+` adds numbers. Join two strings with `++`, as in `\"ab\" ++ \"cd\"`"),
+    );
+}
+
+#[test]
+fn adding_a_string_and_a_number_points_to_joining_and_converting() {
+    let help = "`+` adds numbers. `<>` joins both sides as strings, as in `\"total: \" <> 12`. To add a number written as a string, convert it first, as in `int(\"12\") + 1`";
+    assert_eq!(plus_help("\"total: \" + 12;").as_deref(), Some(help));
+    assert_eq!(plus_help("1.5 + \"x\";").as_deref(), Some(help));
+    assert_eq!(
+        plus_help("let total = 0; let line = \"12\"; total += line;").as_deref(),
+        Some(help)
+    );
+}
+
+#[test]
+fn adding_other_types_still_says_what_plus_takes() {
+    assert_eq!(
+        plus_help("[1] + 2;").as_deref(),
+        Some("The overloads of `+` take (Float, Float), (Int, Int)"),
+    );
+}

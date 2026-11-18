@@ -689,3 +689,20 @@ fn cast_out_of_any(example: &str) -> String {
         "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `cast::<{example}>(value)`, or `cast?::<{example}>(value)` to get an Option"
     )
 }
+
+/// Help for `+` given a string and a string or a number, which people who
+/// know `+` for joining text from other languages write: `++` joins two
+/// strings, and `<>` joins anything as strings.
+pub(crate) fn adding_a_string(types: &[StaticType]) -> Option<&'static str> {
+    let is_number =
+        |t: &StaticType| matches!(t, StaticType::Int | StaticType::Float | StaticType::Number);
+    match types {
+        [StaticType::String, StaticType::String] => {
+            Some("`+` adds numbers. Join two strings with `++`, as in `\"ab\" ++ \"cd\"`")
+        }
+        [StaticType::String, other] | [other, StaticType::String] if is_number(other) => Some(
+            "`+` adds numbers. `<>` joins both sides as strings, as in `\"total: \" <> 12`. To add a number written as a string, convert it first, as in `int(\"12\") + 1`",
+        ),
+        _ => None,
+    }
+}
