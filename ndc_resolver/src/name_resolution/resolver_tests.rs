@@ -152,7 +152,7 @@ fn a_let_cannot_refer_to_itself_in_its_initializer() {
         error.to_string(),
         "Identifier missing has not previously been declared"
     );
-    let NameResolutionError::UnknownName { name, span } = error else {
+    let NameResolutionError::UnknownName { name, span, .. } = error else {
         panic!("expected an unknown name");
     };
     assert_eq!(name, "missing");
@@ -267,7 +267,7 @@ fn unknown_names_are_reported_in_every_expression_position() {
     for source in sources {
         let mut resolver = new_resolver(["callee", "+"]);
         let error = resolve_source(&mut resolver, source).expect_err(source);
-        let NameResolutionError::UnknownName { name, span } = error else {
+        let NameResolutionError::UnknownName { name, span, .. } = error else {
             panic!("expected an unknown name in {source:?}, got {error:?}");
         };
         assert_eq!(name, "missing", "{source}");
@@ -1361,5 +1361,78 @@ fn a_function_declared_with_an_intrinsics_name_shadows_it_like_a_native() {
     assert_eq!(
         only_reference(&resolver).0,
         vec![vec![declared_cast], vec![native_cast]]
+    );
+}
+
+/// What the `UnknownName` error for `source` suggests, with `functions` as natives.
+fn suggestion<'a>(functions: impl IntoIterator<Item = &'a str>, source: &str) -> Option<String> {
+    let mut resolver = new_resolver(functions);
+    match resolve_source(&mut resolver, source) {
+        Err(NameResolutionError::UnknownName { suggestion, .. }) => suggestion,
+        other => panic!("expected an unknown name in {source:?}, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_misspelled_name_suggests_the_visible_one_it_resembles() {
+    assert_eq!(
+        suggestion([], "let total = 0; totl;"),
+        Some("total".to_string())
+    );
+    assert_eq!(
+        suggestion([], "let total = 0; ttoal;"),
+        Some("total".to_string())
+    );
+    assert_eq!(
+        suggestion([], "let total = 0; Total;"),
+        Some("total".to_string())
+    );
+    assert_eq!(
+        suggestion(["lines"], "lnes(\"a\");"),
+        Some("lines".to_string())
+    );
+}
+
+#[test]
+fn the_suggestion_is_the_help_text() {
+    let mut resolver = new_resolver([]);
+    let error = resolve_source(&mut resolver, "let total = 0; totl;").unwrap_err();
+    assert_eq!(error.help_text().as_deref(), Some("Did you mean `total`?"));
+}
+
+#[test]
+fn a_method_name_only_suggests_functions() {
+    assert_eq!(
+        suggestion(["lines"], "let s = \"a\"; s.lnes;"),
+        Some("lines".to_string())
+    );
+    assert_eq!(suggestion([], "let total = 1; let s = 2; s.totl();"), None);
+}
+
+#[test]
+fn nothing_is_suggested_when_no_visible_name_is_close() {
+    // Too different.
+    assert_eq!(suggestion([], "let total = 0; count;"), None);
+    // Too short to tell a typo from another name.
+    assert_eq!(suggestion([], "let x = 1; y;"), None);
+    // Out of scope by the time it's used.
+    assert_eq!(suggestion([], "{ let total = 1; } totl;"), None);
+}
+
+#[test]
+fn operators_and_setters_are_never_suggested() {
+    // A struct binds the setter `amount=` next to the getter `amount`, and
+    // `amounte` is as close to one as to the other.
+    assert_eq!(
+        suggestion([], "struct P { amount: Int } amounte;"),
+        Some("amount".to_string())
+    );
+}
+
+#[test]
+fn the_nearest_scope_wins_a_tie() {
+    assert_eq!(
+        suggestion([], "let tota = 1; { let totl = 2; tot1; }"),
+        Some("totl".to_string())
     );
 }
