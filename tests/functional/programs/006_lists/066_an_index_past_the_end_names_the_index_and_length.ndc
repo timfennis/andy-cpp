@@ -1,0 +1,3 @@
+// expect-error: index 5 is out of bounds for a list of 3 elements
+let xs = [1, 2, 3];
+xs[5];

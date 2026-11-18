@@ -1180,6 +1180,19 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     }
 }
 
+/// `text` quoted for an error message, with escapes that show what's
+/// invisible (`" 4"`, `"4\n"`), and cut short if it's long, as it may be a
+/// whole input passed by mistake.
+fn quoted(text: &str) -> String {
+    const LIMIT: usize = 40;
+    if text.chars().count() <= LIMIT {
+        format!("{text:?}")
+    } else {
+        let start: String = text.chars().take(LIMIT).collect();
+        format!("{start:?}...")
+    }
+}
+
 fn convert_to_int(value: &Value) -> Result<i64, VmError> {
     // Describing the value is only needed on the error paths, and for a
     // container that description walks the whole structure.
@@ -1192,7 +1205,12 @@ fn convert_to_int(value: &Value) -> Result<i64, VmError> {
     let converted = match value {
         Value::Bool(value) => return Ok(if *value { 1 } else { 0 }),
         Value::Object(value) => match value.as_ref() {
-            Object::String(value) => return value.borrow().parse::<i64>().map_err(native_error),
+            Object::String(value) => {
+                let text = value.borrow();
+                return text.parse::<i64>().map_err(|err| {
+                    VmError::native(format!("cannot parse {} as Int: {err}", quoted(&text)))
+                });
+            }
             _ => None,
         },
         Value::None => None,
@@ -1212,7 +1230,12 @@ fn convert_to_float(value: &Value) -> Result<f64, VmError> {
     match value {
         Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
         Value::Object(value) => match value.as_ref() {
-            Object::String(value) => value.borrow().parse::<f64>().map_err(native_error),
+            Object::String(value) => {
+                let text = value.borrow();
+                text.parse::<f64>().map_err(|err| {
+                    VmError::native(format!("cannot parse {} as Float: {err}", quoted(&text)))
+                })
+            }
             _ => Err(VmError::native("cannot convert value to Float".to_string())),
         },
         Value::None => Err(VmError::native("cannot convert None to Float".to_string())),

@@ -137,24 +137,24 @@ fn vm_sequence_length(v: &Value) -> Option<usize> {
     }
 }
 
-fn to_forward_index(i: i64, size: usize, for_slice: bool) -> Result<usize, VmError> {
+/// The position of element `i` in a sequence of `size`, counting a negative
+/// `i` from the end; `None` when there's no element there.
+fn element_index(i: i64, size: usize) -> Option<usize> {
     if i < 0 {
-        let abs = i.unsigned_abs() as usize;
-        if for_slice {
-            Ok(size.saturating_sub(abs))
-        } else {
-            size.checked_sub(abs)
-                .ok_or_else(|| VmError::native("index out of bounds"))
-        }
+        size.checked_sub(i.unsigned_abs() as usize)
     } else {
         let idx = i as usize;
-        if for_slice {
-            Ok(idx.min(size))
-        } else if idx >= size {
-            Err(VmError::native("index out of bounds"))
-        } else {
-            Ok(idx)
-        }
+        (idx < size).then_some(idx)
+    }
+}
+
+/// A slice endpoint `i` in a sequence of `size`, counting a negative `i` from
+/// the end and clamped into `0..=size`.
+fn slice_index(i: i64, size: usize) -> usize {
+    if i < 0 {
+        size.saturating_sub(i.unsigned_abs() as usize)
+    } else {
+        (i as usize).min(size)
     }
 }
 
@@ -178,7 +178,12 @@ fn char_index_to_byte_offset(string: &str, index: usize) -> usize {
         .map_or(string.len(), |(byte_offset, _)| byte_offset)
 }
 
-fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmError> {
+/// Where `index_value` points in `container`, which holds `size` elements.
+fn extract_vm_offset(
+    index_value: &Value,
+    container: &Value,
+    size: usize,
+) -> Result<VmOffset, VmError> {
     if let Value::Object(obj) = index_value
         && let Object::Iterator(iter) = obj.as_ref()
     {
@@ -195,8 +200,8 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
                     "{from_unclamped}..{end_unclamped} out of bounds"
                 )));
             }
-            let from_idx = to_forward_index(start, size, true)?;
-            let to_idx = to_forward_index(end, size, true)?;
+            let from_idx = slice_index(start, size);
+            let to_idx = slice_index(end, size);
             let to_idx = if inclusive {
                 (to_idx + 1).min(size)
             } else {
@@ -205,7 +210,7 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
             return Ok(VmOffset::Range(from_idx, to_idx));
         }
         if let Some(start) = iter_ref.unbounded_range_start() {
-            let from_idx = to_forward_index(start, size, true)?;
+            let from_idx = slice_index(start, size);
             return Ok(VmOffset::Range(from_idx, size));
         }
         return Err(VmError::native("cannot use non-range iterator as index"));
@@ -218,7 +223,26 @@ fn extract_vm_offset(index_value: &Value, size: usize) -> Result<VmOffset, VmErr
             ));
         }
     };
-    Ok(VmOffset::Element(to_forward_index(i, size, false)?))
+    let idx = element_index(i, size).ok_or_else(|| out_of_bounds(i, container, size))?;
+    Ok(VmOffset::Element(idx))
+}
+
+/// The error for indexing `container`, which holds `size` elements, at `i`:
+/// "index 5 is out of bounds for a list of 3 elements".
+fn out_of_bounds(i: i64, container: &Value, size: usize) -> VmError {
+    let (kind, unit) = match container {
+        Value::Object(obj) => match obj.as_ref() {
+            Object::String(_) => ("string", "character"),
+            Object::Tuple(_) => ("tuple", "element"),
+            Object::Deque(_) => ("deque", "element"),
+            _ => ("list", "element"),
+        },
+        _ => ("list", "element"),
+    };
+    let plural = if size == 1 { "" } else { "s" };
+    VmError::native(format!(
+        "index {i} is out of bounds for a {kind} of {size} {unit}{plural}"
+    ))
 }
 
 /// `[]` on any container, a map's default function included, which takes
@@ -270,7 +294,7 @@ fn vm_get_at_index_simple(container: &Value, index_value: &Value) -> Result<Valu
         Value::Object(obj) => match obj.as_ref() {
             Object::List(list) => {
                 let list = list.borrow();
-                match extract_vm_offset(index_value, size)? {
+                match extract_vm_offset(index_value, container, size)? {
                     VmOffset::Element(idx) => Ok(list[idx].clone()),
                     VmOffset::Range(from, to) => {
                         let values = list.get(from..to).ok_or_else(|| {
@@ -282,7 +306,7 @@ fn vm_get_at_index_simple(container: &Value, index_value: &Value) -> Result<Valu
             }
             Object::String(s) => {
                 let s = s.indexed();
-                match extract_vm_offset(index_value, size)? {
+                match extract_vm_offset(index_value, container, size)? {
                     VmOffset::Element(idx) => {
                         let ch = s.get_char(idx).expect("bounds already checked");
                         Ok(Value::string(ch.to_string()))
@@ -294,7 +318,7 @@ fn vm_get_at_index_simple(container: &Value, index_value: &Value) -> Result<Valu
                     }
                 }
             }
-            Object::Tuple(tuple) => match extract_vm_offset(index_value, size)? {
+            Object::Tuple(tuple) => match extract_vm_offset(index_value, container, size)? {
                 VmOffset::Element(idx) => tuple
                     .get(idx)
                     .cloned()
@@ -308,7 +332,7 @@ fn vm_get_at_index_simple(container: &Value, index_value: &Value) -> Result<Valu
             },
             Object::Deque(deque) => {
                 let deque = deque.borrow();
-                match extract_vm_offset(index_value, size)? {
+                match extract_vm_offset(index_value, container, size)? {
                     VmOffset::Element(idx) => deque
                         .get(idx)
                         .cloned()
@@ -345,7 +369,7 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
                 let mut list = list.try_borrow_mut().map_err(|_borrow_err| {
                     VmError::native("Mutation error: you cannot mutate a value in a list while you're iterating over this list")
                 })?;
-                match extract_vm_offset(index_value, size)? {
+                match extract_vm_offset(index_value, container, size)? {
                     VmOffset::Element(idx) => {
                         list[idx] = rhs;
                     }
@@ -392,7 +416,7 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
                     }
                 };
                 let mut s = s.borrow_mut();
-                match extract_vm_offset(index_value, size)? {
+                match extract_vm_offset(index_value, container, size)? {
                     VmOffset::Element(idx) => {
                         let from = char_index_to_byte_offset(&s, idx);
                         let to = char_index_to_byte_offset(&s, idx + 1);

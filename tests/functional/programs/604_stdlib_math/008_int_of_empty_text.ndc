@@ -1,0 +1,2 @@
+// expect-error: cannot parse "" as Int: cannot parse integer from empty string
+int("");

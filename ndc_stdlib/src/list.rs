@@ -157,7 +157,13 @@ mod inner {
     pub fn index(list: &[Value], i: &BigInt) -> anyhow::Result<Value> {
         wrap_index(i, list.len())
             .map(|idx| list[idx].clone())
-            .ok_or_else(|| anyhow!("index out of bounds"))
+            .ok_or_else(|| {
+                let plural = if list.len() == 1 { "" } else { "s" };
+                anyhow!(
+                    "index {i} is out of bounds for a list of {} element{plural}",
+                    list.len()
+                )
+            })
     }
 
     /// Returns a copy of the element at `i`, wrapping negative indices from the

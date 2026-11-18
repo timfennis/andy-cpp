@@ -1,0 +1,3 @@
+// A stray space or newline, invisible in the text itself, shows in the error.
+// expect-error: cannot parse " 4\n" as Int
+int(" 4\n");
