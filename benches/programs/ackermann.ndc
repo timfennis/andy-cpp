@@ -4,4 +4,4 @@ fn ackermann(m, n) {
     else { ackermann(m - 1, ackermann(m, n - 1)) }
 }
 
-print(ackermann(3, 7));
+print(ackermann(3, 8));

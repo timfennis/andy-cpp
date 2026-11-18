@@ -1,4 +1,4 @@
-let result = list(1..=100_000)
+let result = list(1..=1_000_000)
     .filter(fn(x) => x % 2 == 0)
     .map(fn(x) => x * x)
     .reduce(fn(acc, x) => acc + x);

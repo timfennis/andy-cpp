@@ -1,5 +1,5 @@
 let result = 1n;
-for i in 2..=5000 {
+for i in 2..=50_000 {
     result *= i;
 }
 print(result.string.len, "digits");

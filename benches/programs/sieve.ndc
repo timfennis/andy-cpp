@@ -18,4 +18,4 @@ fn sieve(n) {
 }
 
 // Compute primality for all numbers up to n
-sieve(200_000);
+sieve(600_000);

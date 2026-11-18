@@ -32,5 +32,5 @@ fn benchmark_perlin(grid_size) {
   [perlin(x / 10.0, y / 10.0, perm) for x in (0..grid_size), y in (0..grid_size)]
 }
 
-let noise = benchmark_perlin(100);
+let noise = benchmark_perlin(250);
 print("Min:", noise.min, "Max:", noise.max, "Avg:", (cast::<[Float]>(noise).sum / noise.len));

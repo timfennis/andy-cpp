@@ -1,5 +1,5 @@
 let m = %{};
-for i in 1..=50_000 {
+for i in 1..=500_000 {
     let key = (i * i) % 997;
     if key in m {
         m[key] += 1;
