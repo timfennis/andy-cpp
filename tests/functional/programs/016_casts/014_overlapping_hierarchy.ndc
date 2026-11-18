@@ -2,7 +2,7 @@
 // at runtime rather than rejected outright. A copy is cast, as `xs` and `m`
 // still hold their containers.
 let xs: [Any] = [1, 2];
-assert_eq(xs.clone() as [Int], [1, 2]);
+assert_eq(cast::<[Int]>(xs.clone()), [1, 2]);
 
 let m: %{Int: Any} = %{1: 2};
-assert_eq(m.clone() as %{Int: Int}, %{1: 2});
+assert_eq(cast::<%{Int: Int}>(m.clone()), %{1: 2});

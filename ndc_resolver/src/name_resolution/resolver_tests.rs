@@ -231,7 +231,7 @@ fn unknown_names_are_reported_in_every_expression_position() {
         "(missing);",
         "true and missing;",
         "missing or false;",
-        "missing as Int;",
+        "callee::<Int>(missing);",
         "missing(1);",
         "callee(missing);",
         "1 + missing;",
@@ -994,7 +994,7 @@ fn unknown_types_are_reported_in_every_annotation_position() {
         "let x: [Nope] = 1;",
         "fn f(x: Nope) { 1; }",
         "fn f() -> Nope { 1; }",
-        "1 as Nope;",
+        "cast::<Nope>(1);",
     ] {
         let mut resolver = new_resolver([]);
         let error = resolve_source(&mut resolver, source).expect_err(source);
@@ -1039,7 +1039,7 @@ fn types_and_values_are_separate_namespaces() {
 #[test]
 fn type_names_are_never_captured() {
     let mut resolver = new_resolver([]);
-    resolve_source(&mut resolver, "fn f() { let x: Int = 1; 1 as Int; }").unwrap();
+    resolve_source(&mut resolver, "fn f() { let x: Int = 1; let y: Int = x; }").unwrap();
 
     assert_eq!(type_names(&resolver), ["Int", "Int"]);
     assert!(resolver.captures.is_empty());

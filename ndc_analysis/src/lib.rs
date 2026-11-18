@@ -48,9 +48,10 @@ pub struct Analysis {
     pub augmented_assignments: AHashMap<NodeId, Binding>,
     /// What each struct declaration declares, keyed by the declaration.
     pub structs: AHashMap<NodeId, DeclaredStruct>,
-    /// The type each `as` cast checks its value against at runtime, keyed by
-    /// the cast. `None` when the value is already known to have the type, as
-    /// in `1 as Int`, so there is nothing to check.
+    /// The type each cast checks its value against at runtime, keyed by the
+    /// `cast` or `cast?` name, called or used as a value. `None` when the
+    /// value is already known to have the type, as in `cast::<Int>(1)`, so
+    /// there is nothing to check.
     pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries

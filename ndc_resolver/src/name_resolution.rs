@@ -677,12 +677,6 @@ impl NameResolver {
             Expression::Statement(inner)
             | Expression::Grouping(inner)
             | Expression::Return { value: inner } => self.resolve(inner)?,
-            Expression::Cast {
-                value, annotation, ..
-            } => {
-                self.resolve_type(annotation)?;
-                self.resolve(value)?;
-            }
             Expression::Logical { left, right, .. } => {
                 self.resolve(left)?;
                 self.resolve(right)?;

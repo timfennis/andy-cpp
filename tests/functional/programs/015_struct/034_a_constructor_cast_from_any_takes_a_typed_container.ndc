@@ -1,5 +1,5 @@
 // expect-output: [1,2]
 struct Q { xs: [Int] }
 let make: Any = Q;
-let q = make as fn([Int]) -> Q;
+let q = cast::<fn([Int]) -> Q>(make);
 print(q([1, 2]).xs);

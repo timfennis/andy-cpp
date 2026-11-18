@@ -21,7 +21,7 @@ let my_tuple = (1,2,3);
 my_tuple[0] = 99; // ERROR
 ```
 
-The elements of a tuple can have different types. An index written as a number, like `t[1]` or `t[-1]`, gives that element with its own type. An index in a variable, like `t[i]`, could pick any of them, so it gives an `Any` that you have to [cast](../../features/casts.md): `t[i] as Int`.
+The elements of a tuple can have different types. An index written as a number, like `t[1]` or `t[-1]`, gives that element with its own type. An index in a variable, like `t[i]`, could pick any of them, so it gives an `Any` that you have to [cast](../../features/casts.md): `cast::<Int>(t[i])`.
 
 ```ndc
 let point = ("origin", 0, 0);

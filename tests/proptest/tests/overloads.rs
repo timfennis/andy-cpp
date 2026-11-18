@@ -119,7 +119,7 @@ const BODIES_USING_A: [&str; 15] = [
     "a[0]",
     "a.n",
     "a.n + 1",
-    "a as Int",
+    "cast::<Int>(a)",
     "a.first()",
 ];
 
@@ -178,7 +178,7 @@ fn arb_expression() -> impl Strategy<Value = String> {
             inner
                 .clone()
                 .prop_map(|e| format!("{e}.fold(0, fn(acc, a) => acc + a)")),
-            inner.clone().prop_map(|e| format!("({e} as [Int])")),
+            inner.clone().prop_map(|e| format!("cast::<[Int]>({e})")),
             inner.clone().prop_map(|e| format!("{e}[\"k\"]")),
             (inner.clone(), inner).prop_map(|(f, e)| format!("({f})({e})")),
         ]

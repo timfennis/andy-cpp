@@ -1,0 +1,7 @@
+// A cast to a type parameter checks the type each call gives it.
+// expect-output: 1
+// expect-error: cannot cast Int to String
+fn f<T>(x) => cast::<T>(x);
+let x: Any = 1;
+print(f::<Int>(x));
+print(f::<String>(x));

@@ -593,13 +593,13 @@ fn break_pops_the_operands_pending_in_its_expression() {
     );
 }
 
-// let x: Any = 1; x as Int
+// let x: Any = 1; cast::<Int>(x)
 //
 // `Any` doesn't prove the target type, so the cast compiles to a CheckType
 // guard after the value is loaded.
 #[test]
 fn an_unproven_cast_checks_the_type_at_runtime() {
-    let ops = compile_with_analysis("let x: Any = 1; x as Int");
+    let ops = compile_with_analysis("let x: Any = 1; cast::<Int>(x)");
     assert!(
         ops.iter()
             .any(|op| matches!(op, CheckType(t) if **t == ndc_core::StaticType::Int)),
@@ -607,14 +607,14 @@ fn an_unproven_cast_checks_the_type_at_runtime() {
     );
 }
 
-// let x: Any = [1]; x as [Int]; x as Int
+// let x: Any = [1]; cast::<[Int]>(x); cast::<Int>(x)
 //
 // A cast to a container type checks that nothing else holds the container,
 // ahead of the type check. A cast to a type without a container in it has
 // nothing to check.
 #[test]
 fn a_cast_to_a_container_checks_it_is_unshared() {
-    let ops = compile_with_analysis("let x: Any = [1]; x as [Int]; x as Int");
+    let ops = compile_with_analysis("let x: Any = [1]; cast::<[Int]>(x); cast::<Int>(x)");
     let checks: Vec<usize> = ops
         .iter()
         .enumerate()
@@ -628,26 +628,26 @@ fn a_cast_to_a_container_checks_it_is_unshared() {
     );
 }
 
-// 1 as Int; [1] as Any
+// cast::<Int>(1); cast::<Any>([1])
 //
 // Both casts are proven by the value's static type, so no runtime guard is
 // emitted.
 #[test]
 fn a_proven_cast_needs_no_runtime_check() {
-    let ops = compile_with_analysis("1 as Int; [1] as Any");
+    let ops = compile_with_analysis("cast::<Int>(1); cast::<Any>([1])");
     assert!(
         ops.iter().all(|op| !matches!(op, CheckType(_))),
         "provable casts must not emit CheckType, got: {ops:?}",
     );
 }
 
-// let x: Any = 1; x as? Int
+// let x: Any = 1; cast?::<Int>(x)
 //
 // An optional cast tests the value with a TryCast, which gives an option
 // instead of a CheckType guard that fails.
 #[test]
 fn an_unproven_optional_cast_tries_the_type_at_runtime() {
-    let ops = compile_with_analysis("let x: Any = 1; x as? Int");
+    let ops = compile_with_analysis("let x: Any = 1; cast?::<Int>(x)");
     assert!(
         ops.iter()
             .any(|op| matches!(op, TryCast(t) if **t == ndc_core::StaticType::Int)),
@@ -659,12 +659,12 @@ fn an_unproven_optional_cast_tries_the_type_at_runtime() {
     );
 }
 
-// 1 as? Int
+// cast?::<Int>(1)
 //
 // A proven optional cast is always `Some`, which a TryCast to `Any` makes.
 #[test]
 fn a_proven_optional_cast_is_always_some() {
-    let ops = compile_with_analysis("1 as? Int");
+    let ops = compile_with_analysis("cast?::<Int>(1)");
     assert!(
         ops.iter()
             .any(|op| matches!(op, TryCast(t) if **t == ndc_core::StaticType::Any)),
@@ -672,13 +672,13 @@ fn a_proven_optional_cast_is_always_some() {
     );
 }
 
-// let a: Any = 1; let n: Int = a as Int;
+// let a: Any = 1; let n: Int = cast::<Int>(a);
 //
 // An `Any` stored where an Int is expected takes a cast, which is the only
 // check: storing what the cast gives needs none.
 #[test]
 fn an_any_cast_for_a_typed_variable_is_checked_once() {
-    let ops = compile_with_analysis("let a: Any = 1; let n: Int = a as Int;");
+    let ops = compile_with_analysis("let a: Any = 1; let n: Int = cast::<Int>(a);");
     assert_eq!(
         ops.iter().filter(|op| matches!(op, CheckType(_))).count(),
         1,

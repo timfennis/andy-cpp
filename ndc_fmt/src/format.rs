@@ -213,15 +213,6 @@ impl<'a> Formatter<'a> {
             }
             Expression::Logical { .. } => self.operator_chain(expression),
             Expression::Grouping(inner) => concat([text("("), self.expr(inner), text(")")]),
-            Expression::Cast {
-                value,
-                annotation,
-                optional,
-            } => concat([
-                self.expr(value),
-                text(if *optional { " as? " } else { " as " }),
-                type_expr(annotation),
-            ]),
             Expression::VariableDeclaration {
                 l_value,
                 annotated_type,

@@ -340,12 +340,6 @@ impl Compiler {
             Expression::Identifier { .. } => {
                 self.compile_named_binding(&self.binding(id), id, span)?;
             }
-            Expression::Cast {
-                value, optional, ..
-            } => {
-                self.compile_expr(*value)?;
-                self.emit_cast(id, optional, span)?;
-            }
             Expression::Statement(stm) => {
                 self.compile_expr(*stm)?;
                 self.ir.write(OpCode::Pop, Span::synthetic());
@@ -884,7 +878,7 @@ impl Compiler {
         };
         // A container the cast gives a new type mustn't be reachable by
         // another name that keeps the old one, as `xs` is after
-        // `let a: Any = xs; let ys = a as [Any]`: a write through `ys` would
+        // `let a: Any = xs; let ys = cast::<[Any]>(a)`: a write through `ys` would
         // break what `xs` says it holds.
         if let Some(target) = &check
             && target.holds_a_mutable_container()

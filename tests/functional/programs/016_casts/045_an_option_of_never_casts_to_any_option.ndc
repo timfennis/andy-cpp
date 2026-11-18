@@ -4,7 +4,7 @@
 // expect-output: None
 fn f() -> Option<Never> { None }
 let b: Option<Never> = None;
-print(b as Option<Int>);
+print(cast::<Option<Int>>(b));
 let a: Any = f;
-let g = a as fn() -> Option<Int>;
+let g = cast::<fn() -> Option<Int>>(a);
 print(g());

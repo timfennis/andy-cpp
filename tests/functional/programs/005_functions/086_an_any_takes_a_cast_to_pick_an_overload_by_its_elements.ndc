@@ -6,4 +6,4 @@ fn process(xs: [Int]) => "ints";
 fn process(xs: [String]) => "strings";
 let a: Any = [1];
 let b: Any = ["s"];
-print(process(a.clone() as [Int]), process(b.clone() as [String]));
+print(process(cast::<[Int]>(a.clone())), process(cast::<[String]>(b.clone())));

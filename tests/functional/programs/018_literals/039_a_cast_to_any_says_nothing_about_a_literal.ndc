@@ -1,4 +1,4 @@
 // Every value is an `Any`, so casting `1 + 2` to one leaves the `1` and `2`
 // the Ints they are.
 // expect-output: 3 -5
-print((1 + 2) as Any, -5 as Any);
+print(cast::<Any>(1 + 2), cast::<Any>(-5));

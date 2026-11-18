@@ -1,0 +1,4 @@
+// A cast says what type it casts to.
+// expect-error: `cast` needs the type it casts to as a type argument
+let x: Any = 1;
+cast(x);

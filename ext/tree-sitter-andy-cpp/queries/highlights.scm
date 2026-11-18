@@ -56,7 +56,6 @@
 
 [
   "in"
-  "as"
 ] @keyword.operator
 
 [

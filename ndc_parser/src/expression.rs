@@ -37,14 +37,6 @@ pub enum Expression {
         right: Box<ExpressionLocation>,
     },
     Grouping(Box<ExpressionLocation>),
-    /// `value as Type` — asserts the value has the target type; never converts.
-    /// `value as? Type` (`optional`) — `Some(value)` when the value has the
-    /// target type, `None` when it doesn't.
-    Cast {
-        value: Box<ExpressionLocation>,
-        annotation: TypeExpr,
-        optional: bool,
-    },
     VariableDeclaration {
         l_value: BindingPatternLocation,
         annotated_type: Option<TypeExpr>,
@@ -288,7 +280,6 @@ impl ExpressionLocation {
             | Expression::StructDeclaration { .. } => {}
             Expression::Statement(inner)
             | Expression::Grouping(inner)
-            | Expression::Cast { value: inner, .. }
             | Expression::Return { value: inner }
             | Expression::VariableDeclaration { value: inner, .. }
             | Expression::FunctionDeclaration { body: inner, .. }

@@ -488,7 +488,7 @@ impl StaticType {
     /// - `fn(String) -> String` does not overlap `fn(Int) -> Int`, but
     ///   `fn(*) -> Int`, a function that takes anything, does
     ///
-    /// This is the question a cast asks: `as` is impossible only when no value
+    /// This is the question a cast asks: `cast` is impossible only when no value
     /// could satisfy both the operand's type and the target, and anything else
     /// is left to the runtime check.
     ///
@@ -496,7 +496,7 @@ impl StaticType {
     /// count as disjoint even though the empty list inhabits both. Casting an
     /// empty container to an unrelated element type is therefore rejected —
     /// a deliberate trade, because the alternative gives up the compile-time
-    /// error on every non-empty `[Int] as [String]` to allow a cast
+    /// error on every non-empty `cast::<[String]>(ints)` to allow a cast
     /// that could only ever be vacuous.
     ///
     /// `Never` overlaps nothing, since no value inhabits it. A container of

@@ -25,10 +25,10 @@ fn spaces_go_around_operators_and_after_commas() {
 }
 
 #[test]
-fn a_cast_keeps_its_operator() {
+fn a_cast_is_a_call_with_a_type_argument() {
     assert_formats(
-        "let a = x   as Int;let b = x  as?  [Int];",
-        "let a = x as Int;\nlet b = x as? [Int];\n",
+        "let a = cast :: < Int > ( x );let b = x.cast?::<[Int]>( );",
+        "let a = cast::<Int>(x);\nlet b = x.cast?::<[Int]>();\n",
     );
 }
 

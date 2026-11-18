@@ -307,7 +307,7 @@ fn an_earlier_lines_generic_function_used_as_a_value_is_an_instance() {
 fn a_function_value_from_an_earlier_lines_generic_body_cast_from_any_is_checked() {
     repl_error(
         &[
-            "fn bad(x) { let g = abs; g(x); let a: Any = g; let b = a as fn(Int) -> String; b(1) }",
+            "fn bad(x) { let g = abs; g(x); let a: Any = g; let b = cast::<fn(Int) -> String>(a); b(1) }",
             "print(bad(1))",
         ],
         "cannot cast fn(Int) -> Int to fn(Int) -> String",

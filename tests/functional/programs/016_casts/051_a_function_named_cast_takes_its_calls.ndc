@@ -1,0 +1,7 @@
+// A function the program declares named `cast` is called where it fits, as an overload
+// of a built-in function would be; the built-in `cast` takes the rest.
+// expect-output: mine two 1
+fn cast<T>(x: T) -> String { "mine" }
+fn cast(x, y) => "two";
+let a: Any = 1;
+print(cast::<Int>(1), cast(1, 2), cast::<Int>(a));

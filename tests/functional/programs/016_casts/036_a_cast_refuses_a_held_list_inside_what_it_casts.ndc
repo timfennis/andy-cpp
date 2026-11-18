@@ -3,4 +3,4 @@
 // expect-error: the list is also held by something else
 let inner = ["a"];
 let outer: [Any] = [inner];
-let lists = outer.clone() as [[Any]];
+let lists = cast::<[[Any]]>(outer.clone());

@@ -4,6 +4,6 @@
 let n: Int = 0;
 fn store(x: Int) { n = x; 0 }
 let a: Any = store;
-let g = a as fn(Any) -> Int;
+let g = cast::<fn(Any) -> Int>(a);
 g(true);
 print(n);

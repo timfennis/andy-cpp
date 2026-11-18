@@ -82,9 +82,8 @@ fn every_type_name_has_its_own_id() {
 }
 
 #[test]
-fn a_cast_target_before_a_comparison_gets_its_own_id() {
-    // `Int < 5` is not a type argument list, so the parser reads `Int` on its own.
-    let expression = parse_one("[x as Int < 5, y as Int < 6]");
+fn each_type_argument_gets_its_own_id() {
+    let expression = parse_one("[cast::<Int>(x) < 5, cast::<Int>(y) < 6]");
     let Expression::List { values } = expression.expression else {
         panic!("expected a list");
     };
@@ -96,12 +95,14 @@ fn a_cast_target_before_a_comparison_gets_its_own_id() {
         else {
             panic!("expected a comparison, got {value:?}");
         };
-        let Expression::Cast {
-            annotation: TypeExpr::Name { id, name, .. },
-            ..
-        } = &arguments[0].expression
-        else {
-            panic!("expected a cast to a named type");
+        let Expression::Call { function, .. } = &arguments[0].expression else {
+            panic!("expected a call of cast");
+        };
+        let Expression::Identifier { type_arguments, .. } = &function.expression else {
+            panic!("expected cast by name");
+        };
+        let [TypeExpr::Name { id, name, .. }] = &type_arguments[..] else {
+            panic!("expected one named type argument");
         };
         assert_eq!(name, "Int");
         *id
@@ -169,22 +170,22 @@ fn list_and_tuple_types_are_written_like_their_values() {
 }
 
 #[test]
-fn list_map_and_function_types_inside_type_arguments_are_still_a_cast() {
+fn list_map_and_function_types_go_inside_type_arguments() {
     for source in [
-        "x as Option<[Int]>",
-        "x as Option<%{String: Int}>",
-        "x as Option<fn(Int)>",
+        "cast::<Option<[Int]>>",
+        "cast::<Option<%{String: Int}>>",
+        "cast::<Option<fn(Int)>>",
     ] {
-        let Expression::Cast { annotation, .. } = parse_one(source).expression else {
-            panic!("expected a cast: {source}");
+        let Expression::Identifier { type_arguments, .. } = parse_one(source).expression else {
+            panic!("expected a name with type arguments: {source}");
         };
-        assert_eq!(format!("x as {annotation}"), source);
+        assert_eq!(format!("cast::<{}>", type_arguments[0]), source);
     }
 }
 
 #[test]
 fn a_less_than_after_a_cast_in_a_map_literal_is_a_comparison() {
-    let Expression::Map { values, .. } = parse_one("%{k: x as Int < y, j: z > 1}").expression
+    let Expression::Map { values, .. } = parse_one("%{k: cast::<Int>(x) < y, j: z > 1}").expression
     else {
         panic!("expected a map literal");
     };
@@ -194,7 +195,7 @@ fn a_less_than_after_a_cast_in_a_map_literal_is_a_comparison() {
 #[test]
 fn a_less_than_after_a_cast_in_a_list_literal_is_a_comparison() {
     let Expression::OperatorCall { arguments, .. } =
-        parse_one("[x as Int < y] > [false]").expression
+        parse_one("[cast::<Int>(x) < y] > [false]").expression
     else {
         panic!("expected a comparison");
     };
@@ -206,6 +207,28 @@ fn a_less_than_after_a_cast_in_a_list_literal_is_a_comparison() {
         matches!(values[0].expression, Expression::OperatorCall { .. }),
         "expected a comparison inside the list"
     );
+}
+
+#[test]
+fn an_as_cast_says_how_to_write_it() {
+    for (source, help) in [
+        ("x as Int;", "write `cast::<Int>(x)` instead of `x as Int`"),
+        (
+            "x as? [Int];",
+            "write `cast?::<[Int]>(x)` instead of `x as? [Int]`",
+        ),
+    ] {
+        let tokens = Lexer::new(source, SourceId::SYNTHETIC)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let error = Parser::from_tokens(tokens).parse().unwrap_err();
+        assert!(error.to_string().contains("no longer a cast"), "{error}");
+        assert!(
+            error.help_text().is_some_and(|text| text.contains(help)),
+            "{source}: {:?}",
+            error.help_text()
+        );
+    }
 }
 
 #[test]

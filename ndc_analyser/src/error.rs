@@ -289,7 +289,8 @@ impl AnalysisError {
     /// A generic function's name used as a value where nothing says which
     /// types it takes, as `inc` in `let f: Any = inc` with
     /// `fn inc(x) => x + 1`, whose type is `fn(A) -> B`: "say which types it
-    /// takes, as in `inc as fn(A) -> B` with types in place of `A` and `B`",
+    /// takes, as in `cast::<fn(A) -> B>(inc)` with types in place of `A` and
+    /// `B`",
     /// which lists the type parameters of `typ` alphabetically.
     pub(crate) fn generic_function_value(function: &str, typ: &StaticType, span: Span) -> Self {
         let mut names = typ.type_parameters();
@@ -310,7 +311,7 @@ impl AnalysisError {
             span,
         )
         .with_help(format!(
-            "A generic function's value is its version for one set of types, which must be known. Say which types it takes, as in `{function} as {typ}`{in_place}"
+            "A generic function's value is its version for one set of types, which must be known. Say which types it takes, as in `cast::<{typ}>({function})`{in_place}"
         ))
     }
 
@@ -471,7 +472,7 @@ impl AnalysisError {
     pub(crate) fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
         Self {
             help_text: (*typ == StaticType::Any).then(|| {
-                "An `Any` could hold anything. Cast it to say what it holds, as in `value as (Int, Int)`"
+                "An `Any` could hold anything. Cast it to say what it holds, as in `cast::<(Int, Int)>(value)`"
                     .to_string()
             }),
             ..Self::new(format!("Invalid unpacking of {typ}"), span)
@@ -578,7 +579,7 @@ impl AnalysisError {
     ) -> Self {
         Self::function_not_found(ident, types, span).with_help(concat!(
             "An overload would accept a narrower argument type. ",
-            "Cast to say what the value holds, as in `value.clone() as [Int]`: ",
+            "Cast to say what the value holds, as in `cast::<[Int]>(value.clone())`: ",
             "a container is cast as a copy while something else still holds it.",
         ))
     }
@@ -662,6 +663,6 @@ fn annotate_the_unknown() -> String {
 /// is expected.
 fn cast_out_of_any(example: &str) -> String {
     format!(
-        "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `value as {example}`, or `value as? {example}` to get an Option"
+        "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `cast::<{example}>(value)`, or `cast?::<{example}>(value)` to get an Option"
     )
 }

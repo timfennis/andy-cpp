@@ -279,7 +279,7 @@ mod tests {
         let syms = symbols(concat!(
             "if true { fn helper() { 1 } }\n",
             "for x in [1] { let doubled = x * 2; }\n",
-            "(fn identity(value) => value) as Any",
+            "cast::<Any>(fn identity(value) => value)",
         ));
         let names = syms.iter().map(|s| s.name.as_str()).collect::<Vec<_>>();
         assert_eq!(names, ["helper", "doubled", "identity"]);

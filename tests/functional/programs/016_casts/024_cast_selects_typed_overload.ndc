@@ -6,14 +6,14 @@
 let values: %{Any} = %{};
 values.insert(1);
 values.insert(2);
-assert_eq((values.keys as [Int]).sum(), 3);
+assert_eq(cast::<[Int]>(values.keys).sum(), 3);
 
 let floats: [Any] = [1.0, 2.0, 3.0];
-assert_eq((floats.clone() as [Float]).sum(), 6.0);
+assert_eq(cast::<[Float]>(floats.clone()).sum(), 6.0);
 
 let numbers: [Any] = [1n, 2n, 3n];
-assert_eq((numbers.clone() as [Number]).sum(), 6n);
+assert_eq(cast::<[Number]>(numbers.clone()).sum(), 6n);
 
 // An empty container conforms vacuously, so the overload still resolves.
 let empty: [Any] = [];
-assert_eq((empty.clone() as [Int]).sum(), 0);
+assert_eq(cast::<[Int]>(empty.clone()).sum(), 0);

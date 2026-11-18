@@ -1,6 +1,6 @@
 // expect-error: cannot cast [String] to [Int]
 fn first(xs: Any) -> Int {
-    let ints = xs as [Int];
+    let ints = cast::<[Int]>(xs);
     if ints.len() == 0 {
         return 0;
     }

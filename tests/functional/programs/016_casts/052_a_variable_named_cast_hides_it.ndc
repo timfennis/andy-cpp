@@ -1,0 +1,4 @@
+// A variable hides the functions with its name, `cast` too.
+// expect-error: `cast` takes no type arguments, but 1 was given
+let cast = 3;
+cast::<Int>(1);

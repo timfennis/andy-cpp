@@ -4,5 +4,5 @@
 let f: fn(Int) -> Int = fn(x: Int) => 0;
 fn step(x: Int) { if x == 0 { 0 } else { f(x - 1) } }
 let a: Any = step;
-f = a as fn(Int) -> Int;
+f = cast::<fn(Int) -> Int>(a);
 print(f(10000));

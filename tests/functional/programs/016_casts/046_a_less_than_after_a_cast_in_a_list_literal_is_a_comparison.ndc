@@ -1,4 +1,4 @@
 // The `<` after a cast inside a list literal compares, and the `]` ends the list.
 // expect-output: true
 let y = 2;
-print([1 as Int < y] > [false]);
+print([cast::<Int>(1) < y] > [false]);

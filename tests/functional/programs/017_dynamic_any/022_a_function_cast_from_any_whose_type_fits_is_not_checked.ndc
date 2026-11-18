@@ -4,4 +4,4 @@
 fn h(f: fn(Int) -> [Int]) => 1;
 fn h(x: Int) => 0;
 let a: Any = fn(x: Int) => [x];
-print(h(a as fn(Int) -> [Int]));
+print(h(cast::<fn(Int) -> [Int]>(a)));

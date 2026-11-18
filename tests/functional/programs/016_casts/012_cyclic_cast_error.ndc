@@ -3,4 +3,4 @@
 // expect-error: cannot cast
 let x: [Any] = [];
 x.push(x);
-print(x as [Int]);
+print(cast::<[Int]>(x));

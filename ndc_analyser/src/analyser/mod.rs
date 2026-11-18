@@ -617,15 +617,6 @@ impl Analyser {
                 StaticType::Bool
             }
             Expression::Grouping(expr) => self.analyse_expr(expr),
-            Expression::Cast {
-                value,
-                annotation,
-                optional,
-            } => {
-                let target = self.lower_value_type(annotation);
-                let found = self.analyse_expr(value);
-                self.analyse_cast(*id, &found, target, *optional, *span)
-            }
             Expression::VariableDeclaration {
                 l_value,
                 annotated_type,

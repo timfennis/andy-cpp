@@ -7,7 +7,7 @@ fn pick(x) => need_int(x);
 fn pick(x: Any) => "fallback";
 fn via(x: Any) => pick(x);
 fn tested(x: Any) -> Any {
-    let n = x as? Int;
+    let n = cast?::<Int>(x);
     if n.is_some() { pick(n.unwrap()) } else { pick(x) }
 }
 print(via(1), via("a"), pick(1), tested(1), tested("a"));

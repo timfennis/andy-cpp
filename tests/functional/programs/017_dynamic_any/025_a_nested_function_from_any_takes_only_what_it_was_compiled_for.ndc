@@ -7,6 +7,6 @@ fn outer() {
     fn inner(v) => show(v);
     inner(1);
     let a: Any = inner;
-    (a as fn(String) -> String)("s")
+    cast::<fn(String) -> String>(a)("s")
 }
 print(outer());

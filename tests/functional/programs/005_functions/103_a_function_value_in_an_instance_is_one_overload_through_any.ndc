@@ -5,7 +5,7 @@ fn bad(x) {
     let g = abs;
     g(x);
     let a: Any = g;
-    let b = a as fn(Int) -> String;
+    let b = cast::<fn(Int) -> String>(a);
     b(1)
 }
 let h: fn(Int) -> String = bad;

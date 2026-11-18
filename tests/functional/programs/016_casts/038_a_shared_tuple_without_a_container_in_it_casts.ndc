@@ -3,4 +3,4 @@
 // expect-output: (1,None) Some((1,None))
 let value: Any = (1, None);
 let alias = value;
-print(value as (Int, Option<[Int]>), alias as? (Int, Option<[Int]>));
+print(cast::<(Int, Option<[Int]>)>(value), cast?::<(Int, Option<[Int]>)>(alias));

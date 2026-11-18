@@ -1,0 +1,4 @@
+// `cast?` is `Some(value)` when the value is the type and `None` when it isn't.
+// expect-output: Some(1) None
+let x: Any = 1;
+print(cast?::<Int>(x), cast?::<String>(x));

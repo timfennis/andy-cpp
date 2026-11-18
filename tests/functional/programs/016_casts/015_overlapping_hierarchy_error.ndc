@@ -2,4 +2,4 @@
 // then rejects this particular value.
 // expect-error: cannot cast [Any] to [Int]
 let xs: [Any] = [1, "two"];
-xs as [Int]
+cast::<[Int]>(xs)

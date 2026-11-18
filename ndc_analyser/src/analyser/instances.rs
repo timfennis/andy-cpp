@@ -446,7 +446,7 @@ impl Analyser {
 
     /// Picks whether each cast of the batch is checked as the program runs:
     /// not where the type of its value, settled now, proves it. In `fn f(ys)
-    /// => ys as [Int]`, the instance for a `[Int]` needs no check.
+    /// => cast::<[Int]>(ys)`, the instance for a `[Int]` needs no check.
     pub(super) fn pick_cast_checks(&mut self) {
         for cast in std::mem::take(&mut self.casts) {
             let check = (!self.vars.resolve(&cast.found).fits(&cast.target))

@@ -2,4 +2,4 @@
 // expect-output: None
 let mixed: [Any] = [1, "a"];
 let any: Any = mixed;
-print(any as? [Int]);
+print(cast?::<[Int]>(any));
