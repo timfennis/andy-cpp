@@ -491,6 +491,7 @@ impl Analyser {
     fn join_known(&mut self, a: &StaticType, b: &StaticType, span: Span) -> StaticType {
         let snapshot = self.vars.snapshot();
         if self.vars.unify(a, b) {
+            self.vars.commit(snapshot);
             return self.vars.resolve(a);
         }
         self.vars.rollback(snapshot);
@@ -936,10 +937,13 @@ impl Analyser {
                 // aren't part of.
                 if *default == StaticType::Error {
                     self.vars.settle_default(var, default);
+                    self.vars.commit(snapshot);
                 } else if self
                     .settle_with_fellows(var, default, &holders_of_var)
-                    .is_none()
+                    .is_some()
                 {
+                    self.vars.commit(snapshot);
+                } else {
                     self.vars.rollback(snapshot);
                     if self.vars.holds_several_literals(var) {
                         self.report_literals_that_differ(var, default);
@@ -1011,10 +1015,9 @@ impl Analyser {
         for &holder in holders {
             for other in self.vars.held_literals(holder) {
                 let snapshot = self.vars.snapshot();
-                if self.vars.settle_literal(other, default) {
+                let fits = self.vars.settle_literal(other, default);
+                if self.vars.keep_if(snapshot, fits) {
                     settled.push(other);
-                } else {
-                    self.vars.rollback(snapshot);
                 }
             }
         }
@@ -1135,9 +1138,8 @@ impl Analyser {
                     for side in [&a, &b] {
                         if self.vars.resolve(side).has_vars() {
                             let snapshot = self.vars.snapshot();
-                            if !self.vars.bind_argument(&result, side) {
-                                self.vars.rollback(snapshot);
-                            }
+                            let fits = self.vars.bind_argument(&result, side);
+                            self.vars.keep_if(snapshot, fits);
                         }
                     }
                 }
@@ -1358,6 +1360,7 @@ impl Analyser {
             // not take the literal itself, which then isn't an `Any`.
             let snapshot = self.vars.snapshot();
             if let Some(typ) = self.commit_early(call, &arguments, picked) {
+                self.vars.commit(snapshot);
                 return Some(typ);
             }
             self.vars.rollback(snapshot);
@@ -1482,12 +1485,10 @@ impl Analyser {
                 // Only what settles part of the argument counts, so the call
                 // isn't tried again for nothing.
                 let snapshot = self.vars.snapshot();
-                if self.vars.bind_argument(&parameter, argument)
-                    && self.vars.unsettled(argument).len() < unknowns
-                {
+                let fits = self.vars.bind_argument(&parameter, argument)
+                    && self.vars.unsettled(argument).len() < unknowns;
+                if self.vars.keep_if(snapshot, fits) {
                     typed = true;
-                } else {
-                    self.vars.rollback(snapshot);
                 }
             }
         }
@@ -2279,8 +2280,8 @@ impl Analyser {
             unreachable!("only a function with known parameters has a signature to bind");
         };
         let snapshot = self.vars.snapshot();
-        if !self.vars.bind_arguments(parameters, arguments) {
-            self.vars.rollback(snapshot);
+        let fits = self.vars.bind_arguments(parameters, arguments);
+        if !self.vars.keep_if(snapshot, fits) {
             return None;
         }
         let iterations = self.iterations_waited_for(parameters, arguments);

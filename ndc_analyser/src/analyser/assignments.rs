@@ -134,11 +134,8 @@ impl Analyser {
         // expected, as a call passes an argument: `let xs: Iterable<Int> =
         // []` settles the list's elements as Ints.
         let snapshot = self.vars.snapshot();
-        if !self.vars.bind_argument(stored_type, value_type) {
-            self.vars.rollback(snapshot);
-            return false;
-        }
-        true
+        let fits = self.vars.bind_argument(stored_type, value_type);
+        self.vars.keep_if(snapshot, fits)
     }
 
     /// Checks that a value of `value_type` can be stored where values of
