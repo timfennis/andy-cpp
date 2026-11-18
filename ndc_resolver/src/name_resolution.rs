@@ -91,7 +91,13 @@ pub struct NameResolver {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum NameResolutionError {
     #[error("Identifier {name} has not previously been declared")]
-    UnknownName { name: String, span: Span },
+    UnknownName {
+        name: String,
+        /// A visible name that is spelled almost the same, for a likely typo:
+        /// `total` for `totl`.
+        suggestion: Option<String>,
+        span: Span,
+    },
     #[error("Illegal redefinition of parameter {name}")]
     DuplicateParameter { name: String, span: Span },
     #[error("Illegal redefinition of variable {name} as a function in the same scope")]
@@ -142,6 +148,10 @@ impl NameResolutionError {
                 "A map type is written `%{K: V}`, as in `%{String: Int}`, and a set type `%{K}`"
                     .to_string(),
             ),
+            Self::UnknownName {
+                suggestion: Some(suggestion),
+                ..
+            } => Some(format!("Did you mean `{suggestion}`?")),
             Self::VariableIsNotAFunction { name, .. } => Some(format!(
                 "'{name}' is a variable, and `x.{name}` only finds functions. Call it as `{name}(x)` instead"
             )),
@@ -396,6 +406,45 @@ impl ScopeTree {
                 .filter(|group| !group.is_empty())
                 .collect(),
         )
+    }
+
+    /// The name visible from the current scope that is closest to `name`, if
+    /// it's close enough to be a typo of it: `total` for `totl` or `ttoal`.
+    /// Only symbols `accept` takes count, and only names that are identifiers,
+    /// so operators are never suggested. The nearest scope wins a tie.
+    pub(crate) fn similar_name(
+        &self,
+        name: &str,
+        table: &SymbolTable,
+        accept: impl Fn(BindingKind) -> bool,
+    ) -> Option<String> {
+        let allowed = match name.chars().count() {
+            0..=2 => return None,
+            3..=5 => 1,
+            6..=8 => 2,
+            _ => 3,
+        };
+        let is_identifier = |candidate: &str| {
+            candidate
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '?')
+        };
+        let mut best: Option<(usize, &str)> = None;
+        for scope in self.chain() {
+            for &symbol in scope.bindings.iter().rev() {
+                let candidate = table.name(symbol);
+                if candidate == name || !accept(table.kind(symbol)) || !is_identifier(candidate) {
+                    continue;
+                }
+                let distance = strsim::damerau_levenshtein(name, candidate).min(
+                    strsim::damerau_levenshtein(&name.to_lowercase(), &candidate.to_lowercase()),
+                );
+                if distance <= allowed && best.is_none_or(|(closest, _)| distance < closest) {
+                    best = Some((distance, candidate));
+                }
+            }
+        }
+        best.map(|(_, candidate)| candidate.to_string())
     }
 
     /// Same-named symbols in the current scope only, newest first. Empty when
@@ -888,6 +937,7 @@ impl NameResolver {
                 if in_place_candidates.0.is_empty() && candidates.0.is_empty() {
                     return Err(NameResolutionError::UnknownName {
                         name: operation.clone(),
+                        suggestion: None,
                         // The operator has no span of its own, so point at the whole assignment.
                         span: loc.span,
                     });
@@ -919,10 +969,7 @@ impl NameResolver {
         let candidates = self.scopes.candidates(name, &self.symbols);
 
         if candidates.0.is_empty() {
-            return Err(NameResolutionError::UnknownName {
-                name: name.to_string(),
-                span,
-            });
+            return Err(self.unknown_name(name, span, |_| true));
         }
 
         candidates
@@ -947,10 +994,7 @@ impl NameResolver {
 
         if functions.0.is_empty() {
             return Err(if candidates.0.is_empty() {
-                NameResolutionError::UnknownName {
-                    name: name.to_string(),
-                    span,
-                }
+                self.unknown_name(name, span, |kind| kind == BindingKind::Function)
             } else {
                 NameResolutionError::VariableIsNotAFunction {
                     name: name.to_string(),
@@ -1132,10 +1176,22 @@ impl NameResolver {
     fn lookup(&self, name: &str, span: Span) -> Result<SymbolId, NameResolutionError> {
         self.scopes
             .lookup(name, &self.symbols)
-            .ok_or_else(|| NameResolutionError::UnknownName {
-                name: name.to_string(),
-                span,
-            })
+            .ok_or_else(|| self.unknown_name(name, span, |_| true))
+    }
+
+    /// The error for a use of `name` that nothing visible declares, suggesting
+    /// a visible name of a kind `accept` takes that looks like a typo of it.
+    fn unknown_name(
+        &self,
+        name: &str,
+        span: Span,
+        accept: impl Fn(BindingKind) -> bool,
+    ) -> NameResolutionError {
+        NameResolutionError::UnknownName {
+            name: name.to_string(),
+            suggestion: self.scopes.similar_name(name, &self.symbols, accept),
+            span,
+        }
     }
 
     fn declare_pattern(&mut self, pattern: &BindingPatternLocation) {

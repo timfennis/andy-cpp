@@ -1178,6 +1178,7 @@ dependencies = [
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",
+ "strsim",
  "thiserror",
 ]
 
