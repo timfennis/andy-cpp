@@ -2,6 +2,14 @@
 resolver = "3"
 members = ["ndc_macros", "ndc_bin", "ndc_diagnostics", "ndc_highlight", "ndc_wasm", "ndc_core", "ndc_analyser", "ndc_resolver", "ndc_layout", "ndc_analysis", "ndc_interpreter", "ndc_vm", "ndc_lsp", "ndc_lexer", "ndc_parser", "ndc_fmt", "ndc_stdlib", "benches", "tests/functional", "tests/compiler", "tests/proptest"]
 
+# Fat LTO with one codegen unit starts the interpreter about 0.4 ms sooner, as
+# the binary is 9 MB rather than 13 MB, and runs programs 2-7% faster. A
+# release build after a change in ndc_core takes about a minute rather than 13
+# seconds. Thin LTO gains neither.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
 [profile.release-with-debug]
 inherits = "release"
 debug = true
