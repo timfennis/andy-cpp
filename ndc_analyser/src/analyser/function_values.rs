@@ -86,6 +86,14 @@ impl Analyser {
     ) -> StaticType {
         let symbol = self.resolver.innermost_reference(id);
         let mut groups = self.overloaded_function_groups(id, symbol);
+        let reachable = groups.concat();
+        if let Some(function) = self.passes_other_type_arguments(&reachable, &type_arguments) {
+            self.emit(self.recursive_type_arguments(function, span));
+            self.picks
+                .bindings
+                .insert(id, Binding::Resolved(Candidate::Scalar(function)));
+            return StaticType::Error;
+        }
         // `f::<Int>` can only be an overload that takes one type argument.
         if !type_arguments.is_empty() {
             for group in &mut groups {
@@ -154,12 +162,19 @@ impl Analyser {
                     self.emit(AnalysisError::cast_without_a_target(&name, span));
                     return Some(StaticType::Error);
                 };
-                self.casts.push(Cast {
-                    node: id,
-                    found: StaticType::Any,
-                    target: target.clone(),
-                    instance: None,
-                });
+                // Like the value's binding (see `record_function_value`),
+                // the check is the instance's being recorded, and a copy of
+                // a generic function's constraint records none: the
+                // instance for the call records it.
+                if self.copied_through.is_none() {
+                    self.casts.push(Cast {
+                        node: id,
+                        found: StaticType::Any,
+                        target: target.clone(),
+                        instance: self.recording,
+                        span,
+                    });
+                }
                 None
             }
         }
@@ -180,8 +195,9 @@ impl Analyser {
         if self.declaring == Some(symbol) && self.recording.is_none() {
             self.recursive_calls.push(id);
         }
+        // A type parameter its body settled, which was reported there, takes
+        // nothing else.
         let Some(typ) = self.instantiate_explicit(symbol, type_arguments) else {
-            self.emit(self.recursive_type_arguments(symbol, span));
             return StaticType::Error;
         };
         self.flush_value_copies(id, &typ, span);

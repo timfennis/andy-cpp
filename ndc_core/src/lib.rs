@@ -32,16 +32,12 @@ impl<T> FunctionRegistry<T> {
         self.functions.push(f)
     }
 
-    pub fn declare_intrinsic(&mut self, f: IntrinsicFunction) {
-        self.intrinsics.push(f)
-    }
-
     /// The natives, in registration order.
     pub fn iter(&'_ self) -> Iter<'_, T> {
         self.functions.iter()
     }
 
-    /// The intrinsics, in registration order.
+    /// The language's intrinsics, as [`IntrinsicFunction::all`] lists them.
     pub fn intrinsics(&'_ self) -> Iter<'_, IntrinsicFunction> {
         self.intrinsics.iter()
     }

@@ -1246,18 +1246,7 @@ impl Analyser {
         // A function's body can only pass its own type parameters on to
         // itself: `f::<Int>` in `fn f<T>` would need another version of `f`
         // while `f` is still being worked out.
-        if let Some(function) = self.declaring
-            && self.copied_through.is_none()
-            && self.recording.is_none()
-            && reachable.contains(&function)
-            && self.explicit_type_parameters(function).len() == call.type_arguments.len()
-            && self
-                .type_argument_bindings(function, &call.type_arguments)
-                .is_none()
-            && reachable.iter().all(|&symbol| {
-                symbol == function || !self.could_accept(symbol, &call.type_arguments, &arguments)
-            })
-        {
+        if let Some(function) = self.passes_other_type_arguments(&reachable, &call.type_arguments) {
             self.emit(self.recursive_type_arguments(function, call.span));
             self.record_pick(
                 call.site,
@@ -2463,6 +2452,29 @@ impl Analyser {
         Some(made)
     }
 
+    /// The function being declared, if `reachable`, the functions a use of
+    /// a name in its body can mean, has it, and the use gives it as many
+    /// type arguments as it takes, but not its own type parameters: `f::<Int>`
+    /// in `fn f<T>`. That's an error even where another overload of `f`
+    /// could take them, so that `f::<…>` in `f`'s body means the same
+    /// wherever it's written.
+    pub(super) fn passes_other_type_arguments(
+        &self,
+        reachable: &[SymbolId],
+        type_arguments: &[StaticType],
+    ) -> Option<SymbolId> {
+        let function = self.declaring?;
+        (!type_arguments.is_empty()
+            && self.copied_through.is_none()
+            && self.recording.is_none()
+            && reachable.contains(&function)
+            && self.explicit_type_parameters(function).len() == type_arguments.len()
+            && self
+                .type_argument_bindings(function, type_arguments)
+                .is_none())
+        .then_some(function)
+    }
+
     /// The error for a use of `symbol` in its own body with type arguments
     /// other than its own type parameters.
     pub(super) fn recursive_type_arguments(&self, symbol: SymbolId, span: Span) -> AnalysisError {
@@ -2493,17 +2505,8 @@ impl Analyser {
     /// rule picks it, as `cast::<Int>(x)` is (see
     /// [`Analyser::analyse_call`]): `x.cast` reads no getter called `cast`.
     fn site_candidates(&self, site: CallSite) -> Candidates {
-        let candidates = match site {
-            CallSite::Call(id) => self.resolver.reference_candidates(id),
-            CallSite::Getter(id) => self
-                .resolver
-                .getter_candidates(id)
-                .expect("internal error: a getter call without getter candidates"),
-            CallSite::Setter(id) | CallSite::FieldSetter(id) => self.resolver.setter_candidates(id),
-            CallSite::OpAssignment(id) => &self.resolver.augmented_candidates(id).operator,
-        };
         Candidates::from_groups(
-            candidates
+            self.site_references(site)
                 .iter()
                 .map(|group| {
                     group
@@ -2515,6 +2518,19 @@ impl Analyser {
                 .filter(|group| !group.is_empty())
                 .collect(),
         )
+    }
+
+    /// Every function a call at `site` can name, intrinsics too.
+    fn site_references(&self, site: CallSite) -> &Candidates {
+        match site {
+            CallSite::Call(id) => self.resolver.reference_candidates(id),
+            CallSite::Getter(id) => self
+                .resolver
+                .getter_candidates(id)
+                .expect("internal error: a getter call without getter candidates"),
+            CallSite::Setter(id) | CallSite::FieldSetter(id) => self.resolver.setter_candidates(id),
+            CallSite::OpAssignment(id) => &self.resolver.augmented_candidates(id).operator,
+        }
     }
 
     pub(super) fn record_pick(
@@ -2620,8 +2636,10 @@ impl Analyser {
                 }
                 // No overload takes as many type arguments as the call
                 // gives, which is what's wrong whatever the arguments are.
+                // An intrinsic the call can't mean still takes as many as it
+                // does: `cast` takes one.
                 let given = call.type_arguments.len();
-                let counts = self.type_argument_counts(&call.candidates);
+                let counts = self.type_argument_counts(self.site_references(call.site));
                 if given > 0 && !counts.contains(&given) {
                     AnalysisError::wrong_type_argument_count(&call.name, &counts, given, call.span)
                 } else {

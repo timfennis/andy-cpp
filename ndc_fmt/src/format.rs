@@ -203,7 +203,7 @@ impl<'a> Formatter<'a> {
                 name,
                 type_arguments,
                 ..
-            } => concat([text(name), turbofish(type_arguments)]),
+            } => concat([text(name), self.turbofish(type_arguments, close_at)]),
             Expression::Statement(inner) => {
                 let semicolon = self
                     .source
@@ -340,7 +340,7 @@ impl<'a> Formatter<'a> {
                     receiver,
                     text("."),
                     text(name),
-                    turbofish(type_arguments),
+                    self.turbofish(type_arguments, function.span.end().saturating_sub(1)),
                     self.arguments(arguments, close_at),
                 ])
             }
@@ -496,6 +496,20 @@ impl<'a> Formatter<'a> {
 
     /// Items between brackets, on one line if they fit and otherwise each on
     /// its own line with a comma after every one
+    /// The type arguments `::<Int, String>` after a name, nothing if it has
+    /// none, with the comments between them, broken over lines like a call's
+    /// arguments when they don't fit. `close_at` is the offset of the `>`.
+    fn turbofish(&mut self, type_arguments: &[TypeExpr], close_at: usize) -> Doc {
+        if type_arguments.is_empty() {
+            return text("");
+        }
+        self.delimited(
+            Brackets::new("::<", ">", close_at),
+            type_arguments,
+            |_, argument| (type_expr(argument), argument.span()),
+        )
+    }
+
     fn delimited<T>(
         &mut self,
         brackets: Brackets,
@@ -932,15 +946,6 @@ enum MapEntry<'e> {
 
 fn type_expr(annotation: &TypeExpr) -> Doc {
     text(annotation.to_string())
-}
-
-/// The type arguments `::<Int, String>` after a name, nothing if it has none.
-fn turbofish(type_arguments: &[TypeExpr]) -> Doc {
-    if type_arguments.is_empty() {
-        return text("");
-    }
-    let arguments = type_arguments.iter().map(ToString::to_string);
-    text(format!("::<{}>", arguments.collect::<Vec<_>>().join(", ")))
 }
 
 /// A comment after code, at the end of its line

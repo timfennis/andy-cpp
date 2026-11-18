@@ -483,6 +483,7 @@ impl Analyser {
             found,
             target: target.clone(),
             instance: None,
+            span,
         });
         // `cast?` is the same cast, with `None` where `cast` would fail. One
         // that can never succeed is an error like `cast`: it would always be

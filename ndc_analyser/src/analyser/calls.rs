@@ -225,7 +225,9 @@ impl Analyser {
     /// arguments and arguments means, if it means one: of the nearest scope
     /// with an overload that could take them, the only one. A function the
     /// program declares, as `fn cast<T>(x: T)`, is nearer, and takes the
-    /// call if it can, as it would from a native.
+    /// call if it can, as it would from a native. A call that only an
+    /// intrinsic could mean, but that it can't take, as `cast::<Int>(1, 2)`,
+    /// means it too, so its typing rule says what's wrong.
     fn called_intrinsic(
         &mut self,
         callee: NodeId,
@@ -233,6 +235,16 @@ impl Analyser {
         arguments: &[StaticType],
     ) -> Option<(SymbolId, Intrinsic)> {
         let candidates = self.resolver.reference_candidates(callee).clone();
+        let reachable = self.overloads().reachable_symbols(&candidates);
+        // Most calls can't mean an intrinsic, and need no overload tried.
+        let intrinsic = reachable.iter().find_map(|&symbol| {
+            self.resolver
+                .intrinsic(symbol)
+                .map(|intrinsic| (symbol, intrinsic))
+        })?;
+        if reachable.len() == 1 {
+            return Some(intrinsic);
+        }
         for group in self.overloads().reachable_groups(&candidates) {
             let viable = group
                 .into_iter()
@@ -277,7 +289,11 @@ impl Analyser {
                         self.vars
                             .settle_unknowns_but_literals(argument, &StaticType::Error);
                     }
-                    self.emit(AnalysisError::cast_without_a_target(name, span));
+                    self.emit(if type_arguments.is_empty() && arguments.len() == 1 {
+                        AnalysisError::cast_without_a_target(name, span)
+                    } else {
+                        AnalysisError::cast_takes_a_type_and_a_value(name, span)
+                    });
                     return StaticType::Error;
                 };
                 self.analyse_cast(

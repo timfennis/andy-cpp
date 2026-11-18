@@ -57,6 +57,8 @@ pub(super) struct Cast {
     pub(super) found: StaticType,
     pub(super) target: StaticType,
     pub(super) instance: Option<SymbolId>,
+    /// Where the cast is written, for an error about it.
+    pub(super) span: Span,
 }
 
 /// An instance [`Analyser::instance_for`] made: the generic function and the
@@ -449,8 +451,21 @@ impl Analyser {
     /// => cast::<[Int]>(ys)`, the instance for a `[Int]` needs no check.
     pub(super) fn pick_cast_checks(&mut self) {
         for cast in std::mem::take(&mut self.casts) {
-            let check = (!self.vars.resolve(&cast.found).fits(&cast.target))
-                .then(|| self.vars.finish_open(&cast.target));
+            // A type parameter nothing settled, as `T` in `print(f(x))` with
+            // `fn f<T>(x) => cast::<T>(x)`, is `Unknown` in the instance for
+            // the call, and leaves nothing to check against.
+            let target = self.vars.resolve(&cast.target);
+            if target.contains(&|part| matches!(part, StaticType::Var(_) | StaticType::Unknown)) {
+                let outer = std::mem::replace(&mut self.recording, cast.instance);
+                self.emit(AnalysisError::cast_target_not_settled(cast.span));
+                self.recording = outer;
+                self.pick_tables(cast.instance)
+                    .cast_checks
+                    .insert(cast.node, None);
+                continue;
+            }
+            let check = (!self.vars.resolve(&cast.found).fits(&target))
+                .then(|| self.vars.finish_open(&target));
             self.pick_tables(cast.instance)
                 .cast_checks
                 .insert(cast.node, check);

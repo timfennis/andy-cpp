@@ -68,11 +68,14 @@ impl Interpreter {
     }
 
     fn from_capturing(capturing: bool) -> Self {
-        let mut interpreter = Self {
-            function_registry: FunctionRegistry::default(),
-            globals: Vec::new(),
+        // The registry starts with the language's intrinsics, which the
+        // analyser and the globals know from it.
+        let function_registry = FunctionRegistry::default();
+        Self {
+            analyser: Self::new_analyser(&function_registry),
+            globals: ndc_vm::native_globals(&function_registry),
+            function_registry,
             capturing,
-            analyser: Analyser::new(vec![]),
             session: Session::default(),
             source_db: SourceDb::new(),
             resumable: true,
@@ -85,11 +88,7 @@ impl Interpreter {
             },
             #[cfg(feature = "trace")]
             tracer: None,
-        };
-        // The analyser and the globals start from the registry, which holds
-        // the language's intrinsics.
-        interpreter.start_over();
-        interpreter
+        }
     }
 
     /// Create an interpreter for executing a complete program once.
@@ -126,13 +125,12 @@ impl Interpreter {
         self.start_over();
     }
 
-    /// An analyser that knows the registered functions and nothing else.
-    fn new_analyser(&self) -> Analyser {
-        let natives = self
-            .function_registry
+    /// An analyser that knows the functions in `registry` and nothing else.
+    fn new_analyser(registry: &FunctionRegistry<Rc<NativeFunction>>) -> Analyser {
+        let natives = registry
             .iter()
             .map(|fun| (fun.name.clone(), fun.static_type.clone(), None));
-        let intrinsics = self.function_registry.intrinsics().map(|fun| {
+        let intrinsics = registry.intrinsics().map(|fun| {
             (
                 fun.name.clone(),
                 fun.static_type.clone(),
@@ -144,7 +142,7 @@ impl Interpreter {
 
     /// Forgets everything evaluated so far, keeping only what was printed.
     fn start_over(&mut self) {
-        self.analyser = self.new_analyser();
+        self.analyser = Self::new_analyser(&self.function_registry);
         self.session = Session::default();
         self.globals = ndc_vm::native_globals(&self.function_registry);
     }

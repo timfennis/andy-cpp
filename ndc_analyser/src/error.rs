@@ -190,6 +190,16 @@ impl AnalysisError {
         .with_help(format!("write `{name}::<T>(x)`, as in `{name}::<Int>(x)`"))
     }
 
+    /// A call of `cast` or `cast?` with other than one type argument and one
+    /// value, as `cast::<Int>(1, 2)`.
+    pub(crate) fn cast_takes_a_type_and_a_value(name: &str, span: Span) -> Self {
+        Self::new(
+            format!("`{name}` takes one type argument and one value"),
+            span,
+        )
+        .with_help(format!("write `{name}::<T>(x)`, as in `{name}::<Int>(x)`"))
+    }
+
     /// `name::<…>` in `name`'s own body with type arguments other than its
     /// own type parameters, as `f::<Int>` in `fn f<T>(x: T)`, which would
     /// need a version of `f` for them while `f` is still being worked out.
@@ -398,6 +408,19 @@ impl AnalysisError {
     pub(crate) fn iterable_in_an_annotation(span: Span) -> Self {
         Self::new("`Iterable<T>` can't be written in a type annotation", span).with_help(
             "A parameter without an annotation takes any kind of sequence. Say which kind a value is, as in `[Int]`",
+        )
+    }
+
+    /// A cast to a type parameter that nothing settled where the function
+    /// is called, as `T` in `print(f(x))` with `fn f<T>(x) => cast::<T>(x)`.
+    pub(crate) fn cast_target_not_settled(span: Span) -> Self {
+        Self::new(
+            "nothing says what type this cast checks for".to_string(),
+            span,
+        )
+        .with_help(
+            "give the call of the function it's in its type arguments, as in `f::<Int>(x)`, or say what type its result is"
+                .to_string(),
         )
     }
 

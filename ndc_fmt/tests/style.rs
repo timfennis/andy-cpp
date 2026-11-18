@@ -41,6 +41,14 @@ fn type_arguments_and_type_parameters_keep_their_brackets() {
 }
 
 #[test]
+fn type_arguments_keep_their_comments_and_break_like_arguments() {
+    assert_formats(
+        "let w = pair::<Int, // the first\n  String>(1, \"a\");",
+        "let w = pair::<\n    Int, // the first\n    String,\n>(1, \"a\");\n",
+    );
+}
+
+#[test]
 fn statements_are_indented_by_four_spaces() {
     assert_formats(
         "fn f(x) {\n  if x > 0 {\n x\n  } else {\n  0\n }\n}\n",
