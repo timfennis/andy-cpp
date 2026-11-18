@@ -450,6 +450,42 @@ mod inner {
         fold_iterator(iterator, fst, function)
     }
 
+    /// Folds the sequence like `fold`, but returns every intermediate accumulator instead of only
+    /// the last one: `[1, 2, 3].scan(0, fn(acc, x) => acc + x)` gives `[1, 3, 6]`. The initial
+    /// value is not part of the result, so it has one element per element of `seq`.
+    #[function(signature = "<T, A>(Iterable<T>, A, fn(A, T) -> A) -> [A]")]
+    pub fn scan(
+        seq: Value,
+        initial: Value,
+        function: &mut VmCallable<'_>,
+    ) -> anyhow::Result<Value> {
+        let mut out = Vec::new();
+        scan_into(
+            seq.try_into_iter()
+                .ok_or_else(|| anyhow!("scan requires a sequence"))?,
+            initial,
+            function,
+            &mut out,
+        )?;
+        Ok(Value::list(out))
+    }
+
+    /// Like `scan`, but starts from the first element instead of an initial value, as `reduce`
+    /// does for `fold`: `[3, 1, 4, 1, 5].scan(max)` gives `[3, 3, 4, 4, 5]`. The first element
+    /// is the first step, so the result has one element per element of `seq`.
+    #[function(name = "scan", signature = "<T>(Iterable<T>, fn(T, T) -> T) -> [T]")]
+    pub fn scan_first(seq: Value, function: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        let mut iterator = seq
+            .try_into_iter()
+            .ok_or_else(|| anyhow!("scan requires a sequence"))?;
+        let mut out = Vec::new();
+        if let Some(first) = iterator.next() {
+            out.push(first.clone());
+            scan_into(iterator, first, function, &mut out)?;
+        }
+        Ok(Value::list(out))
+    }
+
     /// Filters the given sequence using the `predicate`.
     #[function(signature = "<T>(Iterable<T>, fn(T) -> Bool) -> [T]")]
     pub fn filter(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
@@ -968,6 +1004,21 @@ fn fold_iterator(
         acc = function.call(&[acc, item]).map_err(|e| anyhow!(e))?;
     }
     Ok(acc)
+}
+
+/// Pushes each accumulator a fold of `iter` from `initial` goes through onto `out`.
+fn scan_into(
+    iter: impl Iterator<Item = Value>,
+    initial: Value,
+    function: &mut VmCallable<'_>,
+    out: &mut Vec<Value>,
+) -> anyhow::Result<()> {
+    let mut acc = initial;
+    for item in iter {
+        acc = function.call(&[acc, item]).map_err(|e| anyhow!(e))?;
+        out.push(acc.clone());
+    }
+    Ok(())
 }
 
 pub mod extra {

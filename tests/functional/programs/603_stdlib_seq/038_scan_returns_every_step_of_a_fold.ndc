@@ -1,0 +1,9 @@
+// expect-output: [1,3,6,10] [] [0.5,2.0] ["a","ab","abc"] 6
+print(
+    [1, 2, 3, 4].scan(0, fn(acc, x) => acc + x),
+    [].scan(0, fn(acc, x: Int) => acc + x),
+    // The accumulator takes the type of the elements, as with `fold`.
+    [0.5, 1.5].scan(0, fn(acc, x) => acc + x),
+    "abc".scan("", fn(acc, c) => acc ++ c),
+    [1, 2, 3].scan(0, fn(acc, x) => acc + x).last,
+);
