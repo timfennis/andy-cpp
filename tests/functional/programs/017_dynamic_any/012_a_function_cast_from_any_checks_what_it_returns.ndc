@@ -6,6 +6,6 @@ fn show(x: Int) { "int" }
 fn show(x: String) { "string" }
 fn text(x) => "s";
 let a: Any = text;
-let f = a as fn(Int) -> Int;
+let f = cast::<fn(Int) -> Int>(a);
 let n: Int = f(1);
 print(show(n), n);

@@ -1,0 +1,7 @@
+// `map` is `map<T, U>(Iterable<T>, fn(T) -> U) -> [U]`, so `map::<Int, String>` maps Ints to Strings,
+// and the function passed to it gets an Int.
+// expect-output: ["3","1"]
+// expect-output: 4
+let xs = [3, 1];
+print(xs.map::<Int, String>(fn(x) => x.string()));
+print(fold::<Int, Int>(xs, 0, fn(total, x) => total + x));

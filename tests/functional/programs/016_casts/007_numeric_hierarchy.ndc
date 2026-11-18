@@ -2,10 +2,10 @@
 // succeed — `Number()`, `int()`, and `float()` are the conversions. A cast
 // only recovers a numeric type that is hidden behind Any.
 let integer: Any = 1;
-assert_eq(integer as Int, 1);
+assert_eq(cast::<Int>(integer), 1);
 
 let float: Any = 1.5;
-assert_eq(float as Float, 1.5);
+assert_eq(cast::<Float>(float), 1.5);
 
 let advanced: Any = 1n;
-assert_eq(advanced as Number, 1n);
+assert_eq(cast::<Number>(advanced), 1n);

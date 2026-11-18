@@ -1,0 +1,8 @@
+// `cast::<Int>` without a call is a function that casts what it's given, and
+// `x.cast::<T>()` is the call `cast::<T>(x)`.
+// expect-output: 3
+// expect-output: 2
+let xs: [Any] = [1, 2];
+print(xs.map(cast::<Int>).sum());
+let x: Any = 2;
+print(x.cast::<Any>().cast::<Int>());

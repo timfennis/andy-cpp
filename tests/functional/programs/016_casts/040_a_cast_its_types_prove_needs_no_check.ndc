@@ -3,18 +3,18 @@
 // the types each call gives it. Here every value already is a [Int], so
 // a list held by another name casts fine.
 let xs = [];
-let c = xs as? [Int];
+let c = cast?::<[Int]>(xs);
 xs.push(1);
 print(c);
 
-fn f(ys) => ys as [Int];
+fn f(ys) => cast::<[Int]>(ys);
 let zs = [1];
 print(f(zs));
 
-let g = fn(ys) => ys as [Int];
+let g = fn(ys) => cast::<[Int]>(ys);
 print(g(zs));
 
-fn is_ints(ys) => (ys as? [Int]).is_some();
+fn is_ints(ys) => cast?::<[Int]>(ys).is_some();
 print(is_ints(zs), is_ints(["a"]));
 // expect-output: Some([1])
 // expect-output: [1]

@@ -26,6 +26,11 @@ pub(super) struct Generalizing {
     pub(super) return_annotated: bool,
 }
 
+/// A type parameter a function declares, as `T` in `fn f<T>(x: T)`: the
+/// variable its body has for it, and its name, which the function's type
+/// gives the type parameter it ends up.
+pub(super) type DeclaredTypeParameter<'a> = (&'a StaticType, &'a str);
+
 impl Analyser {
     /// Whether the function declared as `symbol` is generic, which a `fn`
     /// declared in the program scope is. One declared in a function or a
@@ -50,6 +55,7 @@ impl Analyser {
         signature: &StaticType,
         declaration: NodeId,
         flags: Generalizing,
+        declared: &[DeclaredTypeParameter<'_>],
         [first_use, first_function, first_cast]: [usize; 3],
     ) -> StaticType {
         let Generalizing {
@@ -101,16 +107,33 @@ impl Analyser {
                 }
             }
         }
+        // A declared one keeps its name; the others are named `A`, `B`, …
+        // skipping the declared names.
+        let declared = declared
+            .iter()
+            .filter_map(|&(typ, name)| match self.vars.resolve(typ) {
+                StaticType::Var(var) => Some((var, name)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         let mut named = 0;
         let mut contents = Vec::new();
         for var in parameters {
             if self.vars.is_generalizable(var) {
-                let name = type_parameter_name(named);
+                let name = match declared.iter().find(|(declared, _)| *declared == var) {
+                    Some((_, name)) => (*name).to_string(),
+                    None => loop {
+                        let name = type_parameter_name(named);
+                        named += 1;
+                        if declared.iter().all(|(_, declared)| *declared != name) {
+                            break name;
+                        }
+                    },
+                };
                 if self.vars.is_contents(var) {
                     contents.push(name.as_str().into());
                 }
                 self.vars.generalize(var, &name);
-                named += 1;
             }
         }
 
@@ -174,18 +197,24 @@ impl Analyser {
             .filter(|node| self.pure_functions.contains_key(node))
             .map(|&node| self.vars.resolve(self.result.analysis.function_type(node)))
             .collect::<Vec<_>>();
-        // A cast whose check depends on the types of an instance, as `x as
-        // [Int]` does on what `x` is, is decided by each instance. One
-        // its value's type proves whatever the type parameters are, as `x as
-        // Any`, needs no check anywhere.
+        // A cast whose check depends on the types of an instance, as
+        // `cast::<[Int]>(x)` does on what `x` is and `cast::<T>(x)` on what
+        // `T` is, is decided by each instance. One its value's type proves
+        // whatever the type parameters are, as `cast::<Any>(x)`, or as
+        // `cast::<T>(x)` with `x: T`, needs no check anywhere.
         let casts = self.casts[first_cast..]
             .iter()
             .map(|cast| Cast {
                 found: self.vars.resolve(&cast.found),
+                target: self.vars.resolve(&cast.target),
                 ..cast.clone()
             })
             .filter(|cast| {
-                !cast.found.type_parameters().is_empty() && !cast.found.fits(&cast.target)
+                if cast.target.type_parameters().is_empty() {
+                    !cast.found.type_parameters().is_empty() && !cast.found.fits(&cast.target)
+                } else {
+                    cast.found != cast.target
+                }
             })
             .collect::<Vec<_>>();
         let mut parameters = Vec::new();
@@ -204,7 +233,7 @@ impl Analyser {
             .iter()
             .flat_map(|waiting| waiting.constraint.inputs())
             .chain(uses.iter().flat_map(|generic_use| &generic_use.key))
-            .chain(casts.iter().map(|cast| &cast.found))
+            .chain(casts.iter().flat_map(|cast| [&cast.found, &cast.target]))
             .chain(&parameters)
         {
             for name in typ.type_parameters() {
@@ -591,7 +620,7 @@ impl Analyser {
             let reachable = self.overloads().reachable_symbols(call.candidates());
             let mut takers = Vec::new();
             for candidate in reachable {
-                if self.could_accept(candidate, call.arguments()) {
+                if self.could_accept(candidate, call.type_arguments(), call.arguments()) {
                     takers.push(candidate);
                 }
             }

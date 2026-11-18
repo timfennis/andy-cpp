@@ -1173,18 +1173,14 @@ impl TypeVars {
         }
     }
 
-    /// `typ` with each type parameter, such as `T` in `<T>([T], T)`,
-    /// replaced by a new variable of its own. A call does this to the
-    /// signature of the overload it picked, so its arguments settle what `T`
-    /// stands for at that call.
-    pub(crate) fn instantiate(&mut self, typ: &StaticType) -> StaticType {
-        self.instantiate_with(typ, &mut Vec::new())
-    }
-
     /// The parameters of the function type `typ`, with new variables for
-    /// its type parameters, or `None` when `typ` isn't a function whose
-    /// parameters are known.
-    pub(crate) fn instantiate_parameters(&mut self, typ: &StaticType) -> Option<Vec<StaticType>> {
+    /// its type parameters but those `made` already has, or `None` when
+    /// `typ` isn't a function whose parameters are known.
+    pub(crate) fn instantiate_parameters(
+        &mut self,
+        typ: &StaticType,
+        made: &mut Vec<(Box<str>, StaticType)>,
+    ) -> Option<Vec<StaticType>> {
         let StaticType::Function {
             parameters: Some(_),
             ..
@@ -1195,7 +1191,7 @@ impl TypeVars {
         let StaticType::Function {
             parameters: Some(parameters),
             ..
-        } = self.instantiate(typ)
+        } = self.instantiate_with(typ, made)
         else {
             unreachable!("instantiating a function type gives a function type");
         };
@@ -1296,8 +1292,11 @@ impl TypeVars {
         true
     }
 
-    /// [`Self::instantiate`], with the variables already made for some type
-    /// parameters in `made`, which gets the ones made for the others. A
+    /// `typ` with each type parameter, such as `T` in `<T>([T], T)`,
+    /// replaced by what `made` has for it, or else a new variable of its
+    /// own, which `made` gets. A call does this to the signature of the
+    /// overload it picked, so its arguments settle what `T` stands for at
+    /// that call, and `f::<Int>` puts `Int` in `made` for it first. A
     /// generic function's constraints are instantiated with its signature.
     pub(crate) fn instantiate_with(
         &mut self,

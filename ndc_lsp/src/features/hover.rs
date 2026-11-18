@@ -1,5 +1,5 @@
 use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
-use ndc_analysis::{Analysis, Binding, ResolvedVar};
+use ndc_analysis::{Analysis, Binding, Callee, ResolvedVar};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::Expression;
@@ -45,7 +45,7 @@ pub fn hover(
 /// function whose instances pick for their own types, as `abs` in
 /// `fn f(x) { abs(x) } f(1); f(2.5);` does, that's every overload they pick:
 /// `abs(Int)` and `abs(Float)`.
-fn overloads_at(analysis: &Analysis, id: NodeId) -> Vec<ResolvedVar> {
+fn overloads_at(analysis: &Analysis, id: NodeId) -> Vec<Callee> {
     let binding = analysis.binding(id);
     let bindings: Vec<&Binding> = if *binding == Binding::None {
         analysis
@@ -77,14 +77,20 @@ fn overloads_at(analysis: &Analysis, id: NodeId) -> Vec<ResolvedVar> {
 /// signature and documentation of each overload it picked. `None` unless every
 /// one is a built-in, so a local that shadows one (e.g. `let len = 1; len`)
 /// shows the local's type.
-fn native_hover(overloads: &[ResolvedVar], functions: &[FunctionInfo]) -> Option<String> {
+fn native_hover(overloads: &[Callee], functions: &[FunctionInfo]) -> Option<String> {
     // A built-in's global slot is its position in the registry, which is the
     // order of `functions`.
     let markdown = overloads
         .iter()
         .map(|overload| match overload {
-            ResolvedVar::Global { slot } => functions.get(*slot).map(function_markdown),
-            _ => None,
+            Callee::Var(ResolvedVar::Global { slot }) => {
+                functions.get(*slot).map(function_markdown)
+            }
+            Callee::Intrinsic(intrinsic) => functions
+                .iter()
+                .find(|function| function.intrinsic == Some(*intrinsic))
+                .map(function_markdown),
+            Callee::Var(_) => None,
         })
         .collect::<Option<Vec<_>>>()?;
     (!markdown.is_empty()).then(|| markdown.join("\n\n---\n\n"))
@@ -154,8 +160,16 @@ fn type_hover(state: &DocumentState, id: NodeId) -> Option<String> {
     Some(format!("```ndc\n{typ}\n```"))
 }
 
-/// Render a function name plus its [`StaticType`] as `name(p1, p2) -> ret`.
+/// Render a function name plus its [`StaticType`] as `name(p1, p2) -> ret`,
+/// with its type parameters after the name, in the order type arguments
+/// bind them: `fold<T, A>(Iterable<T>, A, fn(A, T) -> A) -> A`.
 fn format_signature(name: &str, typ: &StaticType) -> String {
+    let type_parameters = typ.type_parameters();
+    let name = if type_parameters.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}<{}>", type_parameters.join(", "))
+    };
     match typ {
         StaticType::Function {
             parameters: Some(params),
@@ -255,6 +269,34 @@ mod tests {
                 "expected {signature} among the candidates, got: {value}"
             );
         }
+    }
+
+    #[test]
+    fn hover_on_a_generic_builtin_shows_the_order_of_its_type_parameters() {
+        let src = "let n = fold::<Int, Int>([1], 0, fn(a, x) => a + x);";
+        let (state, functions) = analyse(src);
+        let pos = state
+            .line_index
+            .position(&state.source, src.find("fold").unwrap());
+        let value = markdown(hover(&state, pos, &functions).expect("hover present"));
+        assert!(
+            value.contains("fold<T, A>(Iterable<T>, A, fn(A, T) -> A) -> A"),
+            "expected the type parameters in order, got: {value}"
+        );
+    }
+
+    #[test]
+    fn hover_on_a_type_argument_is_not_hover_on_the_function() {
+        let src = "let n = fold::<Int, Int>([1], 0, fn(a, x) => a + x);";
+        let (state, functions) = analyse(src);
+        let pos = state
+            .line_index
+            .position(&state.source, src.find("Int").unwrap());
+        let value = hover(&state, pos, &functions).map(markdown);
+        assert!(
+            value.as_deref().is_none_or(|value| !value.contains("fold")),
+            "expected no docs of fold on its type argument, got: {value:?}"
+        );
     }
 
     #[test]

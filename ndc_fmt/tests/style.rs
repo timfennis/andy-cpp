@@ -25,10 +25,26 @@ fn spaces_go_around_operators_and_after_commas() {
 }
 
 #[test]
-fn a_cast_keeps_its_operator() {
+fn a_cast_is_a_call_with_a_type_argument() {
     assert_formats(
-        "let a = x   as Int;let b = x  as?  [Int];",
-        "let a = x as Int;\nlet b = x as? [Int];\n",
+        "let a = cast :: < Int > ( x );let b = x.cast?::<[Int]>( );",
+        "let a = cast::<Int>(x);\nlet b = x.cast?::<[Int]>();\n",
+    );
+}
+
+#[test]
+fn type_arguments_and_type_parameters_keep_their_brackets() {
+    assert_formats(
+        "fn pair < A,B > (a: A, b: B) => (a, b);let p = pair :: < Int , [String] > (1, [\"a\"]);let f = id::<Int>;x.f::<Int>(1);",
+        "fn pair<A, B>(a: A, b: B) => (a, b);\nlet p = pair::<Int, [String]>(1, [\"a\"]);\nlet f = id::<Int>;\nx.f::<Int>(1);\n",
+    );
+}
+
+#[test]
+fn type_arguments_keep_their_comments_and_break_like_arguments() {
+    assert_formats(
+        "let w = pair::<Int, // the first\n  String>(1, \"a\");",
+        "let w = pair::<\n    Int, // the first\n    String,\n>(1, \"a\");\n",
     );
 }
 

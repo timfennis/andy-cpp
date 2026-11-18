@@ -4,11 +4,12 @@
 //! `split(String, String)`.
 
 use super::Analyser;
+use super::instances::Cast;
 use super::solver::{CallSite, Constraint, EarlyOverload};
 use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use ndc_analysis::{Binding, Candidate};
-use ndc_core::{NodeId, StaticType};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_resolver::{BindingKind, Candidates, SymbolId};
 
@@ -20,6 +21,9 @@ pub(super) struct FunctionValue {
     name: String,
     /// What the name can mean, as for a call of it.
     candidates: Candidates,
+    /// The type arguments written after the name: `Int` in `cast::<Int>`.
+    /// Empty when none are written.
+    type_arguments: Vec<StaticType>,
     /// The functions among them, grouped by scope, nearest first.
     groups: Vec<Vec<SymbolId>>,
     /// The type expected of the value, which its uses settle.
@@ -35,13 +39,18 @@ impl FunctionValue {
         &self.expected
     }
 
-    /// This value with `expected` as the type expected of it, as a copy of
-    /// a generic function's constraints gets the types of its call.
-    pub(super) fn with_expected(&self, expected: StaticType) -> Self {
+    /// This value with `replace` applied to its types, as a copy of a
+    /// generic function's constraints gets the types of its call.
+    pub(super) fn map_types(&self, replace: &mut impl FnMut(&StaticType) -> StaticType) -> Self {
         Self {
-            expected,
+            expected: replace(&self.expected),
+            type_arguments: self.type_arguments.iter().map(&mut *replace).collect(),
             ..self.clone()
         }
+    }
+
+    pub(super) fn type_arguments(&self) -> &[StaticType] {
+        &self.type_arguments
     }
 
     pub(super) fn id(&self) -> NodeId {
@@ -72,16 +81,41 @@ impl Analyser {
         &mut self,
         id: NodeId,
         name: &str,
+        type_arguments: Vec<StaticType>,
         span: Span,
     ) -> StaticType {
         let symbol = self.resolver.innermost_reference(id);
-        let groups = self.overloaded_function_groups(id, symbol);
+        let mut groups = self.overloaded_function_groups(id, symbol);
+        let reachable = groups.concat();
+        if let Some(function) = self.passes_other_type_arguments(&reachable, &type_arguments) {
+            self.emit(self.recursive_type_arguments(function, span));
+            self.picks
+                .bindings
+                .insert(id, Binding::Resolved(Candidate::Scalar(function)));
+            return StaticType::Error;
+        }
+        // `f::<Int>` can only be an overload that takes one type argument.
+        if !type_arguments.is_empty() {
+            for group in &mut groups {
+                group.retain(|&symbol| {
+                    self.explicit_type_parameters(symbol).len() == type_arguments.len()
+                });
+            }
+            groups.retain(|group| !group.is_empty());
+            let Some(&nearest) = groups.first().and_then(|group| group.first()) else {
+                return self.wrong_type_argument_count(id, name, type_arguments.len(), span);
+            };
+            if groups.iter().map(Vec::len).sum::<usize>() == 1 {
+                return self.commit_explicit_value(id, nearest, &type_arguments, span);
+            }
+        }
         if groups.iter().map(Vec::len).sum::<usize>() > 1 {
             let expected = self.vars.fresh();
             let value = FunctionValue {
                 id,
                 name: name.to_string(),
                 candidates: self.resolver.reference_candidates(id).clone(),
+                type_arguments,
                 groups,
                 expected: expected.clone(),
                 in_literal: false,
@@ -105,7 +139,101 @@ impl Analyser {
         }
         let typ = self.instantiate_function(symbol);
         self.flush_value_copies(id, &typ, span);
-        typ
+        self.intrinsic_value(id, symbol, &[], span).unwrap_or(typ)
+    }
+
+    /// What the value at `id` of `symbol` with `type_arguments` needs if
+    /// `symbol` is an intrinsic, whose bytecode the compiler makes into a
+    /// function there: `cast::<Int>` in `xs.map(cast::<Int>)` is a cast of
+    /// whatever it's passed, an `Any`, to `Int`. Returns the type of a
+    /// failed check if it can't be a value, as `cast` without the type it
+    /// casts to.
+    fn intrinsic_value(
+        &mut self,
+        id: NodeId,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+        span: Span,
+    ) -> Option<StaticType> {
+        match self.resolver.intrinsic(symbol)? {
+            Intrinsic::Cast | Intrinsic::TryCast => {
+                let [target] = type_arguments else {
+                    let name = self.resolver.symbol_name(symbol).to_string();
+                    self.emit(AnalysisError::cast_without_a_target(&name, span));
+                    return Some(StaticType::Error);
+                };
+                // Like the value's binding (see `record_function_value`),
+                // the check is the instance's being recorded, and a copy of
+                // a generic function's constraint records none: the
+                // instance for the call records it.
+                if self.copied_through.is_none() {
+                    self.casts.push(Cast {
+                        node: id,
+                        found: StaticType::Any,
+                        target: target.clone(),
+                        instance: self.recording,
+                        span,
+                    });
+                }
+                None
+            }
+        }
+    }
+
+    /// The value of the one function `symbol` that `f::<…>` at `id` can
+    /// mean, with `type_arguments` for its type parameters.
+    fn commit_explicit_value(
+        &mut self,
+        id: NodeId,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+        span: Span,
+    ) -> StaticType {
+        self.picks
+            .bindings
+            .insert(id, Binding::Resolved(Candidate::Scalar(symbol)));
+        if self.declaring == Some(symbol) && self.recording.is_none() {
+            self.recursive_calls.push(id);
+        }
+        // A type parameter its body settled, which was reported there, takes
+        // nothing else.
+        let Some(typ) = self.instantiate_explicit(symbol, type_arguments) else {
+            return StaticType::Error;
+        };
+        self.flush_value_copies(id, &typ, span);
+        self.intrinsic_value(id, symbol, type_arguments, span)
+            .unwrap_or(typ)
+    }
+
+    /// Reports `f::<…>` at `id` given `given` type arguments that no
+    /// function `f` can mean takes, saying how many they take.
+    pub(super) fn wrong_type_argument_count(
+        &mut self,
+        id: NodeId,
+        name: &str,
+        given: usize,
+        span: Span,
+    ) -> StaticType {
+        let candidates = self.resolver.reference_candidates(id).clone();
+        let counts = self.type_argument_counts(&candidates);
+        self.emit(AnalysisError::wrong_type_argument_count(
+            name, &counts, given, span,
+        ));
+        StaticType::Error
+    }
+
+    /// The numbers of type arguments the overloads `candidates` can reach
+    /// take, fewest first, each once: `[0]` for functions that take none.
+    pub(super) fn type_argument_counts(&self, candidates: &Candidates) -> Vec<usize> {
+        let mut counts = self
+            .overloads()
+            .reachable_symbols(candidates)
+            .into_iter()
+            .map(|symbol| self.explicit_type_parameters(symbol).len())
+            .collect::<Vec<_>>();
+        counts.sort_unstable();
+        counts.dedup();
+        counts
     }
 
     /// The functions the name at `id` can mean, grouped by scope, nearest
@@ -128,10 +256,17 @@ impl Analyser {
             .collect()
     }
 
-    /// `symbol`'s type with fresh variables for its type parameters.
-    fn instantiated_type(&mut self, symbol: SymbolId) -> StaticType {
+    /// `symbol`'s type with `type_arguments` for the type parameters it
+    /// takes them for and fresh variables for the others, or `None` if it
+    /// doesn't take that many or they don't fit.
+    fn instantiated_type(
+        &mut self,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+    ) -> Option<StaticType> {
         let typ = self.vars.resolve(self.types.get_type(symbol));
-        self.vars.instantiate(&typ)
+        let mut made = self.type_argument_bindings(symbol, type_arguments)?;
+        Some(self.vars.instantiate_with(&typ, &mut made))
     }
 
     /// Which overload `value` means where a value of type `expected` is
@@ -156,14 +291,24 @@ impl Analyser {
         } = expected
         {
             let picked = if parameters.iter().any(StaticType::has_vars) {
-                match self.early_overload(&value.candidates, parameters, CallKind::Regular) {
+                match self.early_overload(
+                    &value.candidates,
+                    &value.type_arguments,
+                    parameters,
+                    CallKind::Regular,
+                ) {
                     EarlyOverload::Only(only) => Some(only),
                     EarlyOverload::NoneFits => return Choice::None,
                     EarlyOverload::Undecided => return Choice::Undecided,
                 }
             } else {
                 match self
-                    .resolve_overloads(&value.candidates, parameters, CallKind::Regular)
+                    .resolve_overloads(
+                        &value.candidates,
+                        &value.type_arguments,
+                        parameters,
+                        CallKind::Regular,
+                    )
                     .binding
                 {
                     Binding::Resolved(Candidate::Scalar(symbol)) => Some(symbol),
@@ -173,7 +318,9 @@ impl Analyser {
                 }
             };
             return match picked {
-                Some(symbol) if self.fits_expected(symbol, expected) => Choice::One(symbol),
+                Some(symbol) if self.fits_expected(symbol, &value.type_arguments, expected) => {
+                    Choice::One(symbol)
+                }
                 _ => Choice::None,
             };
         }
@@ -213,7 +360,7 @@ impl Analyser {
                 group
                     .iter()
                     .copied()
-                    .filter(|&symbol| self.fits_expected(symbol, expected))
+                    .filter(|&symbol| self.fits_expected(symbol, &value.type_arguments, expected))
                     .collect::<Vec<_>>()
             })
             .filter(|group| !group.is_empty())
@@ -242,10 +389,16 @@ impl Analyser {
     }
 
     /// Whether a value of `symbol`'s type can be passed where `expected` is.
-    fn fits_expected(&mut self, symbol: SymbolId, expected: &StaticType) -> bool {
+    fn fits_expected(
+        &mut self,
+        symbol: SymbolId,
+        type_arguments: &[StaticType],
+        expected: &StaticType,
+    ) -> bool {
         let snapshot = self.vars.snapshot();
-        let typ = self.instantiated_type(symbol);
-        let fits = self.vars.bind_argument(expected, &typ);
+        let fits = self
+            .instantiated_type(symbol, type_arguments)
+            .is_some_and(|typ| self.vars.bind_argument(expected, &typ));
         self.vars.rollback(snapshot);
         fits
     }
@@ -326,9 +479,16 @@ impl Analyser {
     }
 
     fn commit_function_value(&mut self, value: &FunctionValue, symbol: SymbolId, early: bool) {
-        let typ = self.instantiate_function(symbol);
+        let typ = self
+            .instantiate_explicit(symbol, &value.type_arguments)
+            .expect("internal error: a function value commits to an overload that takes it");
         self.vars.bind_argument(&value.expected, &typ);
         self.flush_value_copies(value.id, &typ, value.span);
+        if let Some(failed) =
+            self.intrinsic_value(value.id, symbol, &value.type_arguments, value.span)
+        {
+            self.vars.try_unify(&value.expected, &failed);
+        }
         if early && cfg!(debug_assertions) {
             self.remember_early_function_value(value, symbol);
         }
@@ -352,8 +512,9 @@ impl Analyser {
     /// without reporting the same value again.
     fn give_up_on_function_value(&mut self, value: &FunctionValue) {
         let symbol = self.resolver.innermost_reference(value.id);
-        let typ = self.instantiated_type(symbol);
-        self.vars.try_unify(&value.expected, &typ);
+        if let Some(typ) = self.instantiated_type(symbol, &value.type_arguments) {
+            self.vars.try_unify(&value.expected, &typ);
+        }
         self.record_function_value(value, symbol);
     }
 }

@@ -1,0 +1,8 @@
+// Type arguments can nest, and can be function types.
+// expect-output: Some(%{"a": 1})
+// expect-output: 3
+fn make() -> Any { Some(%{"a": 1}) }
+print(cast::<Option<%{String: Int}>>(make()));
+fn three() -> Int { 3 }
+let f: Any = three;
+print(cast::<fn() -> Int>(f)());

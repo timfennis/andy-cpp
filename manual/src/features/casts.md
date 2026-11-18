@@ -10,24 +10,28 @@ value + 1
 // error[analysis]: No function called '+' found that matches the arguments 'Any, Int'
 ```
 
-The `as` operator says what type the value has. It checks that while the
+`cast::<T>(value)` says that the value is a `T`. It checks that while the
 program runs:
 
 ```ndc
 let value: Any = 5;
-print((value as Int) + 1);  // 6
+print(cast::<Int>(value) + 1);  // 6
 ```
+
+`cast` is a function: the type it casts to goes between `::<` and `>`, and
+the value in the parentheses. Like other functions, it can be called as a
+method, `value.cast::<Int>()`.
 
 A cast that turns out to be wrong stops the program with an error:
 
 ```ndc,fails
 let value: Any = "five";
-value as Int
+cast::<Int>(value)
 // error[vm]: cannot cast String to Int
 ```
 
-A cast only checks the value, it doesn't convert it, so `n as Float` is an
-error when `n` is an `Int`. To turn one type into another, use functions like
+A cast only checks the value, it doesn't convert it, so `cast::<Float>(n)` is
+an error when `n` is an `Int`. To turn one type into another, use functions like
 `float(n)`, `int(x)` and `string(x)`.
 
 ## Casting a list or a map
@@ -39,13 +43,13 @@ with `clone`:
 
 ```ndc
 let values: Any = [1, 2];
-let ints = values.clone() as [Int];
+let ints = cast::<[Int]>(values.clone());
 print(ints.sum());  // 3
 ```
 
 ```ndc,fails
 let values: Any = [1, 2];
-values as [Int]
+cast::<[Int]>(values)
 // error[vm]: cannot cast to [Int]: the list is also held by something else, which would still expect what it held before
 ```
 
@@ -57,27 +61,27 @@ of something more specific, like `sum`:
 
 ```ndc
 let values: [Any] = [1, 2, 3];
-print((values.clone() as [Int]).sum());  // 6
+print(cast::<[Int]>(values.clone()).sum());  // 6
 ```
 
-## Testing a value's type with `as?`
+## Testing a value's type with `cast?`
 
-`value as? T` is the cast that doesn't fail: it gives `Some(value)` when the
-value is a `T`, and `None` when it isn't.
+`cast?::<T>(value)` is the cast that doesn't fail: it gives `Some(value)` when
+the value is a `T`, and `None` when it isn't.
 
 ```ndc
 let value: Any = 5;
-print(value as? Int);     // Some(5)
-print(value as? String);  // None
+print(cast?::<Int>(value));     // Some(5)
+print(cast?::<String>(value));  // None
 ```
 
 That makes it the way to ask what a value is:
 
 ```ndc
 fn describe(value: Any) {
-    if (value as? Int).is_some() {
+    if cast?::<Int>(value).is_some() {
         "a number"
-    } else if (value as? String).is_some() {
+    } else if cast?::<String>(value).is_some() {
         "some text"
     } else {
         "something else"
@@ -88,8 +92,12 @@ print(describe("a"));  // some text
 print(describe([1]));  // something else
 ```
 
-## Precedence
+## Casting each element with `map`
 
-`as` and `as?` bind tighter than binary operators, so `a + b as Int` means
-`a + (b as Int)`. Method calls bind tighter than the cast, so a method call on
-the result of a cast needs parentheses: `(value as? Int).is_some()`.
+`cast::<T>` without the parentheses is a function that casts what it's given,
+so it can be passed to `map`:
+
+```ndc
+let values: [Any] = [1, 2, 3];
+print(values.map(cast::<Int>).sum());  // 6
+```

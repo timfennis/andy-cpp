@@ -1,5 +1,5 @@
 // A function annotated to return an Int returns a value of type `Any` cast
 // to one, which is checked as the program runs.
 // expect-output: 3
-fn first(xs: Any) -> Int { xs[0] as Int }
+fn first(xs: Any) -> Int { cast::<Int>(xs[0]) }
 print(first([3]));

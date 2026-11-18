@@ -1,0 +1,4 @@
+// A variable holding a function is called without type arguments.
+// expect-error: `f` takes no type arguments, but 1 was given
+let f = fn(x) => x;
+f::<Int>(1);

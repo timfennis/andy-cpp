@@ -1,6 +1,6 @@
 use super::*;
 use itertools::Itertools;
-use ndc_analysis::{Binding, Candidate};
+use ndc_analysis::{Binding, Callee, Candidate};
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 
@@ -268,7 +268,7 @@ fn calling_an_any_takes_a_cast() {
         vec!["The variable 'f' is Any, which can't be called"]
     );
     assert_eq!(
-        analyse_last_type("fn call(f: Any) { (f as fn(String) -> Int)(\"x\") } call"),
+        analyse_last_type("fn call(f: Any) { cast::<fn(String) -> Int>(f)(\"x\") } call"),
         function(vec![StaticType::Any], StaticType::Int)
     );
 }
@@ -460,7 +460,10 @@ fn an_any_value_takes_a_cast_to_be_stored_in_a_typed_variable() {
         vec!["mismatched types: found Any but expected Int"]
     );
     assert_eq!(
-        analyse_last_type_with_globals("let x = 3; x = anything() as Int; x", any_value.clone()),
+        analyse_last_type_with_globals(
+            "let x = 3; x = cast::<Int>(anything()); x",
+            any_value.clone()
+        ),
         StaticType::Int
     );
     // Anything goes into an `Any` without one.
@@ -555,7 +558,7 @@ fn an_any_passed_for_a_list_takes_a_cast_that_says_its_elements() {
         vec!["No function called 'reversed' found that matches the arguments 'Any'"]
     );
     assert_eq!(
-        analyse_last_type_with_globals("fn f(xs: Any) { reversed(xs as [Int]) } f", globals),
+        analyse_last_type_with_globals("fn f(xs: Any) { reversed(cast::<[Int]>(xs)) } f", globals),
         function(
             vec![StaticType::Any],
             StaticType::List(Box::new(StaticType::Int))
@@ -944,9 +947,9 @@ fn an_op_assignment_waits_for_its_operands_like_any_call() {
             .augmented_assignments
             .values()
             .collect::<Vec<_>>(),
-        vec![&Binding::Resolved(Candidate::Scalar(
+        vec![&Binding::Resolved(Candidate::Scalar(Callee::Var(
             ndc_analysis::ResolvedVar::Global { slot: 2 }
-        ))]
+        )))]
     );
 }
 
@@ -1049,7 +1052,7 @@ fn an_error_shows_what_isnt_known_yet_as_unknown() {
 
 #[test]
 fn a_cast_settles_what_isnt_known_about_its_value() {
-    let (_, result) = analyse_with_globals("(fn(x) => x) as fn(Int) -> Int", vec![]);
+    let (_, result) = analyse_with_globals("cast::<fn(Int) -> Int>(fn(x) => x)", vec![]);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     // `x` is an Int, so the cast holds without a check when the program runs.
     assert_eq!(
@@ -1131,7 +1134,8 @@ fn an_operator_takes_no_any_operand_that_no_overload_takes() {
         errors("let g = fn(a: Any) => a ++ [];", globals.clone()),
         vec!["No function called '++' found that matches the arguments 'Any, [Unknown]'"]
     );
-    let (_, result) = analyse_with_globals("let g = fn(a: Any) => (a as [Int]) ++ [];", globals);
+    let (_, result) =
+        analyse_with_globals("let g = fn(a: Any) => cast::<[Int]>(a) ++ [];", globals);
     assert!(result.errors.is_empty(), "{:?}", result.errors);
 }
 
@@ -1738,7 +1742,8 @@ fn an_instance_calls_the_instances_its_types_need() {
         twice
             .bindings
             .values()
-            .all(|binding| *binding == Binding::Resolved(Candidate::Scalar(inc.variable))),
+            .all(|binding| *binding
+                == Binding::Resolved(Candidate::Scalar(Callee::Var(inc.variable)))),
         "{twice:?}"
     );
 }
@@ -1770,7 +1775,9 @@ fn an_instance_calls_itself_where_its_body_recurses() {
     let calls_itself = instance
         .bindings
         .values()
-        .filter(|binding| **binding == Binding::Resolved(Candidate::Scalar(instance.variable)))
+        .filter(|binding| {
+            **binding == Binding::Resolved(Candidate::Scalar(Callee::Var(instance.variable)))
+        })
         .count();
     assert_eq!(calls_itself, 2, "{instance:?}");
 }

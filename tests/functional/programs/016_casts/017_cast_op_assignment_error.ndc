@@ -3,5 +3,5 @@
 // expect-error: cannot cast [Float] to [Int]
 fn opaque(x) -> Any => x;
 let values = [1];
-values ++= opaque([0.5]) as [Int];
+values ++= cast::<[Int]>(opaque([0.5]));
 print(values)

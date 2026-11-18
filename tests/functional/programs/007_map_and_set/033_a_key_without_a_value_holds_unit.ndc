@@ -5,10 +5,10 @@ fn g(x: Any) => "any";
 // The values are `()` and an Int, so they are `Any`s, which go to `g(Any)`.
 // A type test tells what each one holds.
 fn what(x: Any) {
-    if (x as? Int).is_some() {
-        g(x as Int)
-    } else if (x as? ()).is_some() {
-        g(x as ())
+    if cast?::<Int>(x).is_some() {
+        g(cast::<Int>(x))
+    } else if cast?::<()>(x).is_some() {
+        g(cast::<()>(x))
     } else {
         g(x)
     }

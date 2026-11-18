@@ -122,7 +122,7 @@
         {
           "comment": "function definition",
           "name": "meta.function.definition.andy-cpp",
-          "begin": "\\b((pure)\\s)?(fn)\\s+([A-Za-z_][A-Za-z_0-9]*\\??)",
+          "begin": "\\b((pure)\\s)?(fn)\\s+([A-Za-z_][A-Za-z_0-9]*\\??)(?:\\s*(<)([^>]*)(>))?",
           "patterns": [
             {
               "include": "#expression"
@@ -137,6 +137,15 @@
             },
             "4": {
               "name": "entity.name.function.andy-cpp"
+            },
+            "5": {
+              "name": "punctuation.definition.typeparameters.begin.andy-cpp"
+            },
+            "6": {
+              "name": "entity.name.type.parameter.andy-cpp"
+            },
+            "7": {
+              "name": "punctuation.definition.typeparameters.end.andy-cpp"
             }
           },
           "end": "(\\{)|(=>)",
@@ -411,9 +420,31 @@
     "call": {
       "patterns": [
         {
+          "comment": "Function with type arguments, called or used as a value: `f::<Int>(x)`, `f::<Int>`",
+          "name": "meta.function.call.andy-cpp",
+          "begin": "(?:(\\.))?([A-Za-z_][A-Za-z0-9_\\?]*)\\s*(::)\\s*(?=<)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.access.dot.andy-cpp"
+            },
+            "2": {
+              "name": "entity.name.function.andy-cpp"
+            },
+            "3": {
+              "name": "punctuation.separator.namespace.andy-cpp"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#type-arguments"
+            }
+          ],
+          "end": "(?<=>)"
+        },
+        {
           "comment": "Field accessor style call",
           "name": "meta.function.call.andy-cpp",
-          "match": "(?<!\\.)(\\.)([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "(?<!\\.)(\\.)([A-Za-z_][A-Za-z0-9_]*)(?!\\s*::)",
           "captures": {
             "1": {
               "name": "keyword.operator.access.dot.andy-cpp"
@@ -479,6 +510,11 @@
     "punctuation": {
       "patterns": [
         {
+          "comment": "double colon, which starts type arguments",
+          "name": "punctuation.separator.namespace.andy-cpp",
+          "match": "::"
+        },
+        {
           "comment": "comma",
           "name": "punctuation.comma.andy-cpp",
           "match": ","
@@ -487,6 +523,47 @@
           "comment": "colon (type annotation / key separator)",
           "name": "punctuation.separator.colon.andy-cpp",
           "match": ":"
+        }
+      ]
+    },
+    "type-arguments": {
+      "comment": "`<Int, [String]>` after `::`, which may nest: `<Option<Int>>`",
+      "begin": "<",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.typeparameters.begin.andy-cpp"
+        }
+      },
+      "end": ">",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.typeparameters.end.andy-cpp"
+        }
+      },
+      "patterns": [
+        {
+          "comment": "the arrow of a function type, whose `>` doesn't close the list",
+          "name": "keyword.operator.arrow.andy-cpp",
+          "match": "->"
+        },
+        {
+          "include": "#type-arguments"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "comment": "fn in a function type",
+          "name": "keyword.other.fn.andy-cpp",
+          "match": "\\bfn\\b"
+        },
+        {
+          "comment": "a type name",
+          "name": "entity.name.type.andy-cpp",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+        },
+        {
+          "include": "#punctuation"
         }
       ]
     }

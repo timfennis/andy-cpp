@@ -20,6 +20,27 @@ fn add(a, b) { a + b }
         right: (identifier)))))
 
 ==================
+function definition with type parameters
+==================
+
+fn id<T>(x: T) -> T { x }
+
+---
+
+(source_file
+  (function_definition
+    name: (identifier)
+    type_parameters: (type_parameters
+      (type_identifier))
+    parameters: (parameters
+      (parameter
+        name: (identifier)
+        type: (type_identifier)))
+    return_type: (type_identifier)
+    body: (block
+      (identifier))))
+
+==================
 typed let with arithmetic precedence
 ==================
 
@@ -108,27 +129,31 @@ let m = %{:0, "a": 1};
         value: (integer)))))
 
 ==================
-cast expression
+cast call
 ==================
 
-let k = xs as Option<Int>;
+let k = cast::<Option<Int>>(xs);
 
 ---
 
 (source_file
   (variable_declaration
     name: (identifier)
-    value: (cast_expression
-      value: (identifier)
-      type: (generic_type
-        name: (type_identifier)
-        (type_identifier)))))
+    value: (call
+      function: (generic_name
+        name: (identifier)
+        type_arguments: (type_arguments
+          (generic_type
+            name: (type_identifier)
+            (type_identifier))))
+      arguments: (arguments
+        (identifier)))))
 
 ==================
 list, tuple, map and function types
 ==================
 
-let grid: [[Int]] = xs as [[Int]];
+let grid: [[Int]] = cast::<[[Int]]>(xs);
 let pair: (Int, [String]) = p;
 let m: %{String: [Int]} = %{};
 let s: %{Int} = %{};
@@ -142,11 +167,15 @@ let f: fn(Int) -> fn() = g;
     type: (list_type
       (list_type
         (type_identifier)))
-    value: (cast_expression
-      value: (identifier)
-      type: (list_type
-        (list_type
-          (type_identifier)))))
+    value: (call
+      function: (generic_name
+        name: (identifier)
+        type_arguments: (type_arguments
+          (list_type
+            (list_type
+              (type_identifier)))))
+      arguments: (arguments
+        (identifier))))
   (variable_declaration
     name: (identifier)
     type: (tuple_type
@@ -174,85 +203,64 @@ let f: fn(Int) -> fn() = g;
     value: (identifier)))
 
 ==================
-cast binds tighter than binary operators
-==================
-
-a + b as Int;
-
----
-
-(source_file
-  (binary_expression
-    left: (identifier)
-    right: (cast_expression
-      value: (identifier)
-      type: (type_identifier))))
-
-==================
 less-than after a cast is a comparison
 ==================
 
-1 as Int < 2;
+cast::<Int>(1) < 2;
 
 ---
 
 (source_file
   (binary_expression
-    left: (cast_expression
-      value: (integer)
-      type: (type_identifier))
+    left: (call
+      function: (generic_name
+        name: (identifier)
+        type_arguments: (type_arguments
+          (type_identifier)))
+      arguments: (arguments
+        (integer)))
     right: (integer)))
 
 ==================
-generic arguments still win over less-than
+nested type arguments of a cast
 ==================
 
-[[1]] as Option<Option<Int>>;
+cast::<Option<Option<Int>>>([[1]]);
 
 ---
 
 (source_file
-  (cast_expression
-    value: (list
+  (call
+    function: (generic_name
+      name: (identifier)
+      type_arguments: (type_arguments
+        (generic_type
+          name: (type_identifier)
+          (generic_type
+            name: (type_identifier)
+            (type_identifier)))))
+    arguments: (arguments
       (list
-        (integer)))
-    type: (generic_type
-      name: (type_identifier)
-      (generic_type
-        name: (type_identifier)
-        (type_identifier)))))
-
-==================
-grouped comparison after a cast
-==================
-
-value as Int < (y > z);
-
----
-
-(source_file
-  (binary_expression
-    left: (cast_expression
-      value: (identifier)
-      type: (type_identifier))
-    right: (parenthesized_expression
-      (binary_expression
-        left: (identifier)
-        right: (identifier)))))
+        (list
+          (integer))))))
 
 ==================
 shift right after a cast comparison
 ==================
 
-3 as Int < 4 >> 1;
+cast::<Int>(3) < 4 >> 1;
 
 ---
 
 (source_file
   (binary_expression
-    left: (cast_expression
-      value: (integer)
-      type: (type_identifier))
+    left: (call
+      function: (generic_name
+        name: (identifier)
+        type_arguments: (type_arguments
+          (type_identifier)))
+      arguments: (arguments
+        (integer)))
     right: (binary_expression
       left: (integer)
       right: (integer))))

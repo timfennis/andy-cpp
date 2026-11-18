@@ -3,5 +3,5 @@
 // one fails.
 // expect-error: the function doesn't take the arguments (fn(Int) -> Int)
 fn outer(cb: fn(Any) -> Int) => cb("s");
-let g = outer as fn(fn(Int) -> Int) -> Int;
+let g = cast::<fn(fn(Int) -> Int) -> Int>(outer);
 print(g(fn(x: Int) => x + 1));

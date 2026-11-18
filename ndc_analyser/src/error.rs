@@ -99,6 +99,118 @@ impl AnalysisError {
         )
     }
 
+    /// `name::<…>` given `given` type arguments, where the functions `name`
+    /// can mean take `counts` of them: `[0]` when none takes any.
+    pub(crate) fn wrong_type_argument_count(
+        name: &str,
+        counts: &[usize],
+        given: usize,
+        span: Span,
+    ) -> Self {
+        let plural = |count: usize| if count == 1 { "" } else { "s" };
+        let takes = match counts {
+            [] | [0] => "takes no type arguments".to_string(),
+            [count] => format!("takes {count} type argument{}", plural(*count)),
+            [fewer @ .., most] => format!(
+                "takes {} or {most} type arguments",
+                fewer.iter().map(ToString::to_string).join(", ")
+            ),
+        };
+        let text = format!(
+            "`{name}` {takes}, but {given} {} given",
+            if given == 1 { "was" } else { "were" }
+        );
+        let error = Self::new(text, span);
+        if counts.iter().all(|&count| count == 0) {
+            error.with_help(format!("call it without them: `{name}(…)`"))
+        } else {
+            error
+        }
+    }
+
+    /// A function declared in a function or a block, which has one type,
+    /// declaring type parameters, as `fn g<T>` in `fn f() { fn g<T>(x: T) {} }`.
+    pub(crate) fn type_parameters_of_a_local_function(name: &str, span: Span) -> Self {
+        Self::new(
+            format!("only a function declared at the top level can have type parameters, and `{name}` isn't"),
+            span,
+        )
+        .with_help(format!(
+            "declare `{name}` outside of any function or block, or leave out its type parameters"
+        ))
+    }
+
+    /// The type parameter `name` of `function`, which its body settled as
+    /// `typ`, or left unused, so it's no type parameter.
+    pub(crate) fn type_parameter_is_not_generic(
+        function: &str,
+        name: &str,
+        typ: &StaticType,
+        span: Span,
+    ) -> Self {
+        if *typ == StaticType::Unknown {
+            return Self::new(
+                format!("the type parameter `{name}` of `{function}` is never used"),
+                span,
+            )
+            .with_help(format!(
+                "use `{name}` in the type of a parameter or of what `{function}` returns, or leave it out"
+            ));
+        }
+        Self::new(
+            format!("the type parameter `{name}` of `{function}` is always `{typ}`"),
+            span,
+        )
+        .with_help(format!(
+            "a type parameter stands for any type the caller picks; write `{typ}` instead of `{name}` if that's the only one it can be"
+        ))
+    }
+
+    /// Two type parameters of `function`, `first` and `second`, that its
+    /// body made the same.
+    pub(crate) fn type_parameters_are_the_same(
+        function: &str,
+        first: &str,
+        second: &str,
+        span: Span,
+    ) -> Self {
+        Self::new(
+            format!("the type parameters `{first}` and `{second}` of `{function}` are always the same type"),
+            span,
+        )
+        .with_help(format!("use `{first}` for both"))
+    }
+
+    /// `cast(x)` or `cast?(x)` without the type it casts to.
+    pub(crate) fn cast_without_a_target(name: &str, span: Span) -> Self {
+        Self::new(
+            format!("`{name}` needs the type it casts to as a type argument"),
+            span,
+        )
+        .with_help(format!("write `{name}::<T>(x)`, as in `{name}::<Int>(x)`"))
+    }
+
+    /// A call of `cast` or `cast?` with other than one type argument and one
+    /// value, as `cast::<Int>(1, 2)`.
+    pub(crate) fn cast_takes_a_type_and_a_value(name: &str, span: Span) -> Self {
+        Self::new(
+            format!("`{name}` takes one type argument and one value"),
+            span,
+        )
+        .with_help(format!("write `{name}::<T>(x)`, as in `{name}::<Int>(x)`"))
+    }
+
+    /// `name::<…>` in `name`'s own body with type arguments other than its
+    /// own type parameters, as `f::<Int>` in `fn f<T>(x: T)`, which would
+    /// need a version of `f` for them while `f` is still being worked out.
+    pub(crate) fn recursive_type_arguments(name: &str, parameters: &[String], span: Span) -> Self {
+        Self::new(
+            format!("a use of `{name}` in its own body passes its own type parameters on"),
+            span,
+        )
+        .with_help(format!("write `{name}::<{}>`", parameters.join(", ")))
+    }
+
     /// A pattern of `names` names for a tuple of `values` values, the value
     /// or the annotation of `let (a, b): (Int, Int, Int) = …`.
     pub(crate) fn tuple_arity_mismatch(names: usize, values: usize, span: Span) -> Self {
@@ -187,7 +299,8 @@ impl AnalysisError {
     /// A generic function's name used as a value where nothing says which
     /// types it takes, as `inc` in `let f: Any = inc` with
     /// `fn inc(x) => x + 1`, whose type is `fn(A) -> B`: "say which types it
-    /// takes, as in `inc as fn(A) -> B` with types in place of `A` and `B`",
+    /// takes, as in `cast::<fn(A) -> B>(inc)` with types in place of `A` and
+    /// `B`",
     /// which lists the type parameters of `typ` alphabetically.
     pub(crate) fn generic_function_value(function: &str, typ: &StaticType, span: Span) -> Self {
         let mut names = typ.type_parameters();
@@ -208,7 +321,7 @@ impl AnalysisError {
             span,
         )
         .with_help(format!(
-            "A generic function's value is its version for one set of types, which must be known. Say which types it takes, as in `{function} as {typ}`{in_place}"
+            "A generic function's value is its version for one set of types, which must be known. Say which types it takes, as in `cast::<{typ}>({function})`{in_place}"
         ))
     }
 
@@ -298,6 +411,19 @@ impl AnalysisError {
         )
     }
 
+    /// A cast to a type parameter that nothing settled where the function
+    /// is called, as `T` in `print(f(x))` with `fn f<T>(x) => cast::<T>(x)`.
+    pub(crate) fn cast_target_not_settled(span: Span) -> Self {
+        Self::new(
+            "nothing says what type this cast checks for".to_string(),
+            span,
+        )
+        .with_help(
+            "give the call of the function it's in its type arguments, as in `f::<Int>(x)`, or say what type its result is"
+                .to_string(),
+        )
+    }
+
     pub(crate) fn impossible_cast(found: &StaticType, target: &StaticType, span: Span) -> Self {
         Self::new(format!("invalid cast: {found} can never be {target}"), span)
     }
@@ -369,7 +495,7 @@ impl AnalysisError {
     pub(crate) fn unable_to_unpack_type(typ: &StaticType, span: Span) -> Self {
         Self {
             help_text: (*typ == StaticType::Any).then(|| {
-                "An `Any` could hold anything. Cast it to say what it holds, as in `value as (Int, Int)`"
+                "An `Any` could hold anything. Cast it to say what it holds, as in `cast::<(Int, Int)>(value)`"
                     .to_string()
             }),
             ..Self::new(format!("Invalid unpacking of {typ}"), span)
@@ -476,7 +602,7 @@ impl AnalysisError {
     ) -> Self {
         Self::function_not_found(ident, types, span).with_help(concat!(
             "An overload would accept a narrower argument type. ",
-            "Cast to say what the value holds, as in `value.clone() as [Int]`: ",
+            "Cast to say what the value holds, as in `cast::<[Int]>(value.clone())`: ",
             "a container is cast as a copy while something else still holds it.",
         ))
     }
@@ -560,6 +686,6 @@ fn annotate_the_unknown() -> String {
 /// is expected.
 fn cast_out_of_any(example: &str) -> String {
     format!(
-        "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `value as {example}`, or `value as? {example}` to get an Option"
+        "A value of type `Any` only goes where `Any` is taken. Cast it to say what it holds, as in `cast::<{example}>(value)`, or `cast?::<{example}>(value)` to get an Option"
     )
 }

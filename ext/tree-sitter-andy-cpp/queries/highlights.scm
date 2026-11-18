@@ -23,6 +23,8 @@
 ; Functions
 (function_definition name: (identifier) @function)
 (call function: (identifier) @function.call)
+(generic_name name: (identifier) @function)
+(call function: (generic_name name: (identifier) @function.call))
 (member_expression method: (identifier) @function.method)
 
 ; Parameters
@@ -54,7 +56,6 @@
 
 [
   "in"
-  "as"
 ] @keyword.operator
 
 [
@@ -82,4 +83,4 @@
 ; Punctuation
 [ "(" ")" "[" "]" "{" "}" "%{" ] @punctuation.bracket
 [ "," ";" ] @punctuation.delimiter
-[ ":" "." ] @punctuation.delimiter
+[ ":" "::" "." ] @punctuation.delimiter

@@ -2,9 +2,9 @@ use crate::Value;
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
 use ahash::AHashMap;
-use ndc_analysis::{Analysis, Binding, Candidate, Instance, ResolvedVar};
-use ndc_core::NodeId;
+use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
+use ndc_core::{Intrinsic, NodeId};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -337,43 +337,8 @@ impl Compiler {
                 let idx = self.ir.add_constant(value);
                 self.ir.write(OpCode::Constant(idx), span);
             }
-            Expression::Identifier { .. } => self.compile_binding(&self.binding(id), span)?,
-            Expression::Cast {
-                value, optional, ..
-            } => {
-                self.compile_expr(*value)?;
-                let check = match self
-                    .instance_pick(|instance| instance.cast_checks.get(&id))
-                    .or_else(|| self.analysis.cast_checks.get(&id))
-                {
-                    None => return Err(CompileError::unresolved_cast(span)),
-                    Some(check) => check.clone().map(Rc::new),
-                };
-                // A container the cast gives a new type mustn't be reachable
-                // by another name that keeps the old one, as `xs` is after
-                // `let a: Any = xs; let ys = a as [Any]`: a write through
-                // `ys` would break what `xs` says it holds.
-                if let Some(target) = &check
-                    && target.holds_a_mutable_container()
-                {
-                    self.ir
-                        .write(OpCode::CheckUnshared(Rc::clone(target)), span);
-                }
-                match (check, optional) {
-                    (None, false) => {}
-                    (Some(target), false) => {
-                        self.ir.write(OpCode::CheckType(target), span);
-                    }
-                    // A value proven to be the type is always `Some`, as
-                    // every value is an `Any`.
-                    (None, true) => {
-                        self.ir
-                            .write(OpCode::TryCast(Rc::new(StaticType::Any)), span);
-                    }
-                    (Some(target), true) => {
-                        self.ir.write(OpCode::TryCast(target), span);
-                    }
-                }
+            Expression::Identifier { .. } => {
+                self.compile_named_binding(&self.binding(id), id, span)?;
             }
             Expression::Statement(stm) => {
                 self.compile_expr(*stm)?;
@@ -549,19 +514,32 @@ impl Compiler {
                 arguments,
             } => {
                 let function_span = function.span;
-                let opcode = match &function.expression {
-                    Expression::Identifier { .. } => {
-                        Self::call_opcode_for(&self.binding(function.id), arguments.len())
-                    }
-                    _ => OpCode::Call(arguments.len()),
+                let binding = match &function.expression {
+                    Expression::Identifier { .. } => Some(self.binding(function.id)),
+                    _ => None,
                 };
-                self.compile_expr(*function)?;
+                // An intrinsic called by name is written in place of the
+                // call, after its arguments.
+                if let Some(Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(intrinsic)))) =
+                    binding
+                {
+                    for argument in arguments {
+                        self.compile_expr(argument)?;
+                    }
+                    self.emit_intrinsic(intrinsic, function.id, function_span)?;
+                } else {
+                    let opcode = match &binding {
+                        Some(binding) => Self::call_opcode_for(binding, arguments.len()),
+                        None => OpCode::Call(arguments.len()),
+                    };
+                    self.compile_expr(*function)?;
 
-                for argument in arguments {
-                    self.compile_expr(argument)?;
+                    for argument in arguments {
+                        self.compile_expr(argument)?;
+                    }
+
+                    self.ir.write(opcode, function_span);
                 }
-
-                self.ir.write(opcode, function_span);
             }
             Expression::MemberAccess {
                 receiver,
@@ -782,16 +760,145 @@ impl Compiler {
     /// Emit code that puts the resolved callee on top of the stack: the
     /// function, or for an operator whose tuple positions take different
     /// overloads, the tuple of them, which `CallVec` applies position by
-    /// position.
+    /// position. For a binding no name refers to, as a getter's, which can't
+    /// be an intrinsic.
     fn compile_binding(&mut self, resolved: &Binding, span: Span) -> Result<(), CompileError> {
+        self.emit_binding(resolved, None, span)
+    }
+
+    /// [`Self::compile_binding`] for the identifier at `site`, which may name
+    /// an intrinsic.
+    fn compile_named_binding(
+        &mut self,
+        resolved: &Binding,
+        site: NodeId,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        self.emit_binding(resolved, Some(site), span)
+    }
+
+    fn emit_binding(
+        &mut self,
+        resolved: &Binding,
+        site: Option<NodeId>,
+        span: Span,
+    ) -> Result<(), CompileError> {
         match resolved {
             Binding::None => return Err(CompileError::unresolved_binding(span)),
-            Binding::Resolved(candidate) => self.emit_get_var(candidate.var(), span),
+            Binding::Resolved(candidate) => self.emit_callee(candidate.var(), site, span)?,
             Binding::PerPosition(overloads) => {
                 for &overload in overloads {
-                    self.emit_get_var(overload, span);
+                    self.emit_callee(overload, site, span)?;
                 }
                 self.ir.write(OpCode::MakeTuple(overloads.len()), span);
+            }
+        }
+        Ok(())
+    }
+
+    /// Emit code that puts `callee`, named at `site`, on top of the stack as
+    /// a function value. An intrinsic is stored nowhere, so it becomes a
+    /// small function around its bytecode: `cast::<Int>` in
+    /// `xs.map(cast::<Int>)` is `fn(x) => cast::<Int>(x)`.
+    fn emit_callee(
+        &mut self,
+        callee: Callee,
+        site: Option<NodeId>,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        match (callee, site) {
+            (Callee::Var(var), _) => self.emit_get_var(var, span),
+            (Callee::Intrinsic(intrinsic), Some(site)) => {
+                let function = self.intrinsic_function(intrinsic, site, span)?;
+                let idx = self
+                    .ir
+                    .add_constant(Value::function(Function::Compiled(Rc::new(function))));
+                self.ir.write(OpCode::Constant(idx), span);
+            }
+            (Callee::Intrinsic(_), None) => return Err(CompileError::unnamed_intrinsic(span)),
+        }
+        Ok(())
+    }
+
+    /// The function value of `intrinsic` named at `site`: its arguments, the
+    /// intrinsic's bytecode, and a return. It's compiled in the instance being
+    /// compiled, so what it reads of the instance's picks is that instance's.
+    fn intrinsic_function(
+        &self,
+        intrinsic: Intrinsic,
+        site: NodeId,
+        span: Span,
+    ) -> Result<CompiledFunction, CompileError> {
+        let arity = intrinsic.arity();
+        let static_type = self
+            .analysis
+            .expr_types
+            .get(&site)
+            .cloned()
+            .unwrap_or_else(|| StaticType::Function {
+                parameters: Some(vec![StaticType::Any; arity]),
+                return_type: Box::new(StaticType::Any),
+            });
+        let mut fn_compiler = self.nested(arity, self.instance);
+        for slot in 0..arity {
+            fn_compiler.ir.write(OpCode::GetLocal(slot), span);
+        }
+        fn_compiler.emit_intrinsic(intrinsic, site, span)?;
+        let (compiled, used_instance) = fn_compiler.finish_function(None, static_type);
+        if used_instance {
+            self.used_instance.set(true);
+        }
+        Ok(compiled)
+    }
+
+    /// Emit `intrinsic` used at `site`, its arguments on top of the stack,
+    /// leaving its result in their place.
+    fn emit_intrinsic(
+        &mut self,
+        intrinsic: Intrinsic,
+        site: NodeId,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        match intrinsic {
+            Intrinsic::Cast => self.emit_cast(site, false, span),
+            Intrinsic::TryCast => self.emit_cast(site, true, span),
+        }
+    }
+
+    /// Emit the cast at `site` of the value on top of the stack: a check that
+    /// it has the type the analyser picked for the instance being compiled,
+    /// or for `optional`, `Some` of the value if it has it and `None` if not.
+    fn emit_cast(&mut self, site: NodeId, optional: bool, span: Span) -> Result<(), CompileError> {
+        let check = match self
+            .instance_pick(|instance| instance.cast_checks.get(&site))
+            .or_else(|| self.analysis.cast_checks.get(&site))
+        {
+            None => return Err(CompileError::unresolved_cast(span)),
+            Some(check) => check.clone().map(Rc::new),
+        };
+        // A container the cast gives a new type mustn't be reachable by
+        // another name that keeps the old one, as `xs` is after
+        // `let a: Any = xs; let ys = cast::<[Any]>(a)`: a write through `ys` would
+        // break what `xs` says it holds.
+        if let Some(target) = &check
+            && target.holds_a_mutable_container()
+        {
+            self.ir
+                .write(OpCode::CheckUnshared(Rc::clone(target)), span);
+        }
+        match (check, optional) {
+            (None, false) => {}
+            (Some(target), false) => {
+                self.ir.write(OpCode::CheckType(target), span);
+            }
+            // A value proven to be the type is always `Some`, as every value
+            // is an `Any`.
+            (None, true) => {
+                self.ir
+                    .write(OpCode::TryCast(Rc::new(StaticType::Any)), span);
+            }
+            (Some(target), true) => {
+                self.ir.write(OpCode::TryCast(target), span);
             }
         }
         Ok(())
@@ -1131,40 +1238,57 @@ impl Compiler {
                 .unwrap_or(shared),
         }
         .clone();
-        let mut fn_compiler = Self {
+        let mut fn_compiler = self.nested(self.analysis.frame_size(id), instance.or(self.instance));
+        fn_compiler.compile_expr(body)?;
+        Ok(fn_compiler.finish_function(name, static_type))
+    }
+
+    /// A compiler for the body of a function declared in the code this one
+    /// compiles, whose own variables take `source_locals` slots, compiled
+    /// with the picks of `instance`.
+    fn nested(&self, source_locals: usize, instance: Option<InstanceAt>) -> Self {
+        Self {
             ir: Default::default(),
-            source_locals: self.analysis.frame_size(id),
+            source_locals,
             temp_count: 0,
             temp_uses: Vec::new(),
             loop_stack: vec![],
             allow_return: true,
             optimize: self.optimize,
             analysis: Rc::clone(&self.analysis),
-            instance: instance.or(self.instance),
+            instance,
             used_instance: Cell::new(false),
             prototypes: Rc::clone(&self.prototypes),
             functions: None,
-        };
-        fn_compiler.compile_expr(body)?;
-        fn_compiler.ir.write(OpCode::Return, Span::synthetic());
-        fn_compiler.layout_temporaries();
+        }
+    }
 
-        if fn_compiler.optimize {
-            fn_compiler.ir.peephole();
+    /// Ends a function's body with `Return`, and returns the function and
+    /// whether its body used a pick of the instance it's compiled in.
+    fn finish_function(
+        mut self,
+        name: Option<String>,
+        static_type: StaticType,
+    ) -> (CompiledFunction, bool) {
+        self.ir.write(OpCode::Return, Span::synthetic());
+        self.layout_temporaries();
+
+        if self.optimize {
+            self.ir.peephole();
         }
 
-        let num_locals = fn_compiler.num_locals();
-        let used_instance = fn_compiler.used_instance.get();
-        Ok((
+        let num_locals = self.num_locals();
+        let used_instance = self.used_instance.get();
+        (
             CompiledFunction {
                 name,
                 static_type,
-                body: fn_compiler.ir.into_chunk(),
+                body: self.ir.into_chunk(),
                 num_locals,
                 num_globals: 0,
             },
             used_instance,
-        ))
+        )
     }
 
     fn compile_for(
@@ -1509,6 +1633,13 @@ impl CompileError {
             text:
                 "encountered unresolved cast during compilation, this is probably an internal error"
                     .to_string(),
+            span,
+        }
+    }
+
+    fn unnamed_intrinsic(span: Span) -> Self {
+        Self {
+            text: "encountered an intrinsic used other than by name during compilation, this is probably an internal error".to_string(),
             span,
         }
     }

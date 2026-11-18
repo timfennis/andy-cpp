@@ -5,4 +5,4 @@ fn f(xs: [Int]) => "int";
 fn f(xs: [Any]) => "any";
 let n: Int = 1;
 let a: Any = 2;
-print(f([n, a]), f([3, a]), f([n, a as Int]));
+print(f([n, a]), f([3, a]), f([n, cast::<Int>(a)]));

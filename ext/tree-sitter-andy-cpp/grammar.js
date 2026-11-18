@@ -8,7 +8,7 @@
  *
  *   assignment  <  comma/sequence  <  or  <  and  <  not  <  range
  *     <  comparison/in  <  spaceship  <  shift  <  |  <  ~  <  &
- *     <  + - ++ <>  <  * / \ % %%  <  ^ (right assoc)  <  as cast
+ *     <  + - ++ <>  <  * / \ % %%  <  ^ (right assoc)
  *     <  unary ! - ~  <  postfix call/index/member
  */
 
@@ -33,9 +33,8 @@ const PREC = {
   term: 13,
   factor: 14,
   exponent: 15,
-  cast: 16,
-  unary: 17,
-  call: 18,
+  unary: 16,
+  call: 17,
 };
 
 /** @param {RuleOrLiteral} rule */
@@ -60,10 +59,6 @@ module.exports = grammar({
   conflicts: $ => [
     [$._pattern, $._expression],
     [$.if_expression, $.if_guard],
-    // `x as Int < 2` — a `<` after a cast type may open a type argument list
-    // or be a less-than operator. Both branches are explored; the dynamic
-    // precedence on `generic_type` picks the cast when either parse works.
-    [$._type, $.generic_type],
   ],
 
   rules: {
@@ -109,7 +104,10 @@ module.exports = grammar({
     function_definition: $ => prec.right(seq(
       optional('pure'),
       'fn',
-      optional(field('name', $.identifier)),
+      optional(seq(
+        field('name', $.identifier),
+        optional(field('type_parameters', $.type_parameters)),
+      )),
       field('parameters', $.parameters),
       optional(seq('->', field('return_type', $._type))),
       choice(
@@ -117,6 +115,14 @@ module.exports = grammar({
         seq('=>', field('body', $._expression)),
       ),
     )),
+
+    // `<T, U>` after a function's name.
+    type_parameters: $ => seq(
+      '<',
+      commaSep1($._type_name),
+      optional(','),
+      '>',
+    ),
 
     parameters: $ => seq(
       '(',
@@ -160,18 +166,15 @@ module.exports = grammar({
     // An identifier, so that keyword extraction keeps `fn` out of type names.
     _type_name: $ => alias($.identifier, $.type_identifier),
 
-    // A `<` after a type name is ambiguous in a cast: it may open a type
-    // argument list or be a less-than operator. The conflict declared above
-    // makes the parser try both; this dynamic precedence prefers the type
-    // argument list whenever it parses, mirroring the recursive-descent
-    // parser in `ndc_parser/src/parser.rs`.
-    generic_type: $ => prec.dynamic(1, seq(
+    // A type is only written where nothing else can be, so its `<` always
+    // opens type arguments.
+    generic_type: $ => seq(
       field('name', $._type_name),
       '<',
       commaSep($._type),
       optional(','),
       '>',
-    )),
+    ),
 
     list_type: $ => seq('[', $._type, ']'),
 
@@ -216,10 +219,10 @@ module.exports = grammar({
 
     _expression: $ => choice(
       $.identifier,
+      $.generic_name,
       $._literal,
       $.unary_expression,
       $.not_expression,
-      $.cast_expression,
       $.binary_expression,
       $.range_expression,
       $.assignment,
@@ -272,12 +275,6 @@ module.exports = grammar({
         $.named_op_assign,
       )),
       field('right', $._expression_or_sequence),
-    )),
-
-    cast_expression: $ => prec.left(PREC.cast, seq(
-      field('value', $._expression),
-      'as',
-      field('type', $._type),
     )),
 
     unary_expression: $ => prec(PREC.unary, seq(
@@ -345,6 +342,21 @@ module.exports = grammar({
       seq(choice('..', '..='), field('end', $._expression)),
     )),
 
+    // A name with type arguments, as `f::<Int>` in `f::<Int>(x)`.
+    generic_name: $ => seq(
+      field('name', $.identifier),
+      field('type_arguments', $.type_arguments),
+    ),
+
+    // `::<Int, String>`: after `::<` a type always follows.
+    type_arguments: $ => seq(
+      '::',
+      '<',
+      commaSep1($._type),
+      optional(','),
+      '>',
+    ),
+
     call: $ => prec(PREC.call, seq(
       field('function', $._expression),
       field('arguments', $.arguments),
@@ -368,7 +380,10 @@ module.exports = grammar({
       field('object', $._expression),
       '.',
       field('method', $.identifier),
-      optional(field('arguments', $.arguments)),
+      optional(seq(
+        optional(field('type_arguments', $.type_arguments)),
+        field('arguments', $.arguments),
+      )),
     )),
 
     // ------------------------------------------------------------------

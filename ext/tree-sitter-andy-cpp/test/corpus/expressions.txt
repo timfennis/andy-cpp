@@ -149,3 +149,60 @@ exponent is right associative
     right: (binary_expression
       left: (integer)
       right: (integer))))
+
+==================
+call with type arguments
+==================
+
+f::<Int, [String]>(x) < y;
+
+---
+
+(source_file
+  (binary_expression
+    left: (call
+      function: (generic_name
+        name: (identifier)
+        type_arguments: (type_arguments
+          (type_identifier)
+          (list_type
+            (type_identifier))))
+      arguments: (arguments
+        (identifier)))
+    right: (identifier)))
+
+==================
+function with type arguments as a value
+==================
+
+let g = f::<Option<Int>>;
+
+---
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (generic_name
+      name: (identifier)
+      type_arguments: (type_arguments
+        (generic_type
+          name: (type_identifier)
+          (type_identifier))))))
+
+==================
+method call with type arguments
+==================
+
+xs.map::<Int, String>(g);
+
+---
+
+(source_file
+  (member_expression
+    object: (identifier)
+    method: (identifier)
+    type_arguments: (type_arguments
+      (type_identifier)
+      (type_identifier))
+    arguments: (arguments
+      (identifier))))

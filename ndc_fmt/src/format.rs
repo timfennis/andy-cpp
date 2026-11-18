@@ -13,6 +13,7 @@ use ndc_lexer::{Span, Token};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
     ExpressionLocation, ForBody, ForIteration, FunctionParameter, StructField, TypeExpr,
+    TypeParameter,
 };
 use std::ops::Range;
 use std::rc::Rc;
@@ -198,7 +199,11 @@ impl<'a> Formatter<'a> {
             Expression::StringLiteral(_) | Expression::NumericLiteral(_) => {
                 text(&self.source.text[range])
             }
-            Expression::Identifier { name, .. } => text(name),
+            Expression::Identifier {
+                name,
+                type_arguments,
+                ..
+            } => concat([text(name), self.turbofish(type_arguments, close_at)]),
             Expression::Statement(inner) => {
                 let semicolon = self
                     .source
@@ -208,15 +213,6 @@ impl<'a> Formatter<'a> {
             }
             Expression::Logical { .. } => self.operator_chain(expression),
             Expression::Grouping(inner) => concat([text("("), self.expr(inner), text(")")]),
-            Expression::Cast {
-                value,
-                annotation,
-                optional,
-            } => concat([
-                self.expr(value),
-                text(if *optional { " as? " } else { " as " }),
-                type_expr(annotation),
-            ]),
             Expression::VariableDeclaration {
                 l_value,
                 annotated_type,
@@ -248,13 +244,15 @@ impl<'a> Formatter<'a> {
             }
             Expression::FunctionDeclaration {
                 name,
+                type_parameters,
                 parameters,
                 parameters_span,
                 body,
                 return_annotation,
                 pure,
             } => self.function(
-                name.as_deref(),
+                name.as_deref()
+                    .map(|name| (name, type_parameters.as_slice())),
                 parameters,
                 *parameters_span,
                 body,
@@ -330,13 +328,19 @@ impl<'a> Formatter<'a> {
                     .split_first()
                     .expect("a method call has a receiver");
                 let receiver = self.expr(receiver);
-                let Expression::Identifier { name, .. } = &function.expression else {
+                let Expression::Identifier {
+                    name,
+                    type_arguments,
+                    ..
+                } = &function.expression
+                else {
                     unreachable!("a method is named");
                 };
                 concat([
                     receiver,
                     text("."),
                     text(name),
+                    self.turbofish(type_arguments, function.span.end().saturating_sub(1)),
                     self.arguments(arguments, close_at),
                 ])
             }
@@ -492,6 +496,20 @@ impl<'a> Formatter<'a> {
 
     /// Items between brackets, on one line if they fit and otherwise each on
     /// its own line with a comma after every one
+    /// The type arguments `::<Int, String>` after a name, nothing if it has
+    /// none, with the comments between them, broken over lines like a call's
+    /// arguments when they don't fit. `close_at` is the offset of the `>`.
+    fn turbofish(&mut self, type_arguments: &[TypeExpr], close_at: usize) -> Doc {
+        if type_arguments.is_empty() {
+            return text("");
+        }
+        self.delimited(
+            Brackets::new("::<", ">", close_at),
+            type_arguments,
+            |_, argument| (type_expr(argument), argument.span()),
+        )
+    }
+
     fn delimited<T>(
         &mut self,
         brackets: Brackets,
@@ -664,7 +682,8 @@ impl<'a> Formatter<'a> {
 
     fn function(
         &mut self,
-        name: Option<&str>,
+        // A named function's name and the type parameters it declares.
+        name: Option<(&str, &[TypeParameter])>,
         parameters: &[FunctionParameter],
         parameters_span: Span,
         body: &ExpressionLocation,
@@ -673,9 +692,15 @@ impl<'a> Formatter<'a> {
     ) -> Doc {
         let brackets = Brackets::new("(", ")", parameters_span.end() - 1);
         let mut docs = vec![text(if pure { "pure fn" } else { "fn" })];
-        if let Some(name) = name {
+        if let Some((name, type_parameters)) = name {
             docs.push(text(" "));
             docs.push(text(name));
+            if !type_parameters.is_empty() {
+                let names = type_parameters
+                    .iter()
+                    .map(|parameter| parameter.name.as_str());
+                docs.push(text(format!("<{}>", names.collect::<Vec<_>>().join(", "))));
+            }
         }
         docs.push(self.delimited(brackets, parameters, Self::parameter));
         if let Some(annotation) = return_annotation {

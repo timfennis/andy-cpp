@@ -2,5 +2,5 @@
 struct Q { xs: [Int] }
 let q = Q([1]);
 let v: Any = [2];
-q.xs = v.clone() as [Int];
+q.xs = cast::<[Int]>(v.clone());
 print(q.xs);

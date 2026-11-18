@@ -1,0 +1,3 @@
+// A type parameter stands for any type, so a body that makes it one type is an error.
+// expect-error: the type parameter `T` of `f` is always `Int`
+fn f<T>(x: T) -> Int { x }

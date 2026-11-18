@@ -6,10 +6,10 @@ fn g(x: Int) => "int";
 fn g(x: String) => "str";
 fn g(x: Any) => "any";
 fn what(x: Any) {
-    if (x as? Int).is_some() {
-        g(x as Int)
-    } else if (x as? String).is_some() {
-        g(x as String)
+    if cast?::<Int>(x).is_some() {
+        g(cast::<Int>(x))
+    } else if cast?::<String>(x).is_some() {
+        g(cast::<String>(x))
     } else {
         g(x)
     }

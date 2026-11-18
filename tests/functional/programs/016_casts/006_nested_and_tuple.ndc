@@ -1,10 +1,10 @@
 // The variables still hold what's cast, so a copy is cast; `deepcopy` copies
 // the lists inside too, which the cast gives a new type as well.
 let nested: Any = [[1], [2, 3]];
-assert_eq(nested.deepcopy() as [[Int]], [[1], [2, 3]]);
+assert_eq(cast::<[[Int]]>(nested.deepcopy()), [[1], [2, 3]]);
 
 let pair: Any = (1, "a");
-assert_eq(pair as (Int, String), (1, "a"));
+assert_eq(cast::<(Int, String)>(pair), (1, "a"));
 
 let map: Any = %{"a": 1};
-assert_eq(map.clone() as %{String: Int}, %{"a": 1});
+assert_eq(cast::<%{String: Int}>(map.clone()), %{"a": 1});

@@ -1,0 +1,3 @@
+// A cast takes the type it casts to and the value it casts.
+// expect-error: `cast` takes one type argument and one value
+print(cast::<Int>(1, 2));

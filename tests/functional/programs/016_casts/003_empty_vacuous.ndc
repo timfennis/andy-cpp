@@ -1,4 +1,4 @@
 // An empty container conforms to any element type.
-assert_eq([] as [Int], []);
+assert_eq(cast::<[Int]>([]), []);
 let value: Any = [];
-assert_eq(value.clone() as [Int], []);
+assert_eq(cast::<[Int]>(value.clone()), []);

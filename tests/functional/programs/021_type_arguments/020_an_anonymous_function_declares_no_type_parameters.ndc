@@ -1,0 +1,2 @@
+// expect-error: an anonymous function can't declare type parameters
+let f = fn<T>(x: T) => x;

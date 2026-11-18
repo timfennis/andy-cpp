@@ -1,0 +1,3 @@
+// A type parameter that nothing uses can't be worked out from a call.
+// expect-error: the type parameter `T` of `f` is never used
+fn f<T>() => 1;

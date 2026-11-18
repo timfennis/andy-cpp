@@ -6,4 +6,4 @@ fn h(f: fn(Int) -> Int) => f(1) + 1;
 fn h(x: Int) => x;
 fn one(x) => x;
 let a: Any = one;
-print(h(a as fn(Int) -> Int));
+print(h(cast::<fn(Int) -> Int>(a)));

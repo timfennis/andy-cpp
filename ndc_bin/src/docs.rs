@@ -56,11 +56,21 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
 
-    let mut functions: Vec<_> = interpreter
-        .functions()
+    let natives = interpreter.functions().map(|func| Documented {
+        name: &func.name,
+        static_type: &func.static_type,
+        documentation: func.documentation.as_deref(),
+    });
+    let intrinsics = interpreter.intrinsics().map(|func| Documented {
+        name: &func.name,
+        static_type: &func.static_type,
+        documentation: func.documentation.as_deref(),
+    });
+    let mut functions: Vec<_> = natives
+        .chain(intrinsics)
         .filter(|func| {
             if let Some(query) = query {
-                string_match(query, &func.name)
+                string_match(query, func.name)
             } else {
                 true
             }
@@ -69,12 +79,12 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
 
     functions.sort_by(|l, r| {
         if let Some(query) = query {
-            normalized_damerau_levenshtein(&l.name, query)
-                .partial_cmp(&normalized_damerau_levenshtein(&r.name, query))
+            normalized_damerau_levenshtein(l.name, query)
+                .partial_cmp(&normalized_damerau_levenshtein(r.name, query))
                 .unwrap_or(Ordering::Equal)
                 .reverse()
         } else {
-            l.name.cmp(&r.name)
+            l.name.cmp(r.name)
         }
     });
 
@@ -86,7 +96,7 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
         }
 
         // A function that takes any number of arguments has no parameter types.
-        let (parameters, return_type) = match &function.static_type {
+        let (parameters, return_type) = match function.static_type {
             StaticType::Function {
                 parameters,
                 return_type,
@@ -96,6 +106,15 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
 
         let mut line = String::new();
         write!(line, "{}", function.name.bold().yellow())?;
+        // In the order type arguments bind them: `fold::<Int, String>`.
+        let type_parameters = function.static_type.type_parameters();
+        if !type_parameters.is_empty() {
+            write!(
+                line,
+                "{}",
+                format!("<{}>", type_parameters.join(", ")).dim()
+            )?;
+        }
         match parameters {
             None => {
                 write!(line, "{}", "(...)".dim())?;
@@ -117,7 +136,7 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
         write!(line, "{}", return_type.to_string().bold().cyan())?;
         println!("{line}");
 
-        if let Some(docs) = &function.documentation {
+        if let Some(docs) = function.documentation {
             let docs = docs.trim();
             if !docs.is_empty() {
                 let wrapped = wrap_text(docs, width, "  ");
@@ -127,4 +146,11 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// What `ndc docs` shows of a built-in function, native or intrinsic.
+struct Documented<'a> {
+    name: &'a str,
+    static_type: &'a StaticType,
+    documentation: Option<&'a str>,
 }

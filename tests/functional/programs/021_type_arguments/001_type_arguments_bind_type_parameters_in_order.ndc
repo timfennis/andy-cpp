@@ -1,0 +1,4 @@
+// `f::<A, B>` binds the type parameters `f` declares, in the order it declares them.
+// expect-output: (1,"x")
+fn pair<A, B>(a: A, b: B) -> (A, B) { (a, b) }
+print(pair::<Int, String>(1, "x"));

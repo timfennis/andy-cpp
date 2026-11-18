@@ -3,7 +3,8 @@ use super::solver::CallSite;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads};
 use itertools::Itertools;
-use ndc_core::{NodeId, StaticType};
+use ndc_analysis::{Binding, Candidate};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation};
 use ndc_resolver::{Candidates, SymbolId};
@@ -15,6 +16,7 @@ impl Analyser {
     pub(super) fn no_match(
         &self,
         candidates: &Candidates,
+        type_arguments: &[StaticType],
         name: &str,
         types: &[StaticType],
         span: Span,
@@ -36,31 +38,55 @@ impl Analyser {
         } else if overloads.a_cast_could_resolve(candidates, types) {
             AnalysisError::function_not_found_suggest_cast(name, types, span)
         } else {
-            AnalysisError::function_not_found(name, types, span)
-                .with_overloads(name, &self.what_the_overloads_take(candidates))
+            AnalysisError::function_not_found(name, types, span).with_overloads(
+                name,
+                &self.what_the_overloads_take(candidates, type_arguments),
+            )
         }
     }
 
     /// What each overload `candidates` can reach takes, as `(Int, String)`,
     /// when there are few enough to list: why `put("a")` doesn't fit a `put`
-    /// whose body made its parameter an Int.
-    fn what_the_overloads_take(&self, candidates: &Candidates) -> Vec<String> {
+    /// whose body made its parameter an Int. With type arguments, only the
+    /// overloads that take that many are listed, with them in place of
+    /// their type parameters: `id::<String>` takes `(String)`.
+    fn what_the_overloads_take(
+        &self,
+        candidates: &Candidates,
+        type_arguments: &[StaticType],
+    ) -> Vec<String> {
         const MOST: usize = 3;
-        let symbols = self.overloads().reachable_symbols(candidates);
+        let symbols = self
+            .overloads()
+            .reachable_symbols(candidates)
+            .into_iter()
+            .filter_map(|symbol| {
+                self.type_argument_bindings(symbol, type_arguments)
+                    .map(|bound| (symbol, bound))
+            })
+            .collect::<Vec<_>>();
         if symbols.len() > MOST {
             return Vec::new();
         }
         symbols
             .into_iter()
-            .filter_map(
-                |symbol| match self.vars.shown(self.types.get_type(symbol)) {
+            .filter_map(|(symbol, bound)| {
+                let typ = self.vars.shown(self.types.get_type(symbol));
+                let typ = typ.replace(&|part| match part {
+                    StaticType::Generic(name) => bound
+                        .iter()
+                        .find(|(parameter, _)| parameter == name)
+                        .map(|(_, argument)| self.vars.shown(argument)),
+                    _ => None,
+                });
+                match typ {
                     StaticType::Function {
                         parameters: Some(parameters),
                         ..
                     } => Some(format!("({})", parameters.iter().join(", "))),
                     _ => None,
-                },
-            )
+                }
+            })
             .collect()
     }
 
@@ -101,7 +127,12 @@ impl Analyser {
         // function position, so the callee is analysed as a value. The callee
         // comes before the arguments, in source order like the resolver, so
         // declarations in it get their slots first.
-        let Expression::Identifier { name, .. } = &function.expression else {
+        let Expression::Identifier {
+            name,
+            type_arguments,
+            ..
+        } = &function.expression
+        else {
             let callee_type = self.analyse_expr(function);
             let arguments = arguments
                 .iter()
@@ -166,10 +197,113 @@ impl Analyser {
         // A named callee declares nothing, so its overload can be picked after
         // the arguments' types are known.
         let site = CallSite::Call(function.id);
-        let types = self.analyse_arguments(function.id, arguments);
+        let type_arguments = self.lower_type_arguments(type_arguments);
+        let types = self.analyse_arguments(function.id, &type_arguments, arguments);
+        if let Some((symbol, intrinsic)) =
+            self.called_intrinsic(function.id, &type_arguments, &types)
+        {
+            return self.analyse_intrinsic_call(
+                function.id,
+                symbol,
+                intrinsic,
+                &type_arguments,
+                &types,
+                name,
+                span,
+            );
+        }
         match arguments {
+            _ if !type_arguments.is_empty() => {
+                self.constrain_explicit_call(site, type_arguments, types, name, span)
+            }
             [_, index] if name == "[]" => self.constrain_index_read(site, types, index, kind, span),
             _ => self.constrain_call(site, types, kind, name, span),
+        }
+    }
+
+    /// The intrinsic a call of the name at `callee` with these type
+    /// arguments and arguments means, if it means one: of the nearest scope
+    /// with an overload that could take them, the only one. A function the
+    /// program declares, as `fn cast<T>(x: T)`, is nearer, and takes the
+    /// call if it can, as it would from a native. A call that only an
+    /// intrinsic could mean, but that it can't take, as `cast::<Int>(1, 2)`,
+    /// means it too, so its typing rule says what's wrong.
+    fn called_intrinsic(
+        &mut self,
+        callee: NodeId,
+        type_arguments: &[StaticType],
+        arguments: &[StaticType],
+    ) -> Option<(SymbolId, Intrinsic)> {
+        let candidates = self.resolver.reference_candidates(callee).clone();
+        let reachable = self.overloads().reachable_symbols(&candidates);
+        // Most calls can't mean an intrinsic, and need no overload tried.
+        let intrinsic = reachable.iter().find_map(|&symbol| {
+            self.resolver
+                .intrinsic(symbol)
+                .map(|intrinsic| (symbol, intrinsic))
+        })?;
+        if reachable.len() == 1 {
+            return Some(intrinsic);
+        }
+        for group in self.overloads().reachable_groups(&candidates) {
+            let viable = group
+                .into_iter()
+                .filter(|&symbol| self.could_accept(symbol, type_arguments, arguments))
+                .collect::<Vec<_>>();
+            match viable[..] {
+                [] => {}
+                [only] => {
+                    return self
+                        .resolver
+                        .intrinsic(only)
+                        .map(|intrinsic| (only, intrinsic));
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    /// Analyses the call at `callee` of the intrinsic `symbol`, which no
+    /// signature says the type of: `cast::<T>(x)` is a cast of `x` to `T`.
+    #[allow(clippy::too_many_arguments)]
+    fn analyse_intrinsic_call(
+        &mut self,
+        callee: NodeId,
+        symbol: SymbolId,
+        intrinsic: Intrinsic,
+        type_arguments: &[StaticType],
+        arguments: &[StaticType],
+        name: &str,
+        span: Span,
+    ) -> StaticType {
+        self.record_pick(
+            CallSite::Call(callee),
+            Binding::Resolved(Candidate::Scalar(symbol)),
+            arguments,
+        );
+        match intrinsic {
+            Intrinsic::Cast | Intrinsic::TryCast => {
+                let ([target], [found]) = (type_arguments, arguments) else {
+                    for argument in arguments {
+                        self.vars
+                            .settle_unknowns_but_literals(argument, &StaticType::Error);
+                    }
+                    self.emit(if type_arguments.is_empty() && arguments.len() == 1 {
+                        AnalysisError::cast_without_a_target(name, span)
+                    } else {
+                        AnalysisError::cast_takes_a_type_and_a_value(name, span)
+                    });
+                    return StaticType::Error;
+                };
+                self.analyse_cast(
+                    callee,
+                    found,
+                    target.clone(),
+                    intrinsic == Intrinsic::TryCast,
+                    span,
+                )
+            }
         }
     }
 
@@ -185,7 +319,15 @@ impl Analyser {
         kind: CallKind,
         span: Span,
     ) -> StaticType {
-        self.constrain_index_call(site, arguments, kind, "[]", span, literal_index(index))
+        self.constrain_index_call(
+            site,
+            Vec::new(),
+            arguments,
+            kind,
+            "[]",
+            span,
+            literal_index(index),
+        )
     }
 
     /// Analyses the arguments of a call of the function named at `callee`
@@ -197,6 +339,7 @@ impl Analyser {
     fn analyse_arguments(
         &mut self,
         callee: NodeId,
+        type_arguments: &[StaticType],
         arguments: &[ExpressionLocation],
     ) -> Vec<StaticType> {
         let mut types = arguments
@@ -210,7 +353,8 @@ impl Analyser {
             if types[position].is_some() {
                 continue;
             }
-            if let Some(expected) = self.parameters_the_overloads_agree_on(callee, &types, position)
+            if let Some(expected) =
+                self.parameters_the_overloads_agree_on(callee, type_arguments, &types, position)
                 && expected.len() == parameter_count(argument)
             {
                 self.expected_parameters.insert(argument.id, expected);
@@ -228,6 +372,7 @@ impl Analyser {
     fn parameters_the_overloads_agree_on(
         &mut self,
         callee: NodeId,
+        type_arguments: &[StaticType],
         known: &[Option<StaticType>],
         position: usize,
     ) -> Option<Vec<Option<StaticType>>> {
@@ -235,7 +380,8 @@ impl Analyser {
         let mut agreed: Option<Vec<Option<StaticType>>> = None;
         for symbol in self.overloads().reachable_symbols(&candidates) {
             let snapshot = self.vars.snapshot();
-            let expected = self.parameters_one_overload_expects(symbol, known, position);
+            let expected =
+                self.parameters_one_overload_expects(symbol, type_arguments, known, position);
             self.vars.rollback(snapshot);
             let expected = match expected {
                 Expects::Parameters(expected) => expected,
@@ -262,12 +408,16 @@ impl Analyser {
     fn parameters_one_overload_expects(
         &mut self,
         symbol: SymbolId,
+        type_arguments: &[StaticType],
         known: &[Option<StaticType>],
         position: usize,
     ) -> Expects {
         let function = self.vars.resolve(self.types.get_type(symbol));
         let first = self.vars.count();
-        let Some(parameters) = self.vars.instantiate_parameters(&function) else {
+        let Some(mut made) = self.type_argument_bindings(symbol, type_arguments) else {
+            return Expects::Nothing;
+        };
+        let Some(parameters) = self.vars.instantiate_parameters(&function, &mut made) else {
             return Expects::Anything;
         };
         let takes_known = parameters.len() == known.len()
@@ -329,7 +479,7 @@ fn parameter_count(argument: &ExpressionLocation) -> usize {
 /// nothing in it is only known as the program runs, and its variables are
 /// from before `first`, not ones an overload's signature made. A list
 /// literal's elements are a variable until its uses settle them.
-fn is_known_before(typ: &StaticType, first: usize) -> bool {
+pub(super) fn is_known_before(typ: &StaticType, first: usize) -> bool {
     !typ.contains(&|part| match part {
         StaticType::Var(var) => var.0 as usize >= first,
         StaticType::Any | StaticType::Generic(_) => true,

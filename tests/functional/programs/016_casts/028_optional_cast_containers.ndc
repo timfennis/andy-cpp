@@ -1,5 +1,5 @@
-// A container is checked element by element, as `as` does.
+// A container is checked element by element, as `cast` does.
 // expect-output: None Some([1,"a"]) Some([1,2])
 let mixed: [Any] = [1, "a"];
 let ints: [Any] = [1, 2];
-print(mixed as? [Int], mixed as? [Any], ints.clone() as? [Int]);
+print(cast?::<[Int]>(mixed), cast?::<[Any]>(mixed), cast?::<[Int]>(ints.clone()));

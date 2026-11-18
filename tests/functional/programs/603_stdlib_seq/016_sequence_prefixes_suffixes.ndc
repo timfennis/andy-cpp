@@ -1,8 +1,8 @@
 // A string's prefixes and suffixes are strings, even when it comes out of an
 // `Any`.
 let text: Any = "aé🦀";
-assert_eq((text as String).prefixes(), ["a", "aé", "aé🦀"]);
-assert_eq((text as String).suffixes(), ["aé🦀", "é🦀", "🦀"]);
+assert_eq(cast::<String>(text).prefixes(), ["a", "aé", "aé🦀"]);
+assert_eq(cast::<String>(text).suffixes(), ["aé🦀", "é🦀", "🦀"]);
 let empty_text = "";
 assert_eq(empty_text.prefixes(), []);
 assert_eq(empty_text.suffixes(), []);

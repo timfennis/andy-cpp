@@ -5,7 +5,7 @@ use crate::expression::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation,
     ExpressionLocation, ForBody, ForIteration, FunctionParameter, NonBindingTarget,
 };
-use crate::expression::{Expression, StructField};
+use crate::expression::{Expression, StructField, TypeParameter};
 use crate::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use crate::type_expr::TypeExpr;
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
@@ -216,6 +216,7 @@ impl Parser {
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
                         identifier_span: operator_token_loc.span,
+                        type_arguments: Vec::new(),
                     }
                     .to_location(operator_token_loc.span),
                 ),
@@ -229,6 +230,7 @@ impl Parser {
                         Expression::Identifier {
                             name: not_token.token.to_string(),
                             identifier_span: not_token.span,
+                            type_arguments: Vec::new(),
                         }
                         .to_location(not_token.span),
                     ),
@@ -261,6 +263,7 @@ impl Parser {
                     Expression::Identifier {
                         name: operator.to_string(),
                         identifier_span: operator_span,
+                        type_arguments: Vec::new(),
                     }
                     .to_location(operator_span),
                 ),
@@ -542,6 +545,7 @@ impl Parser {
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
                         identifier_span: operator_span,
+                        type_arguments: Vec::new(),
                     }
                     .to_location(operator_span),
                 ),
@@ -653,25 +657,36 @@ impl Parser {
 
     fn exponent(&mut self) -> Result<ExpressionLocation, Error> {
         self.consume_binary_expression_right_associative(
-            Self::cast,
+            Self::no_as_cast,
             Self::exponent,
             &[Token::Caret],
         )
     }
 
-    fn cast(&mut self) -> Result<ExpressionLocation, Error> {
-        let mut expression = self.tight_unary()?;
-        while let Some(operator) = self.consume_token_if(&[Token::As, Token::AsOptional]) {
-            let annotation = self.cast_type_annotation()?;
-            let span = expression.span.merge(annotation.span());
-            expression = Expression::Cast {
-                value: Box::new(expression),
-                annotation,
-                optional: operator.token == Token::AsOptional,
-            }
-            .to_location(span);
-        }
-        Ok(expression)
+    /// An operand, which `as` no longer follows: a cast is the call
+    /// `cast::<T>(x)`. `as` and `as?` stay keywords, so `x as Int` says how to
+    /// write it now.
+    fn no_as_cast(&mut self) -> Result<ExpressionLocation, Error> {
+        let expression = self.tight_unary()?;
+        let Some(operator) = self.consume_token_if(&[Token::As, Token::AsOptional]) else {
+            return Ok(expression);
+        };
+        let name = if operator.token == Token::AsOptional {
+            "cast?"
+        } else {
+            "cast"
+        };
+        let target = self
+            .type_annotation()
+            .map_or_else(|_| "T".to_string(), |annotation| annotation.to_string());
+        Err(Error::with_help(
+            format!("`{}` is no longer a cast", operator.token),
+            operator.span,
+            format!(
+                "a cast is a call now: write `{name}::<{target}>(x)` instead of `x {} {target}`",
+                operator.token
+            ),
+        ))
     }
 
     fn tight_unary(&mut self) -> Result<ExpressionLocation, Error> {
@@ -688,6 +703,7 @@ impl Parser {
                     Expression::Identifier {
                         name: operator_token_loc.token.to_string(),
                         identifier_span: token_span,
+                        type_arguments: Vec::new(),
                     }
                     .to_location(token_span),
                 ),
@@ -736,6 +752,7 @@ impl Parser {
                                     Expression::Identifier {
                                         name: member,
                                         identifier_span: member_span,
+                                        type_arguments: Vec::new(),
                                     }
                                     .to_location(member_span),
                                 ),
@@ -766,6 +783,44 @@ impl Parser {
                     let AssignmentTarget::Identifier { identifier, .. } = identifier.target else {
                         unreachable!("Guaranteed to match by previous call to require_identifier")
                     };
+
+                    // `x.f::<T>(y)` is the call `f::<T>(x, y)`; type arguments
+                    // only go with a call, as a member has none.
+                    if self.peek_current_token() == Some(&Token::ColonColon) {
+                        let (type_arguments, function_span) = self.turbofish(identifier_span)?;
+                        if self.peek_current_token() != Some(&Token::LeftParentheses) {
+                            return Err(Error::with_help(
+                                format!("expected '(' after `.{identifier}::<…>`"),
+                                function_span,
+                                format!(
+                                    "type arguments after a `.` go with a call, as in `x.{identifier}::<T>()`"
+                                ),
+                            ));
+                        }
+                        let arguments = self.delimited_tuple(Self::single_expression)?;
+                        let arguments_span = arguments.span;
+                        let Expression::Tuple {
+                            values: mut arguments,
+                        } = arguments.expression
+                        else {
+                            unreachable!("self.tuple() must always produce a tuple");
+                        };
+                        let span = expr.span.merge(arguments_span);
+                        arguments.insert(0, expr);
+                        expr = Expression::MethodCall {
+                            function: Box::new(
+                                Expression::Identifier {
+                                    name: identifier,
+                                    identifier_span,
+                                    type_arguments,
+                                }
+                                .to_location(function_span),
+                            ),
+                            arguments,
+                        }
+                        .to_location(span);
+                        continue;
+                    }
 
                     let span = expr.span.merge(identifier_span);
                     expr = Expression::MemberAccess {
@@ -830,6 +885,7 @@ impl Parser {
                                 Expression::Identifier {
                                     name: "[]".to_string(),
                                     identifier_span: bracket_span,
+                                    type_arguments: Vec::new(),
                                 }
                                 .to_location(bracket_span),
                             ),
@@ -1088,10 +1144,15 @@ impl Parser {
             Token::None => Expression::NoneLiteral,
             Token::NumericLiteral(literal) => Expression::NumericLiteral(literal),
             Token::String(value) => Expression::StringLiteral(value),
-            Token::Identifier(identifier) => Expression::Identifier {
-                name: identifier,
-                identifier_span: token_location.span,
-            },
+            Token::Identifier(identifier) => {
+                let (type_arguments, span) = self.turbofish(token_location.span)?;
+                return Ok(Expression::Identifier {
+                    name: identifier,
+                    identifier_span: token_location.span,
+                    type_arguments,
+                }
+                .to_location(span));
+            }
             _ => {
                 return Err(Error::text(
                     format!(
@@ -1188,23 +1249,22 @@ impl Parser {
         .to_location(for_token_span.merge(body_span)))
     }
 
+    /// A name: an identifier with no type arguments, as a declaration and
+    /// a member are named. `x.f::<T>()` takes its type arguments itself.
     fn require_identifier(&mut self) -> Result<ExpressionLocation, Error> {
-        let identifier_expression = self.primary()?;
-
-        if matches!(
-            identifier_expression,
-            ExpressionLocation {
-                expression: Expression::Identifier { .. },
-                ..
-            }
-        ) {
-            Ok(identifier_expression)
-        } else {
-            Err(Error::text(
+        let token = self.require_current_token()?;
+        let Token::Identifier(name) = token.token else {
+            return Err(Error::text(
                 "expected an identifier".to_string(),
-                identifier_expression.span,
-            ))
+                token.span,
+            ));
+        };
+        Ok(Expression::Identifier {
+            name,
+            identifier_span: token.span,
+            type_arguments: Vec::new(),
         }
+        .to_location(token.span))
     }
 
     fn function_declaration(&mut self) -> Result<ExpressionLocation, Error> {
@@ -1241,6 +1301,16 @@ impl Parser {
         // fn() { }
         let identifier = match self.peek_current_token() {
             Some(Token::LeftParentheses) => None,
+            Some(Token::Less) => {
+                let less = self
+                    .peek_current_token_location()
+                    .expect("the current token is '<'");
+                return Err(Error::with_help(
+                    "an anonymous function can't declare type parameters".to_string(),
+                    less.span,
+                    "declare them on a named function: `fn f<T>(x: T) -> T`".to_string(),
+                ));
+            }
             Some(Token::Identifier(_)) => {
                 let Ok(ExpressionLocation {
                     expression: Expression::Identifier { name, .. },
@@ -1263,7 +1333,11 @@ impl Parser {
             }
         };
 
-        // let argument_list = self.delimited_tuple(Self::single_expression)?;
+        let type_parameters = if self.peek_current_token() == Some(&Token::Less) {
+            self.type_parameters()?
+        } else {
+            Vec::new()
+        };
 
         let (argument_list, parameters_span) = self.delimited_comma_separated(
             &Token::LeftParentheses,
@@ -1302,6 +1376,7 @@ impl Parser {
         Ok(ExpressionLocation {
             expression: Expression::FunctionDeclaration {
                 name: identifier,
+                type_parameters,
                 parameters: argument_list,
                 parameters_span,
                 body: Box::new(body),
@@ -1463,124 +1538,65 @@ impl Parser {
         }
     }
 
-    /// Parses the type after `as`. Identical to [`Self::type_annotation`] except
-    /// that a `<` which cannot open a type argument list is left alone, so that
-    /// `1 as Int < 2` parses as `(1 as Int) < 2` instead of trying to read `2` as
-    /// a type argument.
-    fn cast_type_annotation(&mut self) -> Result<TypeExpr, Error> {
-        if matches!(self.peek_current_token(), Some(Token::Identifier(_)))
-            && self.peek_next_token() == Some(&Token::Less)
-            && !self.peek_type_arguments()
-        {
-            let Ok(TokenLocation {
-                token: Token::Identifier(name),
-                span,
-            }) = self.require_current_token()
-            else {
-                unreachable!("this should have been checked");
-            };
-
-            return Ok(TypeExpr::Name {
-                id: NodeId::next(),
-                name,
-                args: Vec::new(),
-                span,
-            });
+    /// The type arguments `::<A, B>` after a name, if any, and the span of
+    /// the name with them. `name_span` is the span of the name. After `::<`
+    /// a type always follows, so nothing has to be guessed: `f::<Int>(x) < y`
+    /// compares.
+    fn turbofish(&mut self, name_span: Span) -> Result<(Vec<TypeExpr>, Span), Error> {
+        if self.consume_token_if(&[Token::ColonColon]).is_none() {
+            return Ok((Vec::new(), name_span));
         }
-
-        self.type_annotation()
+        // `<>` lexes as one token.
+        if let Some(location) = self
+            .peek_current_token_location()
+            .filter(|location| location.token == Token::Diamond)
+        {
+            return Err(Error::text(
+                "type arguments can't be empty".to_string(),
+                location.span,
+            ));
+        }
+        if self.peek_current_token() != Some(&Token::Less) {
+            let span = self
+                .peek_current_token_location()
+                .map_or(name_span, |location| location.span);
+            return Err(Error::with_help(
+                "expected '<' after '::'".to_string(),
+                span,
+                "`::` starts type arguments, as in `f::<Int>(x)`".to_string(),
+            ));
+        }
+        let (arguments, close_span) = self.delimited_type_params()?;
+        Ok((arguments, name_span.merge(close_span)))
     }
 
-    /// Scans ahead from the `<` that follows the current token to decide whether
-    /// it opens a type argument list (`[Int]`) or is a less-than operator
-    /// (`Int < 2`). Only the tokens that may legally appear inside a type
-    /// argument list are accepted; anything else means this is a comparison.
-    fn peek_type_arguments(&self) -> bool {
-        let mut depth = 0_usize;
-        let mut parens = 0_usize;
-        let mut braces = 0_usize;
-        let mut brackets = 0_usize;
+    /// The type parameters `<T, U>` a function declares, the `<` current.
+    fn type_parameters(&mut self) -> Result<Vec<TypeParameter>, Error> {
+        let (parameters, _) = self.delimited_comma_separated(
+            &Token::Less,
+            &Token::Greater,
+            Self::type_parameter,
+            false,
+        )?;
+        Ok(parameters)
+    }
 
-        for location in self.tokens.iter().skip(self.current + 1) {
-            // How many `>` this token contributes, and whether consuming all of
-            // them closes the list cleanly or leaves the `=` of `>=` / `>>=`.
-            let (closers, closes_cleanly) = match &location.token {
-                Token::Less => {
-                    depth += 1;
-                    continue;
-                }
-                Token::LeftParentheses => {
-                    parens += 1;
-                    continue;
-                }
-                Token::RightParentheses => {
-                    // A `)` that closes no `(` of ours belongs to an enclosing
-                    // expression, so the type ended before it: in
-                    // `(x as Int < y)` the `<` is a comparison.
-                    if parens == 0 {
-                        return false;
-                    }
-                    parens -= 1;
-                    continue;
-                }
-                Token::MapOpen => {
-                    braces += 1;
-                    continue;
-                }
-                // Like `)`, a `}` or `:` outside a map type of ours belongs to
-                // an enclosing map literal: `%{k: x as Int < y}`.
-                Token::RightCurlyBracket => {
-                    if braces == 0 {
-                        return false;
-                    }
-                    braces -= 1;
-                    continue;
-                }
-                Token::Colon if braces > 0 => continue,
-                Token::LeftSquareBracket => {
-                    brackets += 1;
-                    continue;
-                }
-                // Like `)`, a `]` outside a list type of ours belongs to an
-                // enclosing list literal: `[x as Int < y] > [false]`.
-                Token::RightSquareBracket => {
-                    if brackets == 0 {
-                        return false;
-                    }
-                    brackets -= 1;
-                    continue;
-                }
-                Token::Identifier(_) | Token::Fn | Token::Comma => continue,
-                Token::Greater => (1, true),
-                Token::GreaterGreater => (2, true),
-                Token::GreaterEquals => (1, false),
-                Token::OpAssign(inner) if inner.token == Token::GreaterGreater => (2, false),
-                _ => return false,
-            };
-
-            // A token with more closers than the list has open also contains
-            // part of the following expression, so this `<` is a comparison.
-            if depth < closers {
-                return false;
-            }
-
-            // Consuming every closer would leave a bare `=`, which can neither
-            // continue a type nor follow a cast — `x as Int < y >= z` is a
-            // comparison chain, not a cast to `Int<y>` assigned to `z`.
-            if !closes_cleanly {
-                return false;
-            }
-
-            if depth == closers {
-                // A matching `>` inside brackets belongs to the enclosing
-                // expression unless every bracketed type has closed.
-                return parens == 0 && braces == 0 && brackets == 0;
-            }
-
-            depth -= closers;
-        }
-
-        false
+    fn type_parameter(&mut self) -> Result<TypeParameter, Error> {
+        let token = self.require_current_token()?;
+        let Token::Identifier(name) = token.token else {
+            return Err(Error::text(
+                format!(
+                    "Expected a type parameter but got '{}' instead",
+                    token.token
+                ),
+                token.span,
+            ));
+        };
+        Ok(TypeParameter {
+            id: NodeId::next(),
+            name,
+            span: token.span,
+        })
     }
 
     pub fn named_or_generic_type(&mut self) -> Result<TypeExpr, Error> {

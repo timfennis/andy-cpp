@@ -1,0 +1,10 @@
+// `cast::<T>` passed as a value that a generic function's caller settles is
+// checked for that caller's `T`, also when another `cast` overload made the
+// value wait for it.
+// expect-error: cannot cast Int to String
+fn cast<T>(x: T, y: T) -> T { x }
+fn apply(g, x) => g(x);
+fn h<T>(k, x: Any) => k(cast::<T>, x);
+let a: Any = 1;
+let s: String = h::<String>(apply, a);
+print(s.len());

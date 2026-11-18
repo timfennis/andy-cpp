@@ -1,0 +1,9 @@
+// In its own body, `f::<…>` passes `f`'s own type parameters on, also where
+// another overload of `f` could take other type arguments.
+// expect-error: a use of `f` in its own body passes its own type parameters on
+fn f<T>(x: T, y: T) -> T { x }
+fn f<T>(x: T) -> T {
+    let g: fn(Int) -> Int = f::<Int>;
+    x
+}
+print(f(1));

@@ -408,7 +408,7 @@ impl Value {
     /// Check whether this value conforms to `target`, scanning container
     /// elements recursively. Empty containers conform to any element type.
     ///
-    /// It backs the runtime check of `as` casts, where the caller explicitly
+    /// It backs the runtime check of casts, where the caller explicitly
     /// opted into the scan. Shared container aliases are memoized by object and target
     /// type. Iterators can't be inspected without consuming them, so they only
     /// conform to targets with `Any` elements.

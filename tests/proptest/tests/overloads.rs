@@ -119,7 +119,7 @@ const BODIES_USING_A: [&str; 15] = [
     "a[0]",
     "a.n",
     "a.n + 1",
-    "a as Int",
+    "cast::<Int>(a)",
     "a.first()",
 ];
 
@@ -178,7 +178,7 @@ fn arb_expression() -> impl Strategy<Value = String> {
             inner
                 .clone()
                 .prop_map(|e| format!("{e}.fold(0, fn(acc, a) => acc + a)")),
-            inner.clone().prop_map(|e| format!("({e} as [Int])")),
+            inner.clone().prop_map(|e| format!("cast::<[Int]>({e})")),
             inner.clone().prop_map(|e| format!("{e}[\"k\"]")),
             (inner.clone(), inner).prop_map(|(f, e)| format!("({f})({e})")),
         ]
@@ -285,9 +285,16 @@ fn analyse(program: &Program) {
     ndc_stdlib::register(&mut registry);
     let natives = registry
         .iter()
-        .map(|function| (function.name.clone(), function.static_type.clone()))
+        .map(|function| (function.name.clone(), function.static_type.clone(), None))
+        .chain(registry.intrinsics().map(|function| {
+            (
+                function.name.clone(),
+                function.static_type.clone(),
+                Some(function.intrinsic),
+            )
+        }))
         .collect();
-    let mut analyser = Analyser::new(natives);
+    let mut analyser = Analyser::with_natives(natives);
     for expression in &expressions {
         analyser.analyse(expression);
     }

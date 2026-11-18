@@ -9,7 +9,7 @@
 
 use ahash::AHashMap;
 use ndc_analysis::{
-    Analysis, Binding, CaptureSource, DeclaredStruct, FieldAccessors, Instance, ResolvedVar,
+    Analysis, Binding, Callee, CaptureSource, DeclaredStruct, FieldAccessors, Instance, ResolvedVar,
 };
 use ndc_core::r#struct::StructInfo;
 use ndc_core::{NodeId, StaticType};
@@ -153,8 +153,13 @@ impl<'a> Layout<'a> {
     pub fn lay_out(self, picks: Picks, first_scope: usize, analysis: &mut Analysis) {
         let locate_use =
             |node: NodeId, symbol: SymbolId| self.location(symbol, self.resolver.use_site(node));
+        // An intrinsic isn't stored anywhere: the compiler writes it in place.
         let locate_binding = |(node, binding): (NodeId, Binding<SymbolId>)| {
-            (node, binding.map(|symbol| locate_use(node, symbol)))
+            let binding = binding.map(|symbol| match self.resolver.intrinsic(symbol) {
+                Some(intrinsic) => Callee::Intrinsic(intrinsic),
+                None => Callee::Var(locate_use(node, symbol)),
+            });
+            (node, binding)
         };
         for (symbol, picks) in picks.instances {
             let instance = Instance {

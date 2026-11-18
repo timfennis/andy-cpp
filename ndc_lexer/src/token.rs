@@ -109,6 +109,7 @@ pub enum Token {
     Semicolon,          // ;
     Comma,              // ,
     Colon,              // :
+    ColonColon,         // :: before type arguments, as in `f::<Int>`
     // Lmao syntax
     MapOpen, // %{ operator stolen from elixir
 }
@@ -192,6 +193,7 @@ impl fmt::Display for Token {
                 return write!(f, "{}=", inner.token);
             }
             Self::Colon => ":",
+            Self::ColonColon => "::",
             Self::MapOpen => "%{",
             Self::RightArrow => "->",
             Self::FatArrow => "=>",
@@ -274,6 +276,7 @@ impl TryFrom<(char, char)> for Token {
     fn try_from((c1, c2): (char, char)) -> Result<Self, Self::Error> {
         match (c1, c2) {
             ('.', '.') => Ok(Self::DotDot),
+            (':', ':') => Ok(Self::ColonColon),
             ('%', '{') => Ok(Self::MapOpen),
             ('+', '+') => Ok(Self::PlusPlus),
             ('%', '%') => Ok(Self::PercentPercent),

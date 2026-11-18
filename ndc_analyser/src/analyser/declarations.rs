@@ -1,4 +1,5 @@
 use super::generics::Generalizing;
+use super::solver::Constraint;
 use super::{Analyser, Returns};
 use crate::error::AnalysisError;
 use itertools::izip;
@@ -7,7 +8,7 @@ use ndc_core::{NodeId, StaticType};
 use ndc_lexer::Span;
 use ndc_parser::{
     BindingPattern, BindingPatternLocation, ExpressionLocation, FunctionParameter, StructField,
-    TypeExpr,
+    TypeExpr, TypeParameter,
 };
 use ndc_resolver::SymbolId;
 use std::cell::RefCell;
@@ -19,6 +20,8 @@ use std::rc::Rc;
 pub(super) struct FunctionDeclaration<'a> {
     pub id: NodeId,
     pub name: Option<&'a str>,
+    /// The type parameters it declares, as `T` in `fn f<T>(x: T)`.
+    pub type_parameters: &'a [TypeParameter],
     pub parameters: &'a [FunctionParameter],
     pub body: &'a ExpressionLocation,
     pub return_annotation: Option<&'a TypeExpr>,
@@ -52,6 +55,7 @@ impl Analyser {
         let FunctionDeclaration {
             id,
             name,
+            type_parameters,
             parameters,
             body,
             return_annotation,
@@ -63,6 +67,39 @@ impl Analyser {
         if generic {
             self.vars.enter_level();
             self.declaring = declared.map(|(_, symbol)| symbol);
+        }
+        // Each type parameter it declares is a variable of the body's, which
+        // ends up one of the function's type parameters. Only a generic
+        // function has type parameters: one in a function or a block has
+        // one type.
+        if !type_parameters.is_empty() && !generic {
+            let first = &type_parameters[0];
+            self.emit(AnalysisError::type_parameters_of_a_local_function(
+                name.unwrap_or("?"),
+                first
+                    .span
+                    .merge(type_parameters[type_parameters.len() - 1].span),
+            ));
+        }
+        let declared_type_parameters = type_parameters
+            .iter()
+            .map(|parameter| {
+                let symbol = self.resolver.type_parameter_symbol(parameter.id);
+                let var = if generic {
+                    self.vars.fresh()
+                } else {
+                    StaticType::Error
+                };
+                self.type_parameter_vars.insert(symbol, var.clone());
+                var
+            })
+            .collect::<Vec<_>>();
+        if let Some((_, symbol)) = declared
+            && generic
+            && !declared_type_parameters.is_empty()
+        {
+            self.explicit_type_parameters
+                .insert(symbol, declared_type_parameters.clone());
         }
         let first_use = self.uses.len();
         let first_cast = self.casts.len();
@@ -198,13 +235,20 @@ impl Analyser {
                     pure,
                     return_annotated: annotated_return.is_some(),
                 };
+                let declared = declared_type_parameters
+                    .iter()
+                    .zip(type_parameters)
+                    .map(|(typ, parameter)| (typ, parameter.name.as_str()))
+                    .collect::<Vec<_>>();
                 let typ = self.generalize(
                     symbol,
                     &signature,
                     id,
                     flags,
+                    &declared,
                     [first_use, first_function, first_cast],
                 );
+                self.check_type_parameters(symbol, type_parameters, &declared_type_parameters);
                 self.within_size_limit(symbol, name, typ, span)
             }
             _ => signature,
@@ -235,6 +279,119 @@ impl Analyser {
                 StaticType::unit()
             }
             None => function_type,
+        }
+    }
+
+    /// Checks that each type parameter the generic function `symbol`
+    /// declares, `declared` the variables its body had for them, ended up a
+    /// type parameter of its own: one the body settled, as `fn f<T>(x: T)
+    /// -> Int { x }` does, or made the same as another, isn't one, and is
+    /// reported. The function then takes type arguments for its type
+    /// parameters in the order they're declared.
+    fn check_type_parameters(
+        &mut self,
+        symbol: SymbolId,
+        type_parameters: &[TypeParameter],
+        declared: &[StaticType],
+    ) {
+        if type_parameters.is_empty() {
+            return;
+        }
+        let function = self.resolver.symbol_name(symbol).to_string();
+        let mut generics = Vec::with_capacity(declared.len());
+        for (index, (parameter, var)) in type_parameters.iter().zip(declared).enumerate() {
+            let resolved = self.vars.resolve(var);
+            match &resolved {
+                StaticType::Generic(_) => {
+                    if let Some(earlier) = generics
+                        .iter()
+                        .position(|earlier: &StaticType| *earlier == resolved)
+                    {
+                        self.emit(AnalysisError::type_parameters_are_the_same(
+                            &function,
+                            &type_parameters[earlier].name,
+                            &parameter.name,
+                            parameter.span,
+                        ));
+                    }
+                }
+                // A failed check was reported where it failed.
+                StaticType::Error => {}
+                _ => self.emit(AnalysisError::type_parameter_is_not_generic(
+                    &function,
+                    &parameter.name,
+                    &self.vars.shown(&resolved),
+                    parameter.span,
+                )),
+            }
+            debug_assert_eq!(generics.len(), index);
+            generics.push(resolved);
+        }
+        self.check_type_parameters_are_not_joined(&function, type_parameters, &generics, symbol);
+        self.explicit_type_parameters.insert(symbol, generics);
+    }
+
+    /// Reports each type parameter `generics[i]`, declared as
+    /// `type_parameters[i]`, that the generic function `symbol`'s body
+    /// joins with another type, as `if c { x } else { 1 }` does with `x: T`:
+    /// a call can only pass that type for it. Unlike a call's, which a
+    /// type parameter can meet in many ways, a join's constraint makes the
+    /// two types one.
+    fn check_type_parameters_are_not_joined(
+        &mut self,
+        function: &str,
+        type_parameters: &[TypeParameter],
+        generics: &[StaticType],
+        symbol: SymbolId,
+    ) {
+        let Some(scheme) = self.schemes.get(&symbol) else {
+            return;
+        };
+        let joined = scheme
+            .constraints
+            .iter()
+            .filter_map(|waiting| match &waiting.constraint {
+                Constraint::Join {
+                    types: [a, b, _], ..
+                } => Some((self.vars.resolve(a), self.vars.resolve(b))),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for (a, b) in joined {
+            for (position, (parameter, generic)) in type_parameters.iter().zip(generics).enumerate()
+            {
+                let other = if a == *generic {
+                    &b
+                } else if b == *generic {
+                    &a
+                } else {
+                    continue;
+                };
+                if other == generic {
+                    continue;
+                }
+                let error = match generics.iter().position(|declared| declared == other) {
+                    // Reported once, at the later of the two.
+                    Some(index) if index > position => continue,
+                    Some(index) => AnalysisError::type_parameters_are_the_same(
+                        function,
+                        &type_parameters[index].name,
+                        &parameter.name,
+                        parameter.span,
+                    ),
+                    // One the function doesn't declare, as an unannotated
+                    // parameter's, leaves this one free: it's whatever the
+                    // call makes both.
+                    None if matches!(other, StaticType::Generic(_)) => continue,
+                    None => AnalysisError::type_parameter_is_not_generic(
+                        function,
+                        &parameter.name,
+                        &self.vars.shown(other),
+                        parameter.span,
+                    ),
+                };
+                self.emit(error);
+            }
         }
     }
 

@@ -9,7 +9,7 @@ use crate::iterator::{
 use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{ClosureFunction, Object, Value};
 use ndc_analysis::CaptureSource;
-use ndc_core::StaticType;
+use ndc_core::{FunctionRegistry, StaticType};
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -65,16 +65,19 @@ pub struct CallFrame {
     returns: Option<Box<StaticType>>,
 }
 
-/// The VM's globals for `natives`: native `i` is global slot `i`. The analyser
-/// numbers natives the same way, given them in the same order.
-pub fn native_globals<'a>(natives: impl IntoIterator<Item = &'a Rc<NativeFunction>>) -> Vec<Value> {
-    natives
-        .into_iter()
+/// The VM's globals for the built-ins in `registry`: native `i` is global
+/// slot `i`, and the intrinsics follow. The analyser numbers them the same
+/// way. An intrinsic's slot holds unit: the compiler writes it as bytecode
+/// where it's used and never reads its slot.
+pub fn native_globals(registry: &FunctionRegistry<Rc<NativeFunction>>) -> Vec<Value> {
+    registry
+        .iter()
         .map(|native| {
             Value::Object(Rc::new(Object::Function(Function::Native(Rc::clone(
                 native,
             )))))
         })
+        .chain(registry.intrinsics().map(|_| Value::unit()))
         .collect()
 }
 

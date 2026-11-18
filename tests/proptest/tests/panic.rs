@@ -242,10 +242,15 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
     let registry = build_stdlib_registry();
     let scope = registry
         .iter()
-        .map(|f| (f.name.clone(), f.static_type.clone()))
+        .map(|f| (f.name.clone(), f.static_type.clone(), None))
+        .chain(
+            registry
+                .intrinsics()
+                .map(|f| (f.name.clone(), f.static_type.clone(), Some(f.intrinsic))),
+        )
         .collect();
 
-    let mut analyser = Analyser::new(scope);
+    let mut analyser = Analyser::with_natives(scope);
     for e in &expressions {
         analyser.analyse(e);
     }
@@ -260,7 +265,7 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         Err(_) => return,
     };
 
-    let globals = ndc_vm::native_globals(registry.iter());
+    let globals = ndc_vm::native_globals(&registry);
     let mut vm = Vm::new(compiled, globals).with_output(OutputSink::Buffer(Vec::new()));
     let _ = vm.run();
 }

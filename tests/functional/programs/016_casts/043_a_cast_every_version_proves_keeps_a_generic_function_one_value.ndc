@@ -1,6 +1,6 @@
-// `x as Any` needs no check whatever `x` is, so it doesn't make `erase` a
+// `cast::<Any>(x)` needs no check whatever `x` is, so it doesn't make `erase` a
 // function with a version per type of `x`: its value is one function.
-fn erase(x) => x as Any;
+fn erase(x) => cast::<Any>(x);
 let f: Any = erase;
-print(erase(1), (f as fn(Int) -> Any)(2));
+print(erase(1), cast::<fn(Int) -> Any>(f)(2));
 // expect-output: 1 2

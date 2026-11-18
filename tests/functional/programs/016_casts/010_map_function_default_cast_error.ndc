@@ -1,3 +1,3 @@
 // expect-error: cannot cast
 let m: Any = %{: fn() => 1};
-print(m as %{Int: Int});
+print(cast::<%{Int: Int}>(m));

@@ -16,10 +16,20 @@ impl StaticType {
             generics: Vec::new(),
         };
         let signature = parser.signature()?;
-        match parser.peek() {
-            None => Ok(signature),
-            Some(token) => Err(format!("unexpected '{token}' after the signature")),
+        if let Some(token) = parser.peek() {
+            return Err(format!("unexpected '{token}' after the signature"));
         }
+        // Explicit type arguments, as in `f::<Int, String>(…)`, bind the
+        // type parameters in the order they're declared, which is the order
+        // they're first used in, so the type alone says it.
+        let used = signature.type_parameters();
+        if *parser.generics != *used.iter().map(|name| name.to_string()).collect::<Vec<_>>() {
+            return Err(format!(
+                "declare the type parameters of '{text}' in the order they're first used in: <{}>",
+                used.join(", ")
+            ));
+        }
+        Ok(signature)
     }
 }
 
@@ -287,5 +297,14 @@ mod tests {
         ] {
             assert!(StaticType::signature(text).is_err(), "{text}");
         }
+    }
+
+    #[test]
+    fn type_parameters_are_declared_in_the_order_they_are_first_used_in() {
+        assert!(StaticType::signature("<T, A>(Iterable<T>, A) -> A").is_ok());
+        let error = StaticType::signature("<A, T>(Iterable<T>, A) -> A").unwrap_err();
+        assert!(error.contains("<T, A>"), "{error}");
+        // One that's never used can't be bound by a call's arguments.
+        assert!(StaticType::signature("<T>() -> Int").is_err());
     }
 }

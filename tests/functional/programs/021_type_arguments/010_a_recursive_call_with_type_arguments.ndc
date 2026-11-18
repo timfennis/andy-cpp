@@ -1,0 +1,4 @@
+// A function's own type parameters can be its type arguments.
+// expect-output: 3
+fn last<T>(x: T, n: Int) -> T { if n > 0 { last::<T>(x, n - 1) } else { x } }
+print(last::<Int>(3, 2));

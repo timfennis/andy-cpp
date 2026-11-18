@@ -4,6 +4,6 @@
 fn pick(x: Int) => 1;
 fn pick(x: Any) => 2;
 fn wrap(x) => pick(x);
-let a: Any = wrap as fn(Int) -> Int;
-let g = a as fn(String) -> Int;
+let a: Any = cast::<fn(Int) -> Int>(wrap);
+let g = cast::<fn(String) -> Int>(a);
 print(g("s"));

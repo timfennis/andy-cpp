@@ -14,6 +14,6 @@ assert_eq(c * (3, 4), (33, 48));
 
 // From `Any`s, after a cast to the tuple of numbers they hold.
 fn id(x) -> Any => x;
-let p: (Int, Int, Int) = (id(1), id(2), id(3)) as (Int, Int, Int);
+let p: (Int, Int, Int) = cast::<(Int, Int, Int)>((id(1), id(2), id(3)));
 let q: (Int, Int, Int) = p - b;
 assert_eq(q * q, (9, 9, 9));

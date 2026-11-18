@@ -4,6 +4,7 @@ use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
     BindingPattern, BindingPatternLocation, Expression, ExpressionLocation, FunctionParameter,
+    TypeParameter,
 };
 
 use crate::util::LineIndex;
@@ -34,6 +35,7 @@ fn collect_symbol(
     match &expr.expression {
         Expression::FunctionDeclaration {
             name: Some(name),
+            type_parameters,
             parameters,
             return_annotation,
             body,
@@ -51,7 +53,7 @@ fn collect_symbol(
             };
             out.push(make_symbol(
                 name.clone(),
-                Some(signature(parameters, return_type)),
+                Some(signature(type_parameters, parameters, return_type)),
                 SymbolKind::FUNCTION,
                 expr.span,
                 expr.span,
@@ -133,8 +135,21 @@ fn push_pattern_symbols(
     }
 }
 
-/// Render a function signature like `(a, b) -> Int` for the symbol detail.
-fn signature(parameters: &[FunctionParameter], return_type: Option<&StaticType>) -> String {
+/// Render a function signature like `(a, b) -> Int` for the symbol detail,
+/// with the type parameters it declares in front, as `<T>(x) -> T`.
+fn signature(
+    type_parameters: &[TypeParameter],
+    parameters: &[FunctionParameter],
+    return_type: Option<&StaticType>,
+) -> String {
+    let declared = if type_parameters.is_empty() {
+        String::new()
+    } else {
+        let names = type_parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str());
+        format!("<{}>", names.collect::<Vec<_>>().join(", "))
+    };
     let params = parameters
         .iter()
         .map(|p| match &p.lvalue.pattern {
@@ -144,8 +159,8 @@ fn signature(parameters: &[FunctionParameter], return_type: Option<&StaticType>)
         .collect::<Vec<_>>()
         .join(", ");
     match return_type {
-        Some(rt) => format!("({params}) -> {rt}"),
-        None => format!("({params})"),
+        Some(rt) => format!("{declared}({params}) -> {rt}"),
+        None => format!("{declared}({params})"),
     }
 }
 
@@ -222,6 +237,26 @@ mod tests {
     }
 
     #[test]
+    fn a_function_symbol_shows_the_type_parameters_it_declares() {
+        let syms = symbols("fn swap<B, A>(a: A, b: B) -> (B, A) { (b, a) }");
+        let func = syms
+            .iter()
+            .find(|s| s.name == "swap")
+            .expect("swap symbol present");
+        assert_eq!(func.detail.as_deref(), Some("<B, A>(a, b) -> (B, A)"));
+    }
+
+    #[test]
+    fn a_type_parameter_keeps_the_name_it_is_declared_with() {
+        let syms = symbols("fn id<T>(x: T) -> T { x }");
+        let func = syms
+            .iter()
+            .find(|s| s.name == "id")
+            .expect("id symbol present");
+        assert_eq!(func.detail.as_deref(), Some("<T>(x) -> T"));
+    }
+
+    #[test]
     fn struct_with_fields_in_outline() {
         let syms = symbols("struct Point {\n    x: Int,\n    y: Int,\n}\n");
         let point = syms
@@ -244,7 +279,7 @@ mod tests {
         let syms = symbols(concat!(
             "if true { fn helper() { 1 } }\n",
             "for x in [1] { let doubled = x * 2; }\n",
-            "(fn identity(value) => value) as Any",
+            "cast::<Any>(fn identity(value) => value)",
         ));
         let names = syms.iter().map(|s| s.name.as_str()).collect::<Vec<_>>();
         assert_eq!(names, ["helper", "doubled", "identity"]);

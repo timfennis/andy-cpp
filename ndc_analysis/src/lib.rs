@@ -4,7 +4,7 @@
 
 use ahash::AHashMap;
 use ndc_core::r#struct::StructInfo;
-use ndc_core::{NodeId, StaticType};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 
 /// What the analyser worked out about one batch of statements: a whole program,
 /// or one line of the REPL.
@@ -48,9 +48,10 @@ pub struct Analysis {
     pub augmented_assignments: AHashMap<NodeId, Binding>,
     /// What each struct declaration declares, keyed by the declaration.
     pub structs: AHashMap<NodeId, DeclaredStruct>,
-    /// The type each `as` cast checks its value against at runtime, keyed by
-    /// the cast. `None` when the value is already known to have the type, as
-    /// in `1 as Int`, so there is nothing to check.
+    /// The type each cast checks its value against at runtime, keyed by the
+    /// `cast` or `cast?` name, called or used as a value. `None` when the
+    /// value is already known to have the type, as in `cast::<Int>(1)`, so
+    /// there is nothing to check.
     pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries
@@ -195,9 +196,9 @@ impl Analysis {
 }
 
 /// What a use of a name refers to. The analyser picks symbols, and the layout
-/// turns each into the [`ResolvedVar`] the compiler reads.
+/// turns each into the [`Callee`] the compiler reads.
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum Binding<V = ResolvedVar> {
+pub enum Binding<V = Callee> {
     None,
     Resolved(Candidate<V>),
     /// An operator applied to each element of tuple arguments whose positions
@@ -238,6 +239,15 @@ pub struct FieldAccessors {
     pub setter: ResolvedVar,
 }
 
+/// What a binding refers to: a value stored in a variable, or an intrinsic,
+/// which the compiler writes as bytecode where it's used and which isn't
+/// stored anywhere.
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub enum Callee {
+    Var(ResolvedVar),
+    Intrinsic(Intrinsic),
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum ResolvedVar {
     Local {
@@ -261,7 +271,7 @@ pub enum ResolvedVar {
 /// what kind of call this candidate is — a direct scalar call, or an element-wise
 /// tuple broadcast over the scalar overload that `var()` returns.
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub enum Candidate<V = ResolvedVar> {
+pub enum Candidate<V = Callee> {
     Scalar(V),
     /// Element-wise tuple broadcast. The inner value points to the scalar
     /// overload that fires for each element pair.

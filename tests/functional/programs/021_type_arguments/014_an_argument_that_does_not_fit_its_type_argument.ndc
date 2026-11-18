@@ -1,0 +1,4 @@
+// The arguments have to fit the types the type arguments give the parameters.
+// expect-error: No function called 'id' found that matches the arguments 'Int'
+fn id<T>(x: T) -> T { x }
+id::<String>(1);

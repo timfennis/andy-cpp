@@ -3,5 +3,5 @@
 // expect-error: cannot cast to [Any]: the list is also held by something else
 let words = "a b".split(" ");
 let any: Any = words;
-let anything = any as [Any];
+let anything = cast::<[Any]>(any);
 anything.push(1);

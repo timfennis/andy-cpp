@@ -1,0 +1,5 @@
+// A cast to a type parameter the call leaves open has nothing to check against.
+// expect-error: nothing says what type this cast checks for
+fn f<T>(x: Any) -> T { cast::<T>(x) }
+let a: Any = 1;
+print(f(a));

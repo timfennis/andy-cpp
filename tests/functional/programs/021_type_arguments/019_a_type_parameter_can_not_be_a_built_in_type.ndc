@@ -1,0 +1,2 @@
+// expect-error: Type parameter 'Int' is not allowed to shadow the built-in type 'Int'
+fn f<Int>(x: Int) => x;

@@ -382,16 +382,17 @@ fn a_while_loop_discards_its_body_value_and_yields_unit() {
 // a = 5;
 //
 // A top-level declaration is a global, so the declaration stores 1 into
-// global slot 0 (there are no natives here).
+// global slot 2 (there are no natives here, and the language's intrinsics
+// `cast` and `cast?` take slots 0 and 1).
 // Assignment pushes new value, SetGlobal overwrites,
 // push unit as the expression result, Pop discards it.
 //
 // 0: Constant(0)    push `1`
-// 1: SetGlobal(0)   store in global slot 0 (declaration)
+// 1: SetGlobal(2)   store in global slot 2 (declaration)
 // 2: Constant(1)    push `()` (declaration result)
 // 3: Pop            discard (statement)
 // 4: Constant(2)    push `5`
-// 5: SetGlobal(0)   overwrite global slot 0 (assignment)
+// 5: SetGlobal(2)   overwrite global slot 2 (assignment)
 // 6: Constant(3)    push `()` (assignment result)
 // 7: Pop            discard (statement)
 // 8: Halt
@@ -401,11 +402,11 @@ fn a_top_level_variable_is_declared_and_assigned_through_its_global() {
         compile_with_analysis("let a = 1;\na = 5;"),
         [
             Constant(0),
-            SetGlobal(0),
+            SetGlobal(2),
             Constant(1),
             Pop,
             Constant(2),
-            SetGlobal(0),
+            SetGlobal(2),
             Constant(3),
             Pop,
             Halt
@@ -559,17 +560,18 @@ fn a_named_call_with_a_tuple_argument_is_a_plain_call() {
 // point.x = 2;
 //
 // A member assignment calls the field's setter `x=` with the receiver and
-// then the value. `Point`, `x` and `x=` take global slots 0 to 2, so `point`
-// is global 3. However the setter itself is loaded, the call is:
+// then the value. The intrinsics `cast` and `cast?` take global slots 0 and
+// 1, and `Point`, `x` and `x=` 2 to 4, so `point` is global 5. However the
+// setter itself is loaded, the call is:
 //
-// <setter>, GetGlobal(3), Constant(_), Call(2)
+// <setter>, GetGlobal(5), Constant(_), Call(2)
 #[test]
 fn member_assignment_calls_the_setter_with_the_receiver_and_the_value() {
     let ops = compile_with_analysis("struct Point { x: Int }\nlet point = Point(1);\npoint.x = 2;");
 
     assert!(
         ops.windows(4)
-            .any(|window| matches!(window, [_, GetGlobal(3), Constant(_), Call(2)])),
+            .any(|window| matches!(window, [_, GetGlobal(5), Constant(_), Call(2)])),
         "expected setter, receiver, value, Call(2); got: {ops:?}",
     );
 }
@@ -591,13 +593,13 @@ fn break_pops_the_operands_pending_in_its_expression() {
     );
 }
 
-// let x: Any = 1; x as Int
+// let x: Any = 1; cast::<Int>(x)
 //
 // `Any` doesn't prove the target type, so the cast compiles to a CheckType
 // guard after the value is loaded.
 #[test]
 fn an_unproven_cast_checks_the_type_at_runtime() {
-    let ops = compile_with_analysis("let x: Any = 1; x as Int");
+    let ops = compile_with_analysis("let x: Any = 1; cast::<Int>(x)");
     assert!(
         ops.iter()
             .any(|op| matches!(op, CheckType(t) if **t == ndc_core::StaticType::Int)),
@@ -605,14 +607,14 @@ fn an_unproven_cast_checks_the_type_at_runtime() {
     );
 }
 
-// let x: Any = [1]; x as [Int]; x as Int
+// let x: Any = [1]; cast::<[Int]>(x); cast::<Int>(x)
 //
 // A cast to a container type checks that nothing else holds the container,
 // ahead of the type check. A cast to a type without a container in it has
 // nothing to check.
 #[test]
 fn a_cast_to_a_container_checks_it_is_unshared() {
-    let ops = compile_with_analysis("let x: Any = [1]; x as [Int]; x as Int");
+    let ops = compile_with_analysis("let x: Any = [1]; cast::<[Int]>(x); cast::<Int>(x)");
     let checks: Vec<usize> = ops
         .iter()
         .enumerate()
@@ -626,26 +628,26 @@ fn a_cast_to_a_container_checks_it_is_unshared() {
     );
 }
 
-// 1 as Int; [1] as Any
+// cast::<Int>(1); cast::<Any>([1])
 //
 // Both casts are proven by the value's static type, so no runtime guard is
 // emitted.
 #[test]
 fn a_proven_cast_needs_no_runtime_check() {
-    let ops = compile_with_analysis("1 as Int; [1] as Any");
+    let ops = compile_with_analysis("cast::<Int>(1); cast::<Any>([1])");
     assert!(
         ops.iter().all(|op| !matches!(op, CheckType(_))),
         "provable casts must not emit CheckType, got: {ops:?}",
     );
 }
 
-// let x: Any = 1; x as? Int
+// let x: Any = 1; cast?::<Int>(x)
 //
 // An optional cast tests the value with a TryCast, which gives an option
 // instead of a CheckType guard that fails.
 #[test]
 fn an_unproven_optional_cast_tries_the_type_at_runtime() {
-    let ops = compile_with_analysis("let x: Any = 1; x as? Int");
+    let ops = compile_with_analysis("let x: Any = 1; cast?::<Int>(x)");
     assert!(
         ops.iter()
             .any(|op| matches!(op, TryCast(t) if **t == ndc_core::StaticType::Int)),
@@ -657,12 +659,12 @@ fn an_unproven_optional_cast_tries_the_type_at_runtime() {
     );
 }
 
-// 1 as? Int
+// cast?::<Int>(1)
 //
 // A proven optional cast is always `Some`, which a TryCast to `Any` makes.
 #[test]
 fn a_proven_optional_cast_is_always_some() {
-    let ops = compile_with_analysis("1 as? Int");
+    let ops = compile_with_analysis("cast?::<Int>(1)");
     assert!(
         ops.iter()
             .any(|op| matches!(op, TryCast(t) if **t == ndc_core::StaticType::Any)),
@@ -670,13 +672,13 @@ fn a_proven_optional_cast_is_always_some() {
     );
 }
 
-// let a: Any = 1; let n: Int = a as Int;
+// let a: Any = 1; let n: Int = cast::<Int>(a);
 //
 // An `Any` stored where an Int is expected takes a cast, which is the only
 // check: storing what the cast gives needs none.
 #[test]
 fn an_any_cast_for_a_typed_variable_is_checked_once() {
-    let ops = compile_with_analysis("let a: Any = 1; let n: Int = a as Int;");
+    let ops = compile_with_analysis("let a: Any = 1; let n: Int = cast::<Int>(a);");
     assert_eq!(
         ops.iter().filter(|op| matches!(op, CheckType(_))).count(),
         1,
@@ -787,7 +789,8 @@ fn a_closure_reaches_captured_variables_through_its_upvalues() {
 // let g = 1;
 // fn f() { g = 2; g }
 //
-// A function reaches a top-level declaration as a global: `g` is global 0,
+// A function reaches a top-level declaration as a global: `g` is global 2,
+// after the intrinsics,
 // which `f` writes and reads with SetGlobal and GetGlobal. `f` captures
 // nothing, so its declaration loads it as a plain constant, with no Closure.
 #[test]
@@ -803,10 +806,10 @@ fn a_function_reaches_top_level_declarations_as_globals_without_capturing_them()
         compile_nested_function(source, &[2]),
         [
             Constant(0),
-            SetGlobal(0),
+            SetGlobal(2),
             Constant(1),
             Pop,
-            GetGlobal(0),
+            GetGlobal(2),
             Return
         ]
     );

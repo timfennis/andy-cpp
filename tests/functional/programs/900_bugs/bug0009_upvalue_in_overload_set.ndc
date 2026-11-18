@@ -7,8 +7,8 @@ fn outer() {
     fn describe(x: String) { "string" }
     fn middle() {
         fn inner(v: Any) {
-            let n = v as? Int;
-            if n.is_some() { describe(n.unwrap()) } else { describe(v as String) }
+            let n = cast?::<Int>(v);
+            if n.is_some() { describe(n.unwrap()) } else { describe(cast::<String>(v)) }
         }
         inner(1) ++ " " ++ inner("a")
     }

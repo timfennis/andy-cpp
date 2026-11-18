@@ -4,6 +4,6 @@
 // expect-output: true false 5
 fn is_safe(ns) { ns.all(fn(x) { x > 0 }) }
 fn inc(x) => x + 1
-let f = is_safe as fn([Int]) -> Bool;
-let a: Any = inc as fn(Int) -> Int;
-print(f([1, 2]), f([0]), (a as fn(Int) -> Int)(4));
+let f = cast::<fn([Int]) -> Bool>(is_safe);
+let a: Any = cast::<fn(Int) -> Int>(inc);
+print(f([1, 2]), f([0]), cast::<fn(Int) -> Int>(a)(4));

@@ -2,5 +2,5 @@
 // expect-output: ok
 fn forever() -> Never { forever() }
 let a: Any = forever;
-let f = a as fn() -> Int;
+let f = cast::<fn() -> Int>(a);
 print("ok");

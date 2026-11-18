@@ -4,7 +4,7 @@ use crate::types::{TypeTable, TypeVars};
 use ahash::{AHashMap, AHashSet};
 use ndc_analysis::Analysis;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
-use ndc_core::{NodeId, StaticType, TypeVar};
+use ndc_core::{Intrinsic, NodeId, StaticType, TypeVar};
 use ndc_layout::{Layout, Picks};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, TypeExpr};
@@ -57,6 +57,17 @@ pub struct Analyser {
     /// such as `+(A, Int) -> B` for `fn inc(x) => x + 1`, which a call of it
     /// copies with the types it's called with.
     schemes: AHashMap<SymbolId, Scheme>,
+    /// The type parameters each generic function takes type arguments for,
+    /// in order: `f::<Int, String>` binds the first to `Int`. A native's are
+    /// its signature's, as `T` and `A` in `<T, A>(Iterable<T>, A, …)`; a
+    /// function's are those it declares, as `T` in `fn f<T>(x: T)`, which
+    /// are variables while its body is analysed. Absent for a function
+    /// that takes none.
+    explicit_type_parameters: AHashMap<SymbolId, Vec<StaticType>>,
+    /// What each type parameter a function declares stands for in its
+    /// declaration: a variable, which ends up a type parameter of the
+    /// function's type. Keyed by the type parameter's symbol.
+    type_parameter_vars: AHashMap<SymbolId, StaticType>,
     /// What a call just copied from a generic function, until the call is
     /// known to commit to it.
     pending: Pending,
@@ -159,17 +170,53 @@ pub(super) struct Returns {
 
 impl Analyser {
     /// An analyser for programs that can call `natives`, given as name and
-    /// type in registry order: the first is the native in global slot 0.
+    /// type in registry order: the first is the native in global slot 0. The
+    /// language's intrinsics, as `cast`, follow them.
     pub fn new(natives: Vec<(String, StaticType)>) -> Self {
+        let intrinsics = ndc_core::IntrinsicFunction::all()
+            .into_iter()
+            .map(|function| {
+                (
+                    function.name,
+                    function.static_type,
+                    Some(function.intrinsic),
+                )
+            });
+        Self::with_natives(
+            natives
+                .into_iter()
+                .map(|(name, typ)| (name, typ, None))
+                .chain(intrinsics)
+                .collect(),
+        )
+    }
+
+    /// [`Self::new`] for natives, given with the intrinsics among them,
+    /// which the compiler writes as bytecode where they're used, as a
+    /// [`ndc_core::FunctionRegistry`] lists them.
+    pub fn with_natives(natives: Vec<(String, StaticType, Option<Intrinsic>)>) -> Self {
         let resolver = NameResolver::new(
-            natives.iter().map(|(name, _)| name.as_str()),
+            natives
+                .iter()
+                .map(|(name, _, intrinsic)| (name.as_str(), *intrinsic)),
             StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
         );
         let mut types = TypeTable::default();
         let mut any_index = None;
-        for ((name, typ), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
+        let mut explicit_type_parameters = AHashMap::new();
+        for ((name, typ, _), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
             if name == ndc_core::ANY_INDEX {
                 any_index = Some(symbol);
+            }
+            // A signature declares its type parameters in the order they're
+            // first used in, which is the order of `type_parameters`.
+            let declared = typ
+                .type_parameters()
+                .into_iter()
+                .map(StaticType::Generic)
+                .collect::<Vec<_>>();
+            if !declared.is_empty() {
+                explicit_type_parameters.insert(symbol, declared);
             }
             types.declare(symbol, typ);
         }
@@ -180,6 +227,8 @@ impl Analyser {
             vars: TypeVars::default(),
             waiting: BTreeMap::new(),
             schemes: AHashMap::new(),
+            explicit_type_parameters,
+            type_parameter_vars: AHashMap::new(),
             pending: Pending::default(),
             uses: Vec::new(),
             instances: AHashMap::new(),
@@ -368,6 +417,13 @@ impl Analyser {
                 let has_args = !args.is_empty();
                 let args = args.iter().map(|a| self.lower_type_expr(a)).collect();
                 let symbol = self.resolver.type_name_symbol(*id);
+                if let Some(parameter) = self.type_parameter_vars.get(&symbol) {
+                    if has_args {
+                        self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
+                        return StaticType::Error;
+                    }
+                    return parameter.clone();
+                }
                 match self.struct_types.get(&symbol) {
                     Some(_) if has_args => {
                         self.emit(AnalysisError::type_does_not_take_generic_args(name, *span));
@@ -385,6 +441,67 @@ impl Analyser {
                 }
             }
         }
+    }
+
+    /// The type of a cast of a value of type `found` to `target`, as
+    /// `cast::<Int>(x)`, keyed by `node`, or with `optional` of `cast?`. A
+    /// cast asserts the type and never converts. What isn't known about the
+    /// value yet is what the cast says it is: `cast::<fn(Int) -> Int>(fn(x)
+    /// => x)` takes an Int, and needs no check as the program runs, and
+    /// `cast::<Float>(1)` is a Float. Known parts are checked, and so is a
+    /// value nothing is known about, like what a call that waits returns.
+    /// `cast?` only tests the value, which stays what it is: in `fn f(xs) {
+    /// cast?::<[Int]>(xs).is_some() }`, `xs` can still be a list of Strings.
+    /// A number written there is what it's cast to, as with `cast`:
+    /// `cast?::<Float>(1)` is `Some(1.0)`.
+    fn analyse_cast(
+        &mut self,
+        node: NodeId,
+        found: &StaticType,
+        target: StaticType,
+        optional: bool,
+        span: Span,
+    ) -> StaticType {
+        let found = self.vars.resolve(found);
+        let unknown = self.vars.is_unknown(&found);
+        let literal = matches!(found, StaticType::Var(var) if self.vars.is_literal(var));
+        // Any value is an `Any`, so `cast::<Any>(1 + 2)` says nothing about
+        // what the `1` and `2` are.
+        if found.has_vars() && !unknown && (!optional || literal) && target != StaticType::Any {
+            self.vars.try_unify(&found, &target);
+        }
+        let found = self.vars.resolve(&found);
+        if !found.overlaps(&target) {
+            let found = self.vars.shown(&found);
+            self.emit(AnalysisError::impossible_cast(&found, &target, span));
+        }
+        // Whether the cast is checked as the program runs is decided once
+        // what's known about the value is: in `let xs = []; cast?::<[Int]>(xs)`,
+        // a later `xs.push(1)` proves it.
+        self.casts.push(Cast {
+            node,
+            found,
+            target: target.clone(),
+            instance: None,
+            span,
+        });
+        // `cast?` is the same cast, with `None` where `cast` would fail. One
+        // that can never succeed is an error like `cast`: it would always be
+        // `None`.
+        if optional {
+            StaticType::Option(Box::new(target))
+        } else {
+            target
+        }
+    }
+
+    /// Lowers the type arguments written after a name, as `Int` in
+    /// `f::<Int>`, which are the types of values.
+    fn lower_type_arguments(&mut self, type_arguments: &[TypeExpr]) -> Vec<StaticType> {
+        type_arguments
+            .iter()
+            .map(|argument| self.lower_value_type(argument))
+            .collect()
     }
 
     /// Lowers an annotation of something other than a parameter, which an
@@ -476,7 +593,14 @@ impl Analyser {
                 }
                 StaticType::Never
             }
-            Expression::Identifier { name, .. } => self.analyse_value_reference(*id, name, *span),
+            Expression::Identifier {
+                name,
+                type_arguments,
+                ..
+            } => {
+                let type_arguments = self.lower_type_arguments(type_arguments);
+                self.analyse_value_reference(*id, name, type_arguments, *span)
+            }
             Expression::Statement(inner) => {
                 let typ = self.analyse_expr(inner);
                 // Diverging statements (return/break/continue) propagate Never
@@ -494,57 +618,6 @@ impl Analyser {
                 StaticType::Bool
             }
             Expression::Grouping(expr) => self.analyse_expr(expr),
-            Expression::Cast {
-                value,
-                annotation,
-                optional,
-            } => {
-                let target = self.lower_value_type(annotation);
-                let found = self.analyse_expr(value);
-                // What isn't known about the value yet is what the cast says
-                // it is: `(fn(x) => x) as fn(Int) -> Int` takes an Int, and
-                // needs no check as the program runs, and `1 as Float` is a
-                // Float. Known parts are checked, and so is a value nothing
-                // is known about, like what a call that waits returns.
-                // `as?` only tests the value, which stays what it is: in `fn
-                // f(xs) { (xs as? [Int]).is_some() }`, `xs` can still be a
-                // list of Strings. A number written there is what it's cast
-                // to, as with `as`: `1 as? Float` is `Some(1.0)`.
-                let found = self.vars.resolve(&found);
-                let unknown = self.vars.is_unknown(&found);
-                let literal = matches!(found, StaticType::Var(var) if self.vars.is_literal(var));
-                // Any value is an `Any`, so `(1 + 2) as Any` says nothing
-                // about what the `1` and `2` are.
-                if found.has_vars()
-                    && !unknown
-                    && (!*optional || literal)
-                    && target != StaticType::Any
-                {
-                    self.vars.try_unify(&found, &target);
-                }
-                let found = self.vars.resolve(&found);
-                if !found.overlaps(&target) {
-                    let found = self.vars.shown(&found);
-                    self.emit(AnalysisError::impossible_cast(&found, &target, *span));
-                }
-                // Whether the cast is checked as the program runs is decided
-                // once what's known about the value is: in `let xs = [];
-                // xs as? [Int]`, a later `xs.push(1)` proves it.
-                self.casts.push(Cast {
-                    node: *id,
-                    found,
-                    target: target.clone(),
-                    instance: None,
-                });
-                // `as?` is the same cast, with `None` where `as` would fail.
-                // One that can never succeed is an error like `as`: it would
-                // always be `None`.
-                if *optional {
-                    StaticType::Option(Box::new(target))
-                } else {
-                    target
-                }
-            }
             Expression::VariableDeclaration {
                 l_value,
                 annotated_type,
@@ -579,6 +652,7 @@ impl Analyser {
             } => self.analyse_op_assignment(*id, l_value, r_value, operation, *span),
             Expression::FunctionDeclaration {
                 name,
+                type_parameters,
                 parameters,
                 body,
                 return_annotation,
@@ -587,6 +661,7 @@ impl Analyser {
             } => self.analyse_function_declaration(FunctionDeclaration {
                 id: *id,
                 name: name.as_deref(),
+                type_parameters,
                 parameters,
                 body,
                 return_annotation: return_annotation.as_ref(),

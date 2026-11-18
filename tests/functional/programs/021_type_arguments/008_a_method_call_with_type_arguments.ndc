@@ -1,0 +1,4 @@
+// `x.f::<T>(y)` is the call `f::<T>(x, y)`.
+// expect-output: (1,2)
+fn pair<A, B>(a: A, b: B) -> (A, B) { (a, b) }
+print(1.pair::<Int, Int>(2));

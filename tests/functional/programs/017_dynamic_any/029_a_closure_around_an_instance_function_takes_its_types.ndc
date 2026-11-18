@@ -3,5 +3,5 @@
 // expect-error: cannot cast fn() -> fn() -> Int to fn() -> fn() -> String
 fn make(x) { x + 1; fn() => fn() => x }
 let f: Any = make(1);
-let g = f as fn() -> fn() -> String;
+let g = cast::<fn() -> fn() -> String>(f);
 print(g()());

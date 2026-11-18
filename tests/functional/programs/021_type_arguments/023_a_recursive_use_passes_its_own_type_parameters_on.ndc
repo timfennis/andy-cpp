@@ -1,0 +1,6 @@
+// While a function's body is checked, it can only pass its own type parameters to itself.
+// expect-error: a use of `f` in its own body passes its own type parameters on
+fn f<T>(x: T, n: Int) -> T {
+    if n > 0 { f::<Int>(1, n - 1); }
+    x
+}

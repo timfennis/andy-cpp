@@ -1,0 +1,4 @@
+// A type argument says what the type parameter is, so a literal passed for it takes that type.
+// expect-output: 1.0
+fn id<T>(x: T) -> T { x }
+print(id::<Float>(1));

@@ -1,0 +1,8 @@
+// A type parameter can be written in the body's annotations too.
+// expect-output: [5]
+fn wrap<T>(x: T) -> [T] {
+    let xs: [T] = [];
+    xs.push(x);
+    xs
+}
+print(wrap::<Int>(5));

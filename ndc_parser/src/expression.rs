@@ -26,6 +26,9 @@ pub enum Expression {
         /// include the parentheses. This field still covers only `foo`, so a
         /// binding pattern can use it as the go-to-definition destination.
         identifier_span: Span,
+        /// The type arguments written after the name: `Int` and `String` in
+        /// `f::<Int, String>`. Empty when none are written.
+        type_arguments: Vec<TypeExpr>,
     },
     Statement(Box<ExpressionLocation>),
     Logical {
@@ -34,14 +37,6 @@ pub enum Expression {
         right: Box<ExpressionLocation>,
     },
     Grouping(Box<ExpressionLocation>),
-    /// `value as Type` — asserts the value has the target type; never converts.
-    /// `value as? Type` (`optional`) — `Some(value)` when the value has the
-    /// target type, `None` when it doesn't.
-    Cast {
-        value: Box<ExpressionLocation>,
-        annotation: TypeExpr,
-        optional: bool,
-    },
     VariableDeclaration {
         l_value: BindingPatternLocation,
         annotated_type: Option<TypeExpr>,
@@ -58,6 +53,9 @@ pub enum Expression {
     },
     FunctionDeclaration {
         name: Option<String>,
+        /// The type parameters declared after the name: `T` and `U` in
+        /// `fn f<T, U>(…)`. Empty when none are declared.
+        type_parameters: Vec<TypeParameter>,
         parameters: Vec<FunctionParameter>,
         parameters_span: Span,
         body: Box<ExpressionLocation>,
@@ -155,6 +153,16 @@ pub enum ForBody {
 pub struct StructField {
     pub identifier: String,
     pub annotation: TypeExpr,
+    pub span: Span,
+}
+
+/// A type parameter a function declares: `T` in `fn f<T>(x: T) -> T`.
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct TypeParameter {
+    /// Identity of the declaration, which the resolver keys the type it
+    /// declares by.
+    pub id: NodeId,
+    pub name: String,
     pub span: Span,
 }
 
@@ -272,7 +280,6 @@ impl ExpressionLocation {
             | Expression::StructDeclaration { .. } => {}
             Expression::Statement(inner)
             | Expression::Grouping(inner)
-            | Expression::Cast { value: inner, .. }
             | Expression::Return { value: inner }
             | Expression::VariableDeclaration { value: inner, .. }
             | Expression::FunctionDeclaration { body: inner, .. }
@@ -378,7 +385,9 @@ impl AssignmentTarget {
     #[must_use]
     pub fn can_build_from_expression(expression: &Expression) -> bool {
         match expression {
-            Expression::Identifier { .. } | Expression::MemberAccess { .. } => true,
+            // `f::<Int>` names a function with type arguments, not a variable.
+            Expression::Identifier { type_arguments, .. } => type_arguments.is_empty(),
+            Expression::MemberAccess { .. } => true,
             Expression::Call {
                 function,
                 arguments,
@@ -471,8 +480,8 @@ impl TryFrom<ExpressionLocation> for AssignmentTargetLocation {
             Expression::Identifier {
                 name,
                 identifier_span,
-                ..
-            } => AssignmentTarget::Identifier {
+                type_arguments,
+            } if type_arguments.is_empty() => AssignmentTarget::Identifier {
                 identifier: name,
                 span: identifier_span,
             },

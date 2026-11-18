@@ -1,0 +1,6 @@
+// A function declared in a function or a block has one type, so it has no type parameters.
+// expect-error: only a function declared at the top level can have type parameters
+fn outer() {
+    fn inner<T>(x: T) => x;
+    inner(1)
+}

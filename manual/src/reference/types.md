@@ -100,7 +100,7 @@ Write the `Any` where the list or map is made: a list made as a `[String]` can't
 
 ## Getting a value out of an `Any`
 
-Anything can go into an `Any`, but to get a value back out you need a [cast](../features/casts.md). `value as Int` checks that the value is an Int, and `value as? Int` gives an `Option<Int>`:
+Anything can go into an `Any`, but to get a value back out you need a [cast](../features/casts.md). `cast::<Int>(value)` checks that the value is an Int, and `cast?::<Int>(value)` gives an `Option<Int>`:
 
 ```ndc,fails
 let a: Any = 5;
@@ -109,16 +109,16 @@ let n: Int = a;  // error: mismatched types: found Any but expected Int
 
 ```ndc
 let a: Any = 5;
-let n: Int = a as Int;
+let n: Int = cast::<Int>(a);
 print(n + 1);           // 6
-print(a as? String);    // None
+print(cast?::<String>(a));    // None
 ```
 
-The same goes for operators and functions: `a + 1` needs `(a as Int) + 1`. Functions that take any value, like `print`, `string` and `==`, take an `Any` as it is.
+The same goes for operators and functions: `a + 1` needs `cast::<Int>(a) + 1`. Functions that take any value, like `print`, `string` and `==`, take an `Any` as it is.
 
 Indexing is the exception: `a[i]` works on an `Any` and gives an `Any`, so you can read nested data and cast what you find:
 
 ```ndc
 let data: %{String: Any} = %{"scores": [3, 5]};
-print(data["scores"][1] as Int + 1);  // 6
+print(cast::<Int>(data["scores"][1]) + 1);  // 6
 ```

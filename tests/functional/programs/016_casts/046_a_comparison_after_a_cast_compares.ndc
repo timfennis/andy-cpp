@@ -1,0 +1,16 @@
+// A cast ends at its closing parenthesis, so a `<` after it compares, wherever the cast is.
+// expect-output: (true,true)
+// expect-output: (true,true)
+// expect-output: [true,true]
+// expect-output: true
+// expect-output: true true
+let x: Any = 1;
+let y = 2;
+let z = 3;
+fn f(a, b) => (a, b);
+print(f(cast::<Int>(1) < y, z > 1));
+print((cast::<Int>(1) < y, z > 1));
+print([cast::<Int>(1) < y, z > 1]);
+print([cast::<Int>(1) < y] > [false]);
+let m = %{"k": cast::<Int>(x) < y, "j": z > 1};
+print(m["k"], m["j"]);
