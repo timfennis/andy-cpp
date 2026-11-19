@@ -76,7 +76,7 @@ fn int_loop() {
         "fn run() {
             let i = 0;
             let total = 0;
-            while i < 20000 {
+            while i < 40000 {
                 total = total + i * 2 - 1;
                 i = i + 1;
             }
@@ -84,7 +84,7 @@ fn int_loop() {
         }
         print(run());",
     );
-    assert_eq!(outcome.output, "399960000\n");
+    assert_eq!(outcome.output, "1599920000\n");
 }
 
 #[test]
@@ -234,16 +234,51 @@ fn a_local_read_before_an_operand_that_assigns_it() {
 
 #[test]
 fn integer_overflow() {
+    for program in [
+        "fn grow(n) { n * 1000000 } print(grow(grow(grow(grow(5)))));",
+        "fn grow(n) { n * 1000 } print(grow(grow(grow(grow(grow(grow(grow(5))))))));",
+        "fn up(n) { n + 1 } let big = 9223372036854775807; print(up(big));",
+        "fn down(n) { n - 1 } let small = -9223372036854775807; print(down(down(small)));",
+    ] {
+        let outcome = same_on_both(program);
+        assert!(
+            outcome
+                .result
+                .as_ref()
+                .is_err_and(|error| error.contains("overflowed")),
+            "{outcome:?}"
+        );
+    }
+}
+
+#[test]
+fn conditions_that_compare() {
     let outcome = same_on_both(
-        "fn grow(n) { n * 1000000 }
-        print(grow(grow(grow(grow(5)))));",
+        r#"fn test(a, b) {
+            let out = 0;
+            if a < b { out = out + 1; }
+            if a <= b { out = out + 10; }
+            if a > b { out = out + 100; }
+            if a >= b { out = out + 1000; }
+            if a == b { out = out + 10000; }
+            if a != b { out = out + 100000; }
+            if a < 3 { out = out + 1000000; }
+            if a <= 3 { out = out + 10000000; }
+            if a > 3 { out = out + 100000000; }
+            if a >= 3 { out = out + 1000000000; }
+            if a == 3 { out = out + 10000000000; }
+            if a != 3 { out = out + 100000000000; }
+            out
+        }
+        fn float(x) { if x < 2.5 { 1 } else { 2 } }
+        fn text(a, b) { if a < b { 1 } else { 2 } }
+        print(test(1, 2), test(3, 3), test(5, 4), test(-40000, 40000));
+        print(float(1.0), float(3.0), text("a", "b"), text("b", "a"));
+        print(if (1 < 2) { 1 } else { 2 });"#,
     );
-    assert!(
-        outcome
-            .result
-            .as_ref()
-            .is_err_and(|error| error.contains("overflowed")),
-        "{outcome:?}"
+    assert_eq!(
+        outcome.output,
+        "100011100011 11010011010 101100101100 100011100011\n1 2 1 2\n1\n"
     );
 }
 

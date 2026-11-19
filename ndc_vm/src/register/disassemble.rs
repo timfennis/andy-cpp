@@ -9,10 +9,10 @@ use std::rc::Rc;
 ///
 /// ```text
 /// == f == (2 registers)
-/// 0000  LoadK         r1, k0            1                1
-/// 0001  JumpIfFalse   r0, +1            -> 0003          c
-/// 0002  AddInt        r1, r0, r1                         +
-/// 0003  Return        r1
+/// 0000  LoadK                   r1, k0            1                1
+/// 0001  JumpIfFalse             r0, +1            -> 0003          c
+/// 0002  AddInt                  r1, r0, r1                         +
+/// 0003  Return                  r1
 /// ```
 pub fn disassemble(function: &CompiledFunction, source: Option<&str>) -> String {
     let mut out = String::new();
@@ -40,8 +40,8 @@ fn disassemble_function(function: &CompiledFunction, source: Option<&str>, out: 
                     None => constant.to_string(),
                 }
             }
-            _ => match instr.jump_offset() {
-                Some(offset) => format!("-> {:04}", (ip + 1).wrapping_add_signed(offset as isize)),
+            _ => match chunk.jump_target(ip) {
+                Some(target) => format!("-> {target:04}"),
                 None => String::new(),
             },
         };
@@ -50,7 +50,7 @@ fn disassemble_function(function: &CompiledFunction, source: Option<&str>, out: 
             .map(|excerpt| excerpt.trim().replace('\n', "↵"))
             .unwrap_or_default();
         let line = format!(
-            "{ip:04}  {:<12}  {:<16}  {annotation:<15}  {excerpt}",
+            "{ip:04}  {:<22}  {:<16}  {annotation:<15}  {excerpt}",
             instr.name(),
             instr.to_string()
         );
@@ -108,10 +108,10 @@ mod tests {
         assert_eq!(
             disassemble(&function, None),
             "== f == (2 registers)\n\
-             0000  LoadK         r1, k0            1\n\
-             0001  JumpIfFalse   r0, +1            -> 0003\n\
-             0002  AddInt        r1, r0, r1\n\
-             0003  Return        r1\n"
+             0000  LoadK                   r1, k0            1\n\
+             0001  JumpIfFalse             r0, +1            -> 0003\n\
+             0002  AddInt                  r1, r0, r1\n\
+             0003  Return                  r1\n"
         );
     }
 }
