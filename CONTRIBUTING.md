@@ -38,7 +38,7 @@ The workspace has three test crates, each living under `tests/`:
 |---|---|---|
 | `functional_tests` | `tests/functional/` | End-to-end `.ndc` programs and REPL integration tests. The crate's `build.rs` auto-generates one Rust `#[test]` per `.ndc` file under `tests/functional/programs/`. |
 | `compiler_tests`   | `tests/compiler/`   | Disassembly snapshots: each `.ndc` program under `tests/compiler/programs/` is compiled for each VM and its listings compared with the expected ones next to it. |
-| `proptest_tests`   | `tests/proptest/`   | Property-based fuzz harnesses: random token streams through the parser → analyser → compiler → VM, and generated programs that stress the analyser's overload choices. Both look for panics. |
+| `proptest_tests`   | `tests/proptest/`   | Property-based fuzz harnesses: random token streams through the parser → analyser → compiler → both VMs, generated programs that run on both VMs, and generated programs that stress the analyser's overload choices. They look for panics and for programs the two VMs run differently. |
 
 ### Run everything
 
@@ -49,6 +49,17 @@ cargo test
 This runs all three crates. The proptest crate's fuzz test is `#[ignore]`d
 by default (see below); only its **regression replay** runs as part of
 `cargo test`.
+
+Programs run on the stack VM unless the environment variable `NDC_VM`
+says `register`. To run the whole suite on the register VM:
+
+```bash
+NDC_VM=register cargo test
+```
+
+`tests/functional/tests/register_vm.rs` and the compiler snapshots use
+both VMs whichever `NDC_VM` names; every other test that runs a program
+runs it on the VM `NDC_VM` names.
 
 ### Run a single crate
 
@@ -67,7 +78,9 @@ cargo test test_001_math_001_addition
 ### Run the proptest fuzz harness
 
 The harness lives in `tests/proptest/tests/panic.rs` and contains two
-test functions sharing a single `panic.regressions` file:
+test functions sharing a single `panic.regressions` file. Each runs a
+program on both VMs, and fails on a panic or on a program the two VMs run
+differently:
 
 * `known_regressions_do_not_panic` — replays previously-saved failure
   seeds and runs as part of normal `cargo test`. If a known panic
@@ -91,6 +104,30 @@ When a fresh fuzz run finds a new panic, proptest shrinks it and appends
 the seed to `tests/proptest/tests/panic.regressions`. **Commit the
 updated `.regressions` file** — every subsequent `cargo test` will
 guard against that input.
+
+### Run the differential fuzz harness
+
+Random token streams rarely get past the parser.
+`tests/proptest/tests/differential.rs` generates programs that do run,
+built from what the language has (arithmetic, variables, `if`, bounded
+`while` and `for` loops, lists, tuples, indexing, functions, closures,
+assignment with operators, `break`, `continue`, `return`), and runs each
+on the stack VM and on the register VM. They must print the same, give the
+same value and fail with the same error at the same place. Every loop is
+bounded, so no program runs or allocates without end. A failure shows the
+shrunk program as source.
+
+```bash
+# The short run (300 programs) and the saved seeds, part of `cargo test`
+cargo test -p proptest_tests --test differential
+
+# Long run (10,000 programs by default)
+cargo test -p proptest_tests --test differential -- --ignored
+PROPTEST_CASES=100000 cargo test -p proptest_tests --test differential -- --ignored
+```
+
+Its seeds go to `tests/proptest/tests/differential.regressions`; commit
+them with the fix.
 
 ### Run the overload fuzz harness
 
@@ -168,7 +205,10 @@ a listing that differs fails its test with a diff.
 cargo fmt
 cargo clippy            # fix all warnings
 cargo test
+NDC_VM=register cargo test
 ```
+
+CI runs the tests on both VMs.
 
 If you find yourself writing a `TODO` comment, please open a GitHub
 issue instead.

@@ -1,4 +1,4 @@
-use ndc_interpreter::{InputSource, Interpreter};
+use ndc_interpreter::{Backend, InputSource, Interpreter};
 use std::fs;
 use std::path::Path;
 
@@ -29,6 +29,9 @@ fn run_ndc_test(path: &Path) -> Result<(), std::io::Error> {
 
     let mut interpreter = Interpreter::capturing().with_input(InputSource::Buffer(stdin));
     interpreter.configure(ndc_stdlib::register);
+    // The VM the environment variable `NDC_VM` names, the stack VM if it
+    // names none.
+    interpreter.set_backend(Backend::from_env().expect("NDC_VM names a VM"));
     let interpreter_result = interpreter.eval(&contents);
 
     let program_had_error = interpreter_result.is_err();

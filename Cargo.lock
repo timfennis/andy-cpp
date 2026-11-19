@@ -1490,6 +1490,7 @@ version = "0.4.1"
 dependencies = [
  "ndc_analyser",
  "ndc_core",
+ "ndc_interpreter",
  "ndc_lexer",
  "ndc_parser",
  "ndc_stdlib",

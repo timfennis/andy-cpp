@@ -10,7 +10,7 @@ The manual introduces people to the language and teaches the most common ways to
 Use workspace commands from the repository root:
 
 - `cargo build --workspace` builds all Rust crates.
-- `cargo test --workspace` runs the main test suites and matches CI.
+- `cargo test --workspace` runs the main test suites on the stack VM, and `NDC_VM=register cargo test --workspace` runs them on the register VM; CI runs both.
 - `cargo build --no-default-features` checks the reduced feature set used in CI.
 - `cargo install --path ndc_bin` installs the `ndc` CLI locally.
 - `cargo run -p ndc_bin -- run script.ndc` runs a script without installing.
