@@ -303,6 +303,8 @@ impl Compiler {
             num_locals,
             num_globals: self.analysis.global_count,
             natives,
+            registers: crate::register::Chunk::default(),
+            frame_size: 0,
         }
     }
 
@@ -1422,6 +1424,8 @@ impl Compiler {
                 num_locals,
                 num_globals: 0,
                 natives: Vec::new(),
+                registers: crate::register::Chunk::default(),
+                frame_size: 0,
             },
             used_instance,
         )

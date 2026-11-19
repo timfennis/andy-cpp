@@ -8,6 +8,7 @@ mod io;
 pub mod iterator;
 mod native_op;
 mod natives;
+pub mod register;
 #[cfg(feature = "trace")]
 #[allow(clippy::print_stderr)]
 pub mod tracer;
