@@ -170,3 +170,108 @@ fn elides_every_load_pop_pair() {
         opt.opcodes()
     );
 }
+
+/// The raw and the optimized bytecode of the first function in `source`,
+/// compiled with the standard library.
+fn nested_raw_and_optimized(source: &str) -> (Vec<OpCode>, Vec<OpCode>) {
+    let compile = |optimize: bool| {
+        let mut interp = ndc_interpreter::Interpreter::capturing();
+        interp.configure(ndc_stdlib::register);
+        let compiled = if optimize {
+            interp.compile_str(source)
+        } else {
+            interp.compile_str_unoptimized(source)
+        };
+        first_nested_function_opcodes(&compiled.expect("compile failed"))
+    };
+    (compile(false), compile(true))
+}
+
+// `let a = (x, y);` stores the tuple in slot 2 and, once the declaration's
+// discarded unit value is gone, reads it straight back. As nothing else reads
+// `a`, the optimizer leaves the tuple on the stack instead.
+#[test]
+fn elides_a_local_stored_and_read_once_straight_away() {
+    let (raw, opt) = nested_raw_and_optimized("fn f(x, y) { let a = (x, y); (a, x) }");
+    assert!(raw.contains(&SetLocal(2)), "{raw:?}");
+    assert_eq!(
+        opt,
+        [
+            GetLocal(0),
+            GetLocal(1),
+            MakeTuple(2),
+            GetLocal(0),
+            MakeTuple(2),
+            Return
+        ]
+    );
+}
+
+// A chain of lets, each read once by the next, leaves no locals behind.
+#[test]
+fn elides_a_chain_of_lets_read_once() {
+    let (_, opt) = nested_raw_and_optimized(
+        "fn f(x, y) { let a = (x, y); let b = (a, x); let c = (b, y); c }",
+    );
+    assert_eq!(
+        opt,
+        [
+            GetLocal(0),
+            GetLocal(1),
+            MakeTuple(2),
+            GetLocal(0),
+            MakeTuple(2),
+            GetLocal(1),
+            MakeTuple(2),
+            Return
+        ]
+    );
+}
+
+// `a` is read twice, so its slot is needed after the first read.
+#[test]
+fn keeps_a_local_read_more_than_once() {
+    let (_, opt) = nested_raw_and_optimized("fn f(x) { let a = (x, x); (a, a) }");
+    assert_eq!(
+        opt,
+        [
+            GetLocal(0),
+            GetLocal(0),
+            MakeTuple(2),
+            SetLocal(1),
+            GetLocal(1),
+            GetLocal(1),
+            MakeTuple(2),
+            Return
+        ]
+    );
+}
+
+// `a` is read once, but not straight after it's stored: `x` is read in
+// between, so the tuple can't simply stay on the stack.
+#[test]
+fn keeps_a_local_read_once_after_another_value() {
+    let (_, opt) = nested_raw_and_optimized("fn f(x) { let a = (x, x); (x, a) }");
+    assert!(opt.contains(&SetLocal(1)), "{opt:?}");
+}
+
+// `t[0]` on a local tuple read only there takes the element of the tuple
+// left on the stack, with `TupleIndex`, instead of storing the tuple first.
+#[test]
+fn reads_the_element_of_a_tuple_read_once_from_the_stack() {
+    let (raw, opt) = nested_raw_and_optimized("fn f(x) { let t = (x, x); t[0] }");
+    assert!(
+        raw.contains(&GetLocalTupleIndex { slot: 1, index: 0 }),
+        "{raw:?}"
+    );
+    assert_eq!(
+        opt,
+        [
+            GetLocal(0),
+            GetLocal(0),
+            MakeTuple(2),
+            TupleIndex(0),
+            Return
+        ]
+    );
+}

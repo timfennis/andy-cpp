@@ -11,7 +11,7 @@ ndc_diagnostics.workspace = true
 ndc_highlight.workspace = true
 ndc_interpreter.workspace = true
 # The language features without the language server around them.
-ndc_lsp = { workspace = true, default-features = false }
+ndc_lsp.workspace = true
 ndc_stdlib.workspace = true
 serde = "1.0.229"
 serde_json.workspace = true

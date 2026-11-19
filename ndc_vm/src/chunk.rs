@@ -455,6 +455,30 @@ impl std::fmt::Debug for OpCode {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LabelId(usize);
 
+/// How many instructions of a function read each of its local slots,
+/// including closures capturing it.
+fn slot_reads(code: &[(LabelId, OpCode, Span)]) -> HashMap<usize, usize> {
+    let mut reads = HashMap::default();
+    for (_, op, _) in code {
+        match op {
+            OpCode::GetLocal(slot)
+            | OpCode::GetCell(slot)
+            | OpCode::GetLocalTupleIndex { slot, .. }
+            | OpCode::ListPush(slot)
+            | OpCode::MapInsert(slot) => *reads.entry(*slot).or_default() += 1,
+            OpCode::Closure { values, .. } => {
+                for capture in values.iter() {
+                    if let CaptureSource::Local(slot) = capture {
+                        *reads.entry(*slot).or_default() += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    reads
+}
+
 #[derive(Default, Clone)]
 pub(crate) struct OptimizerIr {
     constants: Vec<Value>,
@@ -528,10 +552,37 @@ impl OptimizerIr {
             .collect();
 
         loop {
+            let reads = slot_reads(&self.code);
             let mut out = Vec::with_capacity(self.code.len());
             let mut i = 0;
             let mut removed = 0;
             while i < self.code.len() {
+                // A local stored and read straight back, and read nowhere
+                // else, never needs its slot: the value stays on the stack.
+                // This also leaves a container's refcount at one, so a
+                // native can change it in place.
+                if let Some(read) = self.code.get(i + 1)
+                    && let OpCode::SetLocal(slot) = self.code[i].1
+                    && reads.get(&slot) == Some(&1)
+                    && !targets.contains(&self.code[i].0)
+                    && !targets.contains(&read.0)
+                {
+                    match read.1 {
+                        OpCode::GetLocal(s) if s == slot => {
+                            i += 2;
+                            removed += 2;
+                            continue;
+                        }
+                        OpCode::GetLocalTupleIndex { slot: s, index } if s == slot => {
+                            out.push((read.0, OpCode::TupleIndex(index), read.2));
+                            i += 2;
+                            removed += 1;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+
                 let elide = i + 1 < self.code.len()
                     && matches!(
                         self.code[i].1,

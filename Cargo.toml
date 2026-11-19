@@ -42,7 +42,7 @@ ndc_analysis = { path = "ndc_analysis" }
 ndc_interpreter = { path = "ndc_interpreter" }
 ndc_vm = { path = "ndc_vm" }
 ndc_parser = { path = "ndc_parser" }
-ndc_lsp = { path = "ndc_lsp" }
+ndc_lsp = { path = "ndc_lsp", default-features = false }
 ndc_macros = { path = "ndc_macros" }
 ndc_stdlib = { path = "ndc_stdlib" }
 num = "0.4.3"
