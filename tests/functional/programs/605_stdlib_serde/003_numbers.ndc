@@ -11,3 +11,11 @@ assert_eq(json_decode(json_encode(0.1)), 0.1);
 // null and the unit value are the same thing on both sides
 assert_eq(json_decode("null"), ());
 assert_eq(json_encode(()), "null");
+
+// Integers at the edge of the 64-bit range keep their exact value
+assert_eq(json_decode("9223372036854775807"), 9223372036854775807);
+assert_eq(json_decode("-9223372036854775808"), -9223372036854775807 - 1);
+assert_eq(json_decode("9223372036854775808"), 9223372036854775808n);
+assert_eq(json_decode("-9223372036854775809"), -9223372036854775809n);
+assert_eq(json_decode("-7"), -7);
+assert_eq(json_decode("-1.5e-3"), -0.0015);

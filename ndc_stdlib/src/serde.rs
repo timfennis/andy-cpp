@@ -174,18 +174,19 @@ fn json_to_value(value: JsonValue) -> Result<Value, anyhow::Error> {
         JsonValue::Null => Value::unit(),
         JsonValue::Bool(b) => Value::Bool(b),
         JsonValue::Number(n) => {
+            if let Some(int) = n.as_i64() {
+                return Ok(Value::Int(int));
+            }
             // With serde_json's arbitrary_precision feature the number's
             // original text is preserved exactly, so integers of any size can
             // be converted without going through a lossy f64.
-            let repr = n.to_string();
+            let repr = n.as_str();
             if repr.contains(['.', 'e', 'E']) {
                 let float: f64 = repr.parse().context("cannot parse JSON number")?;
                 if !float.is_finite() {
                     bail!("JSON number {repr} does not fit in a float");
                 }
                 Value::Float(float)
-            } else if let Ok(int) = repr.parse::<i64>() {
-                Value::Int(int)
             } else {
                 Value::bigint(repr.parse().context("cannot parse JSON number")?)
             }
