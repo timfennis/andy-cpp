@@ -4,7 +4,8 @@
 
 use ndc_core::collections::HashMap;
 use ndc_core::r#struct::StructInfo;
-use ndc_core::{Intrinsic, NodeId, StaticType};
+use ndc_core::{Intrinsic, NativeOp, NodeId, StaticType};
+use std::sync::Arc;
 
 /// What the analyser worked out about one batch of statements: a whole program,
 /// or one line of the REPL.
@@ -75,6 +76,10 @@ pub struct Analysis {
     /// How many of the global slots are the built-ins': the natives, then
     /// the intrinsics. The program's own globals follow them.
     pub builtin_count: usize,
+    /// The instruction that does what each native does, by global slot, for
+    /// the natives the VM has one for. The compiler writes it in place of a
+    /// call the analyser resolved to the native.
+    pub native_ops: Arc<[Option<NativeOp>]>,
 }
 
 /// One instance of a generic function: where it's stored, and the picks in
@@ -102,9 +107,8 @@ pub struct Instance {
 impl Analysis {
     /// Adds what the analyser worked out about a later batch, such as the
     /// next REPL line. Node ids are unique across batches, so its tables join
-    /// these. Its instances, top-level frame size, global count and built-in
-    /// count replace
-    /// these: they're what compiling the later batch takes, which for
+    /// these. Its instances, top-level frame size, global count, built-in
+    /// count and native ops replace these: they're what compiling the later batch takes, which for
     /// [`Self::instances`] means the instances it made, of its own functions
     /// and of earlier ones.
     pub fn extend(&mut self, later: Self) {
@@ -126,6 +130,7 @@ impl Analysis {
             global_count,
             instances,
             builtin_count,
+            native_ops,
         } = later;
         self.expr_types.extend(expr_types);
         self.inferred_return_types.extend(inferred_return_types);
@@ -144,6 +149,14 @@ impl Analysis {
         self.global_count = global_count;
         self.instances = instances;
         self.builtin_count = builtin_count;
+        self.native_ops = native_ops;
+    }
+
+    /// The instruction that does what the native in global `slot` does, if
+    /// it's a native the VM has one for.
+    #[must_use]
+    pub fn native_op(&self, slot: usize) -> Option<NativeOp> {
+        self.native_ops.get(slot).copied().flatten()
     }
 
     /// What the identifier expression `identifier` refers to; `Binding::None`

@@ -12,6 +12,7 @@ use ndc_resolver::{NameResolver, SymbolId};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::rc::Rc;
+use std::sync::Arc;
 
 mod assignments;
 mod calls;
@@ -48,6 +49,9 @@ pub struct Analyser {
     struct_registry: StructRegistry,
     /// The type of every value declared so far.
     types: TypeTable,
+    /// The instruction that does what each native does, by global slot,
+    /// which every batch's analysis carries for the compiler.
+    native_ops: Arc<[Option<ndc_core::NativeOp>]>,
     /// What the type variables in those types stand for, once known.
     vars: TypeVars,
     /// The calls and other uses that wait for types that aren't known yet,
@@ -214,8 +218,12 @@ impl Analyser {
             .enumerate()
             .map(|(slot, symbol)| (symbol, slot))
             .collect();
+        let native_ops = (0..builtins.count())
+            .map(|slot| builtins.native_op(slot))
+            .collect();
         let types = TypeTable::with_builtins(builtins, builtin_slots);
         Self {
+            native_ops,
             any_index,
             resolver,
             types,
@@ -327,6 +335,7 @@ impl Analyser {
         }
 
         let mut result = std::mem::take(&mut self.result);
+        result.analysis.native_ops = Arc::clone(&self.native_ops);
         Layout::new(&self.resolver).lay_out(
             std::mem::take(&mut self.picks),
             self.laid_out_scopes,

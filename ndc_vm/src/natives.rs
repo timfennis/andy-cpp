@@ -2,7 +2,7 @@
 //! for it: a program that only prints builds `print` and none of the others.
 
 use crate::value::{NativeFunc, NativeFunction};
-use ndc_core::{Builtins, FunctionRegistry, Intrinsic, IntrinsicFunction, StaticType};
+use ndc_core::{Builtins, FunctionRegistry, Intrinsic, IntrinsicFunction, NativeOp, StaticType};
 use std::borrow::Cow;
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
@@ -17,6 +17,9 @@ pub struct NativeSpec {
     pub documentation: Option<Cow<'static, str>>,
     pub static_type: MakeType,
     pub func: MakeFunc,
+    /// The instruction the compiler writes in place of a call it resolved
+    /// to this native, which must do exactly what `func` does.
+    pub op: Option<NativeOp>,
 }
 
 impl NativeSpec {
@@ -33,6 +36,17 @@ impl NativeSpec {
             documentation: Some(documentation.into()),
             static_type: Box::new(static_type),
             func: Box::new(func),
+            op: None,
+        }
+    }
+
+    /// This native, written as the instruction `op` where the compiler
+    /// knows a call means it.
+    #[must_use]
+    pub fn with_op(self, op: NativeOp) -> Self {
+        Self {
+            op: Some(op),
+            ..self
         }
     }
 
@@ -61,6 +75,7 @@ impl NativeSpec {
 struct Native {
     name: &'static str,
     documentation: Option<Cow<'static, str>>,
+    op: Option<NativeOp>,
     make_type: Cell<Option<MakeType>>,
     make_func: Cell<Option<MakeFunc>>,
     static_type: OnceCell<StaticType>,
@@ -94,6 +109,7 @@ impl Natives {
             .extend(registry.into_vec().into_iter().map(|spec| Native {
                 name: spec.name,
                 documentation: spec.documentation,
+                op: spec.op,
                 make_type: Cell::new(Some(spec.static_type)),
                 make_func: Cell::new(Some(spec.func)),
                 static_type: OnceCell::new(),
@@ -189,5 +205,9 @@ impl Builtins for Natives {
     fn intrinsic(&self, slot: usize) -> Option<Intrinsic> {
         let index = slot.checked_sub(self.natives.len())?;
         Some(self.intrinsics[index].intrinsic)
+    }
+
+    fn native_op(&self, slot: usize) -> Option<NativeOp> {
+        self.natives.get(slot)?.op
     }
 }

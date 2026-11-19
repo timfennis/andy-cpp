@@ -9,7 +9,7 @@ use crate::iterator::{
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Natives, Object, Value};
 use ndc_analysis::CaptureSource;
-use ndc_core::StaticType;
+use ndc_core::{NativeOp, StaticType};
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -288,6 +288,10 @@ impl Vm {
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
+                OpCode::Native(op) => {
+                    native_op(&mut self.stack, *op)
+                        .map_err(|message| VmError::new(message, span))?;
+                }
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());
@@ -1119,4 +1123,84 @@ fn convert_result(stack: &mut [Value], returns: &StaticType) -> Result<(), Strin
         "expected the function to return {returns} but it returned {}",
         returned.diagnostic_type()
     ))
+}
+
+/// Replaces the two operands on top of the stack with what a native that
+/// `op` does would return for them, failing as it would: `3 - 1` leaves `2`,
+/// and an `Int` operation that overflows fails.
+#[inline]
+fn native_op(stack: &mut Vec<Value>, op: NativeOp) -> Result<(), String> {
+    let right = stack.pop().expect("stack underflow");
+    let left = stack.last_mut().expect("stack underflow");
+    let result = match op {
+        NativeOp::AddInt => int_op(left, &right, i64::checked_add, "+")?,
+        NativeOp::SubInt => int_op(left, &right, i64::checked_sub, "-")?,
+        NativeOp::MulInt => int_op(left, &right, i64::checked_mul, "*")?,
+        NativeOp::AddFloat => float_op(left, &right, |l, r| l + r)?,
+        NativeOp::SubFloat => float_op(left, &right, |l, r| l - r)?,
+        NativeOp::MulFloat => float_op(left, &right, |l, r| l * r)?,
+        NativeOp::Less => Value::Bool(compare(left, &right)?.is_lt()),
+        NativeOp::LessEqual => Value::Bool(compare(left, &right)?.is_le()),
+        NativeOp::Greater => Value::Bool(compare(left, &right)?.is_gt()),
+        NativeOp::GreaterEqual => Value::Bool(compare(left, &right)?.is_ge()),
+        NativeOp::Equal => Value::Bool(*left == right),
+        NativeOp::NotEqual => Value::Bool(*left != right),
+    };
+    *left = result;
+    Ok(())
+}
+
+/// `operation` of two `Int`s, as the `Int` natives do it.
+#[inline]
+fn int_op(
+    left: &Value,
+    right: &Value,
+    operation: fn(i64, i64) -> Option<i64>,
+    operator: &str,
+) -> Result<Value, String> {
+    let Value::Int(left) = *left else {
+        return Err(wrong_operand(&StaticType::Int, left));
+    };
+    let Value::Int(right) = *right else {
+        return Err(wrong_operand(&StaticType::Int, right));
+    };
+    operation(left, right)
+        .map(Value::Int)
+        .ok_or_else(|| integer_overflow(left, operator, right))
+}
+
+/// `operation` of two `Float`s.
+#[inline]
+fn float_op(left: &Value, right: &Value, operation: fn(f64, f64) -> f64) -> Result<Value, String> {
+    let Value::Float(left) = *left else {
+        return Err(wrong_operand(&StaticType::Float, left));
+    };
+    let Value::Float(right) = *right else {
+        return Err(wrong_operand(&StaticType::Float, right));
+    };
+    Ok(Value::Float(operation(left, right)))
+}
+
+/// The order of two values, as the comparison natives find it.
+#[inline]
+fn compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, String> {
+    match (left, right) {
+        (Value::Int(left), Value::Int(right)) => Ok(left.cmp(right)),
+        _ => left.try_cmp(right),
+    }
+}
+
+/// An operand that isn't what the native the op does takes.
+#[cold]
+#[inline(never)]
+fn wrong_operand(expected: &StaticType, value: &Value) -> String {
+    format!("expected {expected}, got {}", value.diagnostic_type())
+}
+
+/// What an `Int` operation that overflows, or has no result, fails with:
+/// `integer operation overflowed or is undefined: 9223372036854775807 + 1`.
+#[cold]
+#[inline(never)]
+pub fn integer_overflow(left: i64, operator: &str, right: i64) -> String {
+    format!("integer operation overflowed or is undefined: {left} {operator} {right}")
 }

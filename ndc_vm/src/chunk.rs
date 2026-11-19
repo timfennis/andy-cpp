@@ -1,8 +1,8 @@
 use crate::Value;
 use crate::hash_map::HashMap;
 use ndc_analysis::CaptureSource;
-use ndc_core::StaticType;
 use ndc_core::collections::HashSet;
+use ndc_core::{NativeOp, StaticType};
 use ndc_lexer::Span;
 use std::rc::Rc;
 
@@ -162,6 +162,9 @@ pub enum OpCode {
     /// Pops a value, pushes `Some(value)` if it conforms to the type and
     /// `None` if it doesn't. `[… value → … option]`
     TryCast(Rc<StaticType>),
+    /// Pops two operands, pushes what the native the op does would return
+    /// for them. `[… left right → … result]`
+    Native(NativeOp),
 }
 
 impl OpCode {
@@ -201,6 +204,20 @@ impl OpCode {
             Self::CheckType(_) => "CheckType",
             Self::CheckUnshared(_) => "CheckUnshared",
             Self::TryCast(_) => "TryCast",
+            Self::Native(op) => match op {
+                NativeOp::AddInt => "AddInt",
+                NativeOp::SubInt => "SubInt",
+                NativeOp::MulInt => "MulInt",
+                NativeOp::AddFloat => "AddFloat",
+                NativeOp::SubFloat => "SubFloat",
+                NativeOp::MulFloat => "MulFloat",
+                NativeOp::Less => "Less",
+                NativeOp::LessEqual => "LessEqual",
+                NativeOp::Greater => "Greater",
+                NativeOp::GreaterEqual => "GreaterEqual",
+                NativeOp::Equal => "Equal",
+                NativeOp::NotEqual => "NotEqual",
+            },
         }
     }
 
@@ -260,6 +277,7 @@ impl OpCode {
             Self::CheckType(_) | Self::CheckUnshared(_) => 0,
             // Replaces the value with the option holding it.
             Self::TryCast(_) => 0,
+            Self::Native(_) => -1,
         }
     }
 }
@@ -316,6 +334,7 @@ impl std::fmt::Debug for OpCode {
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
             Self::CheckUnshared(typ) => write!(f, "CheckUnshared({typ})"),
             Self::TryCast(typ) => write!(f, "TryCast({typ})"),
+            Self::Native(_) => write!(f, "{}", self.name()),
         }
     }
 }

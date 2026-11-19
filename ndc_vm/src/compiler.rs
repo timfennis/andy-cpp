@@ -4,7 +4,7 @@ use crate::value::{CompiledFunction, Function};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_core::collections::{HashMap, HashSet};
-use ndc_core::{Intrinsic, NodeId};
+use ndc_core::{Intrinsic, NativeOp, NodeId};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -431,11 +431,17 @@ impl Compiler {
                     return Err(CompileError::unresolved_binding(span));
                 };
 
-                let opcode = Self::call_opcode_for(&binding, 2);
-                self.compile_binding(&binding, span)?;
-                target.emit_read(self)?;
-                self.compile_expr(*r_value)?;
-                self.ir.write(opcode, span);
+                if let Some(op) = self.native_op(&binding, 2) {
+                    target.emit_read(self)?;
+                    self.compile_expr(*r_value)?;
+                    self.ir.write(OpCode::Native(op), span);
+                } else {
+                    let opcode = Self::call_opcode_for(&binding, 2);
+                    self.compile_binding(&binding, span)?;
+                    target.emit_read(self)?;
+                    self.compile_expr(*r_value)?;
+                    self.ir.write(opcode, span);
+                }
                 target.emit_store(self)?;
 
                 self.emit_unit();
@@ -529,7 +535,8 @@ impl Compiler {
                     _ => None,
                 };
                 // An intrinsic called by name is written in place of the
-                // call, after its arguments.
+                // call, after its arguments, as is a native the VM has an
+                // instruction for.
                 if let Some(Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(intrinsic)))) =
                     binding
                 {
@@ -537,6 +544,14 @@ impl Compiler {
                         self.compile_expr(argument)?;
                     }
                     self.emit_intrinsic(intrinsic, function.id, function_span)?;
+                } else if let Some(op) = binding
+                    .as_ref()
+                    .and_then(|binding| self.native_op(binding, arguments.len()))
+                {
+                    for argument in arguments {
+                        self.compile_expr(argument)?;
+                    }
+                    self.ir.write(OpCode::Native(op), function_span);
                 } else {
                     let opcode = match &binding {
                         Some(binding) => Self::call_opcode_for(binding, arguments.len()),
@@ -912,6 +927,19 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// The instruction to write in place of a call with `args` arguments
+    /// that `binding` picks the callee of, if it picks one native the VM has
+    /// an instruction for: `-(Int, Int)` in `n - 1` is `SubInt`.
+    fn native_op(&self, binding: &Binding, args: usize) -> Option<NativeOp> {
+        let Binding::Resolved(Candidate::Scalar(Callee::Var(ResolvedVar::Global { slot }))) =
+            *binding
+        else {
+            return None;
+        };
+        // Every instruction for a native takes two operands.
+        (args == 2).then(|| self.analysis.native_op(slot)).flatten()
     }
 
     /// `CallVec(args)` for an operator applied to each element of tuple

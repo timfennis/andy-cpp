@@ -1,4 +1,5 @@
 use ndc_analysis::{Analysis, CaptureSource};
+use ndc_core::NativeOp;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_vm::chunk::JumpTarget;
@@ -420,9 +421,10 @@ fn a_top_level_variable_is_declared_and_assigned_through_its_global() {
 // An augmented assignment stores the operation's result back into its target,
 // then pushes unit for the assignment expression. That holds for a `++=` that
 // mutates the list in place and returns it as much as for a `+` that makes a
-// new value. A variable target stores with its Set opcode:
+// new value, which `+(Int, Int)` writes as an instruction. A variable target
+// stores with its Set opcode:
 //
-// Call(2), SetGlobal(_), Constant(_), Pop
+// Call(2) or Native(_), SetGlobal(_), Constant(_), Pop
 //
 // An indexed target passes the result to `[]=`, and pops that call's unit
 // before pushing its own:
@@ -437,7 +439,7 @@ fn an_augmented_assignment_stores_its_result_back_even_when_it_mutates_in_place(
         let ops = compile_with_stdlib_unoptimized(source);
         assert!(
             ops.windows(4)
-                .any(|ops| matches!(ops, [Call(2), SetGlobal(_), Constant(_), Pop])),
+                .any(|ops| matches!(ops, [Call(2) | Native(_), SetGlobal(_), Constant(_), Pop])),
             "`{source}` must store the operation result and push unit: {ops:?}",
         );
     }
@@ -929,5 +931,107 @@ fn a_program_lists_the_natives_its_functions_read() {
             .all(|slot| print.contains(slot) || len.contains(slot)),
         "only print and len are read: {:?}",
         program.natives()
+    );
+}
+
+// fn fib(n) { if n < 2 { n } else { fib(n - 1) + fib(n - 2) } }
+// fib(30);
+//
+// In the Int instance of `fib`, `<`, `-` and `+` resolve to the natives for
+// two Ints, which the VM has instructions for. The compiler writes those in
+// place of the calls, after the operands; only `fib` itself is called.
+#[test]
+fn a_call_resolved_to_a_native_with_an_instruction_is_the_instruction() {
+    let ops = compile_nested_function_with_stdlib(
+        "fn fib(n) { if n < 2 { n } else { fib(n - 1) + fib(n - 2) } }\nfib(30);",
+        &[0],
+    );
+    assert!(
+        matches!(
+            ops[..],
+            [
+                GetLocal(0),
+                Constant(0),
+                Native(NativeOp::Less),
+                JumpIfFalse(_),
+                Pop,
+                GetLocal(0),
+                Jump(_),
+                Pop,
+                GetGlobal(_),
+                GetLocal(0),
+                Constant(1),
+                Native(NativeOp::SubInt),
+                Call(1),
+                GetGlobal(_),
+                GetLocal(0),
+                Constant(2),
+                Native(NativeOp::SubInt),
+                Call(1),
+                Native(NativeOp::AddInt),
+                Return,
+            ]
+        ),
+        "{ops:?}"
+    );
+}
+
+// let total = 1.5; total += 2.0; total -= 0.5; total *= 3.0;
+//
+// An augmented assignment that resolves to such a native is its instruction
+// too, between reading the target and storing to it.
+#[test]
+fn an_augmented_assignment_resolved_to_a_native_with_an_instruction_is_the_instruction() {
+    let ops = compile_with_stdlib_unoptimized(
+        "let total = 1.5; total += 2.0; total -= 0.5; total *= 3.0;",
+    );
+    let operations = ops
+        .iter()
+        .filter(|op| matches!(op, Native(_) | Call(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        operations,
+        [
+            &Native(NativeOp::AddFloat),
+            &Native(NativeOp::SubFloat),
+            &Native(NativeOp::MulFloat),
+        ],
+        "{ops:?}"
+    );
+}
+
+// 7 / 2; "a" ++ "b"; 7 % 2;
+//
+// Natives the VM has no instruction for are still called.
+#[test]
+fn a_call_resolved_to_a_native_without_an_instruction_stays_a_call() {
+    for source in ["7 / 2;", "\"a\" ++ \"b\";", "7 % 2;"] {
+        let ops = compile_with_stdlib_unoptimized(source);
+        assert!(
+            ops.contains(&Call(2)) && !ops.iter().any(|op| matches!(op, Native(_))),
+            "`{source}` must call the native: {ops:?}"
+        );
+    }
+}
+
+// "a" < "b"; [1] == [1]; (1, 2) != (2, 1);
+//
+// The comparisons and equality do the same for every overload, so each
+// overload is written as the instruction.
+#[test]
+fn comparisons_of_any_values_are_instructions() {
+    let ops = compile_with_stdlib_unoptimized("\"a\" < \"b\"; [1] == [1]; (1, 2) != (2, 1);");
+    let operations = ops
+        .iter()
+        .filter(|op| matches!(op, Native(_) | Call(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        operations,
+        [
+            &Native(NativeOp::Less),
+            &Native(NativeOp::Equal),
+            &Native(NativeOp::NotEqual),
+        ],
+        "{ops:?}"
     );
 }
