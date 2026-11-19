@@ -39,6 +39,12 @@ An `_` between digits is ignored, so you can use it to group them:
 print(1_000_000, 3.141_592, 0xFF_FF);  // 1000000 3.141592 65535
 ```
 
+A literal with an exponent, written with `e` or `E`, is a `Float`:
+
+```ndc
+print(2.5e3, 1e-3, 1E6);  // 2500.0 0.001 1000000.0
+```
+
 An integer literal without `n` must fit in `i64`. The lexer reports an error and suggests the suffixed form when it does not fit.
 
 A whole number like `7` is an `Int`, but where a `Float` is expected, such as after a `Float` annotation or in a list of Floats, it is a `Float`:

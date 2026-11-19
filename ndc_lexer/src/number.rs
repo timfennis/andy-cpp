@@ -118,6 +118,7 @@ impl NumberLexer for Lexer<'_> {
         buf.push(first_char);
 
         let mut is_float = false;
+        let mut has_exponent = false;
         while let Some(next_char) = self.source.peek() {
             match next_char {
                 c if c.is_ascii_digit() => {
@@ -129,7 +130,7 @@ impl NumberLexer for Lexer<'_> {
                     self.source.next();
                     // ignore underscore for nice number formatting
                 }
-                '.' if !is_float => {
+                '.' if !is_float && !has_exponent => {
                     // if we find a dot we're likely dealing with a float, but it could
                     // also be an integer followed by a method call eg: 1.add(2)
                     // in this match we look ahead one step further to figure out if the
@@ -147,6 +148,26 @@ impl NumberLexer for Lexer<'_> {
                             break;
                         }
                     }
+                }
+                // An exponent like `e3`, `E-12` or `e+5` makes the literal a float, as long
+                // as a digit follows; otherwise the `e` starts the next token
+                'e' | 'E' if !has_exponent => {
+                    let digit_at = match self.source.peek_n(1) {
+                        Some('+' | '-') => 2,
+                        _ => 1,
+                    };
+                    if !self
+                        .source
+                        .peek_n(digit_at)
+                        .is_some_and(|c| c.is_ascii_digit())
+                    {
+                        break;
+                    }
+                    for _ in 0..digit_at {
+                        buf.push(self.source.next().expect("peeked above"));
+                    }
+                    is_float = true;
+                    has_exponent = true;
                 }
                 // RADIX FUN!
                 'r' if !is_float => {
@@ -379,6 +400,34 @@ mod tests {
     }
 
     #[test]
+    fn an_exponent_makes_a_float() {
+        for (source, expected) in [
+            ("1e12", NumericLiteral::Float64(1e12)),
+            ("1e-12", NumericLiteral::Float64(1e-12)),
+            ("1e+3", NumericLiteral::Float64(1000.0)),
+            ("2.5e3", NumericLiteral::Float64(2500.0)),
+            ("1.5E-6", NumericLiteral::Float64(1.5e-6)),
+            ("1_000e1_0", NumericLiteral::Float64(1e13)),
+            ("1e400", NumericLiteral::Float64(f64::INFINITY)),
+            ("2.5e3n", NumericLiteral::NumberFloat(2500.0)),
+            ("1e3i", NumericLiteral::Complex(Complex::new(0.0, 1000.0))),
+        ] {
+            let token = lex_one(source).expect("literal should be valid");
+
+            assert_eq!(
+                token.token,
+                Token::NumericLiteral(expected),
+                "unexpected token for {source}"
+            );
+            assert_eq!(
+                token.span.range(),
+                0..source.len(),
+                "unexpected span for {source}"
+            );
+        }
+    }
+
+    #[test]
     fn a_literal_of_only_underscores_after_a_prefix_has_no_digits() {
         let error = lex_one("0x_").expect_err("literal should be invalid");
 
@@ -394,5 +443,19 @@ mod tests {
         assert_eq!(tokens[0], Token::NumericLiteral(NumericLiteral::Int64(1)));
         assert_eq!(tokens[1], Token::Dot);
         assert_eq!(tokens.len(), 3, "unexpected tokens {tokens:?}");
+    }
+
+    #[test]
+    fn an_e_without_digits_after_it_is_not_an_exponent() {
+        // The literal ends before the `e`, except in hex where `e` is a digit
+        for (source, literal_len) in [("1e", 1), ("1e-", 1), ("1.5e+x", 3), ("0x1e3", 5)] {
+            let token = lex_one(source).expect("literal should be valid");
+
+            assert_eq!(
+                token.span.range(),
+                0..literal_len,
+                "unexpected span for {source}"
+            );
+        }
     }
 }
