@@ -69,10 +69,10 @@ pub struct Compiler {
     /// The functions the code compiled so far declared in globals, kept when
     /// compiling a REPL line, whose later lines may need instances of them.
     functions: Option<HashMap<NodeId, DeclaredFunction>>,
-    /// The global slots of the natives the code compiled so far reads,
-    /// shared with the compilers of the functions it declares. Reading a
-    /// global is the only way code reaches a native, so this lists every
-    /// native the program can call.
+    /// The global slots of the natives the code compiled so far reads or
+    /// calls with `CallNative`, shared with the compilers of the functions
+    /// it declares: every native the program can call, which the VM puts in
+    /// its globals.
     natives: Rc<RefCell<HashSet<usize>>>,
     /// The op each native does, if it's one, in global slot order: a call
     /// resolved to one is written as the op's instruction.
@@ -446,7 +446,7 @@ impl Compiler {
                 if let Some(call) = self.native_call(&binding, 2) {
                     target.emit_read(self)?;
                     self.compile_expr(*r_value)?;
-                    self.ir.write(call, span);
+                    self.write_native_call(call, span);
                 } else {
                     let opcode = Self::call_opcode_for(&binding, 2);
                     self.compile_binding(&binding, span)?;
@@ -563,7 +563,7 @@ impl Compiler {
                     for argument in arguments {
                         self.compile_expr(argument)?;
                     }
-                    self.ir.write(call, function_span);
+                    self.write_native_call(call, function_span);
                 } else {
                     let opcode = match &binding {
                         Some(binding) => Self::call_opcode_for(binding, arguments.len()),
@@ -944,7 +944,7 @@ impl Compiler {
     /// The instruction that calls the native `binding` picks with the
     /// `args` arguments on top of the stack, if it picks one native and
     /// applies it to the arguments as they are: the native's own instruction
-    /// if the VM has one, as `SubInt` for `-(Int, Int)` in `n - 1`, and
+    /// if it does an op, as `SubInt` for `-(Int, Int)` in `n - 1`, and
     /// otherwise `CallNative`, as for `len` in `len(xs)`. Not for `+` in
     /// `(1, 2) + (3, 4)`, which applies it to each pair of elements, nor for
     /// a function a program declares, even one named like a native.
@@ -954,16 +954,24 @@ impl Compiler {
         else {
             return None;
         };
-        if slot >= self.analysis.builtin_count {
-            return None;
-        }
-        match self.native_ops.get(slot).copied().flatten() {
-            Some(op) if op.arity() == args => Some(OpCode::native(op)),
-            _ => {
-                self.natives.borrow_mut().insert(slot);
-                Some(OpCode::CallNative { slot, args })
+        // Only natives have an entry; a program's globals come after them.
+        Some(match *self.native_ops.get(slot)? {
+            Some(op) => {
+                debug_assert_eq!(op.arity(), args, "the analyser picks an overload by arity");
+                OpCode::native(op)
             }
+            None => OpCode::CallNative { slot, args },
+        })
+    }
+
+    /// Writes `call`, an instruction [`Self::native_call`] made, noting the
+    /// native it calls if it's `CallNative`, so the VM puts it in its
+    /// globals.
+    fn write_native_call(&mut self, call: OpCode, span: Span) {
+        if let OpCode::CallNative { slot, .. } = call {
+            self.natives.borrow_mut().insert(slot);
         }
+        self.ir.write(call, span);
     }
 
     /// `CallVec(args)` for an operator applied to each element of tuple
