@@ -8,7 +8,8 @@ on:
     branches: [ "master" ]
   # Runs in the context of master, and checks out nothing from the pull request.
   pull_request_target:
-    types: [ auto_merge_enabled ]
+    # Joining the queue, and leaving it, which lets the next one go.
+    types: [ auto_merge_enabled, auto_merge_disabled, closed, converted_to_draft, ready_for_review ]
   # When the checks on the pull request in progress fail, move on to the next.
   workflow_run:
     workflows: [ "Rust" ]
