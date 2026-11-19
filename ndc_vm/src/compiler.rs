@@ -4,7 +4,7 @@ use crate::value::{CompiledFunction, Function};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_core::collections::{HashMap, HashSet};
-use ndc_core::{Intrinsic, NativeOp, NodeId};
+use ndc_core::{Intrinsic, NodeId};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -431,10 +431,10 @@ impl Compiler {
                     return Err(CompileError::unresolved_binding(span));
                 };
 
-                if let Some(op) = self.native_op(&binding, 2) {
+                if let Some(call) = self.native_call(&binding, 2) {
                     target.emit_read(self)?;
                     self.compile_expr(*r_value)?;
-                    self.ir.write(OpCode::Native(op), span);
+                    self.ir.write(call, span);
                 } else {
                     let opcode = Self::call_opcode_for(&binding, 2);
                     self.compile_binding(&binding, span)?;
@@ -535,8 +535,8 @@ impl Compiler {
                     _ => None,
                 };
                 // An intrinsic called by name is written in place of the
-                // call, after its arguments, as is a native the VM has an
-                // instruction for.
+                // call, after its arguments, and a native needs no callee
+                // under them.
                 if let Some(Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(intrinsic)))) =
                     binding
                 {
@@ -544,14 +544,14 @@ impl Compiler {
                         self.compile_expr(argument)?;
                     }
                     self.emit_intrinsic(intrinsic, function.id, function_span)?;
-                } else if let Some(op) = binding
+                } else if let Some(call) = binding
                     .as_ref()
-                    .and_then(|binding| self.native_op(binding, arguments.len()))
+                    .and_then(|binding| self.native_call(binding, arguments.len()))
                 {
                     for argument in arguments {
                         self.compile_expr(argument)?;
                     }
-                    self.ir.write(OpCode::Native(op), function_span);
+                    self.ir.write(call, function_span);
                 } else {
                     let opcode = match &binding {
                         Some(binding) => Self::call_opcode_for(binding, arguments.len()),
@@ -929,17 +929,29 @@ impl Compiler {
         Ok(())
     }
 
-    /// The instruction to write in place of a call with `args` arguments
-    /// that `binding` picks the callee of, if it picks one native the VM has
-    /// an instruction for: `-(Int, Int)` in `n - 1` is `SubInt`.
-    fn native_op(&self, binding: &Binding, args: usize) -> Option<NativeOp> {
+    /// The instruction that calls the native `binding` picks with the
+    /// `args` arguments on top of the stack, if it picks one native and
+    /// applies it to the arguments as they are: the native's own instruction
+    /// if the VM has one, as `SubInt` for `-(Int, Int)` in `n - 1`, and
+    /// otherwise `CallNative`, as for `len` in `len(xs)`. Not for `+` in
+    /// `(1, 2) + (3, 4)`, which applies it to each pair of elements, nor for
+    /// a function a program declares, even one named like a native.
+    fn native_call(&self, binding: &Binding, args: usize) -> Option<OpCode> {
         let Binding::Resolved(Candidate::Scalar(Callee::Var(ResolvedVar::Global { slot }))) =
             *binding
         else {
             return None;
         };
-        // Every instruction for a native takes two operands.
-        (args == 2).then(|| self.analysis.native_op(slot)).flatten()
+        if slot >= self.analysis.builtin_count {
+            return None;
+        }
+        match self.analysis.native_op(slot) {
+            Some(op) if op.arity() == args => Some(OpCode::native(op)),
+            _ => {
+                self.natives.borrow_mut().insert(slot);
+                Some(OpCode::CallNative { slot, args })
+            }
+        }
     }
 
     /// `CallVec(args)` for an operator applied to each element of tuple

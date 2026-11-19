@@ -23,6 +23,21 @@ enum BinaryOperation {
 }
 
 impl BinaryOperation {
+    /// The operator the compiler writes as an instruction of its own for the
+    /// operation on operands of `left` and `right`, if there's one.
+    fn operator(self, left: NumericMode, right: NumericMode) -> Option<NativeOp> {
+        match (self, left, right) {
+            (Self::Add, NumericMode::Int, NumericMode::Int) => Some(NativeOp::AddInt),
+            (Self::Sub, NumericMode::Int, NumericMode::Int) => Some(NativeOp::SubInt),
+            (Self::Mul, NumericMode::Int, NumericMode::Int) => Some(NativeOp::MulInt),
+            (Self::Add, NumericMode::Float, NumericMode::Float) => Some(NativeOp::AddFloat),
+            (Self::Sub, NumericMode::Float, NumericMode::Float) => Some(NativeOp::SubFloat),
+            (Self::Mul, NumericMode::Float, NumericMode::Float) => Some(NativeOp::MulFloat),
+            (Self::Div, NumericMode::Float, NumericMode::Float) => Some(NativeOp::DivFloat),
+            _ => None,
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Self::Add => "+",
@@ -73,19 +88,9 @@ fn declare(
     static_type: impl FnOnce() -> StaticType + 'static,
     func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
 ) {
-    env.declare_global_fn(native(name, documentation, static_type, func));
-}
-
-/// A native whose type `static_type` makes when it's first used.
-fn native(
-    name: &'static str,
-    documentation: impl Into<Cow<'static, str>>,
-    static_type: impl FnOnce() -> StaticType + 'static,
-    func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
-) -> NativeSpec {
-    NativeSpec::new(name, documentation, static_type, || {
+    env.declare_global_fn(NativeSpec::new(name, documentation, static_type, || {
         NativeFunc::Simple(Box::new(func))
-    })
+    }));
 }
 
 /// Declares a native whose type is a generic signature such as
@@ -97,20 +102,34 @@ fn declare_signature(
     documentation: &'static str,
     func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
 ) {
-    env.declare_global_fn(native_with_signature(name, signature, documentation, func));
+    env.declare_global_fn(NativeSpec::with_signature(
+        name,
+        documentation,
+        signature,
+        || NativeFunc::Simple(Box::new(func)),
+    ));
 }
 
-/// A native whose type is a generic signature such as
-/// `<A, B>(A, B) -> Bool`, see [`StaticType::signature`].
-fn native_with_signature(
+/// Declares a native whose type is `signature` that does `operator`, which
+/// the compiler writes as an instruction of its own where a call resolves to
+/// it.
+fn declare_operator(
+    env: &mut FunctionRegistry<NativeSpec>,
     name: &'static str,
     signature: impl AsRef<str> + 'static,
     documentation: &'static str,
-    func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
-) -> NativeSpec {
-    NativeSpec::with_signature(name, documentation, signature, || {
-        NativeFunc::Simple(Box::new(func))
-    })
+    operator: NativeOp,
+) {
+    env.declare_global_fn(NativeSpec::operator(
+        name,
+        documentation,
+        move || {
+            StaticType::signature(signature.as_ref()).unwrap_or_else(|error| {
+                panic!("internal error: invalid signature of {name}: {error}")
+            })
+        },
+        operator,
+    ));
 }
 
 /// The type of a function that takes `parameters` and returns `return_type`.
@@ -226,8 +245,23 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
             // Choosing the evaluator per overload here, instead of letting one
             // shared closure rediscover the output mode on every call, is what
             // lets `1 + 2` read two `i64` slots and add them.
-            let spec = match output_mode {
-                NumericMode::Int => native(
+            if let Some(operator) = operation.operator(left_mode, right_mode) {
+                env.declare_global_fn(NativeSpec::operator(
+                    name,
+                    documentation,
+                    move || {
+                        function_type(
+                            vec![left_mode.static_type(), right_mode.static_type()],
+                            output_mode.static_type(),
+                        )
+                    },
+                    operator,
+                ));
+                continue;
+            }
+            match output_mode {
+                NumericMode::Int => declare(
+                    env,
                     name,
                     documentation,
                     move || {
@@ -243,7 +277,8 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
                         eval_int_operands(operation, left, right)
                     },
                 ),
-                NumericMode::Float => native(
+                NumericMode::Float => declare(
+                    env,
                     name,
                     documentation,
                     move || {
@@ -259,7 +294,8 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
                         eval_float_operands(operation, left_mode, right_mode, left, right)
                     },
                 ),
-                NumericMode::Number => native(
+                NumericMode::Number => declare(
+                    env,
                     name,
                     documentation,
                     move || {
@@ -275,32 +311,9 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
                         eval_number_operands(operation, left_mode, right_mode, left, right)
                     },
                 ),
-            };
-            env.declare_global_fn(match binary_op(operation, left_mode, right_mode) {
-                Some(op) => spec.with_op(op),
-                None => spec,
-            });
+            }
         }
     }
-}
-
-/// The instruction that does `operation` of the modes given, if the VM has
-/// one: `+` of two `Int`s is `AddInt`.
-fn binary_op(
-    operation: BinaryOperation,
-    left_mode: NumericMode,
-    right_mode: NumericMode,
-) -> Option<NativeOp> {
-    use NumericMode::{Float, Int};
-    Some(match (operation, left_mode, right_mode) {
-        (BinaryOperation::Add, Int, Int) => NativeOp::AddInt,
-        (BinaryOperation::Sub, Int, Int) => NativeOp::SubInt,
-        (BinaryOperation::Mul, Int, Int) => NativeOp::MulInt,
-        (BinaryOperation::Add, Float, Float) => NativeOp::AddFloat,
-        (BinaryOperation::Sub, Float, Float) => NativeOp::SubFloat,
-        (BinaryOperation::Mul, Float, Float) => NativeOp::MulFloat,
-        _ => return None,
-    })
 }
 
 fn eval_binary(
@@ -515,21 +528,19 @@ fn eval_number_binary(
 }
 
 fn register_unary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
-    declare_typed!(
+    declare_operator(
         env,
         "-",
-        (value: Int) -> Result<Int>,
+        "(Int) -> Int",
         "Negates an integer.",
-        value
-            .checked_neg()
-            .ok_or_else(|| VmError::native("integer negation overflowed".to_string()))
+        NativeOp::NegInt,
     );
-    declare_typed!(
+    declare_operator(
         env,
         "-",
-        (value: Float) -> Float,
+        "(Float) -> Float",
         "Negates a floating-point number.",
-        -value
+        NativeOp::NegFloat,
     );
     declare_typed!(
         env,
@@ -579,74 +590,53 @@ fn orderable_parameters() -> Vec<String> {
 }
 
 fn register_comparisons(env: &mut FunctionRegistry<NativeSpec>) {
-    for (name, predicate, op, docs) in [
+    for (name, operator, docs) in [
         (
             ">",
-            (|ordering| ordering == Ordering::Greater) as fn(Ordering) -> bool,
             NativeOp::Greater,
             "Returns whether the left value is greater than the right.",
         ),
         (
             ">=",
-            |ordering| matches!(ordering, Ordering::Greater | Ordering::Equal),
             NativeOp::GreaterEqual,
             "Returns whether the left value is greater than or equal to the right.",
         ),
         (
             "<",
-            |ordering| ordering == Ordering::Less,
             NativeOp::Less,
             "Returns whether the left value is less than the right.",
         ),
         (
             "<=",
-            |ordering| matches!(ordering, Ordering::Less | Ordering::Equal),
             NativeOp::LessEqual,
             "Returns whether the left value is less than or equal to the right.",
         ),
     ] {
-        let compare = move |args: &[Value]| Ok(Value::Bool(predicate(compare_operands(args)?)));
         for parameters in orderable_parameters() {
-            env.declare_global_fn(
-                native_with_signature(name, format!("{parameters} -> Bool"), docs, compare)
-                    .with_op(op),
-            );
+            declare_operator(env, name, format!("{parameters} -> Bool"), docs, operator);
         }
         let unit = StaticType::unit();
-        env.declare_global_fn(
-            native(
-                name,
-                docs,
-                move || function_type(vec![unit.clone(), unit], StaticType::Bool),
-                compare,
-            )
-            .with_op(op),
-        );
+        env.declare_global_fn(NativeSpec::operator(
+            name,
+            docs,
+            move || function_type(vec![unit.clone(), unit], StaticType::Bool),
+            operator,
+        ));
     }
 
-    env.declare_global_fn(
-        native_with_signature(
-            "==",
-            "<A, B>(A, B) -> Bool",
-            "Returns whether two values are equal.",
-            |args| {
-                arity(args, 2)?;
-                Ok(Value::Bool(args[0] == args[1]))
-            },
-        )
-        .with_op(NativeOp::Equal),
+    declare_operator(
+        env,
+        "==",
+        "<A, B>(A, B) -> Bool",
+        "Returns whether two values are equal.",
+        NativeOp::Equal,
     );
-    env.declare_global_fn(
-        native_with_signature(
-            "!=",
-            "<A, B>(A, B) -> Bool",
-            "Returns whether two values are not equal.",
-            |args| {
-                arity(args, 2)?;
-                Ok(Value::Bool(args[0] != args[1]))
-            },
-        )
-        .with_op(NativeOp::NotEqual),
+    declare_operator(
+        env,
+        "!=",
+        "<A, B>(A, B) -> Bool",
+        "Returns whether two values are not equal.",
+        NativeOp::NotEqual,
     );
 
     for (name, reverse, docs) in [
@@ -737,12 +727,12 @@ fn register_bitwise(env: &mut FunctionRegistry<NativeSpec>) {
     );
 
     for name in ["!", "not"] {
-        declare_typed!(
+        declare_operator(
             env,
             name,
-            (value: Bool) -> Bool,
+            "(Bool) -> Bool",
             "Computes logical negation.",
-            !value
+            NativeOp::Not,
         );
     }
 

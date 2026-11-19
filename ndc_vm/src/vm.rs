@@ -6,6 +6,7 @@ use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
+use crate::native_op;
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Natives, Object, Value};
 use ndc_analysis::CaptureSource;
@@ -288,9 +289,92 @@ impl Vm {
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
-                OpCode::Native(op) => {
-                    native_op(&mut self.stack, *op)
-                        .map_err(|message| VmError::new(message, span))?;
+                OpCode::AddInt => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::AddInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::SubInt => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::SubInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::MulInt => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::MulInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::AddFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::AddFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::SubFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::SubFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::MulFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::MulFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::DivFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::DivFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Less => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::Less) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::LessEqual => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::LessEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Greater => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::Greater) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::GreaterEqual => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::GreaterEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Equal => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::Equal) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NotEqual => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::NotEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NegInt => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::NegInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NegFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::NegFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Not => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::Not) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::CallNative { slot, args } => {
+                    let (slot, args) = (*slot, *args);
+                    if let Err(mut e) = self.call_native(slot, args) {
+                        e.span.get_or_insert(span);
+                        return Err(e);
+                    }
                 }
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
@@ -805,6 +889,38 @@ impl Vm {
         Ok(Dispatch::FramePushed)
     }
 
+    /// Calls the native in global slot `slot` with the `args` values on top
+    /// of the stack, and puts its result in their place.
+    fn call_native(&mut self, slot: usize, args: usize) -> Result<(), VmError> {
+        let native = match &self.globals[slot] {
+            Value::Object(object) => match object.as_ref() {
+                Object::Function(Function::Native(native)) => native,
+                _ => unreachable!("internal error: global slot {slot} holds no native"),
+            },
+            _ => unreachable!("internal error: global slot {slot} holds no native"),
+        };
+        let start = self.stack.len() - args;
+        let result = match &native.func {
+            NativeFunc::Simple(f) => {
+                let result = f(&self.stack[start..])?;
+                self.stack.truncate(start);
+                result
+            }
+            NativeFunc::WithVm(_) => {
+                // The native takes the VM, so it can't be borrowed from the
+                // VM's globals while it runs.
+                let native = Rc::clone(native);
+                let NativeFunc::WithVm(f) = &native.func else {
+                    unreachable!()
+                };
+                let call_args: Vec<Value> = self.stack.drain(start..).collect();
+                f(&call_args, self)?
+            }
+        };
+        self.stack.push(result);
+        Ok(())
+    }
+
     /// Call a function inline on this VM, without spawning a child VM.
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
@@ -1125,82 +1241,17 @@ fn convert_result(stack: &mut [Value], returns: &StaticType) -> Result<(), Strin
     ))
 }
 
-/// Replaces the two operands on top of the stack with what a native that
-/// `op` does would return for them, failing as it would: `3 - 1` leaves `2`,
-/// and an `Int` operation that overflows fails.
-#[inline]
-fn native_op(stack: &mut Vec<Value>, op: NativeOp) -> Result<(), String> {
-    let right = stack.pop().expect("stack underflow");
-    let left = stack.last_mut().expect("stack underflow");
-    let result = match op {
-        NativeOp::AddInt => int_op(left, &right, i64::checked_add, "+")?,
-        NativeOp::SubInt => int_op(left, &right, i64::checked_sub, "-")?,
-        NativeOp::MulInt => int_op(left, &right, i64::checked_mul, "*")?,
-        NativeOp::AddFloat => float_op(left, &right, |l, r| l + r)?,
-        NativeOp::SubFloat => float_op(left, &right, |l, r| l - r)?,
-        NativeOp::MulFloat => float_op(left, &right, |l, r| l * r)?,
-        NativeOp::Less => Value::Bool(compare(left, &right)?.is_lt()),
-        NativeOp::LessEqual => Value::Bool(compare(left, &right)?.is_le()),
-        NativeOp::Greater => Value::Bool(compare(left, &right)?.is_gt()),
-        NativeOp::GreaterEqual => Value::Bool(compare(left, &right)?.is_ge()),
-        NativeOp::Equal => Value::Bool(*left == right),
-        NativeOp::NotEqual => Value::Bool(*left != right),
-    };
-    *left = result;
-    Ok(())
-}
-
-/// `operation` of two `Int`s, as the `Int` natives do it.
-#[inline]
-fn int_op(
-    left: &Value,
-    right: &Value,
-    operation: fn(i64, i64) -> Option<i64>,
-    operator: &str,
-) -> Result<Value, String> {
-    let Value::Int(left) = *left else {
-        return Err(wrong_operand(&StaticType::Int, left));
-    };
-    let Value::Int(right) = *right else {
-        return Err(wrong_operand(&StaticType::Int, right));
-    };
-    operation(left, right)
-        .map(Value::Int)
-        .ok_or_else(|| integer_overflow(left, operator, right))
-}
-
-/// `operation` of two `Float`s.
-#[inline]
-fn float_op(left: &Value, right: &Value, operation: fn(f64, f64) -> f64) -> Result<Value, String> {
-    let Value::Float(left) = *left else {
-        return Err(wrong_operand(&StaticType::Float, left));
-    };
-    let Value::Float(right) = *right else {
-        return Err(wrong_operand(&StaticType::Float, right));
-    };
-    Ok(Value::Float(operation(left, right)))
-}
-
-/// The order of two values, as the comparison natives find it.
-#[inline]
-fn compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, String> {
-    match (left, right) {
-        (Value::Int(left), Value::Int(right)) => Ok(left.cmp(right)),
-        _ => left.try_cmp(right),
+/// Replaces the operands of `op` on top of `stack` with what it makes of
+/// them.
+#[inline(always)]
+fn run_native_op(stack: &mut Vec<Value>, op: NativeOp) -> Result<(), VmError> {
+    if op.arity() == 1 {
+        let value = stack.last_mut().expect("stack underflow");
+        *value = native_op::unary(op, value)?;
+    } else {
+        let right = stack.pop().expect("stack underflow");
+        let left = stack.last_mut().expect("stack underflow");
+        *left = native_op::binary(op, left, &right)?;
     }
-}
-
-/// An operand that isn't what the native the op does takes.
-#[cold]
-#[inline(never)]
-fn wrong_operand(expected: &StaticType, value: &Value) -> String {
-    format!("expected {expected}, got {}", value.diagnostic_type())
-}
-
-/// What an `Int` operation that overflows, or has no result, fails with:
-/// `integer operation overflowed or is undefined: 9223372036854775807 + 1`.
-#[cold]
-#[inline(never)]
-pub fn integer_overflow(left: i64, operator: &str, right: i64) -> String {
-    format!("integer operation overflowed or is undefined: {left} {operator} {right}")
+    Ok(())
 }

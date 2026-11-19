@@ -1,5 +1,4 @@
 use ndc_analysis::{Analysis, CaptureSource};
-use ndc_core::NativeOp;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_vm::chunk::JumpTarget;
@@ -421,10 +420,10 @@ fn a_top_level_variable_is_declared_and_assigned_through_its_global() {
 // An augmented assignment stores the operation's result back into its target,
 // then pushes unit for the assignment expression. That holds for a `++=` that
 // mutates the list in place and returns it as much as for a `+` that makes a
-// new value, which `+(Int, Int)` writes as an instruction. A variable target
-// stores with its Set opcode:
+// new value, which `+(Int, Int)` writes as an instruction and `++` calls by
+// its slot. A variable target stores with its Set opcode:
 //
-// Call(2) or Native(_), SetGlobal(_), Constant(_), Pop
+// AddInt (or another op) or CallNative, SetGlobal(_), Constant(_), Pop
 //
 // An indexed target passes the result to `[]=`, and pops that call's unit
 // before pushing its own:
@@ -438,8 +437,13 @@ fn an_augmented_assignment_stores_its_result_back_even_when_it_mutates_in_place(
     ] {
         let ops = compile_with_stdlib_unoptimized(source);
         assert!(
-            ops.windows(4)
-                .any(|ops| matches!(ops, [Call(2) | Native(_), SetGlobal(_), Constant(_), Pop])),
+            ops.windows(4).any(|ops| match ops {
+                [operation, SetGlobal(_), Constant(_), Pop] => {
+                    operation.native_op().is_some()
+                        || matches!(operation, CallNative { args: 2, .. })
+                }
+                _ => false,
+            }),
             "`{source}` must store the operation result and push unit: {ops:?}",
         );
     }
@@ -578,15 +582,15 @@ fn member_assignment_calls_the_setter_with_the_receiver_and_the_value() {
     );
 }
 
-// fn add(a: Int, b: Int) -> Int { a + b } while true { print(add(1, break)); }
+// fn add(a: Int, b: Int, c: Int) -> Int { a + b + c } while true { add(1, 2, break); }
 //
-// The break sits inside a partially compiled call (`print` and `add` callees
-// and the constant `1` are already on the stack), so it pops those three
+// The break sits inside a partially compiled call (the `add` callee and the
+// constants `1` and `2` are already on the stack), so it pops those three
 // pending operands before jumping out of the loop.
 #[test]
 fn break_pops_the_operands_pending_in_its_expression() {
     let ops = compile_with_stdlib_unoptimized(
-        "fn add(a: Int, b: Int) -> Int { a + b } while true { print(add(1, break)); }",
+        "fn add(a: Int, b: Int, c: Int) -> Int { a + b + c } while true { add(1, 2, break); }",
     );
     assert!(
         ops.windows(4)
@@ -952,7 +956,7 @@ fn a_call_resolved_to_a_native_with_an_instruction_is_the_instruction() {
             [
                 GetLocal(0),
                 Constant(0),
-                Native(NativeOp::Less),
+                Less,
                 JumpIfFalse(_),
                 Pop,
                 GetLocal(0),
@@ -961,14 +965,14 @@ fn a_call_resolved_to_a_native_with_an_instruction_is_the_instruction() {
                 GetGlobal(_),
                 GetLocal(0),
                 Constant(1),
-                Native(NativeOp::SubInt),
+                SubInt,
                 Call(1),
                 GetGlobal(_),
                 GetLocal(0),
                 Constant(2),
-                Native(NativeOp::SubInt),
+                SubInt,
                 Call(1),
-                Native(NativeOp::AddInt),
+                AddInt,
                 Return,
             ]
         ),
@@ -987,29 +991,26 @@ fn an_augmented_assignment_resolved_to_a_native_with_an_instruction_is_the_instr
     );
     let operations = ops
         .iter()
-        .filter(|op| matches!(op, Native(_) | Call(_)))
+        .filter(|op| op.native_op().is_some() || matches!(op, Call(_)))
         .collect::<Vec<_>>();
-    assert_eq!(
-        operations,
-        [
-            &Native(NativeOp::AddFloat),
-            &Native(NativeOp::SubFloat),
-            &Native(NativeOp::MulFloat),
-        ],
-        "{ops:?}"
-    );
+    assert_eq!(operations, [&AddFloat, &SubFloat, &MulFloat,], "{ops:?}");
 }
 
 // 7 / 2; "a" ++ "b"; 7 % 2;
 //
-// Natives the VM has no instruction for are still called.
+// A native the VM has no instruction for is called by its global slot, with
+// no callee under its arguments.
 #[test]
-fn a_call_resolved_to_a_native_without_an_instruction_stays_a_call() {
+fn a_call_resolved_to_a_native_without_an_instruction_calls_it_by_its_slot() {
     for source in ["7 / 2;", "\"a\" ++ \"b\";", "7 % 2;"] {
         let ops = compile_with_stdlib_unoptimized(source);
         assert!(
-            ops.contains(&Call(2)) && !ops.iter().any(|op| matches!(op, Native(_))),
-            "`{source}` must call the native: {ops:?}"
+            ops.iter()
+                .any(|op| matches!(op, CallNative { args: 2, .. }))
+                && !ops
+                    .iter()
+                    .any(|op| op.native_op().is_some() || matches!(op, Call(_) | GetGlobal(_))),
+            "`{source}` must call the native by its slot: {ops:?}"
         );
     }
 }
@@ -1023,15 +1024,46 @@ fn comparisons_of_any_values_are_instructions() {
     let ops = compile_with_stdlib_unoptimized("\"a\" < \"b\"; [1] == [1]; (1, 2) != (2, 1);");
     let operations = ops
         .iter()
-        .filter(|op| matches!(op, Native(_) | Call(_)))
+        .filter(|op| op.native_op().is_some() || matches!(op, Call(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(operations, [&Less, &Equal, &NotEqual,], "{ops:?}");
+}
+
+// let xs = [1, 2]; len(xs)
+//
+// A call the analyser resolves to one native names it by its global slot:
+// the arguments go on the stack with no callee under them, and `CallNative`
+// calls the native there.
+#[test]
+fn a_call_resolved_to_a_native_calls_it_by_its_slot() {
+    let ops = compile_with_stdlib("let xs = [1, 2]; len(xs)");
+    let len = native_slots("len");
+    assert!(
+        ops.windows(2).any(|pair| matches!(
+            pair,
+            [GetGlobal(_), CallNative { slot, args: 1 }] if len.contains(slot)
+        )),
+        "expected xs then CallNative(len, 1), got: {ops:?}",
+    );
+}
+
+// fn f(x: Float, y: Float, a: Int, p: Bool) { (x / y, -a, -x, !p) }
+//
+// Float division and the unary operators the VM has instructions for are
+// instructions too, with one operand for the unary ones.
+#[test]
+fn float_division_and_unary_operators_are_instructions() {
+    let ops = compile_nested_function_with_stdlib(
+        "fn f(x: Float, y: Float, a: Int, p: Bool) { (x / y, -a, -x, !p) }",
+        &[0],
+    );
+    let operations = ops
+        .iter()
+        .filter(|op| op.native_op().is_some() || matches!(op, Call(_) | CallNative { .. }))
         .collect::<Vec<_>>();
     assert_eq!(
         operations,
-        [
-            &Native(NativeOp::Less),
-            &Native(NativeOp::Equal),
-            &Native(NativeOp::NotEqual),
-        ],
+        [&DivFloat, &NegInt, &NegFloat, &Not,],
         "{ops:?}"
     );
 }

@@ -6,6 +6,7 @@ pub mod error;
 pub mod hash_map;
 mod io;
 pub mod iterator;
+mod native_op;
 mod natives;
 #[cfg(feature = "trace")]
 #[allow(clippy::print_stderr)]
@@ -14,6 +15,7 @@ pub mod value;
 mod vm;
 
 pub use io::{InputSource, OutputSink};
+pub use native_op::integer_overflow;
 pub use natives::{NativeSpec, Natives};
 pub use vm::*;
 

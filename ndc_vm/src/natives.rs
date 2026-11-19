@@ -18,7 +18,8 @@ pub struct NativeSpec {
     pub static_type: MakeType,
     pub func: MakeFunc,
     /// The instruction the compiler writes in place of a call it resolved
-    /// to this native, which must do exactly what `func` does.
+    /// to this native, which does what `func` does: a native made with
+    /// [`NativeSpec::operator`] runs the op's own code as its function.
     pub op: Option<NativeOp>,
 }
 
@@ -40,13 +41,20 @@ impl NativeSpec {
         }
     }
 
-    /// This native, written as the instruction `op` where the compiler
-    /// knows a call means it.
-    #[must_use]
-    pub fn with_op(self, op: NativeOp) -> Self {
+    /// A native whose type `static_type` makes that does `op`: the compiler
+    /// writes the instruction where a call resolves to it, and called as a
+    /// value it runs the same code.
+    pub fn operator(
+        name: &'static str,
+        documentation: impl Into<Cow<'static, str>>,
+        static_type: impl FnOnce() -> StaticType + 'static,
+        op: NativeOp,
+    ) -> Self {
         Self {
             op: Some(op),
-            ..self
+            ..Self::new(name, documentation, static_type, move || {
+                NativeFunc::Simple(Box::new(move |args| crate::native_op::apply(op, args)))
+            })
         }
     }
 

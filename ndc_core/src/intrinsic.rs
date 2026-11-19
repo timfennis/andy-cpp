@@ -80,6 +80,14 @@ pub enum NativeOp {
     SubFloat,
     /// `*(Float, Float)`.
     MulFloat,
+    /// `/(Float, Float)`.
+    DivFloat,
+    /// `-(Int)`, an error if it overflows.
+    NegInt,
+    /// `-(Float)`.
+    NegFloat,
+    /// `!(Bool)`.
+    Not,
     /// `<` of two values that have an order.
     Less,
     /// `<=` of two values that have an order.
@@ -92,4 +100,15 @@ pub enum NativeOp {
     Equal,
     /// `!=` of any two values.
     NotEqual,
+}
+
+impl NativeOp {
+    /// How many operands it takes.
+    #[must_use]
+    pub fn arity(self) -> usize {
+        match self {
+            Self::NegInt | Self::NegFloat | Self::Not => 1,
+            _ => 2,
+        }
+    }
 }
