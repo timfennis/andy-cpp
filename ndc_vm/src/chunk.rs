@@ -63,6 +63,7 @@ impl std::fmt::Debug for JumpTarget {
 /// | `Jump`        | `[…]`                                   | 0 (unconditional jump)                     |
 /// | `JumpIfTrue`  | `[… bool → … bool]`                    | 0 (peeks, jumps if true)                   |
 /// | `JumpIfFalse` | `[… bool → … bool]`                    | 0 (peeks, jumps if false)                  |
+/// | `PopJumpIfFalse` | `[… bool → …]`                      | −1 (pops, jumps if false)                  |
 /// | `MakeList`    | `[… v1…vn → … list]`                   | −(n−1)                                     |
 /// | `MakeTuple`   | `[… v1…vn → … tuple]`                  | −(n−1)                                     |
 /// | `MakeMap`     | `[… k1 v1…kn vn (default?) → … map]`   | −(2n−1) or −2n if `has_default`              |
@@ -95,6 +96,8 @@ pub enum OpCode {
     JumpIfTrue(JumpTarget),
     /// Peeks top; jumps if false. `[… bool → … bool]`
     JumpIfFalse(JumpTarget),
+    /// Pops top; jumps if false. `[… bool → …]`
+    PopJumpIfFalse(JumpTarget),
     /// Pushes a constant. `[… → … value]`
     Constant(usize),
     /// Pushes a new string with the text of a constant string: a string
@@ -174,6 +177,7 @@ impl OpCode {
             Self::Jump(_) => "Jump",
             Self::JumpIfTrue(_) => "JumpIfTrue",
             Self::JumpIfFalse(_) => "JumpIfFalse",
+            Self::PopJumpIfFalse(_) => "PopJumpIfFalse",
             Self::Constant(_) => "Constant",
             Self::MakeString(_) => "MakeString",
             Self::GetLocal(_) => "GetLocal",
@@ -221,6 +225,8 @@ impl OpCode {
             // The conditional jumps peek at the condition without popping it;
             // the branch they land in pops it instead.
             Self::Jump(_) | Self::JumpIfTrue(_) | Self::JumpIfFalse(_) => 0,
+            // Pops the condition on both paths.
+            Self::PopJumpIfFalse(_) => -1,
             Self::Constant(_)
             | Self::MakeString(_)
             | Self::GetLocal(_)
@@ -273,6 +279,7 @@ impl std::fmt::Debug for OpCode {
             Self::Jump(n) => write!(f, "Jump({n:?})"),
             Self::JumpIfTrue(n) => write!(f, "JumpIfTrue({n:?})"),
             Self::JumpIfFalse(n) => write!(f, "JumpIfFalse({n:?})"),
+            Self::PopJumpIfFalse(n) => write!(f, "PopJumpIfFalse({n:?})"),
             Self::Constant(n) => write!(f, "Constant({n})"),
             Self::MakeString(n) => write!(f, "MakeString({n})"),
             Self::GetLocal(n) => write!(f, "GetLocal({n})"),
@@ -366,6 +373,9 @@ impl OptimizerIr {
                 OpCode::JumpIfFalse(JumpTarget::Label(d)) => {
                     OpCode::JumpIfFalse(resolve(cur_label, d))
                 }
+                OpCode::PopJumpIfFalse(JumpTarget::Label(d)) => {
+                    OpCode::PopJumpIfFalse(resolve(cur_label, d))
+                }
                 OpCode::JumpIfTrue(JumpTarget::Label(d)) => {
                     OpCode::JumpIfTrue(resolve(cur_label, d))
                 }
@@ -375,11 +385,14 @@ impl OptimizerIr {
             op_codes.push(lowered);
         }
 
-        Chunk {
+        let chunk = Chunk {
             constants: self.constants,
             code: op_codes,
             spans,
-        }
+        };
+        #[cfg(debug_assertions)]
+        chunk.check_stack_depths();
+        chunk
     }
 
     pub(crate) fn peephole(&mut self) {
@@ -389,6 +402,7 @@ impl OptimizerIr {
             .filter_map(|(_, op, _)| match op {
                 OpCode::Jump(JumpTarget::Label(l))
                 | OpCode::JumpIfFalse(JumpTarget::Label(l))
+                | OpCode::PopJumpIfFalse(JumpTarget::Label(l))
                 | OpCode::JumpIfTrue(JumpTarget::Label(l))
                 | OpCode::IterNext(JumpTarget::Label(l)) => Some(*l),
                 _ => None,
@@ -434,8 +448,9 @@ impl OptimizerIr {
         self.constants.len() - 1
     }
 
-    /// Overwrites the jump operand of a `Jump`, `JumpIfTrue`, `JumpIfFalse`, or
-    /// `IterNext` already written at `idx`. Panics on any other opcode.
+    /// Overwrites the jump operand of a `Jump`, `JumpIfTrue`, `JumpIfFalse`,
+    /// `PopJumpIfFalse`, or `IterNext` already written at `idx`. Panics on any
+    /// other opcode.
     pub(crate) fn set_jump_offset(&mut self, label: LabelId, target: JumpTarget) {
         let idx = self
             .code
@@ -447,6 +462,7 @@ impl OptimizerIr {
             Some((
                 _label,
                 OpCode::JumpIfFalse(n)
+                | OpCode::PopJumpIfFalse(n)
                 | OpCode::JumpIfTrue(n)
                 | OpCode::Jump(n)
                 | OpCode::IterNext(n),
@@ -502,6 +518,58 @@ pub struct Chunk {
 }
 
 impl Chunk {
+    /// Checks that each instruction is reached with the same number of
+    /// values on the stack, by every path that reaches it, and that no
+    /// instruction pops below the stack the function started with, panicking
+    /// with the code if not. The compiler counts on this: a `break` pops what
+    /// its loop's iteration pushed by that count, and code where two paths
+    /// meet at different depths reads the wrong values.
+    #[cfg(debug_assertions)]
+    fn check_stack_depths(&self) {
+        let mut depths: Vec<Option<isize>> = vec![None; self.code.len()];
+        let mut pending = vec![(0, 0)];
+        while let Some((ip, depth)) = pending.pop() {
+            let Some(op) = self.code.get(ip) else {
+                panic!(
+                    "internal error: the code runs past its end at {ip}: {:?}",
+                    self.code
+                );
+            };
+            match depths[ip] {
+                Some(seen) if seen == depth => continue,
+                Some(seen) => panic!(
+                    "internal error: instruction {ip} ({op:?}) is reached with {seen} and with \
+                     {depth} values on the stack: {:?}",
+                    self.code
+                ),
+                None => depths[ip] = Some(depth),
+            }
+            let after = depth + op.stack_delta();
+            assert!(
+                after >= 0,
+                "internal error: instruction {ip} ({op:?}) pops below the function's stack: {:?}",
+                self.code
+            );
+            let target = |offset: &JumpTarget| offset.apply(ip + 1);
+            match op {
+                OpCode::Return | OpCode::Halt => {}
+                OpCode::Jump(offset) => pending.push((target(offset), after)),
+                OpCode::JumpIfTrue(offset)
+                | OpCode::JumpIfFalse(offset)
+                | OpCode::PopJumpIfFalse(offset) => {
+                    pending.push((target(offset), after));
+                    pending.push((ip + 1, after));
+                }
+                // An exhausted iterator jumps without pushing an element.
+                OpCode::IterNext(offset) => {
+                    pending.push((target(offset), depth));
+                    pending.push((ip + 1, after));
+                }
+                _ => pending.push((ip + 1, after)),
+            }
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.code.len()
     }

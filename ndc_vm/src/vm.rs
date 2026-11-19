@@ -346,6 +346,16 @@ impl Vm {
                         value => return Err(VmError::new(not_a_bool(value), span)),
                     }
                 }
+                OpCode::PopJumpIfFalse(offset) => {
+                    let offset = *offset;
+                    match self.stack.pop().expect("stack underflow") {
+                        Value::Bool(false) => {
+                            frame.ip = offset.apply(frame.ip);
+                        }
+                        Value::Bool(true) => {}
+                        value => return Err(VmError::new(not_a_bool(&value), span)),
+                    }
+                }
                 OpCode::JumpIfTrue(offset) => {
                     let offset = *offset;
                     let top = self.stack.last().expect("stack underflow");

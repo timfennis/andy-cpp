@@ -1,0 +1,46 @@
+// Statements whose values nothing uses, as an `if` without an `else`, a loop
+// or an assignment, leave the stack as they found it, also when a `break` or
+// `continue` leaves them halfway, so the values around them stay put.
+// expect-output: 27 [1,3] 6 true true [2,4] 8 5 true 3 [0,2,4] 11
+let total = 0;
+for i in 0..10 {
+    if i == 7 { break }
+    if i % 2 == 0 { continue; } else { total += i; }
+    if i > 100 { total = 0; }
+    total += i * 2;
+}
+let odds = [];
+let i = 0;
+while true {
+    i += 1;
+    if i > 4 { break; }
+    if i % 2 == 0 { continue }
+    odds.push(i);
+}
+fn sum_to(n) {
+    let s = 0;
+    for k in 1..=n, if k != 0 { if k > 3 { break } s += k; }
+    s
+}
+let unit_while = while false { 1 };
+let unit_if = if false { 1 };
+let evens = [x for x in 1..=4, if x % 2 == 0];
+let nested = 0;
+for a in 0..3 {
+    for b in 0..3 {
+        if b == a { continue }
+        if b > a { break }
+        nested += a + b * 3;
+    }
+}
+let pending = 0;
+for v in [1, 2, 3] { pending = pending + if v == 2 { break } else { v } + 4; }
+let empty = { let z = 1; z = 2; };
+let count = 0;
+for x in [1, 2, 3], if x > 1 { if x == 3 { count += x; } else { count += 0; } }
+[y * 2 for y in 0..3];
+let calls = 0;
+fn bump() { calls += 1; calls }
+if bump() > 0 { bump(); } else { bump(); }
+while calls < 11 { bump(); }
+print(total, odds, sum_to(10), unit_while == (), unit_if == (), evens, nested, pending, empty == (), count, [y * 2 for y in 0..3], calls);

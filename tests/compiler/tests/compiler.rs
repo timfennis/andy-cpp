@@ -99,102 +99,71 @@ fn compile_with_stdlib_unoptimized(input: &str) -> Vec<OpCode> {
 
 // if true { 1 }
 //
-// 0: Constant(0)      push `true`
-// 1: JumpIfFalse(3)   if false, jump to else path (index 5)
-// 2: Pop              pop condition (true path)
-// 3: Constant(1)      push `1`
-// 4: Jump(2)          skip else path (jump to Halt at index 7)
-// 5: Pop              pop condition (false path, jumped here)
-// 6: Constant(2)      push `()` (no else branch)
-// 7: Halt
+// An `if` without an `else` is `()`, so its branch is compiled for what it
+// does, and both paths meet to push the `()`.
+//
+// 0: Constant(0)        push `true`
+// 1: PopJumpIfFalse(2)  pop the condition; if false, skip the branch (index 4)
+// 2: Constant(1)        push `1`
+// 3: Pop                drop the branch's value
+// 4: Constant(2)        push `()`
+// 5: Halt
 #[test]
-fn an_if_without_else_yields_unit_when_false() {
+fn an_if_without_else_yields_unit_on_both_paths() {
+    let expected = [
+        Constant(0),
+        PopJumpIfFalse(JumpTarget::Offset(2)),
+        Constant(1),
+        Pop,
+        Constant(2),
+        Halt,
+    ];
     let compiled = compile_function("if true { 1 }");
-    assert_eq!(
-        compiled.opcodes(),
-        [
-            Constant(0),
-            JumpIfFalse(JumpTarget::Offset(3)),
-            Pop,
-            Constant(1),
-            Jump(JumpTarget::Offset(2)),
-            Pop,
-            Constant(2),
-            Halt
-        ]
-    );
+    assert_eq!(compiled.opcodes(), expected);
     assert!(
         compiled.body().constant(2).is_unit(),
-        "the false path must push unit"
+        "both paths push unit"
     );
+    assert_eq!(compile_with_analysis("if true { 1 }"), expected);
 }
 
-// if true { 1 }, analysed: an `if` without an `else` is `()`, so the branch's
-// own value is dropped for one.
-//
-// 0: Constant(0)      push `true`
-// 1: JumpIfFalse(5)   if false, jump to the else path (index 7)
-// 2: Pop              pop condition (true path)
-// 3: Constant(1)      push `1`
-// 4: Pop              drop the branch's value
-// 5: Constant(2)      push `()`
-// 6: Jump(2)          skip the else path
-// 7: Pop              pop condition (false path)
-// 8: Constant(3)      push `()`
-// 9: Halt
+// A branch that's already `()`, or never finishes, is compiled for what it
+// does like any other.
 #[test]
-fn an_if_without_else_drops_its_branch_s_value() {
-    assert_eq!(
-        compile_with_analysis("if true { 1 }"),
-        [
-            Constant(0),
-            JumpIfFalse(JumpTarget::Offset(5)),
-            Pop,
-            Constant(1),
-            Pop,
-            Constant(2),
-            Jump(JumpTarget::Offset(2)),
-            Pop,
-            Constant(3),
-            Halt
-        ]
-    );
-}
-
-// A branch that's already `()`, or never finishes, needs no extra ops.
-#[test]
-fn an_if_without_else_keeps_a_unit_or_never_branch_as_it_is() {
+fn an_if_without_else_compiles_a_unit_or_never_branch_for_what_it_does() {
     assert_eq!(
         compile_with_analysis("if true { () }"),
         [
             Constant(0),
-            JumpIfFalse(JumpTarget::Offset(3)),
-            Pop,
+            PopJumpIfFalse(JumpTarget::Offset(2)),
             MakeTuple(0),
-            Jump(JumpTarget::Offset(2)),
             Pop,
             Constant(1),
             Halt
         ]
     );
-    // The inner `if`'s branch is a `break`, which is `Never`.
+    // The inner `if`'s branch is a `break`, which is `Never`. The loop's body
+    // is compiled for what it does, so the `if` pushes no `()`, and the
+    // `break` lands where the loop's condition exits it.
+    //
+    // 0: Constant(0)        push `true`  ← loop start
+    // 1: PopJumpIfFalse(4)  exit the loop (index 6)
+    // 2: Constant(1)        push `true`
+    // 3: PopJumpIfFalse(1)  skip the branch (index 5)
+    // 4: Jump(1)            `break` (index 6)
+    // 5: Jump(-6)           back to the loop start
+    // 6: Constant(2)        push `()`, the loop's value
+    // 7: Halt
     assert_eq!(
         compile_with_analysis("while true { if true { break } }"),
         [
             Constant(0),
-            JumpIfFalse(JumpTarget::Offset(10)),
-            Pop,
+            PopJumpIfFalse(JumpTarget::Offset(4)),
             Constant(1),
-            JumpIfFalse(JumpTarget::Offset(3)),
-            Pop,
-            Jump(JumpTarget::Offset(6)),
-            Jump(JumpTarget::Offset(2)),
-            Pop,
+            PopJumpIfFalse(JumpTarget::Offset(1)),
+            Jump(JumpTarget::Offset(1)),
+            Jump(JumpTarget::Offset(-6)),
             Constant(2),
-            Pop,
-            Jump(JumpTarget::Offset(-12)),
-            Pop,
-            Constant(3),
             Halt
         ]
     );
@@ -202,25 +171,21 @@ fn an_if_without_else_keeps_a_unit_or_never_branch_as_it_is() {
 
 // if true { 1 } else { 2 }
 //
-// 0: Constant(0)      push `true`
-// 1: JumpIfFalse(3)   if false, jump to else (index 5)
-// 2: Pop              pop condition (true path)
-// 3: Constant(1)      push `1`
-// 4: Jump(2)          skip else, jump to Halt (index 7)
-// 5: Pop              pop condition (false path)
-// 6: Constant(2)      push `2`
-// 7: Halt
+// 0: Constant(0)        push `true`
+// 1: PopJumpIfFalse(2)  pop the condition; if false, jump to else (index 4)
+// 2: Constant(1)        push `1`
+// 3: Jump(1)            skip else, jump to Halt (index 5)
+// 4: Constant(2)        push `2`
+// 5: Halt
 #[test]
-fn an_if_pops_its_condition_on_both_paths() {
+fn an_if_pops_its_condition_as_it_branches() {
     assert_eq!(
         compile("if true { 1 } else { 2 }"),
         [
             Constant(0),
-            JumpIfFalse(JumpTarget::Offset(3)),
-            Pop,
+            PopJumpIfFalse(JumpTarget::Offset(2)),
             Constant(1),
-            Jump(JumpTarget::Offset(2)),
-            Pop,
+            Jump(JumpTarget::Offset(1)),
             Constant(2),
             Halt
         ]
@@ -320,27 +285,23 @@ fn a_block_discards_all_but_its_last_value() {
 // Each branch leaves exactly one value on the stack: the true branch its `3`,
 // the false branch, which ends in a statement, unit.
 //
-// 0: Constant(0)      push `true`
-// 1: JumpIfFalse(3)   jump to false branch (index 5)
-// 2: Pop              pop condition (true path)
-// 3: Constant(1)      push `3`
-// 4: Jump(4)          jump to Halt (index 9)
-// 5: Pop              pop condition (false path)
-// 6: Constant(2)      push `3` (inner of `3;`)
-// 7: Pop              discard (trailing semicolon)
-// 8: Constant(3)      push `()` (block result)
-// 9: Halt
+// 0: Constant(0)        push `true`
+// 1: PopJumpIfFalse(2)  pop the condition; if false, jump to the false branch (index 4)
+// 2: Constant(1)        push `3`
+// 3: Jump(3)            jump to Halt (index 7)
+// 4: Constant(2)        push `3` (inner of `3;`)
+// 5: Pop                discard (trailing semicolon)
+// 6: Constant(3)        push `()` (block result)
+// 7: Halt
 #[test]
 fn each_if_branch_leaves_one_value() {
     assert_eq!(
         compile("if true { 3 } else { 3; }"),
         [
             Constant(0),
-            JumpIfFalse(JumpTarget::Offset(3)),
-            Pop,
+            PopJumpIfFalse(JumpTarget::Offset(2)),
             Constant(1),
-            Jump(JumpTarget::Offset(4)),
-            Pop,
+            Jump(JumpTarget::Offset(3)),
             Constant(2),
             Pop,
             Constant(3),
@@ -351,27 +312,23 @@ fn each_if_branch_leaves_one_value() {
 
 // while true { 1 }
 //
-// 0: Constant(0)      push `true`  ← loop_start
-// 1: JumpIfFalse(4)   if false, jump past body to exit Pop (index 6)
-// 2: Pop              pop condition (true path)
-// 3: Constant(1)      body: push `1`
-// 4: Pop              discard body value (each iteration's result is unobservable)
-// 5: Jump(-6)         jump back to loop_start (index 0)
-// 6: Pop              pop condition (false path, loop exit)
-// 7: Constant(2)      push `()` (the loop's result)
-// 8: Halt
+// 0: Constant(0)        push `true`  ← loop_start
+// 1: PopJumpIfFalse(3)  pop the condition; if false, exit the loop (index 5)
+// 2: Constant(1)        body: push `1`
+// 3: Pop                discard body value (each iteration's result is unobservable)
+// 4: Jump(-5)           jump back to loop_start (index 0)
+// 5: Constant(2)        push `()` (the loop's result)
+// 6: Halt
 #[test]
 fn a_while_loop_discards_its_body_value_and_yields_unit() {
     assert_eq!(
         compile("while true { 1 }"),
         [
             Constant(0),
-            JumpIfFalse(JumpTarget::Offset(4)),
-            Pop,
+            PopJumpIfFalse(JumpTarget::Offset(3)),
             Constant(1),
             Pop,
-            Jump(JumpTarget::Offset(-6)),
-            Pop,
+            Jump(JumpTarget::Offset(-5)),
             Constant(2),
             Halt
         ]
@@ -384,50 +341,35 @@ fn a_while_loop_discards_its_body_value_and_yields_unit() {
 // A top-level declaration is a global, so the declaration stores 1 into
 // global slot 2 (there are no natives here, and the language's intrinsics
 // `cast` and `cast?` take slots 0 and 1).
-// Assignment pushes new value, SetGlobal overwrites,
-// push unit as the expression result, Pop discards it.
+// Assignment pushes new value, SetGlobal overwrites. Both are statements,
+// whose `()` nothing wants, so neither pushes one.
 //
 // 0: Constant(0)    push `1`
 // 1: SetGlobal(2)   store in global slot 2 (declaration)
-// 2: Constant(1)    push `()` (declaration result)
-// 3: Pop            discard (statement)
-// 4: Constant(2)    push `5`
-// 5: SetGlobal(2)   overwrite global slot 2 (assignment)
-// 6: Constant(3)    push `()` (assignment result)
-// 7: Pop            discard (statement)
-// 8: Halt
+// 2: Constant(1)    push `5`
+// 3: SetGlobal(2)   overwrite global slot 2 (assignment)
+// 4: Halt
 #[test]
 fn a_top_level_variable_is_declared_and_assigned_through_its_global() {
     assert_eq!(
         compile_with_analysis("let a = 1;\na = 5;"),
-        [
-            Constant(0),
-            SetGlobal(2),
-            Constant(1),
-            Pop,
-            Constant(2),
-            SetGlobal(2),
-            Constant(3),
-            Pop,
-            Halt
-        ]
+        [Constant(0), SetGlobal(2), Constant(1), SetGlobal(2), Halt]
     );
 }
 
 // let value = 1;
 // value += 2;
 //
-// An augmented assignment stores the operation's result back into its target,
-// then pushes unit for the assignment expression. That holds for a `++=` that
-// mutates the list in place and returns it as much as for a `+` that makes a
-// new value. A variable target stores with its Set opcode:
+// An augmented assignment stores the operation's result back into its target.
+// That holds for a `++=` that mutates the list in place and returns it as much
+// as for a `+` that makes a new value. A variable target stores with its Set
+// opcode, and as a statement pushes no unit:
 //
-// Call(2), SetGlobal(_), Constant(_), Pop
+// Call(2), SetGlobal(_), Halt
 //
-// An indexed target passes the result to `[]=`, and pops that call's unit
-// before pushing its own:
+// An indexed target passes the result to `[]=`, and pops that call's unit:
 //
-// Call(3), Pop, Constant(_)
+// Call(3), Pop, Halt
 #[test]
 fn an_augmented_assignment_stores_its_result_back_even_when_it_mutates_in_place() {
     for source in [
@@ -436,9 +378,9 @@ fn an_augmented_assignment_stores_its_result_back_even_when_it_mutates_in_place(
     ] {
         let ops = compile_with_stdlib_unoptimized(source);
         assert!(
-            ops.windows(4)
-                .any(|ops| matches!(ops, [Call(2), SetGlobal(_), Constant(_), Pop])),
-            "`{source}` must store the operation result and push unit: {ops:?}",
+            ops.windows(3)
+                .any(|ops| matches!(ops, [Call(2), SetGlobal(_), Halt])),
+            "`{source}` must store the operation result: {ops:?}",
         );
     }
 
@@ -449,8 +391,8 @@ fn an_augmented_assignment_stores_its_result_back_even_when_it_mutates_in_place(
         let ops = compile_with_stdlib_unoptimized(source);
         assert!(
             ops.windows(3)
-                .any(|ops| matches!(ops, [Call(3), Pop, Constant(_)])),
-            "`{source}` must store through []= and push unit: {ops:?}",
+                .any(|ops| matches!(ops, [Call(3), Pop, Halt])),
+            "`{source}` must store through []=: {ops:?}",
         );
     }
 }
@@ -493,12 +435,10 @@ fn temporaries_come_after_the_frames_own_locals() {
 //
 // 0: Constant(0)   push `1`
 // 1: SetLocal(0)   store in slot 0
-// 2: Constant(1)   push `()` / 3: Pop
-// 4: Constant(2)   push `2`
-// 5: SetLocal(1)   store in slot 1
-// 6: Constant(3)   push `()` / 7: Pop
-// 8: GetLocal(0)   push `a` (block result)
-// 9: Halt
+// 2: Constant(1)   push `2`
+// 3: SetLocal(1)   store in slot 1
+// 4: GetLocal(0)   push `a` (block result)
+// 5: Halt
 #[test]
 fn block_locals_live_in_preallocated_slots() {
     assert_eq!(
@@ -507,11 +447,7 @@ fn block_locals_live_in_preallocated_slots() {
             Constant(0),
             SetLocal(0),
             Constant(1),
-            Pop,
-            Constant(2),
             SetLocal(1),
-            Constant(3),
-            Pop,
             GetLocal(0),
             Halt
         ]
@@ -719,19 +655,13 @@ fn a_captured_local_is_read_and_written_through_its_cell() {
         [
             Constant(0),
             SetLocal(0),
-            Constant(1),
-            Pop,
             Closure {
-                constant_idx: 2,
+                constant_idx: 1,
                 values: Rc::from([CaptureSource::Local(0)]),
             },
             SetLocal(1),
-            Constant(3),
-            Pop,
-            Constant(4),
+            Constant(2),
             SetCell(0),
-            Constant(5),
-            Pop,
             GetCell(0),
             Return
         ]
@@ -767,22 +697,15 @@ fn a_self_capturing_function_gets_its_cell_before_its_closure() {
 // }
 //
 // A closure reaches a captured local through its upvalues: `x` is upvalue 0
-// of `inner`, the function that is constant 2 of `outer`.
+// of `inner`, the function that is constant 1 of `outer`.
 #[test]
 fn a_closure_reaches_captured_variables_through_its_upvalues() {
     assert_eq!(
         compile_nested_function(
             "fn outer() {\nlet x = 1;\nfn inner() { x = 2; x }\n}",
-            &[0, 2]
+            &[0, 1]
         ),
-        [
-            Constant(0),
-            SetUpvalue(0),
-            Constant(1),
-            Pop,
-            GetUpvalue(0),
-            Return
-        ]
+        [Constant(0), SetUpvalue(0), GetUpvalue(0), Return]
     );
 }
 
@@ -803,15 +726,8 @@ fn a_function_reaches_top_level_declarations_as_globals_without_capturing_them()
         "a function that only uses globals needs no closure",
     );
     assert_eq!(
-        compile_nested_function(source, &[2]),
-        [
-            Constant(0),
-            SetGlobal(2),
-            Constant(1),
-            Pop,
-            GetGlobal(2),
-            Return
-        ]
+        compile_nested_function(source, &[1]),
+        [Constant(0), SetGlobal(2), GetGlobal(2), Return]
     );
 }
 

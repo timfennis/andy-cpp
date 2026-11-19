@@ -232,6 +232,15 @@ impl Compiler {
         self.ir.write(OpCode::Constant(idx), Span::synthetic());
     }
 
+    /// Push unit if `want` is [`Want::Value`], as the value of an expression
+    /// that's `()` for what it is, and return whether it did.
+    fn emit_unit_if(&mut self, want: Want) -> bool {
+        if want == Want::Value {
+            self.emit_unit();
+        }
+        want == Want::Value
+    }
+
     /// Pop the stack down to a loop's entry depth. Emitted before the jump of
     /// a `break`/`continue` that sits inside a partially compiled expression,
     /// e.g. `f(1 + break)`, so the pending operands don't leak.
@@ -302,6 +311,26 @@ impl Compiler {
         &mut self,
         expression_location: ExpressionLocation,
     ) -> Result<(), CompileError> {
+        self.compile_wanting(expression_location, Want::Value)
+    }
+
+    /// Compile one expression for what it does, leaving the stack as it
+    /// was: the body of a loop, or `x = 1` in `x = 1;`.
+    fn compile_discarded(
+        &mut self,
+        expression_location: ExpressionLocation,
+    ) -> Result<(), CompileError> {
+        self.compile_wanting(expression_location, Want::Nothing)
+    }
+
+    /// Compile one expression, leaving its value on the stack if `want` is
+    /// [`Want::Value`]. An expression that's `()` for what it is, as a loop
+    /// or an assignment, writes no `()` that nothing wants.
+    fn compile_wanting(
+        &mut self,
+        expression_location: ExpressionLocation,
+        want: Want,
+    ) -> Result<(), CompileError> {
         let ExpressionLocation {
             id,
             expression,
@@ -309,8 +338,11 @@ impl Compiler {
         } = expression_location;
         let entry_depth = self.ir.stack_depth();
         // A `;`-statement pops its own value and is the one expression that
-        // leaves nothing on the stack.
-        let leaves_value = !matches!(expression, Expression::Statement(_));
+        // leaves nothing on the stack even where a value is wanted.
+        let leaves_value = want == Want::Value && !matches!(expression, Expression::Statement(_));
+        // Whether the expression pushed a value, which has to be popped if
+        // nothing wants it.
+        let mut pushed = true;
         match expression {
             Expression::BoolLiteral(b) => {
                 let idx = self.ir.add_constant(Value::Bool(b));
@@ -351,8 +383,8 @@ impl Compiler {
                 self.compile_named_binding(&self.binding(id), id, span)?;
             }
             Expression::Statement(stm) => {
-                self.compile_expr(*stm)?;
-                self.ir.write(OpCode::Pop, Span::synthetic());
+                self.compile_discarded(*stm)?;
+                pushed = false;
             }
             Expression::Logical {
                 left,
@@ -383,7 +415,7 @@ impl Compiler {
             Expression::VariableDeclaration { value, l_value, .. } => {
                 self.compile_expr(*value)?;
                 self.compile_binding_pattern(l_value, span)?;
-                self.emit_unit();
+                pushed = self.emit_unit_if(want);
             }
             Expression::Assignment {
                 l_value,
@@ -402,7 +434,7 @@ impl Compiler {
                 AssignmentTarget::Identifier { span: lv_span, .. } => {
                     self.compile_expr(*value)?;
                     self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
-                    self.emit_unit();
+                    pushed = self.emit_unit_if(want);
                 }
                 AssignmentTarget::Sequence(seq) => {
                     self.compile_expr(*value)?;
@@ -410,7 +442,7 @@ impl Compiler {
                     for l_value in seq {
                         self.compile_assignment_target(l_value, span)?;
                     }
-                    self.emit_unit();
+                    pushed = self.emit_unit_if(want);
                 }
                 AssignmentTarget::Member {
                     receiver,
@@ -438,7 +470,7 @@ impl Compiler {
                 self.ir.write(opcode, span);
                 target.emit_store(self)?;
 
-                self.emit_unit();
+                pushed = self.emit_unit_if(want);
             }
             Expression::FunctionDeclaration {
                 name, body, pure, ..
@@ -487,29 +519,33 @@ impl Compiler {
                     self.ir.write(OpCode::Constant(set_idx), span);
                     self.emit_declare(field.setter, span);
                 }
-                self.emit_unit();
+                pushed = self.emit_unit_if(want);
             }
             Expression::Grouping(statements) => {
-                self.compile_expr(*statements)?;
+                self.compile_wanting(*statements, want)?;
+                pushed = want == Want::Value;
             }
             Expression::Block { statements } => {
-                self.compile_block(statements, span)?;
+                self.compile_block(statements, want)?;
+                pushed = want == Want::Value;
             }
             Expression::If {
                 condition,
                 on_true,
                 on_false,
             } => {
-                self.compile_if(*condition, *on_true, on_false.map(|e| *e), span)?;
+                self.compile_if(*condition, *on_true, on_false.map(|e| *e), want)?;
+                pushed = want == Want::Value;
             }
             Expression::While {
                 expression: condition,
                 loop_body,
             } => {
-                self.compile_while(*condition, *loop_body, span)?;
+                self.compile_while(*condition, *loop_body)?;
+                pushed = self.emit_unit_if(want);
             }
             Expression::For { iterations, body } => {
-                self.compile_for(&iterations, *body, span)?;
+                pushed = self.compile_for(&iterations, *body, want, span)?;
             }
             Expression::Call {
                 function,
@@ -600,6 +636,7 @@ impl Compiler {
                 );
                 self.compile_expr(*value)?;
                 self.ir.write(OpCode::Return, span);
+                pushed = false;
             }
             Expression::Break => {
                 let context = self
@@ -612,6 +649,7 @@ impl Compiler {
                     .expect("loop context checked above")
                     .break_instructions
                     .push(idx);
+                pushed = false;
             }
             Expression::Continue => {
                 let context = self
@@ -620,6 +658,7 @@ impl Compiler {
                 let start = context.start;
                 self.emit_operand_cleanup(context.stack_depth, span);
                 self.write_jump_back(start, span);
+                pushed = false;
             }
             range @ (Expression::RangeInclusive { .. } | Expression::RangeExclusive { .. }) => {
                 let (inclusive, start, end) = match range {
@@ -638,7 +677,11 @@ impl Compiler {
             }
         }
 
-        // Every expression except a statement leaves exactly one value.
+        if want == Want::Nothing && pushed {
+            self.ir.write(OpCode::Pop, Span::synthetic());
+        }
+        // Every expression except a statement leaves exactly one value where
+        // one is wanted, and none where none is.
         self.ir
             .set_stack_depth(entry_depth + isize::from(leaves_value));
         Ok(())
@@ -989,104 +1032,101 @@ impl Compiler {
         self.ir.write(OpCode::Jump(JumpTarget::Label(target)), span)
     }
 
+    /// Compile a block, leaving its value, that of its last statement, on
+    /// the stack if `want` is [`Want::Value`].
     fn compile_block(
         &mut self,
         statements: Vec<ExpressionLocation>,
-        _span: Span,
+        want: Want,
     ) -> Result<(), CompileError> {
-        if statements.is_empty() {
-            self.emit_unit();
-        } else {
-            let last = statements.len() - 1;
-            for (i, stmt) in statements.into_iter().enumerate() {
-                // A `;`-terminated statement pops its own value, so it can't
-                // be the block result; substitute unit.
-                let is_last_expr =
-                    i == last && !matches!(stmt.expression, Expression::Statement(_));
-                self.compile_expr(stmt)?;
-                if i == last && !is_last_expr {
-                    self.emit_unit();
-                }
+        let last = statements.len().checked_sub(1);
+        // A block that ends in a `;`-terminated statement, or in none, is
+        // unit.
+        let ends_in_value = statements
+            .last()
+            .is_some_and(|stmt| !matches!(stmt.expression, Expression::Statement(_)));
+        for (i, stmt) in statements.into_iter().enumerate() {
+            if Some(i) == last && ends_in_value {
+                self.compile_wanting(stmt, want)?;
+            } else {
+                self.compile_discarded(stmt)?;
+            }
+        }
+        if !ends_in_value {
+            self.emit_unit_if(want);
+        }
+
+        Ok(())
+    }
+
+    /// Compile an `if`, leaving its value on the stack if `want` is
+    /// [`Want::Value`]. An `if` without an `else` is `()`, so a branch with a
+    /// value of its own, as in `if c { 1 }`, is compiled for what it does.
+    fn compile_if(
+        &mut self,
+        condition: ExpressionLocation,
+        on_true: ExpressionLocation,
+        on_false: Option<ExpressionLocation>,
+        want: Want,
+    ) -> Result<(), CompileError> {
+        let condition_span = condition.span;
+        self.compile_expr(condition)?;
+        let skip_true = self.ir.write(
+            OpCode::PopJumpIfFalse(JumpTarget::PLACEHOLDER),
+            condition_span,
+        );
+        // Each branch starts with the condition popped, and both end with
+        // what `want` asks for on top of that.
+        let branch_depth = self.ir.stack_depth();
+        match on_false {
+            None => {
+                self.compile_discarded(on_true)?;
+                self.patch_jump(skip_true);
+                self.ir.set_stack_depth(branch_depth);
+                self.emit_unit_if(want);
+            }
+            Some(on_false) => {
+                self.compile_wanting(on_true, want)?;
+                let skip_false = self
+                    .ir
+                    .write(OpCode::Jump(JumpTarget::PLACEHOLDER), Span::synthetic());
+                self.patch_jump(skip_true);
+                self.ir.set_stack_depth(branch_depth);
+                self.compile_wanting(on_false, want)?;
+                self.patch_jump(skip_false);
             }
         }
 
         Ok(())
     }
 
-    fn compile_if(
-        &mut self,
-        condition: ExpressionLocation,
-        on_true: ExpressionLocation,
-        on_false: Option<ExpressionLocation>,
-        _span: Span,
-    ) -> Result<(), CompileError> {
-        let condition_span = condition.span;
-        self.compile_expr(condition)?;
-        let conditional_jump_idx = self
-            .ir
-            .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), condition_span);
-        self.ir.write(OpCode::Pop, Span::synthetic());
-        let on_true_id = on_true.id;
-        self.compile_expr(on_true)?;
-        // An `if` without an `else` is `()`, so a branch with a value of
-        // its own, as in `if c { 1 }`, gives `()` instead.
-        if on_false.is_none()
-            && !matches!(
-                self.analysis.expr_types.get(&on_true_id),
-                Some(StaticType::Never) | None
-            )
-            && self.analysis.expr_types.get(&on_true_id) != Some(&StaticType::unit())
-        {
-            self.ir.write(OpCode::Pop, Span::synthetic());
-            self.emit_unit();
-        }
-        if let Some(on_false) = on_false {
-            let jump_to_end = self
-                .ir
-                .write(OpCode::Jump(JumpTarget::PLACEHOLDER), Span::synthetic());
-            self.patch_jump(conditional_jump_idx);
-            self.ir.write(OpCode::Pop, Span::synthetic());
-            self.compile_expr(on_false)?;
-            self.patch_jump(jump_to_end);
-        } else {
-            // No else branch — push unit so the if-expression always produces a value.
-            let jump_to_end = self
-                .ir
-                .write(OpCode::Jump(JumpTarget::PLACEHOLDER), Span::synthetic());
-            self.patch_jump(conditional_jump_idx);
-            self.ir.write(OpCode::Pop, Span::synthetic());
-            self.emit_unit();
-            self.patch_jump(jump_to_end);
-        }
-
-        Ok(())
-    }
-
+    /// Compile a `while` loop, which leaves the stack as it was: a loop is
+    /// `()`, which [`Self::compile_wanting`] pushes if it's wanted.
     fn compile_while(
         &mut self,
         condition: ExpressionLocation,
         loop_body: ExpressionLocation,
-        _span: Span,
     ) -> Result<(), CompileError> {
         let condition_span = condition.span;
         let loop_start = self.new_loop_context();
         self.compile_expr(condition)?;
-        let conditional_jump_idx = self
-            .ir
-            .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), condition_span);
-        self.ir.write(OpCode::Pop, Span::synthetic());
-        self.compile_expr(loop_body)?;
-        self.ir.write(OpCode::Pop, Span::synthetic());
+        let exit = self.ir.write(
+            OpCode::PopJumpIfFalse(JumpTarget::PLACEHOLDER),
+            condition_span,
+        );
+        self.compile_discarded(loop_body)?;
         self.write_jump_back(loop_start, Span::synthetic());
-        self.patch_jump(conditional_jump_idx);
-        self.ir.write(OpCode::Pop, Span::synthetic());
+        // The condition's exit and every `break` leave the loop at the depth
+        // it started at.
+        self.patch_jump(exit);
         let break_instructions =
             std::mem::take(&mut self.current_loop_context_mut().unwrap().break_instructions);
         for instruction in break_instructions {
             self.patch_jump(instruction)
         }
+        let depth = self.current_loop_context().unwrap().stack_depth;
         self.end_loop_context();
-        self.emit_unit();
+        self.ir.set_stack_depth(depth);
         Ok(())
     }
 
@@ -1308,23 +1348,24 @@ impl Compiler {
         )
     }
 
+    /// Compile a `for`, leaving its value on the stack if `want` is
+    /// [`Want::Value`], and return whether it pushed a value: a loop with a
+    /// block for its body is `()`, pushed only if it's wanted, and a list or
+    /// map comprehension pushes what it makes.
     fn compile_for(
         &mut self,
         iterations: &[ForIteration],
         body: ForBody,
+        want: Want,
         span: Span,
-    ) -> Result<(), CompileError> {
+    ) -> Result<bool, CompileError> {
         match body {
             ForBody::Block(block) => {
                 self.compile_for_iterations(iterations, span, &mut |this| {
-                    // The body is always a block, which always pushes exactly one value.
-                    // Discard it — each iteration's result is unobservable.
-                    this.compile_expr(block.clone())?;
-                    this.ir.write(OpCode::Pop, span);
-                    Ok(())
+                    // Each iteration's value is unobservable.
+                    this.compile_discarded(block.clone())
                 })?;
-                self.emit_unit();
-                Ok(())
+                Ok(self.emit_unit_if(want))
             }
             ForBody::List { expr } => {
                 let tmp_list = self.allocate_temp();
@@ -1336,7 +1377,7 @@ impl Compiler {
                     Ok(())
                 })?;
                 self.write_temp(tmp_list, span, OpCode::GetLocal);
-                Ok(())
+                Ok(true)
             }
             ForBody::Map {
                 key,
@@ -1367,7 +1408,7 @@ impl Compiler {
                     Ok(())
                 })?;
                 self.write_temp(tmp_map, span, OpCode::GetLocal);
-                Ok(())
+                Ok(true)
             }
         }
     }
@@ -1415,15 +1456,13 @@ impl Compiler {
             }
             ForIteration::Guard(condition) => {
                 self.compile_expr(condition.clone())?;
-                let skip_jump = self
+                let skip = self
                     .ir
-                    .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), span);
-                self.ir.write(OpCode::Pop, Span::synthetic());
+                    .write(OpCode::PopJumpIfFalse(JumpTarget::PLACEHOLDER), span);
+                // What's left of the iterations leaves the stack as it was,
+                // so a skipped and a finished iteration meet at one depth.
                 self.compile_for_iterations(rest, span, compile_leaf)?;
-                let end_jump = self.ir.write(OpCode::Jump(JumpTarget::PLACEHOLDER), span);
-                self.patch_jump(skip_jump);
-                self.ir.write(OpCode::Pop, Span::synthetic());
-                self.patch_jump(end_jump);
+                self.patch_jump(skip);
             }
         }
 
@@ -1453,6 +1492,15 @@ impl Compiler {
             .pop()
             .expect("expected there to be a loop context to pop");
     }
+}
+
+/// Whether the code that uses an expression wants its value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Want {
+    /// The value, on top of the stack.
+    Value,
+    /// Nothing: the expression is compiled for what it does.
+    Nothing,
 }
 
 #[derive(Clone)]
