@@ -2,6 +2,12 @@
 
 Status: plan, written 2026-11-19 against master `8b6437be`. Work started 2026-11-19 on `feat/register-vm`.
 
+Progress:
+
+- Step 0 is done (#494 benchmark script, #495 cast check removed on the branch, #496 characterisation tests, #497 compiler snapshots).
+- Steps 1 and 2 are written (`ndc_vm::register`) and **the first go/no-go passed**: on the same binary, the integer loop of appendix A takes 2,660 ms on the stack VM and 279 ms on the register VM (9.5x; the gate was 3x), and `fib(32)` 795 ms and 295 ms (2.7x; the gate was 1.3x). Without immediates and fused branches the figures are 6.3x and 2.3x. Safe Rust, `u16` registers, about 2 ns per instruction, as the prototype predicted.
+- Creating a VM costs 61 µs with the 65,536-register window against 3 µs on the stack VM, which is lost in a process's 2 ms start. `u16` registers stay.
+
 This is a guideline for the sessions that do the work. It records what was measured, what other interpreters learned, the design that follows from both, and the order to build it in. Where the plan says "measure", the number decides, not the plan.
 
 ## 1. Goal and decisions already made
@@ -107,7 +113,7 @@ The value stack stays one `Vec<Value>`, but it's a register file: nothing is pus
 - A frame is `stack[base .. base + frame_size]`. Register `r` is `stack[base + r]`.
 - `ResolvedVar::Local { slot }` is register `slot`. The layout pass already numbers parameters first, then locals, and reuses a block's slots when it ends. Temporaries come after the locals. `CompiledFunction::frame_size` replaces `num_locals` and includes the most temporaries the function ever has at once.
 - A register nothing lives in holds `Value::None`. It costs nothing to write and nothing to drop, unlike today's `Value::unit()`, which is an `Rc` clone for every local of every call.
-- `Return` sets the registers of the frame it leaves to `Value::None`, as `truncate` drops them today, so a call never has to initialise the callee's frame. Inside a running frame, a temporary that's no longer needed may keep its last value until the register is used again or the function returns (section 4.6).
+- `Return` sets the registers of the frame it leaves to `Value::None`, as `truncate` drops them today, so a call never has to initialise the callee's frame: it may hold temporaries the caller left there, which is harmless, as every local is written before it's read. Inside a running frame, a temporary that's no longer needed may keep its last value until the register is used again or the function returns (section 4.6).
 - The stack only grows. Before a frame runs, the VM makes sure `stack.len() >= base + WINDOW`, filling with `Value::None`.
 
 ### 4.3 The dispatch loop
@@ -150,10 +156,16 @@ loop {
 
 - Operands: `Reg(u16)`, a constant index, or an `i16` immediate. An opcode byte and three `u16`s fit in 8 bytes.
 - What makes `OpCode` 32 bytes and not `Copy` moves to tables on the chunk: `Rc<StaticType>` (casts) and `Rc<[CaptureSource]>` (closures) become indexes.
-- The builder keeps symbolic labels and lowers them to offsets at the end, as `OptimizerIr::into_chunk` does. A jump whose offset doesn't fit its field falls back to a wider form.
+- The builder keeps symbolic labels and lowers them to offsets at the end, as `OptimizerIr::into_chunk` does.
 - Spans stay a parallel `Vec<Span>`.
 
-Start with `u16` registers and a 65,536-slot window (1 MB of `None` beyond the top frame). It avoids a 255-register limit and measured the same as `u8`. Check in step 2 what creating that stack costs per `Vm::new`, since tests and the REPL create many VMs; if it shows, fall back to `u8` registers with a compile error for functions that need more than 256.
+`u16` registers and a 65,536-slot window (1 MB of `None` beyond the top frame). It avoids a 255-register limit and measured the same as `u8`; step 2 measured what creating that stack costs (see Progress) and kept it.
+
+What step 2 settled about the encoding:
+
+- `CallNative { dst, slot, base, args }` has `args: u8`, as four `u16`s don't fit beside the opcode. A call with more than 255 arguments, or a native slot past `u16`, calls the native as a value with `Call`.
+- `Jump` and `JumpIfFalse` take an `i32` offset and never need a wider form. The fused compare-and-branch instructions take an `i16`; when a target is further, the offset is a marker and the target is in a table on the chunk, read only when that jump is taken.
+- An immediate is only ever the right operand, so an overflow message names the operands in the order the stack VM does.
 
 **Instruction set for parity (step 3).** One register instruction per thing the stack VM does, nothing clever:
 
@@ -243,6 +255,7 @@ If a benchmark shows memory held too long, add a `Clear { reg }` instruction for
 - `Call { base, args }`: the function value is in `R[base]`, the arguments in `R[base + 1 ..= base + args]`. The callee's frame starts at the caller's `base + 1`, so the arguments are its parameters without a copy. `Return` puts the result in the caller's `R[base]`. This is today's layout (callee slot under the frame), so `dispatch_call`, memoisation, `Function::Checked` and `MAX_CALL_DEPTH` carry over.
 - `CallNative { dst, slot, base, args }`: runs the native on `&regs[base..base + args]`, clears those registers, writes the result to `dst`.
 - `WithVm` natives get their arguments moved into a `Vec`, as now. Avoiding that allocation is a later optimisation.
+- Natives take `&mut ndc_vm::Vm`, which on the branch is the stack VM's type, and `print` is one of them. Step 2 gives them a stack `Vm` without code that holds the output and input. Step 3 has to let a native call back into register code through that same type (`Vm::call_callback`, `VmCallable`), so the register VM's state has to be reachable from what the natives are given. Prefer the arrangement that leaves the least to undo in step 6, when the register VM becomes `ndc_vm::Vm`.
 - `Vm::call_callback` puts the callback's frame above the running frame: at `base + frame_size` of the top frame, with a callee slot first. It runs with `run_to_depth` as now.
 - The value of the last top-level expression goes to a known register that `Halt` names, which replaces `Vm::last_value`'s "is there something above the locals".
 - Keep `CallFrame` small: `memo` and `returns` are rare, so they can share one boxed field.
@@ -255,7 +268,7 @@ Name the class before patching anything that looks like one of these.
 |---|---|---|
 | Lingering temporaries | A dead temporary keeps a big value alive, so memory is freed later | Accepted (section 4.6). Watch peak memory in the benchmark script; add `Clear` only for a measured case. |
 | Borrowed local given to a count-sensitive native | `a ++ b` changes `a` | The rule of 4.6; a test per native that reads `strong_count` |
-| A local read late | In `x + { x = 5; x }` the left operand is `x`'s register, and the block changes it before the add runs. The stack VM read `x` first. | When a later operand of the same instruction can assign a local (it contains an assignment, an op-assignment or a declaration), copy earlier local operands to temporaries. Tests for binary ops, call arguments, list literals, index expressions. |
+| A local read late | In `x + { x = 5; x }` the left operand is `x`'s register, and the block changes it before the add runs. The stack VM read `x` first. | When a later operand of the same instruction can assign a local (it contains an assignment, an op-assignment or a declaration), copy earlier local operands to temporaries. A declaration counts because a block's registers are reused once it ends: `{ let a = 1; a } + { let b = 2; b }` would otherwise add `b` to itself. A captured local is read through its cell into a temporary anyway, as a call can change it. Tests for binary ops, call arguments, list literals, index expressions. |
 | Destination is also an operand | `Move { dst, src }` with both the same, `MakeList { dst, base, .. }` with `dst == base`, a call whose result register is an argument | Read all operands before writing the destination; a unit test per instruction with aliased registers |
 | Stale window or `ip` | The loop keeps running the old frame's code after a call | The two-loop shape of 4.3. Run every VM test under `ulimit -v`. |
 | Stack too short for the window | A frame near the end of the stack panics on window creation | Reserve on every frame push, including callbacks. A test mode with a tiny initial stack. |
@@ -298,14 +311,14 @@ Measure against master. **Continue only if the loop is at least 3x faster and `f
 
 ### Step 3: the rest of the language
 
-Port in this order, a PR each, running the matching `tests/functional/programs` directories on the new backend as they start to pass:
+Port in this order, a PR each. One test already runs every program under `tests/functional/programs` that the register compiler accepts on both VMs and requires the same outcome, so each step shows up as more programs compared (413 of 927 after step 2).
 
-1. All literals, strings, tuples, lists, maps, ranges, logical operators, blocks.
-2. `for` loops, iterators, guards, list and map comprehensions.
-3. Closures, cells, upvalues, named functions that capture themselves, `pure fn`.
-4. Every assignment target: index, member, op-assignment, destructuring, and `Unpack`.
-5. Natives: `CallNative`, `WithVm` natives and callbacks, `CallVec`.
-6. Structs, casts, intrinsics, `Function::Checked`.
+1. Natives and calls of every kind of function: natives that take the VM and call back into the program, `CallVec`, memoised and checked functions, calling a value that isn't a global.
+2. Closures, cells, upvalues, named functions that capture themselves, `pure fn`.
+3. All literals, strings, tuples, lists, maps, ranges, logical operators.
+4. `for` loops, iterators, guards, list and map comprehensions.
+5. Every assignment target: index, member, op-assignment, destructuring, and `Unpack`.
+6. Structs, casts, intrinsics.
 7. Instances of generic functions and the REPL `Session`.
 8. The `trace` feature and `ndc disassemble`.
 
@@ -340,7 +353,7 @@ An unsafe experiment (unchecked `code[ip]`, or a raw register base) in one modul
 - Every `cargo` or `ndc` run that executes VM code: `(ulimit -v 16000000; timeout 900 cargo test ...)`. A VM bug can loop and allocate until the machine dies.
 - At most two agents building at once. Benchmarks are run serially by the coordinating session after agents finish.
 - `perf record` works only with `-e task-clock` and without `--call-graph=dwarf` on Tim's machine. No hyperfine.
-- Worktree agents start from master: pass the branch's commit explicitly.
+- Worktree agents start from master: pass the branch's commit explicitly. The branch moves while an agent works; an agent that rebases can't force-push, so it pushes the rebased work under a new branch name and says which one to use.
 - PRs through the `create-pr` skill, short bodies, no test sections.
 - If a second special case appears around one cause, stop and propose the design change instead.
 
