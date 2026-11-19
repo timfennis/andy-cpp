@@ -1,10 +1,11 @@
 use super::chunk::{ClosureCode, far_target};
 use super::instr::{FAR, Instr, Reg, WINDOW};
 use crate::error::VmError;
+use crate::hash_map::HashMap;
 use crate::native_op::NativeOp;
 use crate::value::{ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::vm::{
-    MAX_CALL_DEPTH, MemoCache, calls_too_deep, convert_returned, memo_key, not_a_bool,
+    MAX_CALL_DEPTH, MemoCache, calls_too_deep, convert_returned, make_range, memo_key, not_a_bool,
     refused_arguments,
 };
 use crate::{Object, Value, Vm};
@@ -475,6 +476,11 @@ impl Vm {
                         Value::Bool(false) => ip = ip.wrapping_add_signed(offset as isize),
                         value => break Exit::Error(VmError::native(not_a_bool(value))),
                     },
+                    Instr::JumpIfTrue { cond, offset } => match &regs[cond.index()] {
+                        Value::Bool(true) => ip = ip.wrapping_add_signed(offset as isize),
+                        Value::Bool(false) => {}
+                        value => break Exit::Error(VmError::native(not_a_bool(value))),
+                    },
                     Instr::Call { base, args } => break Exit::Call { base, args },
                     Instr::CallVec { base, args } => break Exit::CallVec { base, args },
                     Instr::CallNative {
@@ -532,6 +538,37 @@ impl Vm {
                         let elements =
                             take_all(&mut regs[base.index()..base.index() + usize::from(len)]);
                         regs[dst.index()] = Value::Object(Rc::new(Object::Tuple(elements)));
+                    }
+                    Instr::MakeList { dst, base, len } => {
+                        let elements =
+                            take_all(&mut regs[base.index()..base.index() + usize::from(len)]);
+                        regs[dst.index()] = Value::list(elements);
+                    }
+                    Instr::MakeMap {
+                        dst,
+                        base,
+                        pairs,
+                        default,
+                    } => regs[dst.index()] = make_map(regs, base, pairs, default),
+                    Instr::ListPush { list, src } => list_push(regs, list, src),
+                    Instr::MapInsert { map, key, value } => map_insert(regs, map, key, value),
+                    Instr::MakeRange { dst, start, end } => {
+                        match make_range(&regs[start.index()], Some(&regs[end.index()]), false) {
+                            Ok(range) => regs[dst.index()] = range,
+                            Err(message) => break Exit::Error(VmError::native(message)),
+                        }
+                    }
+                    Instr::MakeRangeInclusive { dst, start, end } => {
+                        match make_range(&regs[start.index()], Some(&regs[end.index()]), true) {
+                            Ok(range) => regs[dst.index()] = range,
+                            Err(message) => break Exit::Error(VmError::native(message)),
+                        }
+                    }
+                    Instr::MakeRangeFrom { dst, start } => {
+                        match make_range(&regs[start.index()], None, false) {
+                            Ok(range) => regs[dst.index()] = range,
+                            Err(message) => break Exit::Error(VmError::native(message)),
+                        }
                     }
                     Instr::Return { src } => break Exit::Return { src },
                     Instr::Halt { src } => break Exit::Halt { src },
@@ -876,6 +913,55 @@ fn capture_local(register: &mut Value) -> Rc<RefCell<Value>> {
     let cell = Rc::new(RefCell::new(std::mem::replace(register, Value::None)));
     *register = Value::Cell(Rc::clone(&cell));
     cell
+}
+
+/// A new map of the `pairs` keys and values from `base` on in `regs`, a key
+/// then its value, with the value after them as its default if it has a
+/// `default`. The registers are `None` afterwards.
+#[inline(never)]
+fn make_map(regs: &mut [Value; WINDOW], base: Reg, pairs: u16, default: bool) -> Value {
+    let pairs = usize::from(pairs);
+    let values = &mut regs[base.index()..base.index() + 2 * pairs + usize::from(default)];
+    let mut entries = HashMap::with_capacity_and_hasher(pairs, Default::default());
+    for [key, value] in values[..2 * pairs].as_chunks_mut::<2>().0 {
+        let key = std::mem::replace(key, Value::None);
+        entries.insert(key, std::mem::replace(value, Value::None));
+    }
+
+    let default = default.then(|| std::mem::replace(&mut values[2 * pairs], Value::None));
+    Value::Object(Rc::new(Object::map(entries, default)))
+}
+
+/// Appends the value in `src` to the list in `list`, leaving `None` in
+/// `src`.
+fn list_push(regs: &mut [Value; WINDOW], list: Reg, src: Reg) {
+    debug_assert_ne!(list, src, "internal error: a list is pushed onto itself");
+    let value = std::mem::replace(&mut regs[src.index()], Value::None);
+    let Value::Object(object) = &regs[list.index()] else {
+        unreachable!("internal error: ListPush's register holds a list");
+    };
+    let Object::List(list) = object.as_ref() else {
+        unreachable!("internal error: ListPush's register holds a list");
+    };
+    list.borrow_mut().push(value);
+}
+
+/// Puts the value in `value` under the key in `key` in the map in `map`,
+/// leaving `None` in both.
+fn map_insert(regs: &mut [Value; WINDOW], map: Reg, key: Reg, value: Reg) {
+    debug_assert!(
+        map != key && map != value && key != value,
+        "internal error: MapInsert's registers are different"
+    );
+    let key = std::mem::replace(&mut regs[key.index()], Value::None);
+    let value = std::mem::replace(&mut regs[value.index()], Value::None);
+    let Value::Object(object) = &regs[map.index()] else {
+        unreachable!("internal error: MapInsert's register holds a map");
+    };
+    let Object::Map { entries, .. } = object.as_ref() else {
+        unreachable!("internal error: MapInsert's register holds a map");
+    };
+    entries.borrow_mut().insert(key, value);
 }
 
 /// Puts the function in `register` in a memoising wrapper with a new cache.
@@ -1518,6 +1604,164 @@ mod tests {
             emit(b, Instr::Halt { src: Reg(0) });
         });
         assert_eq!(run(&Natives::default(), function).unwrap(), Value::Int(8));
+    }
+
+    /// Lists, maps and ranges made in the register of their first operand.
+    #[test]
+    fn collections_made_in_their_first_operand() {
+        let function = program(5, vec![], |b| {
+            load_int(b, Reg(0), 1);
+            load_int(b, Reg(1), 2);
+            emit(
+                b,
+                Instr::MakeList {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    len: 2,
+                },
+            );
+            load_int(b, Reg(1), 3);
+            emit(
+                b,
+                Instr::ListPush {
+                    list: Reg(0),
+                    src: Reg(1),
+                },
+            );
+            load_int(b, Reg(1), 10);
+            load_int(b, Reg(2), 20);
+            load_int(b, Reg(3), 0);
+            emit(
+                b,
+                Instr::MakeMap {
+                    dst: Reg(1),
+                    base: Reg(1),
+                    pairs: 1,
+                    default: true,
+                },
+            );
+            load_int(b, Reg(2), 30);
+            load_int(b, Reg(3), 40);
+            emit(
+                b,
+                Instr::MapInsert {
+                    map: Reg(1),
+                    key: Reg(2),
+                    value: Reg(3),
+                },
+            );
+            load_int(b, Reg(2), 5);
+            load_int(b, Reg(3), 7);
+            emit(
+                b,
+                Instr::MakeRangeInclusive {
+                    dst: Reg(2),
+                    start: Reg(2),
+                    end: Reg(3),
+                },
+            );
+            load_int(b, Reg(3), 1);
+            emit(
+                b,
+                Instr::MakeRange {
+                    dst: Reg(3),
+                    start: Reg(3),
+                    end: Reg(3),
+                },
+            );
+            load_int(b, Reg(4), 9);
+            emit(
+                b,
+                Instr::MakeRangeFrom {
+                    dst: Reg(4),
+                    start: Reg(4),
+                },
+            );
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    len: 5,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        let value = run(&Natives::default(), function).unwrap();
+        let Value::Object(tuple) = &value else {
+            panic!("a tuple");
+        };
+        let Object::Tuple(values) = tuple.as_ref() else {
+            panic!("a tuple");
+        };
+        assert_eq!(values[0].to_string(), "[1,2,3]");
+        let Value::Object(map) = &values[1] else {
+            panic!("a map");
+        };
+        let Object::Map { entries, default } = map.as_ref() else {
+            panic!("a map");
+        };
+        assert_eq!(entries.borrow().len(), 2);
+        assert_eq!(entries.borrow()[&Value::Int(30)], Value::Int(40));
+        assert_eq!(default.as_ref(), Some(&Value::Int(0)));
+        let range = |value: &Value| {
+            value
+                .clone()
+                .try_into_iter()
+                .unwrap()
+                .take(5)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(range(&values[2]), [5, 6, 7].map(Value::Int));
+        assert!(range(&values[3]).is_empty());
+        assert_eq!(range(&values[4]), [9, 10, 11, 12, 13].map(Value::Int));
+    }
+
+    #[test]
+    fn a_range_bound_that_isnt_an_int() {
+        let function = program(2, vec![], |b| {
+            load_int(b, Reg(0), 1);
+            let k = b.constant(Value::Bool(true));
+            emit(b, Instr::LoadK { dst: Reg(1), k });
+            emit(
+                b,
+                Instr::MakeRange {
+                    dst: Reg(0),
+                    start: Reg(1),
+                    end: Reg(1),
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        let error = run(&Natives::default(), function).unwrap_err();
+        assert_eq!(error.message, "range bounds must be Int, got Bool");
+    }
+
+    #[test]
+    fn jump_if_true() {
+        for (condition, expected) in [(true, 2), (false, 1)] {
+            let function = program(2, vec![], |b| {
+                let end = b.label();
+                let k = b.constant(Value::Bool(condition));
+                emit(b, Instr::LoadK { dst: Reg(0), k });
+                load_int(b, Reg(1), 2);
+                b.jump(
+                    Instr::JumpIfTrue {
+                        cond: Reg(0),
+                        offset: 0,
+                    },
+                    end,
+                    Span::synthetic(),
+                );
+                load_int(b, Reg(1), 1);
+                b.bind(end);
+                emit(b, Instr::Halt { src: Reg(1) });
+            });
+            assert_eq!(
+                run(&Natives::default(), function).unwrap(),
+                Value::Int(expected)
+            );
+        }
     }
 
     #[test]

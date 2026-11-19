@@ -559,27 +559,11 @@ impl Vm {
                 }
                 OpCode::MakeRange { inclusive, bounded } => {
                     let (inclusive, bounded) = (*inclusive, *bounded);
-                    let end = if bounded {
-                        let v = self.stack.pop().expect("stack underflow");
-                        let Value::Int(n) = v else {
-                            return Err(VmError::new(bad_range_bound(&v), span));
-                        };
-                        Some(n)
-                    } else {
-                        None
-                    };
+                    let end = bounded.then(|| self.stack.pop().expect("stack underflow"));
                     let start = self.stack.pop().expect("stack underflow");
-                    let Value::Int(start) = start else {
-                        return Err(VmError::new(bad_range_bound(&start), span));
-                    };
-                    let iter: Rc<RefCell<dyn VmIterator>> = match (inclusive, end) {
-                        (_, None) => Rc::new(RefCell::new(UnboundedRangeIter::new(start))),
-                        (false, Some(end)) => Rc::new(RefCell::new(RangeIter::new(start, end))),
-                        (true, Some(end)) => {
-                            Rc::new(RefCell::new(RangeInclusiveIter::new(start, end)))
-                        }
-                    };
-                    self.stack.push(Value::iterator(iter));
+                    let range = make_range(&start, end.as_ref(), inclusive)
+                        .map_err(|message| VmError::new(message, span))?;
+                    self.stack.push(range);
                 }
                 OpCode::Closure {
                     constant_idx: idx,
@@ -1195,6 +1179,30 @@ pub(crate) fn not_a_bool(value: &Value) -> String {
 #[cold]
 fn bad_range_bound(value: &Value) -> String {
     format!("range bounds must be Int, got {}", value.diagnostic_type())
+}
+
+/// The range from `start` to `end`, which includes `end` if `inclusive`,
+/// or which doesn't end without one: `1..4`, `1..=3`, `1..`. The bounds
+/// are `Int`s; `end` is checked first.
+pub(crate) fn make_range(
+    start: &Value,
+    end: Option<&Value>,
+    inclusive: bool,
+) -> Result<Value, String> {
+    let end = match end {
+        Some(Value::Int(end)) => Some(*end),
+        Some(end) => return Err(bad_range_bound(end)),
+        None => None,
+    };
+    let Value::Int(start) = *start else {
+        return Err(bad_range_bound(start));
+    };
+    let iter: Rc<RefCell<dyn VmIterator>> = match (inclusive, end) {
+        (_, None) => Rc::new(RefCell::new(UnboundedRangeIter::new(start))),
+        (false, Some(end)) => Rc::new(RefCell::new(RangeIter::new(start, end))),
+        (true, Some(end)) => Rc::new(RefCell::new(RangeInclusiveIter::new(start, end))),
+    };
+    Ok(Value::iterator(iter))
 }
 
 /// Replaces the value on top of `stack` with `Some` of it, made the

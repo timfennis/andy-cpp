@@ -127,6 +127,9 @@ pub enum Instr {
     /// Goes `offset` instructions on if `cond` is `false`, and fails if it
     /// isn't a `Bool`.
     JumpIfFalse { cond: Reg, offset: i32 },
+    /// Goes `offset` instructions on if `cond` is `true`, and fails if it
+    /// isn't a `Bool`.
+    JumpIfTrue { cond: Reg, offset: i32 },
     /// Goes `offset` instructions on unless `left < right`: the condition
     /// `i < n` of a loop, as `Less` then `JumpIfFalse` would, without making
     /// a `Bool`. An offset of [`FAR`] is in the chunk's far jumps.
@@ -175,6 +178,30 @@ pub enum Instr {
     /// `dst` = the tuple of the `len` values from `base` on, which are
     /// `None` afterwards.
     MakeTuple { dst: Reg, base: Reg, len: u16 },
+    /// `dst` = a new list of the `len` values from `base` on, which are
+    /// `None` afterwards.
+    MakeList { dst: Reg, base: Reg, len: u16 },
+    /// `dst` = a new map of the `pairs` keys and values from `base` on, a
+    /// key then its value, and with a `default`, the value after them as the
+    /// map's default. They are `None` afterwards.
+    MakeMap {
+        dst: Reg,
+        base: Reg,
+        pairs: u16,
+        default: bool,
+    },
+    /// Appends `src` to the list in `list`, leaving `None` in `src`, which
+    /// is another register.
+    ListPush { list: Reg, src: Reg },
+    /// Puts `value` under `key` in the map in `map`, leaving `None` in both,
+    /// which are other registers.
+    MapInsert { map: Reg, key: Reg, value: Reg },
+    /// `dst` = the range `start..end` of the `Int`s in `start` and `end`.
+    MakeRange { dst: Reg, start: Reg, end: Reg },
+    /// `dst` = the range `start..=end`.
+    MakeRangeInclusive { dst: Reg, start: Reg, end: Reg },
+    /// `dst` = the range `start..`, which doesn't end.
+    MakeRangeFrom { dst: Reg, start: Reg },
     /// Ends the call, giving the caller the value in `src`.
     Return { src: Reg },
     /// Ends the program, whose value is the one in `src`.
@@ -320,6 +347,7 @@ impl Instr {
             Self::MulIntI { .. } => "MulIntI",
             Self::Jump { .. } => "Jump",
             Self::JumpIfFalse { .. } => "JumpIfFalse",
+            Self::JumpIfTrue { .. } => "JumpIfTrue",
             Self::JumpIfNotLess { .. } => "JumpIfNotLess",
             Self::JumpIfNotLessEqual { .. } => "JumpIfNotLessEqual",
             Self::JumpIfNotGreater { .. } => "JumpIfNotGreater",
@@ -336,6 +364,13 @@ impl Instr {
             Self::CallVec { .. } => "CallVec",
             Self::CallNative { .. } => "CallNative",
             Self::MakeTuple { .. } => "MakeTuple",
+            Self::MakeList { .. } => "MakeList",
+            Self::MakeMap { .. } => "MakeMap",
+            Self::ListPush { .. } => "ListPush",
+            Self::MapInsert { .. } => "MapInsert",
+            Self::MakeRange { .. } => "MakeRange",
+            Self::MakeRangeInclusive { .. } => "MakeRangeInclusive",
+            Self::MakeRangeFrom { .. } => "MakeRangeFrom",
             Self::Return { .. } => "Return",
             Self::Halt { .. } => "Halt",
         }
@@ -346,7 +381,9 @@ impl Instr {
     /// where it goes.
     pub fn jump_offset(self) -> Option<i32> {
         match self {
-            Self::Jump { offset } | Self::JumpIfFalse { offset, .. } => Some(offset),
+            Self::Jump { offset }
+            | Self::JumpIfFalse { offset, .. }
+            | Self::JumpIfTrue { offset, .. } => Some(offset),
             Self::JumpIfNotLess { offset, .. }
             | Self::JumpIfNotLessEqual { offset, .. }
             | Self::JumpIfNotGreater { offset, .. }
@@ -366,8 +403,10 @@ impl Instr {
     /// Whether this is a jump whose offset is [`FAR`], so that where it
     /// goes is in the chunk's far jumps.
     pub fn is_far_jump(self) -> bool {
-        !matches!(self, Self::Jump { .. } | Self::JumpIfFalse { .. })
-            && self.jump_offset() == Some(i32::from(FAR))
+        !matches!(
+            self,
+            Self::Jump { .. } | Self::JumpIfFalse { .. } | Self::JumpIfTrue { .. }
+        ) && self.jump_offset() == Some(i32::from(FAR))
     }
 
     /// The same jump going `offset` instructions on, or `None` if `offset`
@@ -379,6 +418,9 @@ impl Instr {
         }
         if let Self::JumpIfFalse { cond, .. } = self {
             return Some(Self::JumpIfFalse { cond, offset });
+        }
+        if let Self::JumpIfTrue { cond, .. } = self {
+            return Some(Self::JumpIfTrue { cond, offset });
         }
         let offset = i16::try_from(offset).ok().filter(|&offset| offset != FAR)?;
         Some(self.with_short_offset(offset))
@@ -481,7 +523,9 @@ impl fmt::Display for Instr {
             | Self::SubIntI { dst, left, imm }
             | Self::MulIntI { dst, left, imm } => write!(f, "{dst}, {left}, #{imm}"),
             Self::Jump { offset } => write!(f, "{offset:+}"),
-            Self::JumpIfFalse { cond, offset } => write!(f, "{cond}, {offset:+}"),
+            Self::JumpIfFalse { cond, offset } | Self::JumpIfTrue { cond, offset } => {
+                write!(f, "{cond}, {offset:+}")
+            }
             Self::JumpIfNotLess {
                 left,
                 right,
@@ -529,7 +573,24 @@ impl fmt::Display for Instr {
                 slot,
                 args,
             } => write!(f, "{dst}, n{slot}, {base}, {args}"),
-            Self::MakeTuple { dst, base, len } => write!(f, "{dst}, {base}, {len}"),
+            Self::MakeTuple { dst, base, len } | Self::MakeList { dst, base, len } => {
+                write!(f, "{dst}, {base}, {len}")
+            }
+            Self::MakeMap {
+                dst,
+                base,
+                pairs,
+                default,
+            } => {
+                let default = if default { ", default" } else { "" };
+                write!(f, "{dst}, {base}, {pairs}{default}")
+            }
+            Self::ListPush { list, src } => write!(f, "{list}, {src}"),
+            Self::MapInsert { map, key, value } => write!(f, "{map}, {key}, {value}"),
+            Self::MakeRange { dst, start, end } | Self::MakeRangeInclusive { dst, start, end } => {
+                write!(f, "{dst}, {start}, {end}")
+            }
+            Self::MakeRangeFrom { dst, start } => write!(f, "{dst}, {start}"),
             Self::Return { src } | Self::Halt { src } => write!(f, "{src}"),
         }
     }

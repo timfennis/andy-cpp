@@ -19,9 +19,16 @@ use ndc_analysis::{Analysis, Binding, Callee, Candidate, CaptureSource, Instance
 use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
-use ndc_parser::{AssignmentTarget, BindingPattern, Expression, ExpressionLocation};
+use ndc_parser::{
+    AssignmentTarget, BindingPattern, Expression, ExpressionLocation, LogicalOperator,
+};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+/// How many elements of a list literal, or pairs of a map literal, are made
+/// at once from registers of their own; the ones after them are added one by
+/// one, so a long literal takes no more registers than a short one.
+const LITERAL_CHUNK: usize = 64;
 
 /// Where an expression's value has to go.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -423,9 +430,11 @@ impl Compiler {
                 self.builder.jump(Instr::Jump { offset: 0 }, start, span);
                 self.diverged(dest, span)
             }
-            Expression::Logical { .. } => {
-                Err(CompileError::not_yet_supported("`and` and `or`", span))
-            }
+            Expression::Logical {
+                left,
+                operator,
+                right,
+            } => self.compile_logical(*left, operator, *right, dest),
             Expression::OpAssignment { .. } => Err(CompileError::not_yet_supported(
                 "an assignment with an operator, such as `+=`",
                 span,
@@ -445,11 +454,16 @@ impl Compiler {
                     .expect("internal error: every member access is analysed before it's compiled");
                 self.compile_binding_call(&getter, vec![*receiver], dest, member_span)
             }
-            Expression::Tuple { .. } => Err(CompileError::not_yet_supported("tuples", span)),
-            Expression::List { .. } => Err(CompileError::not_yet_supported("lists", span)),
-            Expression::Map { .. } => Err(CompileError::not_yet_supported("maps", span)),
-            Expression::RangeInclusive { .. } | Expression::RangeExclusive { .. } => {
-                Err(CompileError::not_yet_supported("ranges", span))
+            Expression::Tuple { values } => self.compile_tuple(values, dest, span),
+            Expression::List { values } => self.compile_list(values, dest, span),
+            Expression::Map { values, default } => {
+                self.compile_map(values, default.map(|default| *default), dest, span)
+            }
+            Expression::RangeInclusive { start, end } => {
+                self.compile_range(start, end, true, dest, span)
+            }
+            Expression::RangeExclusive { start, end } => {
+                self.compile_range(start, end, false, dest, span)
             }
         }
     }
@@ -999,6 +1013,224 @@ impl Compiler {
             operands.push(reg);
         }
         Ok(operands)
+    }
+
+    /// Compiles `a and b` or `a or b`: `b` only runs when `a` doesn't
+    /// settle it. Both go to one register, which isn't a local's: the left
+    /// operand written to a local's register would change what the right
+    /// one reads of it, as in `x = y and x`.
+    fn compile_logical(
+        &mut self,
+        left: ExpressionLocation,
+        operator: LogicalOperator,
+        right: ExpressionLocation,
+        dest: Dest,
+    ) -> Result<Operand, CompileError> {
+        let left_span = left.span;
+        let dst = match dest {
+            Dest::Reg(reg) if reg.index() >= self.locals => reg,
+            Dest::Reg(_) | Dest::Any | Dest::Discard => self.alloc_temp(left_span)?,
+        };
+        self.compile_expr(left, Dest::Reg(dst))?;
+        let end = self.builder.label();
+        let jump = match operator {
+            LogicalOperator::And => Instr::JumpIfFalse {
+                cond: dst,
+                offset: 0,
+            },
+            LogicalOperator::Or => Instr::JumpIfTrue {
+                cond: dst,
+                offset: 0,
+            },
+        };
+        self.builder.jump(jump, end, left_span);
+        self.compile_expr(right, Dest::Reg(dst))?;
+        self.builder.bind(end);
+        Ok(match dest {
+            Dest::Any => Operand::Temp(dst),
+            Dest::Reg(reg) if reg != dst => {
+                self.emit(Instr::Move { dst: reg, src: dst }, left_span);
+                Operand::Placed
+            }
+            Dest::Reg(_) | Dest::Discard => Operand::Placed,
+        })
+    }
+
+    /// Compiles a tuple literal, its elements in order.
+    fn compile_tuple(
+        &mut self,
+        values: Vec<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let len = u16::try_from(values.len())
+            .map_err(|_too_many| CompileError::too_many_registers(span))?;
+        let mark = self.next_temp;
+        let base = self.compile_arguments(values, span)?;
+        // `MakeTuple` reads its elements before it writes `dst`.
+        self.next_temp = mark;
+        let dst = self.place(dest, span)?;
+        self.emit(Instr::MakeTuple { dst, base, len }, span);
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// Compiles a list literal, its elements in order: the first
+    /// [`LITERAL_CHUNK`] in registers of their own, which `MakeList` makes
+    /// the list of, and each one after them pushed onto it, so a long list
+    /// takes no more registers than a short one.
+    fn compile_list(
+        &mut self,
+        mut values: Vec<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let rest = values.split_off(values.len().min(LITERAL_CHUNK));
+        let len = u16::try_from(values.len()).expect("internal error: a chunk fits a u16");
+        let mark = self.next_temp;
+        let base = self.compile_arguments(values, span)?;
+        self.next_temp = mark;
+        if rest.is_empty() {
+            let dst = self.place(dest, span)?;
+            self.emit(Instr::MakeList { dst, base, len }, span);
+            return Ok(Self::placed(dest, dst));
+        }
+        let list = self.alloc_temp(span)?;
+        self.emit(
+            Instr::MakeList {
+                dst: list,
+                base,
+                len,
+            },
+            span,
+        );
+        for value in rest {
+            let src = self.alloc_temp(value.span)?;
+            self.compile_expr(value, Dest::Reg(src))?;
+            self.emit(Instr::ListPush { list, src }, span);
+            self.next_temp = src.index();
+        }
+        Ok(self.built(list, dest, span))
+    }
+
+    /// Compiles a map literal, each key before its value, and its default
+    /// after them: the first [`LITERAL_CHUNK`] pairs in registers of their
+    /// own, which `MakeMap` makes the map of, and each one after them
+    /// inserted into it. A map with a default is made at once, as its
+    /// default comes last.
+    fn compile_map(
+        &mut self,
+        mut values: Vec<(ExpressionLocation, Option<ExpressionLocation>)>,
+        default: Option<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let chunk = if default.is_some() {
+            values.len()
+        } else {
+            values.len().min(LITERAL_CHUNK)
+        };
+        let rest = values.split_off(chunk);
+        let pairs = u16::try_from(values.len())
+            .map_err(|_too_many| CompileError::too_many_registers(span))?;
+        let mark = self.next_temp;
+        let base = Self::register(mark, span)?;
+        for (key, value) in values {
+            self.compile_pair(key, value, span)?;
+        }
+        let has_default = default.is_some();
+        if let Some(default) = default {
+            let reg = self.alloc_temp(default.span)?;
+            self.compile_expr(default, Dest::Reg(reg))?;
+        }
+        self.next_temp = mark;
+        let make = |dst| Instr::MakeMap {
+            dst,
+            base,
+            pairs,
+            default: has_default,
+        };
+        if rest.is_empty() {
+            let dst = self.place(dest, span)?;
+            self.emit(make(dst), span);
+            return Ok(Self::placed(dest, dst));
+        }
+        let map = self.alloc_temp(span)?;
+        self.emit(make(map), span);
+        for (key, value) in rest {
+            let (key, value) = self.compile_pair(key, value, span)?;
+            self.emit(Instr::MapInsert { map, key, value }, span);
+            self.next_temp = key.index();
+        }
+        Ok(self.built(map, dest, span))
+    }
+
+    /// Compiles a key of a map literal and its value, which is unit when
+    /// there's none, as in the set `{1, 2}`, into two new temporaries.
+    fn compile_pair(
+        &mut self,
+        key: ExpressionLocation,
+        value: Option<ExpressionLocation>,
+        span: Span,
+    ) -> Result<(Reg, Reg), CompileError> {
+        let key_reg = self.alloc_temp(key.span)?;
+        let value_reg = self.alloc_temp(span)?;
+        self.compile_expr(key, Dest::Reg(key_reg))?;
+        match value {
+            Some(value) => {
+                self.compile_expr(value, Dest::Reg(value_reg))?;
+            }
+            None => self.emit(Instr::LoadUnit { dst: value_reg }, Span::synthetic()),
+        }
+        Ok((key_reg, value_reg))
+    }
+
+    /// What a literal built in `reg`, the first free temporary but one,
+    /// gives for `dest`.
+    fn built(&mut self, reg: Reg, dest: Dest, span: Span) -> Operand {
+        debug_assert_eq!(reg.index() + 1, self.next_temp);
+        match dest {
+            Dest::Any => Operand::Temp(reg),
+            Dest::Reg(dst) => {
+                self.emit(Instr::Move { dst, src: reg }, span);
+                Operand::Placed
+            }
+            Dest::Discard => Operand::Placed,
+        }
+    }
+
+    /// Compiles the range `start..end`, or `start..=end` if `inclusive`, or
+    /// `start..` without an end.
+    fn compile_range(
+        &mut self,
+        start: Option<Box<ExpressionLocation>>,
+        end: Option<Box<ExpressionLocation>>,
+        inclusive: bool,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let start = start.expect("internal error: the parser gives a range a start");
+        let bounds = std::iter::once(*start).chain(end.map(|end| *end)).collect();
+        let mark = self.next_temp;
+        let operands = self.compile_operands(bounds)?;
+        // The range reads its bounds before it writes `dst`.
+        self.next_temp = mark;
+        let dst = self.place(dest, span)?;
+        let instr = match (&operands[..], inclusive) {
+            ([start, end], false) => Instr::MakeRange {
+                dst,
+                start: *start,
+                end: *end,
+            },
+            ([start, end], true) => Instr::MakeRangeInclusive {
+                dst,
+                start: *start,
+                end: *end,
+            },
+            ([start], _) => Instr::MakeRangeFrom { dst, start: *start },
+            _ => unreachable!("internal error: a range has one or two bounds"),
+        };
+        self.emit(instr, span);
+        Ok(Self::placed(dest, dst))
     }
 
     /// Compiles `arguments` into registers of their own, one after the

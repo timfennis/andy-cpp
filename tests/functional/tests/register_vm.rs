@@ -462,6 +462,74 @@ fn a_variable_a_call_changes_is_read_before_the_call() {
 }
 
 #[test]
+fn literals() {
+    let outcome = same_on_both(
+        r#"fn values() {
+            let x = 2;
+            let t = (1, x, "three");
+            let l = [[x], [x + 1]];
+            let m = %{"a": [x], "b": [x + 1]};
+            let s = %{1, x};
+            let d = %{:0, "a": 1};
+            let r = 1..4;
+            let ri = 1..=x;
+            print(t, l, m["b"], s.len(), d["zz"], d["a"], r.list(), ri.list(), (), 1e3, 2.5);
+            print(0x10, 0b101, 1_000, (1..).take(3).list());
+        }
+        values();"#,
+    );
+    assert_eq!(
+        outcome.output,
+        "(1,2,\"three\") [[2],[3]] [3] 2 0 1 [1,2,3] [1,2]  1000.0 2.5\n16 5 1000 [1,2,3]\n"
+    );
+}
+
+/// A literal with more elements than are made at once is the same as a
+/// short one.
+#[test]
+fn long_literals() {
+    let elements = (0..150).map(|n| n.to_string()).collect::<Vec<_>>();
+    let list = format!("[{}]", elements.join(", "));
+    let pairs = (0..150)
+        .map(|n| format!("{n}: {}", n * 2))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let outcome = same_on_both(&format!(
+        "fn f() {{
+            let l = {list};
+            let m = %{{{pairs}}};
+            let d = %{{:7, {pairs}}};
+            print(l.len(), l[149], m.len(), m[149], d[149], d[1000]);
+        }}
+        f();"
+    ));
+    assert_eq!(outcome.output, "150 149 150 298 298 7\n");
+}
+
+/// `and` and `or` give their value to a local that their right operand
+/// reads only once both ran.
+#[test]
+fn logical_operators() {
+    let outcome = same_on_both(
+        r#"fn f(a, b) {
+            let x = b;
+            x = a and x;
+            let y = b;
+            y = a or y;
+            let z = a or { print("ran"); b };
+            print(x, y, z, a and b, a or b, !a and !b);
+        }
+        f(true, false);
+        f(false, true);
+        f(false, false);"#,
+    );
+    assert_eq!(
+        outcome.output,
+        "false true true false true false\nran\nfalse true true false true false\nran\nfalse false false false false true\n"
+    );
+}
+
+#[test]
 fn deep_recursion() {
     let outcome = same_on_both(
         "fn depth(n) { if n == 0 { 0 } else { 1 + depth(n - 1) } }
@@ -530,10 +598,8 @@ fn the_test_programs_it_compiles() {
 #[test]
 fn constructs_it_cant_compile_yet_are_errors() {
     for (program, construct) in [
-        ("[1, 2]", "lists"),
         ("let x = 1; x += 1;", "an assignment with an operator"),
         ("for x in 1..3 { }", "`for` loops"),
-        ("true and false", "`and` and `or`"),
     ] {
         let outcome = run(Backend::Register, program);
         let error = outcome.result.expect_err(program);
