@@ -1,0 +1,5 @@
+// The `if` in `h` waits for `a`, which only its fallback settles. The literal
+// it then makes, holding `[a]` and `a`, is settled and reported like any other.
+// expect-error: values of different types: [Unknown] and Unknown share no type
+fn h(a) => if true { [a] } else { a };
+let w = if true { h } else { fn(a) => [a] };

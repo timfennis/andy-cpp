@@ -463,6 +463,17 @@ impl TypeVars {
         }
     }
 
+    /// Whether a variable made since `first`, but for those in `except`, is
+    /// still unsettled.
+    pub(crate) fn has_unsettled_from(&self, first: usize, except: &HashSet<TypeVar>) -> bool {
+        (first..self.solutions.len()).any(|index| {
+            self.solutions[index].is_none()
+                && !except.contains(&TypeVar(
+                    u32::try_from(index).expect("fewer than 2^32 type variables"),
+                ))
+        })
+    }
+
     /// Settles every variable made since `first` that nothing settled with
     /// its fallback, but for those in `except`.
     pub(crate) fn settle_from(&mut self, first: usize, except: &HashSet<TypeVar>) {

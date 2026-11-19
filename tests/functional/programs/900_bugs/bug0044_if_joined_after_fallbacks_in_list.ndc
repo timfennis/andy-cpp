@@ -1,0 +1,5 @@
+// As bug0043, with `h` in a list next to a lambda.
+// expect-error: mismatched types: found [Any] but expected Int
+fn g(a) => a + 1;
+fn h(a) => if true { g(a) } else { a };
+let w: Int = [1, [h, fn(a) => [a]]];
