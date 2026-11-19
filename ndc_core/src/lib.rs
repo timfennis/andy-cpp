@@ -1,4 +1,5 @@
 mod builtins;
+pub mod collections;
 mod intrinsic;
 mod node_id;
 mod signature;

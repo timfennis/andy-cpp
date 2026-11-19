@@ -1,9 +1,9 @@
 use crate::Value;
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
-use ahash::{AHashMap, AHashSet};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{Intrinsic, NodeId};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
@@ -30,9 +30,9 @@ pub struct Session {
     /// What the analyser worked out about every line so far.
     analysis: Rc<Analysis>,
     /// The functions the lines declared in globals, by declaration.
-    functions: AHashMap<NodeId, DeclaredFunction>,
+    functions: HashMap<NodeId, DeclaredFunction>,
     /// As [`Compiler::prototypes`], for every line so far.
-    prototypes: Rc<RefCell<AHashMap<NodeId, Rc<CompiledFunction>>>>,
+    prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
 }
 
 /// A function declaration, as [`Compiler::compile_function_decl`] takes it.
@@ -64,15 +64,15 @@ pub struct Compiler {
     /// declaration: outside of any instance, or in an instance's body
     /// without using its picks, so `fn f() => 42` in a generic body is one
     /// function across its instances and keeps its identity.
-    prototypes: Rc<RefCell<AHashMap<NodeId, Rc<CompiledFunction>>>>,
+    prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
     /// The functions the code compiled so far declared in globals, kept when
     /// compiling a REPL line, whose later lines may need instances of them.
-    functions: Option<AHashMap<NodeId, DeclaredFunction>>,
+    functions: Option<HashMap<NodeId, DeclaredFunction>>,
     /// The global slots of the natives the code compiled so far reads,
     /// shared with the compilers of the functions it declares. Reading a
     /// global is the only way code reaches a native, so this lists every
     /// native the program can call.
-    natives: Rc<RefCell<AHashSet<usize>>>,
+    natives: Rc<RefCell<HashSet<usize>>>,
 }
 
 impl Compiler {

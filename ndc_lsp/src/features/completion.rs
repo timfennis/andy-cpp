@@ -1,8 +1,8 @@
-use ahash::AHashMap;
 use ls_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
     Documentation, MarkupContent, MarkupKind, Position,
 };
+use ndc_core::collections::HashMap;
 use ndc_core::{Intrinsic, StaticType};
 use ndc_interpreter::{Builtins, Interpreter};
 
@@ -152,7 +152,7 @@ fn group_overloads<'a>(
     receiver_type: Option<&StaticType>,
 ) -> Vec<OverloadGroup<'a>> {
     let mut groups: Vec<OverloadGroup<'a>> = Vec::new();
-    let mut index: AHashMap<(&'a str, Option<usize>), usize> = AHashMap::new();
+    let mut index: HashMap<(&'a str, Option<usize>), usize> = HashMap::default();
 
     for fun in functions {
         if !is_normal_ident(&fun.name) {
@@ -245,7 +245,7 @@ fn local_completions(state: &DocumentState, position: Position) -> Vec<Completio
     };
     let scope = file_scope(source_id, state.source.len());
 
-    let mut names: AHashMap<String, Option<StaticType>> = AHashMap::new();
+    let mut names: HashMap<String, Option<StaticType>> = HashMap::default();
     for decl in collect_declarations(&state.ast, scope) {
         if is_visible(&decl, offset) {
             // Type is a best-effort hint from the name-keyed map (a shadowed name

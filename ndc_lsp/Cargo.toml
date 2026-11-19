@@ -13,7 +13,6 @@ server = ["dep:tokio", "dep:tower-lsp-server"]
 
 [dependencies]
 ndc_analysis.workspace = true
-ahash.workspace = true
 ls-types.workspace = true
 ndc_lexer.workspace = true
 ndc_interpreter.workspace = true

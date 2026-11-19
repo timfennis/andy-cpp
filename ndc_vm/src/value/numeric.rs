@@ -204,10 +204,9 @@ fn compare_int_float(integer: i64, float: f64) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::hash_map::DefaultHasher;
 
     fn hash(value: NumericRef<'_>) -> u64 {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = ndc_core::collections::hasher();
         value.hash(&mut hasher);
         hasher.finish()
     }

@@ -1,0 +1,15 @@
+# The interpreter's hash maps and sets hash with fixed seeds, so the same
+# program gives the same output on every run: see `ndc_core::collections`.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "use ndc_core::collections::HashMap, whose order is the same on every run" },
+    { path = "std::collections::HashSet", reason = "use ndc_core::collections::HashSet, whose order is the same on every run" },
+    { path = "std::hash::RandomState", reason = "it seeds hashes at random; use ndc_core::collections::FixedState" },
+    { path = "std::collections::hash_map::DefaultHasher", reason = "it seeds hashes at random; use ndc_core::collections::hasher" },
+    { path = "ahash::AHashMap", reason = "it seeds hashes at random; use ndc_core::collections::HashMap" },
+    { path = "ahash::AHashSet", reason = "it seeds hashes at random; use ndc_core::collections::HashSet" },
+    { path = "ahash::RandomState", reason = "it seeds hashes at random unless given seeds; use ndc_core::collections::FixedState" },
+]
+
+# A map value can hold a list as a key, which the program can still change.
+# It hashes by what it holds, as the language means it to.
+ignore-interior-mutability = ["ndc_vm::value::Value", "ndc_vm::value::Object"]

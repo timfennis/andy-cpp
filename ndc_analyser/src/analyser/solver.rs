@@ -9,9 +9,9 @@ use super::generics::redefinable_parameters;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads, ResolvedCall, is_strictly_more_specific};
 use crate::types::TypeVars;
-use ahash::AHashSet;
 use itertools::Itertools;
 use ndc_analysis::{Binding, Candidate};
+use ndc_core::collections::HashSet;
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
@@ -710,7 +710,7 @@ impl Analyser {
     /// The unsettled variables the waiting constraints settle once they're
     /// solved, which no fallback settles: what a call returns is what the
     /// overload it picks returns, once what it waits on is known.
-    fn produced_by_waiting(&self) -> AHashSet<TypeVar> {
+    fn produced_by_waiting(&self) -> HashSet<TypeVar> {
         self.waiting
             .values()
             .flat_map(|waiting| {
@@ -786,13 +786,13 @@ impl Analyser {
     /// settles once it's solved. Constraints that wait only on older
     /// variables keep waiting.
     pub(super) fn settle_waiting(&mut self, first: usize) {
-        self.settle_waiting_keeping(first, &AHashSet::new());
+        self.settle_waiting_keeping(first, &HashSet::default());
     }
 
     /// [`Self::settle_waiting`], but for the variables in `open`, which
     /// nothing waits on and later code may still settle: see
     /// [`Self::not_needed_now`].
-    pub(super) fn settle_waiting_keeping(&mut self, first: usize, open: &AHashSet<TypeVar>) {
+    pub(super) fn settle_waiting_keeping(&mut self, first: usize, open: &HashSet<TypeVar>) {
         // Each constraint is checked for a default rule once, and again only
         // after something it waits on changed.
         let mut unchecked = self.waiting.keys().copied().collect::<BTreeSet<_>>();
@@ -809,7 +809,7 @@ impl Analyser {
             // A branch's default may settle what a call returns, as the
             // `+` in `fib(n - 1) + fib(n - 2)` returns what `fib` does.
             while let Some(serial) = unchecked.pop_first() {
-                let vars = self.waits_on_vars_since(serial, first, &AHashSet::new());
+                let vars = self.waits_on_vars_since(serial, first, &HashSet::default());
                 if !vars.is_empty() && self.default_to_branch(serial, &vars) {
                     unchecked.extend(self.solve_waiting_and_report());
                 }
@@ -859,7 +859,7 @@ impl Analyser {
     /// runs, as a cast to a function type does, and which a `pure fn`'s
     /// parameters are checked by. What an empty `[]`, `%{}` or `None` holds
     /// is one; a lambda's parameter isn't, even if nothing has used it yet.
-    pub(super) fn not_needed_now(&self) -> AHashSet<TypeVar> {
+    pub(super) fn not_needed_now(&self) -> HashSet<TypeVar> {
         let needed_types = self
             .waiting
             .values()
@@ -901,7 +901,7 @@ impl Analyser {
             .into_iter()
             .map(|var| (var, self.vars.literals_within(&StaticType::Var(var))))
             .collect::<Vec<_>>();
-        let mut literals = AHashSet::new();
+        let mut literals = HashSet::default();
         for (var, tree) in trees {
             if tree.iter().any(|&held| self.vars.is_number(held))
                 && (self.vars.is_number(var) || !self.vars.holds_unshared_values(var))
@@ -1039,7 +1039,7 @@ impl Analyser {
         &self,
         serial: u64,
         first: usize,
-        produced: &AHashSet<TypeVar>,
+        produced: &HashSet<TypeVar>,
     ) -> Vec<TypeVar> {
         self.waiting.get(&serial).map_or_else(Vec::new, |waiting| {
             self.waits_on(&waiting.constraint)

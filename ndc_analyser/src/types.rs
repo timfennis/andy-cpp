@@ -1,5 +1,5 @@
-use ahash::{AHashMap, AHashSet};
 use bounds::Bounds;
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{Builtins, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::SymbolId;
@@ -18,10 +18,10 @@ use unify::Deferred;
 /// the one [`Builtins`] gives for its slot, which may only be worked out when
 /// it's first asked for.
 pub(crate) struct TypeTable {
-    types: AHashMap<SymbolId, StaticType>,
+    types: HashMap<SymbolId, StaticType>,
     builtins: Rc<dyn Builtins>,
     /// The global slot of each built-in's symbol.
-    builtin_slots: AHashMap<SymbolId, usize>,
+    builtin_slots: HashMap<SymbolId, usize>,
 }
 
 impl Default for TypeTable {
@@ -29,7 +29,7 @@ impl Default for TypeTable {
     fn default() -> Self {
         Self::with_builtins(
             Rc::new(Vec::<(String, StaticType, Option<ndc_core::Intrinsic>)>::new()),
-            AHashMap::new(),
+            HashMap::default(),
         )
     }
 }
@@ -48,10 +48,10 @@ impl TypeTable {
     /// `builtin_slots` gives its slot.
     pub(crate) fn with_builtins(
         builtins: Rc<dyn Builtins>,
-        builtin_slots: AHashMap<SymbolId, usize>,
+        builtin_slots: HashMap<SymbolId, usize>,
     ) -> Self {
         Self {
-            types: AHashMap::new(),
+            types: HashMap::default(),
             builtins,
             builtin_slots,
         }
@@ -134,13 +134,13 @@ pub(crate) struct TypeVars {
     literals: Vec<TypeVar>,
     /// Where each literal holding values is, keyed by the type its elements
     /// were made as: the whole of `[1, "a"]`, or of an `if`.
-    literal_spans: AHashMap<TypeVar, Span>,
+    literal_spans: HashMap<TypeVar, Span>,
     /// The literals settled as [`StaticType::Error`] because their values
     /// share no type, which the analyser reports.
     unshared: Vec<(TypeVar, Unshared)>,
     /// The types of the `if`s and `match`es whose branches aren't known yet:
     /// see [`Self::mark_join`].
-    joins: AHashSet<TypeVar>,
+    joins: HashSet<TypeVar>,
     /// Those an `Any` was expected of.
     expects_any: Vec<TypeVar>,
     /// While [`Self::bind_arguments`] runs, the values passed for the type
@@ -165,8 +165,8 @@ pub(crate) struct Unshared {
 #[cfg(test)]
 mod tests {
     use super::TypeVars;
-    use ahash::AHashSet;
     use ndc_core::StaticType;
+    use ndc_core::collections::HashSet;
     use ndc_lexer::Span;
 
     fn span() -> Span {
@@ -215,7 +215,7 @@ mod tests {
         let mut vars = TypeVars::default();
         let var = vars.fresh();
         vars.probe(|vars| vars.fall_back_as_errors(&var));
-        vars.settle_from(0, &AHashSet::new());
+        vars.settle_from(0, &HashSet::default());
         assert_eq!(vars.resolve(&var), StaticType::Unknown);
     }
 

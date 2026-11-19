@@ -1,4 +1,4 @@
-use ahash::AHashMap;
+use ndc_core::collections::HashMap;
 
 use ls_types::{
     CompletionItem, CompletionOptions, CompletionParams, CompletionResponse,
@@ -29,7 +29,7 @@ struct OpenDocument {
 
 pub struct Backend {
     pub client: Client,
-    documents: RwLock<AHashMap<Uri, OpenDocument>>,
+    documents: RwLock<HashMap<Uri, OpenDocument>>,
     configure: Configure,
     /// Native-function metadata, snapshotted once at startup. The set of native
     /// functions never changes, so completion and hover read this instead of
@@ -41,7 +41,7 @@ impl Backend {
     pub fn new(client: Client, configure: Configure) -> Self {
         Self {
             client,
-            documents: RwLock::new(AHashMap::new()),
+            documents: RwLock::new(HashMap::default()),
             configure,
             functions: FunctionInfo::collect(&document::interpreter(configure)),
         }

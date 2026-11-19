@@ -4,7 +4,7 @@
 //! `=` an assignment, `len` a function, `(` `)` `;` punctuation, `xs` a
 //! variable and `// count` a comment. Whitespace between them is left out.
 
-use ahash::AHashSet;
+use ndc_core::collections::HashSet;
 use ndc_lexer::{Lexer, SourceId, Token, TokenLocation};
 use ndc_parser::{Expression, ExpressionLocation};
 use std::ops::Range;
@@ -64,7 +64,7 @@ pub fn highlight(source: &str) -> Vec<Highlight> {
     let function_spans = if lexed && nesting(&tokens) <= MAX_PARSED_NESTING {
         function_spans(tokens.clone())
     } else {
-        AHashSet::new()
+        HashSet::default()
     };
 
     let mut highlights = Vec::new();
@@ -133,7 +133,7 @@ fn kind(
     token: &TokenLocation,
     previous: Option<&Token>,
     next: Option<&Token>,
-    function_spans: &AHashSet<usize>,
+    function_spans: &HashSet<usize>,
 ) -> Kind {
     match &token.token {
         Token::String(_) => Kind::String,
@@ -184,8 +184,8 @@ fn kind(
 }
 
 /// The byte offsets of identifiers the parser sees used as functions.
-fn function_spans(tokens: Vec<TokenLocation>) -> AHashSet<usize> {
-    let mut spans = AHashSet::new();
+fn function_spans(tokens: Vec<TokenLocation>) -> HashSet<usize> {
+    let mut spans = HashSet::default();
     if let Ok(expressions) = ndc_parser::Parser::from_tokens(tokens).parse() {
         for expression in &expressions {
             collect_function_spans(expression, &mut spans);
@@ -194,7 +194,7 @@ fn function_spans(tokens: Vec<TokenLocation>) -> AHashSet<usize> {
     spans
 }
 
-fn collect_function_spans(expr: &ExpressionLocation, spans: &mut AHashSet<usize>) {
+fn collect_function_spans(expr: &ExpressionLocation, spans: &mut HashSet<usize>) {
     match &expr.expression {
         Expression::Call { function, .. }
         | Expression::OperatorCall { function, .. }

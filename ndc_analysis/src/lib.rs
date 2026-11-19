@@ -2,7 +2,7 @@
 //! editor tooling to read. The parser's output is syntax; everything decided
 //! about it after parsing belongs here.
 
-use ahash::AHashMap;
+use ndc_core::collections::HashMap;
 use ndc_core::r#struct::StructInfo;
 use ndc_core::{Intrinsic, NodeId, StaticType};
 
@@ -11,52 +11,52 @@ use ndc_core::{Intrinsic, NodeId, StaticType};
 #[derive(Debug, Default, Clone)]
 pub struct Analysis {
     /// Each expression's inferred type.
-    pub expr_types: AHashMap<NodeId, StaticType>,
+    pub expr_types: HashMap<NodeId, StaticType>,
     /// The inferred return type of each function without a return type
     /// annotation, keyed by its declaration.
-    pub inferred_return_types: AHashMap<NodeId, StaticType>,
+    pub inferred_return_types: HashMap<NodeId, StaticType>,
     /// The type of each name a binding pattern declares, keyed by the pattern:
     /// its annotation, or what the analyser inferred from the value. A
     /// parameter's type is its annotation, `Any` if it has none.
-    pub variable_types: AHashMap<NodeId, StaticType>,
+    pub variable_types: HashMap<NodeId, StaticType>,
     /// The type each function declaration gives the function value, keyed by
     /// the declaration: its annotated parameter and return types, `Any` where
     /// there is no annotation. `fn f(x: Int) { x }` is `Function(Int) -> Any`.
-    pub function_types: AHashMap<NodeId, StaticType>,
+    pub function_types: HashMap<NodeId, StaticType>,
     /// What each identifier expression refers to, keyed by the identifier. For
     /// a call like `f(x)` that's the overload of `f` the call picks.
-    pub bindings: AHashMap<NodeId, Binding>,
+    pub bindings: HashMap<NodeId, Binding>,
     /// The variable each declared or assigned name is stored in, keyed by its
     /// binding pattern, its assignment target, or the named function or struct
     /// declaration. In `let x = 1; x = 2;` both the pattern `x` and the target
     /// `x` map to the same local.
-    pub variables: AHashMap<NodeId, ResolvedVar>,
+    pub variables: HashMap<NodeId, ResolvedVar>,
     /// Where the values each function captures come from, in upvalue order,
     /// keyed by its declaration.
-    pub captures: AHashMap<NodeId, Vec<CaptureSource>>,
+    pub captures: HashMap<NodeId, Vec<CaptureSource>>,
     /// The function that reads through each member access or member or index
     /// assignment target, keyed by it. `p.x` calls the getter `x(p)`; an index
     /// target has one only when it's read, as in `xs[0] += 1`.
-    pub getters: AHashMap<NodeId, Binding>,
+    pub getters: HashMap<NodeId, Binding>,
     /// The function that writes through each member or index assignment
     /// target, keyed by it: `x=` for `p.x = 1`, `[]=` for `xs[0] = 1`.
-    pub setters: AHashMap<NodeId, Binding>,
+    pub setters: HashMap<NodeId, Binding>,
     /// The function each augmented assignment like `x += 1` calls, keyed by the
     /// assignment: a mutating overload such as `+=` when one fits, otherwise
     /// the plain operator `+`. Either returns the updated left value, which the
     /// compiler writes back through the target. Absent when neither fits.
-    pub augmented_assignments: AHashMap<NodeId, Binding>,
+    pub augmented_assignments: HashMap<NodeId, Binding>,
     /// What each struct declaration declares, keyed by the declaration.
-    pub structs: AHashMap<NodeId, DeclaredStruct>,
+    pub structs: HashMap<NodeId, DeclaredStruct>,
     /// The type each cast checks its value against at runtime, keyed by the
     /// `cast` or `cast?` name, called or used as a value. `None` when the
     /// value is already known to have the type, as in `cast::<Int>(1)`, so
     /// there is nothing to check.
-    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
+    pub cast_checks: HashMap<NodeId, Option<StaticType>>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries
     /// after them.
-    pub frame_sizes: AHashMap<NodeId, usize>,
+    pub frame_sizes: HashMap<NodeId, usize>,
     /// How many local slots the top-level code needs for the variables of its
     /// blocks and loops. Its own top-level declarations are globals.
     pub top_level_frame_size: usize,
@@ -71,7 +71,7 @@ pub struct Analysis {
     /// depend on its types has an entry, empty if nothing calls it, and runs
     /// only as its instances. For an earlier REPL line's function, the entry
     /// holds only the instances this line made.
-    pub instances: AHashMap<NodeId, Vec<Instance>>,
+    pub instances: HashMap<NodeId, Vec<Instance>>,
     /// How many of the global slots are the built-ins': the natives, then
     /// the intrinsics. The program's own globals follow them.
     pub builtin_count: usize,
@@ -84,19 +84,19 @@ pub struct Instance {
     /// The global the instance is stored in.
     pub variable: ResolvedVar,
     /// As [`Analysis::bindings`], for the instance's body.
-    pub bindings: AHashMap<NodeId, Binding>,
+    pub bindings: HashMap<NodeId, Binding>,
     /// As [`Analysis::getters`], for the instance's body.
-    pub getters: AHashMap<NodeId, Binding>,
+    pub getters: HashMap<NodeId, Binding>,
     /// As [`Analysis::setters`], for the instance's body.
-    pub setters: AHashMap<NodeId, Binding>,
+    pub setters: HashMap<NodeId, Binding>,
     /// As [`Analysis::augmented_assignments`], for the instance's body.
-    pub augmented_assignments: AHashMap<NodeId, Binding>,
+    pub augmented_assignments: HashMap<NodeId, Binding>,
     /// As [`Analysis::function_types`], for the functions the instance's
     /// body declares, with the instance's types.
-    pub function_types: AHashMap<NodeId, StaticType>,
+    pub function_types: HashMap<NodeId, StaticType>,
     /// As [`Analysis::cast_checks`], for the casts in the instance's body,
     /// which its types may already prove.
-    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
+    pub cast_checks: HashMap<NodeId, Option<StaticType>>,
 }
 
 impl Analysis {

@@ -2,7 +2,7 @@
 
 use super::bounds::{Bound, Bounds, Held, Literals, takes_a_number};
 use super::{TypeVars, Unshared};
-use ahash::{AHashMap, AHashSet};
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{StaticType, TypeVar};
 use ndc_lexer::Span;
 
@@ -42,9 +42,9 @@ impl TypeVars {
 
     /// The unsettled literal types that each unsettled literal type is
     /// held by: the element type of `[1]` holds the `1`'s.
-    pub(crate) fn holders(&self) -> AHashMap<TypeVar, Vec<TypeVar>> {
-        let mut holders = AHashMap::<TypeVar, Vec<TypeVar>>::new();
-        let mut seen = AHashSet::new();
+    pub(crate) fn holders(&self) -> HashMap<TypeVar, Vec<TypeVar>> {
+        let mut holders = HashMap::<TypeVar, Vec<TypeVar>>::default();
+        let mut seen = HashSet::default();
         for &holder in &self.literals {
             if (holder.0 as usize) >= self.solutions.len()
                 || !self.is_literal(holder)
@@ -66,7 +66,7 @@ impl TypeVars {
     /// holds: the `1`'s and the `2`'s in `[1, 2]`.
     pub(crate) fn held_literals(&self, var: TypeVar) -> Vec<TypeVar> {
         let mut held_literals = Vec::new();
-        let mut seen = AHashSet::new();
+        let mut seen = HashSet::default();
         for bound in self.bounds[var.0 as usize].iter() {
             if let Bound::Holds(held, _, _) = bound
                 && let StaticType::Var(held) = self.resolve(held)
@@ -123,7 +123,7 @@ impl TypeVars {
         belongs: impl Fn(&Self, TypeVar) -> bool,
     ) -> Vec<TypeVar> {
         let mut literals = Vec::new();
-        let mut seen = AHashSet::new();
+        let mut seen = HashSet::default();
         for &var in &self.literals {
             if (var.0 as usize) < self.solutions.len()
                 && self.solution(var).is_none()
@@ -147,7 +147,7 @@ impl TypeVars {
                 },
                 Bound::Number(..) => None,
             })
-            .collect::<AHashSet<_>>();
+            .collect::<HashSet<_>>();
         let mut keyed = literals
             .into_iter()
             .map(|var| {
@@ -180,7 +180,7 @@ impl TypeVars {
         if self.solution(var).is_some() || !self.is_literal(var) {
             return false;
         }
-        let mut seen = AHashSet::from_iter([var]);
+        let mut seen = HashSet::from_iter([var]);
         let mut unseen = vec![var];
         let mut holds_a_number = false;
         while let Some(var) = unseen.pop() {
@@ -214,7 +214,7 @@ impl TypeVars {
                 .filter(|&var| self.is_literal(var))
         };
         let mut within = Vec::new();
-        let mut seen = AHashSet::new();
+        let mut seen = HashSet::default();
         let mut unseen = literals_of(typ).collect::<Vec<_>>();
         while let Some(var) = unseen.pop() {
             if seen.insert(var) {
@@ -251,7 +251,7 @@ impl TypeVars {
     /// numbers is a list of whatever the numbers are, which is up to them.
     pub(crate) fn literal_defaults(&mut self, var: TypeVar) -> Option<Vec<StaticType>> {
         let mut defaults = Vec::new();
-        let mut seen = AHashSet::new();
+        let mut seen = HashSet::default();
         let mut waits = false;
         let mut unknown = None;
         // The literal made first says first what the type is: after `let v
@@ -322,7 +322,7 @@ impl TypeVars {
         seen.push(var);
         // The values of each literal, in the order the literals come in.
         let mut literals: Vec<(TypeVar, Vec<StaticType>)> = Vec::new();
-        let mut index = AHashMap::<TypeVar, usize>::new();
+        let mut index = HashMap::<TypeVar, usize>::default();
         for bound in self.bounds[var.0 as usize].iter() {
             // A number literal is a number.
             if let Bound::Holds(held, literal, _) = bound {
@@ -427,7 +427,7 @@ impl TypeVars {
         if self.unshared.is_empty() {
             return Vec::new();
         }
-        let mut seen = AHashSet::new();
+        let mut seen = HashSet::default();
         std::mem::take(&mut self.unshared)
             .into_iter()
             .filter(|(var, _)| {

@@ -7,10 +7,10 @@
 //! The analyser picks symbols; [`Layout::lay_out`] then fills in where each of
 //! them lives, once per batch.
 
-use ahash::AHashMap;
 use ndc_analysis::{
     Analysis, Binding, Callee, CaptureSource, DeclaredStruct, FieldAccessors, Instance, ResolvedVar,
 };
+use ndc_core::collections::HashMap;
 use ndc_core::r#struct::StructInfo;
 use ndc_core::{NodeId, StaticType};
 use ndc_resolver::{NameResolver, ScopeId, ScopeKind, SymbolId};
@@ -23,22 +23,22 @@ mod tests;
 #[derive(Debug, Default)]
 pub struct Picks {
     /// For [`Analysis::bindings`].
-    pub bindings: AHashMap<NodeId, Binding<SymbolId>>,
+    pub bindings: HashMap<NodeId, Binding<SymbolId>>,
     /// For [`Analysis::getters`].
-    pub getters: AHashMap<NodeId, Binding<SymbolId>>,
+    pub getters: HashMap<NodeId, Binding<SymbolId>>,
     /// For [`Analysis::setters`].
-    pub setters: AHashMap<NodeId, Binding<SymbolId>>,
+    pub setters: HashMap<NodeId, Binding<SymbolId>>,
     /// For [`Analysis::augmented_assignments`].
-    pub augmented_assignments: AHashMap<NodeId, Binding<SymbolId>>,
+    pub augmented_assignments: HashMap<NodeId, Binding<SymbolId>>,
     /// For [`Analysis::cast_checks`].
-    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
+    pub cast_checks: HashMap<NodeId, Option<StaticType>>,
     /// For [`Analysis::variables`].
-    pub variables: AHashMap<NodeId, SymbolId>,
+    pub variables: HashMap<NodeId, SymbolId>,
     /// Each struct declaration's struct, for [`Analysis::structs`], which also
     /// says where its field accessors live.
-    pub structs: AHashMap<NodeId, StructInfo>,
+    pub structs: HashMap<NodeId, StructInfo>,
     /// For [`Analysis::instances`], by the symbol each instance is stored as.
-    pub instances: AHashMap<SymbolId, InstancePicks>,
+    pub instances: HashMap<SymbolId, InstancePicks>,
 }
 
 /// What one instance of a generic function picks in its body, where that
@@ -47,27 +47,27 @@ pub struct Picks {
 pub struct InstancePicks {
     /// The generic function's declaration.
     pub declaration: NodeId,
-    pub bindings: AHashMap<NodeId, Binding<SymbolId>>,
-    pub getters: AHashMap<NodeId, Binding<SymbolId>>,
-    pub setters: AHashMap<NodeId, Binding<SymbolId>>,
-    pub augmented_assignments: AHashMap<NodeId, Binding<SymbolId>>,
+    pub bindings: HashMap<NodeId, Binding<SymbolId>>,
+    pub getters: HashMap<NodeId, Binding<SymbolId>>,
+    pub setters: HashMap<NodeId, Binding<SymbolId>>,
+    pub augmented_assignments: HashMap<NodeId, Binding<SymbolId>>,
     /// As [`Analysis::function_types`], for the functions the instance's
     /// body declares, with the instance's types.
-    pub function_types: AHashMap<NodeId, StaticType>,
+    pub function_types: HashMap<NodeId, StaticType>,
     /// As [`Analysis::cast_checks`], for the casts in the instance's body.
-    pub cast_checks: AHashMap<NodeId, Option<StaticType>>,
+    pub cast_checks: HashMap<NodeId, Option<StaticType>>,
 }
 
 impl InstancePicks {
     pub fn new(declaration: NodeId) -> Self {
         Self {
             declaration,
-            bindings: AHashMap::new(),
-            getters: AHashMap::new(),
-            setters: AHashMap::new(),
-            augmented_assignments: AHashMap::new(),
-            function_types: AHashMap::new(),
-            cast_checks: AHashMap::new(),
+            bindings: HashMap::default(),
+            getters: HashMap::default(),
+            setters: HashMap::default(),
+            augmented_assignments: HashMap::default(),
+            function_types: HashMap::default(),
+            cast_checks: HashMap::default(),
         }
     }
 }
@@ -227,7 +227,7 @@ impl<'a> Layout<'a> {
         // `fn f(a) { let b = 1; { let c = 2; } }` that's 3. The program scope's
         // own declarations are globals, so at the top level only blocks and
         // loops count.
-        let mut frame_sizes: AHashMap<ScopeId, usize> = AHashMap::new();
+        let mut frame_sizes: HashMap<ScopeId, usize> = HashMap::default();
         for (id, scope) in self.resolver.scopes().skip(first_scope) {
             match scope.kind() {
                 ScopeKind::Builtins | ScopeKind::Program => continue,

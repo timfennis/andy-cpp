@@ -2,14 +2,14 @@
 
 use super::TypeVars;
 use super::store::Undo;
-use ahash::AHashSet;
+use ndc_core::collections::HashSet;
 use ndc_core::{StaticType, TypeVar};
 
 /// What [`TypeVars::bind_arguments`] puts off while it passes the arguments.
 #[derive(Debug)]
 pub(super) struct Deferred {
     /// The variables of the parameters.
-    variables: AHashSet<TypeVar>,
+    variables: HashSet<TypeVar>,
     /// Each value passed where one of them is expected directly or as what
     /// an `Iterable` holds.
     passed: Vec<(TypeVar, StaticType)>,
@@ -26,8 +26,8 @@ impl TypeVars {
     /// The unsettled variables in `types` and, through each literal among
     /// them, in what it holds, at any depth: `x`'s type is one `[x]` is
     /// made from.
-    pub(crate) fn vars_made_from(&self, types: &[StaticType]) -> AHashSet<TypeVar> {
-        let mut made_from = AHashSet::new();
+    pub(crate) fn vars_made_from(&self, types: &[StaticType]) -> HashSet<TypeVar> {
+        let mut made_from = HashSet::default();
         let mut todo = types
             .iter()
             .flat_map(|typ| self.unsettled(typ))
@@ -50,7 +50,7 @@ impl TypeVars {
     /// at the top itself doesn't: in `let xs = [x]; x = xs.pop()`, `x`'s type
     /// is the element type of `[x]`, which holds just `x`'s type.
     pub(super) fn would_contain(&self, typ: &StaticType, var: TypeVar) -> bool {
-        let mut seen = AHashSet::new();
+        let mut seen = HashSet::default();
         let mut todo = vec![typ.clone()];
         while let Some(next) = todo.pop() {
             match self.shallow(&next) {
@@ -183,7 +183,7 @@ impl TypeVars {
         let variables = parameters
             .iter()
             .flat_map(|parameter| self.unsettled(parameter))
-            .collect::<AHashSet<_>>();
+            .collect::<HashSet<_>>();
         let outer = self.deferred.replace(Deferred {
             variables,
             passed: Vec::new(),

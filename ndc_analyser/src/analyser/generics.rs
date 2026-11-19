@@ -11,7 +11,7 @@ use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
 use crate::types::TypeVars;
-use ahash::AHashSet;
+use ndc_core::collections::HashSet;
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{ScopeKind, SymbolId};
@@ -277,7 +277,7 @@ impl Analyser {
     /// }` is what `data` is once `m[k]` is picked, and the `[]` of `fn f(xs)
     /// => if xs.len() == 0 { [] } else { f(xs[1..]) }` is what the call's
     /// result is used as.
-    fn reached_from_signature(&self, signature: &StaticType) -> AHashSet<TypeVar> {
+    fn reached_from_signature(&self, signature: &StaticType) -> HashSet<TypeVar> {
         let groups = self
             .generic_constraints()
             .into_iter()
@@ -293,7 +293,7 @@ impl Analyser {
             .vars
             .generalizable_in(signature)
             .into_iter()
-            .collect::<AHashSet<_>>();
+            .collect::<HashSet<_>>();
         loop {
             let mut changed = false;
             for group in &groups {
@@ -451,7 +451,7 @@ impl Analyser {
         let mut decided = parameters
             .iter()
             .flat_map(|typ| self.vars.generalizable_in(typ))
-            .collect::<AHashSet<_>>();
+            .collect::<HashSet<_>>();
         loop {
             let mut changed = false;
             for serial in &serials {
@@ -510,7 +510,7 @@ impl Analyser {
     /// what the constraints `connected` to the parameters, which each call
     /// settles: in `fn f(data, k) { let m = %{:fn() => %{}}; m[k].insert(data)
     /// }`, the inner map's keys are what `data` is once `m[k]` is picked.
-    fn settle_ambiguous(&mut self, signature: &StaticType, connected: &AHashSet<TypeVar>) {
+    fn settle_ambiguous(&mut self, signature: &StaticType, connected: &HashSet<TypeVar>) {
         let parameters = match signature {
             StaticType::Function {
                 parameters: Some(parameters),

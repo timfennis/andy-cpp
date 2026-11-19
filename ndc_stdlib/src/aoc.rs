@@ -9,7 +9,7 @@ mod inner {
     /// Counts the occurrences of each item in a sequence and returns a map with the frequencies.
     #[function(signature = "<T>(Iterable<T>) -> %{T: Int}")]
     pub fn frequencies(seq: Value) -> anyhow::Result<Value> {
-        let mut counts: HashMap<Value, i64> = HashMap::new();
+        let mut counts: HashMap<Value, i64> = HashMap::default();
 
         for item in seq
             .try_into_iter()

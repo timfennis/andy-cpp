@@ -10,9 +10,9 @@ use super::Analyser;
 use super::generics::named_in_order;
 use super::solver::{CallSite, Constraint, Origin, Waiting};
 use crate::error::AnalysisError;
-use ahash::AHashMap;
 use itertools::izip;
 use ndc_analysis::{Binding, Candidate};
+use ndc_core::collections::HashMap;
 use ndc_core::{NodeId, StaticType};
 use ndc_layout::InstancePicks;
 use ndc_lexer::Span;
@@ -548,17 +548,17 @@ impl Analyser {
 
 /// The tables of one body's picks, by the kind of site.
 pub(super) struct PickTables<'a> {
-    bindings: &'a mut AHashMap<NodeId, Binding<SymbolId>>,
-    getters: &'a mut AHashMap<NodeId, Binding<SymbolId>>,
-    setters: &'a mut AHashMap<NodeId, Binding<SymbolId>>,
-    augmented_assignments: &'a mut AHashMap<NodeId, Binding<SymbolId>>,
+    bindings: &'a mut HashMap<NodeId, Binding<SymbolId>>,
+    getters: &'a mut HashMap<NodeId, Binding<SymbolId>>,
+    setters: &'a mut HashMap<NodeId, Binding<SymbolId>>,
+    augmented_assignments: &'a mut HashMap<NodeId, Binding<SymbolId>>,
     /// The type each cast checks its value against as the program runs, if
     /// any.
-    pub(super) cast_checks: &'a mut AHashMap<NodeId, Option<StaticType>>,
+    pub(super) cast_checks: &'a mut HashMap<NodeId, Option<StaticType>>,
 }
 
 impl<'a> PickTables<'a> {
-    fn table(self, site: CallSite) -> (&'a mut AHashMap<NodeId, Binding<SymbolId>>, NodeId) {
+    fn table(self, site: CallSite) -> (&'a mut HashMap<NodeId, Binding<SymbolId>>, NodeId) {
         match site {
             CallSite::Call(id) => (self.bindings, id),
             CallSite::Getter(id) => (self.getters, id),

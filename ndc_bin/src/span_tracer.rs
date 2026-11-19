@@ -1,5 +1,5 @@
+use ndc_core::collections::HashMap;
 use ndc_interpreter::tracer::{InstructionContext, VmTracer};
-use std::collections::HashMap;
 use std::io::Write;
 use std::time::{Duration, Instant};
 use yansi::Paint;
@@ -16,7 +16,7 @@ pub struct SpanTracer {
 impl SpanTracer {
     pub fn new() -> Self {
         Self {
-            times: HashMap::new(),
+            times: HashMap::default(),
             last: None,
             source: None,
         }

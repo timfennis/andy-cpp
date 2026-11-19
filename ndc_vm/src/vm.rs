@@ -1,6 +1,6 @@
 use crate::chunk::OpCode;
 use crate::error::VmError;
-use crate::hash_map::{DefaultHasher, HashMap};
+use crate::hash_map::{HashMap, hasher};
 use crate::io::{InputSource, OutputSink};
 use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
@@ -446,7 +446,7 @@ impl Vm {
                         None
                     };
                     let flat = self.stack.split_off(self.stack.len() - pairs * 2);
-                    let mut map = HashMap::with_capacity(pairs);
+                    let mut map = HashMap::with_capacity_and_hasher(pairs, Default::default());
                     let mut flat_iter = flat.into_iter();
                     for _ in 0..pairs {
                         let key = flat_iter.next().expect("expected key");
@@ -671,7 +671,7 @@ impl Vm {
         // the cache once the call finishes.
         if let Function::Memoized { cache, function } = func {
             let start = self.stack.len() - args;
-            let mut hasher = DefaultHasher::default();
+            let mut hasher = hasher();
             // Arguments `==` calls equal share a result: a `pure fn` takes
             // only values it compares by what they are, which hash alike when
             // they're equal.

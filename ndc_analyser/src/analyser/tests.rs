@@ -1908,7 +1908,7 @@ fn a_tie_at_a_tuple_position_is_ambiguous() {
 #[test]
 fn type_parameters_are_named_in_the_order_they_are_written() {
     let (_, result) = analyse_with_globals("fn swap(a, b) => (b, a);", vec![]);
-    let shown = |types: &AHashMap<_, StaticType>| {
+    let shown = |types: &HashMap<_, StaticType>| {
         types.values().map(ToString::to_string).collect::<Vec<_>>()
     };
     assert_eq!(shown(&result.analysis.function_types), ["fn(A, B) -> Any"]);
