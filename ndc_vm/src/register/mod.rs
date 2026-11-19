@@ -10,10 +10,12 @@
 //! pop.
 
 pub mod chunk;
+mod compiler;
 pub mod disassemble;
 pub mod instr;
 mod vm;
 
 pub use chunk::{Builder, Chunk, Label};
+pub use compiler::Compiler;
 pub use instr::{Instr, Reg, WINDOW};
 pub use vm::Vm;

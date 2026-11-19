@@ -1761,7 +1761,28 @@ pub struct CompileError {
 }
 
 impl CompileError {
-    fn unresolved_binding(span: Span) -> Self {
+    /// What the register compiler fails with for `construct`, which it
+    /// can't compile yet: `not yet supported on the register VM: lists`.
+    pub(crate) fn not_yet_supported(construct: &str, span: Span) -> Self {
+        Self {
+            text: format!("not yet supported on the register VM: {construct}"),
+            span,
+        }
+    }
+
+    /// What the register compiler fails with for a function whose values
+    /// don't fit in the registers a frame can have.
+    pub(crate) fn too_many_registers(span: Span) -> Self {
+        Self {
+            text: format!(
+                "this function needs more than {} registers, which is more than the register VM has",
+                crate::register::WINDOW
+            ),
+            span,
+        }
+    }
+
+    pub(crate) fn unresolved_binding(span: Span) -> Self {
         Self {
             text: "encountered unresolved binding during compilation, this is probably an internal error".to_string(),
             span,
