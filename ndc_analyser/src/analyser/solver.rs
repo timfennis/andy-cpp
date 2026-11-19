@@ -834,21 +834,28 @@ impl Analyser {
                     let vars = self.waits_on_vars_since(serial, first, &produced);
                     (!vars.is_empty()).then_some((serial, vars))
                 });
-            let Some((serial, vars)) = next else {
+            if let Some((serial, vars)) = next {
+                fallen_back = serial;
+                self.vars.settle_with_fallbacks(&vars);
+                unchecked.extend(self.solve_waiting_and_report());
+                continue;
+            }
+            // What's left gets its fallback, but for what a waiting constraint
+            // settles, which only gets one if that constraint can't be solved.
+            let mut produced = self.produced_by_waiting();
+            produced.extend(open);
+            self.vars.settle_from(first, &produced);
+            self.solve_waiting();
+            self.vars.settle_from(first, open);
+            self.solve_waiting();
+            // What those fallbacks woke can make new variables, which are
+            // settled the same way: in `fn h(a) => if c { [a] } else { a }`,
+            // once `a` falls back, the `if` is a literal holding both.
+            if !self.vars.has_unsettled_from(first, open) {
                 break;
-            };
-            fallen_back = serial;
-            self.vars.settle_with_fallbacks(&vars);
-            unchecked.extend(self.solve_waiting_and_report());
+            }
+            unchecked.extend(self.waiting.keys().copied());
         }
-        // What's left gets its fallback, but for what a waiting constraint
-        // settles, which only gets one if that constraint can't be solved.
-        let mut produced = self.produced_by_waiting();
-        produced.extend(open);
-        self.vars.settle_from(first, &produced);
-        self.solve_waiting();
-        self.vars.settle_from(first, open);
-        self.solve_waiting();
     }
 
     /// The unsettled variables that only what values hold mentions: not a
