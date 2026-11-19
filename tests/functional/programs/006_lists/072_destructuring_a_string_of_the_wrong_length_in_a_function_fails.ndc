@@ -1,0 +1,6 @@
+// expect-error: cannot unpack a string of length 1 into 2 variables
+fn f(s) {
+    let a, b = s;
+    a <> b
+}
+f("x");

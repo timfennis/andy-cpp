@@ -722,6 +722,16 @@ impl Compiler {
                 self.emit_declare(variable, span);
             }
             BindingPattern::Sequence(seq) => {
+                if let Some(first) = self.local_run(&seq) {
+                    self.ir.write(
+                        OpCode::UnpackLocals {
+                            first,
+                            count: seq.len(),
+                        },
+                        span,
+                    );
+                    return Ok(());
+                }
                 self.ir.write(OpCode::Unpack(seq.len()), span);
                 for lv in seq {
                     self.compile_binding_pattern(lv, span)?;
@@ -729,6 +739,28 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    /// The first slot of `seq` when it's a flat pattern of local variables
+    /// in consecutive slots, `(a, b)` with `a` in slot `n` and `b` in slot
+    /// `n + 1`, which `UnpackLocals` declares at once.
+    fn local_run(&self, seq: &[BindingPatternLocation]) -> Option<usize> {
+        let mut first = None;
+        for (i, pattern) in seq.iter().enumerate() {
+            let BindingPattern::Identifier { .. } = pattern.pattern else {
+                return None;
+            };
+            let (ResolvedVar::Local { slot } | ResolvedVar::Cell { slot }) =
+                self.analysis.variable(pattern.id)?
+            else {
+                return None;
+            };
+            let first = *first.get_or_insert(slot);
+            if slot != first + i {
+                return None;
+            }
+        }
+        first
     }
 
     /// The variable the identifier assignment target at `target` writes to.

@@ -75,6 +75,7 @@ impl std::fmt::Debug for JumpTarget {
 /// | `ListPush`    | `[… value → …]`                        | −1 (pops value, mutates list in slot)      |
 /// | `MapInsert`   | `[… key value → …]`                    | −2 (pops both, mutates map in slot)        |
 /// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
+/// | `UnpackLocals`| `[… compound → …]`                      | −1 (pops 1, writes n local slots)          |
 /// | `NewCell`     | `[…]`                                   | 0 (puts a fresh cell in a slot)            |
 /// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
 /// | `TupleIndex`  | `[… tuple → … element]`                | 0 (the index is the operand)               |
@@ -153,6 +154,11 @@ pub enum OpCode {
     MakeRange { inclusive: bool, bounded: bool },
     /// Pops a compound value, pushes `n` elements. `[… compound → … v1…vn]`
     Unpack(usize),
+    /// Pops a compound value and writes its `count` elements to the local
+    /// slots `first..first + count`, as `Unpack(count)` followed by
+    /// `SetLocal(first)` … `SetLocal(first + count - 1)` would.
+    /// `[… compound → …]`
+    UnpackLocals { first: usize, count: usize },
     /// Terminates execution.
     Halt,
     /// Returns from function call. Pops return value, truncates frame, pushes return value.
@@ -266,6 +272,7 @@ impl OpCode {
             Self::MapInsert(_) => "MapInsert",
             Self::MakeRange { .. } => "MakeRange",
             Self::Unpack(_) => "Unpack",
+            Self::UnpackLocals { .. } => "UnpackLocals",
             Self::Halt => "Halt",
             Self::Return => "Return",
             Self::NewCell(_) => "NewCell",
@@ -342,6 +349,7 @@ impl OpCode {
             Self::MakeRange { bounded, .. } => -isize::from(*bounded),
             // Pops the compound value, pushes its `n` elements.
             Self::Unpack(n) => *n as isize - 1,
+            Self::UnpackLocals { .. } => -1,
             Self::Halt => 0,
             // Pops the return value; the frame teardown that discards the
             // rest of the frame happens in the VM, outside this accounting.
@@ -424,6 +432,7 @@ impl std::fmt::Debug for OpCode {
             Self::Halt => write!(f, "Halt"),
             Self::Return => write!(f, "Return"),
             Self::Unpack(n) => write!(f, "Unpack({n})"),
+            Self::UnpackLocals { first, count } => write!(f, "UnpackLocals({first}, {count})"),
             Self::Memoize => write!(f, "Memoize"),
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
             Self::CheckUnshared(typ) => write!(f, "CheckUnshared({typ})"),
