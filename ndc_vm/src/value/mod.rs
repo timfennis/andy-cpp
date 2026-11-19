@@ -2,6 +2,7 @@ mod function;
 mod number;
 mod numeric;
 mod string;
+pub mod walk;
 
 pub use function::*;
 pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFloatError};
@@ -856,7 +857,7 @@ impl fmt::Display for Object {
             });
         }
         DISPLAYING.with_borrow_mut(|displaying| displaying.push(this));
-        let result = display_contents(self, f);
+        let result = walk::nested(|| display_contents(self, f));
         DISPLAYING.with_borrow_mut(|displaying| displaying.pop());
         result
     }
@@ -1004,6 +1005,12 @@ impl PartialOrd for Value {
 
 impl PartialOrd for Object {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        walk::nested(|| self.cmp_contents(other))
+    }
+}
+
+impl Object {
+    fn cmp_contents(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
             (Self::String(a), Self::String(b)) => a.borrow().partial_cmp(&*b.borrow()),
             (Self::List(a), Self::List(b)) => a.borrow().partial_cmp(&*b.borrow()),
@@ -1095,6 +1102,12 @@ impl Hash for Value {
 
 impl PartialEq for Object {
     fn eq(&self, other: &Self) -> bool {
+        walk::nested(|| self.eq_contents(other))
+    }
+}
+
+impl Object {
+    fn eq_contents(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Some(a), Self::Some(b)) => a == b,
             (Self::String(a), Self::String(b)) => a.borrow().eq(&*b.borrow()),
@@ -1157,6 +1170,12 @@ impl Eq for Object {}
 /// apart.
 impl Hash for Object {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        walk::nested(|| self.hash_contents(state));
+    }
+}
+
+impl Object {
+    fn hash_contents<H: Hasher>(&self, state: &mut H) {
         match self {
             Self::Some(v) => {
                 state.write_u8(1);

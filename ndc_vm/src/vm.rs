@@ -188,7 +188,17 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<(), VmError> {
-        self.run_to_depth(0)
+        let outer = crate::value::walk::depth();
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run_to_depth(0))) {
+            Ok(result) => result,
+            Err(payload) if payload.is::<crate::value::walk::TooDeep>() => {
+                crate::value::walk::reset(outer);
+                let frame = self.frames.last().expect("a frame was running");
+                let span = frame.closure.prototype.body.span(frame.ip - 1);
+                Err(VmError::new(crate::value::walk::TOO_DEEP, span))
+            }
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     /// Run the VM until the frame stack drops back to `target_depth`.
