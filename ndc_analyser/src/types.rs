@@ -129,9 +129,10 @@ enum Bound {
 }
 
 /// The state of the variables at one point, which [`TypeVars::rollback`]
-/// returns to: overload resolution tries each candidate this way.
+/// returns to: see [`TypeVars::attempt_in`] and [`TypeVars::probe_in`],
+/// the only ways to take one.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Snapshot {
+struct Snapshot {
     vars: usize,
     trail: usize,
     lowered: usize,
@@ -602,15 +603,12 @@ impl TypeVars {
                     return Some(unshared);
                 }
             }
-            let snapshot = self.snapshot();
-            let mut found = None;
-            for other in &held[1..] {
-                if !self.try_unify(&held[0], other) {
-                    found = Some((self.shown(&held[0]), self.shown(other)));
-                    break;
-                }
-            }
-            self.rollback(snapshot);
+            let found = self.probe(|vars| {
+                held[1..].iter().find_map(|other| {
+                    (!vars.try_unify(&held[0], other))
+                        .then(|| (vars.shown(&held[0]), vars.shown(other)))
+                })
+            });
             if let Some((first, second)) = found {
                 let span = self.literal_spans[&literal];
                 return Some(Unshared {
@@ -696,12 +694,11 @@ impl TypeVars {
         let Some(defaults) = self.literal_defaults(var) else {
             return true;
         };
-        let snapshot = self.snapshot();
-        let fits = defaults
-            .iter()
-            .any(|default| self.try_unify(&StaticType::Var(var), default));
-        self.rollback(snapshot);
-        fits
+        self.probe(|vars| {
+            defaults
+                .iter()
+                .any(|default| vars.try_unify(&StaticType::Var(var), default))
+        })
     }
 
     /// What the unsettled literal type `var` is shown as: what it would be
@@ -977,8 +974,48 @@ impl TypeVars {
         &self.trail[count.min(self.trail.len())..]
     }
 
+    /// Runs `try_it` on `context`, whose variables `vars` gives, and keeps
+    /// what it settled only if it returns `Some`: overload resolution tries
+    /// each candidate this way.
+    pub(crate) fn attempt_in<C, T>(
+        context: &mut C,
+        vars: fn(&mut C) -> &mut Self,
+        try_it: impl FnOnce(&mut C) -> Option<T>,
+    ) -> Option<T> {
+        let snapshot = vars(context).snapshot();
+        let tried = try_it(context);
+        if tried.is_none() {
+            vars(context).rollback(snapshot);
+        }
+        tried
+    }
+
+    /// Runs `look` on `context`, whose variables `vars` gives, and takes back
+    /// what it settled: whether a call would fit is asked this way.
+    pub(crate) fn probe_in<C, R>(
+        context: &mut C,
+        vars: fn(&mut C) -> &mut Self,
+        look: impl FnOnce(&mut C) -> R,
+    ) -> R {
+        let snapshot = vars(context).snapshot();
+        let seen = look(context);
+        vars(context).rollback(snapshot);
+        seen
+    }
+
+    /// [`Self::attempt_in`] on the variables alone, keeping what `try_it`
+    /// settled if it returns `true`.
+    pub(crate) fn attempt(&mut self, try_it: impl FnOnce(&mut Self) -> bool) -> bool {
+        Self::attempt_in(self, |vars| vars, |vars| try_it(vars).then_some(())).is_some()
+    }
+
+    /// [`Self::probe_in`] on the variables alone.
+    pub(crate) fn probe<R>(&mut self, look: impl FnOnce(&mut Self) -> R) -> R {
+        Self::probe_in(self, |vars| vars, look)
+    }
+
     /// The current state, to [`Self::rollback`] to later.
-    pub(crate) fn snapshot(&self) -> Snapshot {
+    fn snapshot(&self) -> Snapshot {
         Snapshot {
             vars: self.solutions.len(),
             trail: self.trail.len(),
@@ -991,7 +1028,7 @@ impl TypeVars {
 
     /// Unsettles what was settled since `snapshot`, and forgets the variables
     /// made since.
-    pub(crate) fn rollback(&mut self, snapshot: Snapshot) {
+    fn rollback(&mut self, snapshot: Snapshot) {
         for var in self.trail.drain(snapshot.trail..) {
             self.solutions[var.0 as usize] = None;
         }
@@ -1017,12 +1054,7 @@ impl TypeVars {
     /// Unifies `a` and `b` if they can be made the same type, and otherwise
     /// leaves every variable as it was.
     pub(crate) fn try_unify(&mut self, a: &StaticType, b: &StaticType) -> bool {
-        let snapshot = self.snapshot();
-        let unified = self.unify(a, b);
-        if !unified {
-            self.rollback(snapshot);
-        }
-        unified
+        self.attempt(|vars| vars.unify(a, b))
     }
 
     /// The unsettled variables in `typ`, each once, outermost first.
@@ -1062,14 +1094,10 @@ impl TypeVars {
                 Some(defaults) if !self.bounds[var.0 as usize].is_empty() => defaults,
                 _ => vec![self.fallbacks[var.0 as usize].clone()],
             };
-            if !defaults.iter().any(|default| {
-                let snapshot = self.snapshot();
-                let settled = self.settle_default(var, default);
-                if !settled {
-                    self.rollback(snapshot);
-                }
-                settled
-            }) {
+            if !defaults
+                .iter()
+                .any(|default| self.attempt(|vars| vars.settle_default(var, default)))
+            {
                 // `Any` takes anything a literal holds.
                 self.settle(var, StaticType::Any);
             }
@@ -1266,12 +1294,9 @@ impl TypeVars {
             let target = self.shallow(&target);
             let target = if matches!(target, StaticType::Var(_)) {
                 let Some(widest) = values.iter().find(|&candidate| {
-                    values.iter().all(|value| {
-                        let snapshot = self.snapshot();
-                        let fits = self.bind_argument(candidate, value);
-                        self.rollback(snapshot);
-                        fits
-                    })
+                    values
+                        .iter()
+                        .all(|value| self.probe(|vars| vars.bind_argument(candidate, value)))
                 }) else {
                     return false;
                 };
@@ -1484,16 +1509,16 @@ impl TypeVars {
                 Some(StaticType::Any)
             }
             StaticType::Tuple(elements) if !elements.is_empty() => {
-                let snapshot = self.snapshot();
-                if elements[1..]
-                    .iter()
-                    .all(|element| self.unify(&elements[0], element))
-                {
-                    Some(self.resolve(&elements[0]))
+                let unified = self.attempt(|vars| {
+                    elements[1..]
+                        .iter()
+                        .all(|element| vars.unify(&elements[0], element))
+                });
+                Some(if unified {
+                    self.resolve(&elements[0])
                 } else {
-                    self.rollback(snapshot);
-                    Some(StaticType::Any)
-                }
+                    StaticType::Any
+                })
             }
             other => other.sequence_element_type(),
         }
@@ -1595,11 +1620,11 @@ mod tests {
         let mut vars = TypeVars::default();
         let literal = vars.fresh_number(span());
         let other = vars.fresh();
-        let snapshot = vars.snapshot();
-        assert!(vars.unify(&literal, &other));
-        // `other` is the literal now, so it can't be a String.
-        assert!(!vars.try_unify(&other, &StaticType::String));
-        vars.rollback(snapshot);
+        vars.probe(|vars| {
+            assert!(vars.unify(&literal, &other));
+            // `other` is the literal now, so it can't be a String.
+            assert!(!vars.try_unify(&other, &StaticType::String));
+        });
         assert!(vars.try_unify(&other, &StaticType::String));
     }
 

@@ -383,10 +383,9 @@ impl Analyser {
         let candidates = self.resolver.reference_candidates(callee).clone();
         let mut agreed: Option<Vec<Option<StaticType>>> = None;
         for symbol in self.overloads().reachable_symbols(&candidates) {
-            let snapshot = self.vars.snapshot();
-            let expected =
-                self.parameters_one_overload_expects(symbol, type_arguments, known, position);
-            self.vars.rollback(snapshot);
+            let expected = self.probe(|this| {
+                this.parameters_one_overload_expects(symbol, type_arguments, known, position)
+            });
             let expected = match expected {
                 Expects::Parameters(expected) => expected,
                 Expects::Nothing => continue,
