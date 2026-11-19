@@ -570,17 +570,17 @@ impl TypeVars {
         seen: &mut Vec<TypeVar>,
     ) -> Option<Unshared> {
         seen.push(var);
+        // The values of each literal, in the order the literals come in.
         let mut literals: Vec<(TypeVar, Vec<StaticType>)> = Vec::new();
+        let mut index = AHashMap::<TypeVar, usize>::new();
         for bound in &self.bounds[var.0 as usize] {
-            match bound {
-                Bound::Holds(held, literal, _) => {
-                    match literals.iter_mut().find(|(found, _)| found == literal) {
-                        Some((_, held_by_it)) => held_by_it.push(held.clone()),
-                        None => literals.push((*literal, vec![held.clone()])),
-                    }
-                }
-                // A number literal is a number.
-                Bound::Number(..) => {}
+            // A number literal is a number.
+            if let Bound::Holds(held, literal, _) = bound {
+                let at = *index.entry(*literal).or_insert_with(|| {
+                    literals.push((*literal, Vec::new()));
+                    literals.len() - 1
+                });
+                literals[at].1.push(held.clone());
             }
         }
         for (literal, held) in literals {
