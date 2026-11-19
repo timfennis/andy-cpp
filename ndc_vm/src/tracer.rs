@@ -1,15 +1,48 @@
 use crate::chunk::OpCode;
 use crate::duration::format_duration;
+use crate::register::Instr;
 use ndc_core::collections::HashMap;
 use ndc_lexer::Span;
+use std::fmt;
 use std::time::{Duration, Instant};
 
 /// Context passed to a tracer on every dispatched instruction.
 pub struct InstructionContext<'a> {
+    /// The instruction's index in its function's code.
     pub ip: usize,
-    pub opcode: &'a OpCode,
+    pub instruction: Instruction<'a>,
     pub span: Span,
     pub source: Option<&'a str>,
+}
+
+/// An instruction either VM dispatches: `GetLocal(0)` of the stack VM, or
+/// `AddIntI r0, r0, #1` of the register VM.
+#[derive(Clone, Copy)]
+pub enum Instruction<'a> {
+    Stack(&'a OpCode),
+    Register(Instr),
+}
+
+impl Instruction<'_> {
+    /// The instruction's name, the same for every instruction of its kind:
+    /// `"GetLocal"`, `"AddIntI"`.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Stack(op) => op.name(),
+            Self::Register(instr) => instr.name(),
+        }
+    }
+}
+
+/// The instruction with its operands: `GetLocal(0)`, `AddIntI r0, r0, #1`.
+impl fmt::Display for Instruction<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stack(op) => write!(f, "{op:?}"),
+            Self::Register(instr) => write!(f, "{} {instr}", instr.name()),
+        }
+    }
 }
 
 /// Trait for observing VM instruction dispatch.
@@ -20,6 +53,24 @@ pub trait VmTracer {
     /// Called when the VM finishes execution.
     /// Tracers that accumulate data should print their summaries here.
     fn on_complete(&mut self);
+}
+
+/// Tells `tracer`, if the VM has one, that the register VM is about to run
+/// the instruction at `ip` of `chunk`, which came from `source`.
+pub(crate) fn on_register_instruction(
+    tracer: &mut Option<Box<dyn VmTracer>>,
+    source: Option<&str>,
+    chunk: &crate::register::Chunk,
+    ip: usize,
+) {
+    if let Some(tracer) = tracer {
+        tracer.on_instruction(&InstructionContext {
+            ip,
+            instruction: Instruction::Register(chunk.code()[ip]),
+            span: chunk.span(ip),
+            source,
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -35,7 +86,7 @@ impl VmTracer for PrintTracer {
             src.get(ctx.span.range())
                 .map(|s| s.trim().replace('\n', "↵"))
         });
-        let op_str = format!("{:?}", ctx.opcode);
+        let op_str = ctx.instruction.to_string();
         match excerpt {
             Some(s) => eprintln!("[VM] {:04} {:<30}  {}", ctx.ip, op_str, s),
             None => eprintln!("[VM] {:04} {}", ctx.ip, op_str),
@@ -71,7 +122,7 @@ impl Default for HistogramTracer {
 
 impl VmTracer for HistogramTracer {
     fn on_instruction(&mut self, ctx: &InstructionContext<'_>) {
-        *self.counts.entry(ctx.opcode.name()).or_insert(0) += 1;
+        *self.counts.entry(ctx.instruction.name()).or_insert(0) += 1;
     }
 
     fn on_complete(&mut self) {
@@ -124,7 +175,7 @@ impl VmTracer for TimingTracer {
         if let Some((prev_name, start)) = self.last.take() {
             *self.times.entry(prev_name).or_default() += now - start;
         }
-        self.last = Some((ctx.opcode.name(), now));
+        self.last = Some((ctx.instruction.name(), now));
     }
 
     fn on_complete(&mut self) {

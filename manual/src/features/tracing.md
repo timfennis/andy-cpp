@@ -24,6 +24,14 @@ Prints every VM instruction to stderr as it is dispatched, along with the corres
 
 This is useful for understanding the exact sequence of bytecode operations your program produces.
 
+When the program runs on the register VM (`NDC_VM=register`), every trace mode shows the register VM's instructions instead, each with the registers it reads and writes:
+
+```
+[VM] 0003 JumpIfNotLess r0, r2, +5        <
+[VM] 0004 MulIntI r2, r0, #2              *
+[VM] 0005 AddInt r2, r1, r2               +
+```
+
 ### `--trace-histogram`
 
 Prints a summary table of how many times each instruction type was dispatched:

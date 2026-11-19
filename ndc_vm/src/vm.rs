@@ -39,9 +39,9 @@ pub struct Vm {
     /// Input source for `read_stdin`.
     input: InputSource,
     #[cfg(feature = "trace")]
-    source: Option<String>,
+    pub(crate) source: Option<String>,
     #[cfg(feature = "trace")]
-    tracer: Option<Box<dyn crate::tracer::VmTracer>>,
+    pub(crate) tracer: Option<Box<dyn crate::tracer::VmTracer>>,
 }
 
 /// The cache of a memoised function's results, and the key of the call
@@ -213,11 +213,19 @@ impl Vm {
         self
     }
 
+    /// Runs the program until it ends or fails, and then tells the tracer,
+    /// if there is one, that it's done.
     pub fn run(&mut self) -> Result<(), VmError> {
-        if self.runs_registers() {
-            return self.run_registers(0);
+        let result = if self.runs_registers() {
+            self.run_registers(0)
+        } else {
+            self.run_to_depth(0)
+        };
+        #[cfg(feature = "trace")]
+        if let Some(tracer) = &mut self.tracer {
+            tracer.on_complete();
         }
-        self.run_to_depth(0)
+        result
     }
 
     /// Whether the VM runs register code.
@@ -233,7 +241,7 @@ impl Vm {
             panic!("no call frames")
         }
 
-        let result = loop {
+        loop {
             let frame = self.frames.last_mut().expect("must not be empty");
             let ip = frame.ip;
             let span = frame.closure.prototype.body.span(ip);
@@ -244,7 +252,7 @@ impl Vm {
             if let Some(tracer) = &mut self.tracer {
                 tracer.on_instruction(&crate::tracer::InstructionContext {
                     ip,
-                    opcode: op,
+                    instruction: crate::tracer::Instruction::Stack(op),
                     span,
                     source: self.source.as_deref(),
                 });
@@ -598,16 +606,7 @@ impl Vm {
                     }));
                 }
             }
-        };
-
-        #[cfg(feature = "trace")]
-        if target_depth == 0
-            && let Some(tracer) = &mut self.tracer
-        {
-            tracer.on_complete();
         }
-
-        result
     }
 
     /// The cell a closure shares with the local at `stack_slot`. On the
