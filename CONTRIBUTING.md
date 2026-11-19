@@ -205,7 +205,10 @@ a listing that differs fails its test with a diff.
 cargo fmt
 cargo clippy            # fix all warnings
 cargo test
+NDC_VM=register cargo test
 ```
+
+CI runs the tests on both VMs.
 
 If you find yourself writing a `TODO` comment, please open a GitHub
 issue instead.
