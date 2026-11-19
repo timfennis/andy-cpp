@@ -530,6 +530,102 @@ fn logical_operators() {
 }
 
 #[test]
+fn for_loops() {
+    let outcome = same_on_both(
+        r#"fn sums() {
+            let total = 0;
+            for x in [1, 2, 3, 4, 5, 6] {
+                if x == 2 { continue; }
+                if x == 5 { break; }
+                total = total + x;
+            }
+            let pairs = [];
+            for (a, b) in [(1, 2), (3, 4)], c in "xy", if a > 1 {
+                pairs.push((a + b, c));
+            }
+            let words = [];
+            for (first, (x, y)) in [(1, (2, 3))] { words.push(first + x + y); }
+            for c in "héllo", if c != "l" { words.push(c.len()); }
+            let m = %{"a": 1, "b": 2};
+            let keys = [];
+            for (k, v) in m { keys.push((k, v)); }
+            print(total, pairs, words, keys.sorted());
+        }
+        sums();
+        let top = [];
+        for i in 1..=3 { top.push(i * i); }
+        print(top);"#,
+    );
+    assert_eq!(
+        outcome.output,
+        "8 [(7,\"x\"),(7,\"y\")] [6,1,1,1] [(\"a\",1),(\"b\",2)]\n[1,4,9]\n"
+    );
+}
+
+#[test]
+fn comprehensions() {
+    let outcome = same_on_both(
+        r#"fn f() {
+            let xs = [1, 2, 3, 4];
+            let squares = [x * x for x in xs, if x % 2 == 0];
+            let grid = [(x, y) for x in 1..3, y in 1..3, if x != y];
+            let by_parity = %{x % 2: x for x in xs};
+            let counts = %{:0, x: x * 10 for x in xs, if x > 2};
+            let set = %{x % 3 for x in xs};
+            let nested = [[y for y in 0..x] for x in 1..4];
+            let stopped = [if x == 3 { break } else { x } for x in xs];
+            let skipped = [if x == 2 { continue } else { x } for x in xs];
+            print(squares, grid, by_parity[0], by_parity[1], counts[3], counts[9], set.len());
+            print(nested, stopped, skipped);
+        }
+        f();"#,
+    );
+    assert_eq!(
+        outcome.output,
+        "[4,16] [(1,2),(2,1)] 4 3 30 0 3\n[[0],[0,1],[0,1,2]] [1,2] [1,3,4]\n"
+    );
+}
+
+/// Each run of a `for` loop's body declares its variables anew, so each
+/// closure made in it has its own.
+#[test]
+fn closures_made_in_a_for_loop() {
+    let outcome = same_on_both(
+        "fn f() {
+            let getters = [];
+            for x in 1..4 {
+                let doubled = x * 2;
+                getters.push(fn() => x + doubled);
+            }
+            let comprehended = [fn() => y for y in 1..4];
+            print(getters.map(fn(g) => g()), comprehended.map(fn(g) => g()));
+        }
+        f();",
+    );
+    assert_eq!(outcome.output, "[3,6,9] [1,2,3]\n");
+}
+
+#[test]
+fn destructuring_declarations() {
+    let outcome = same_on_both(
+        r#"fn f() {
+            let pair = (1, 2);
+            let (a, b) = pair;
+            let (c, (d, e)) = (3, [4, 5]);
+            let (x, y) = "hi";
+            print(a, b, c, d, e, x, y, pair);
+        }
+        f();
+        let (g, h) = (7, 8);
+        print(g + h);
+        fn bad() { let (p, q) = [1, 2, 3]; p + q }
+        bad();"#,
+    );
+    assert_eq!(outcome.output, "1 2 3 4 5 h i (1,2)\n15\n");
+    assert!(outcome.result.is_err());
+}
+
+#[test]
 fn deep_recursion() {
     let outcome = same_on_both(
         "fn depth(n) { if n == 0 { 0 } else { 1 + depth(n - 1) } }
@@ -599,7 +695,11 @@ fn the_test_programs_it_compiles() {
 fn constructs_it_cant_compile_yet_are_errors() {
     for (program, construct) in [
         ("let x = 1; x += 1;", "an assignment with an operator"),
-        ("for x in 1..3 { }", "`for` loops"),
+        (
+            "let xs = [1]; xs[0] = 2;",
+            "assigning to anything but a variable",
+        ),
+        ("let x: Any = 1; cast::<Int>(x)", "intrinsics"),
     ] {
         let outcome = run(Backend::Register, program);
         let error = outcome.result.expect_err(program);

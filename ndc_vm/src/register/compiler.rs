@@ -20,7 +20,8 @@ use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
-    AssignmentTarget, BindingPattern, Expression, ExpressionLocation, LogicalOperator,
+    AssignmentTarget, BindingPattern, BindingPatternLocation, Expression, ExpressionLocation,
+    ForBody, ForIteration, LogicalOperator,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -357,16 +358,24 @@ impl Compiler {
             }
             Expression::Grouping(inner) => self.compile_expr(*inner, dest),
             Expression::VariableDeclaration { l_value, value, .. } => {
-                let BindingPattern::Identifier { .. } = l_value.pattern else {
-                    return Err(CompileError::not_yet_supported(
-                        "declaring more than one variable at once",
-                        span,
-                    ));
-                };
-                let variable = self.analysis.variable(l_value.id).expect(
-                    "internal error: every binding pattern is analysed before it's compiled",
-                );
-                self.store(variable, *value, true, span)?;
+                if let BindingPattern::Identifier { .. } = l_value.pattern {
+                    let variable = self.analysis.variable(l_value.id).expect(
+                        "internal error: every binding pattern is analysed before it's compiled",
+                    );
+                    self.store(variable, *value, true, span)?;
+                } else {
+                    // The whole value is read before any variable is
+                    // declared.
+                    let mark = self.next_temp;
+                    let src = match self.compile_expr(*value, Dest::Any)? {
+                        Operand::Local(reg) | Operand::Temp(reg) => reg,
+                        Operand::Placed => {
+                            unreachable!("internal error: Dest::Any gives a register")
+                        }
+                    };
+                    self.declare_pattern(l_value, src, span)?;
+                    self.next_temp = mark;
+                }
                 self.unit(dest, span)
             }
             Expression::Assignment { l_value, r_value } => {
@@ -443,7 +452,9 @@ impl Compiler {
                 self.compile_struct_declaration(id, span)?;
                 self.unit(dest, span)
             }
-            Expression::For { .. } => Err(CompileError::not_yet_supported("`for` loops", span)),
+            Expression::For { iterations, body } => {
+                self.compile_for(&iterations, *body, dest, span)
+            }
             Expression::MemberAccess {
                 receiver,
                 member_span,
@@ -1013,6 +1024,219 @@ impl Compiler {
             operands.push(reg);
         }
         Ok(operands)
+    }
+
+    /// Declares the variables of `pattern`, which a declaration or a `for`
+    /// loop at `span` declares, with the value in `src`: a sequence
+    /// pattern's parts with the elements of the value, which `Unpack` puts
+    /// in temporaries first.
+    fn declare_pattern(
+        &mut self,
+        pattern: BindingPatternLocation,
+        src: Reg,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        match pattern.pattern {
+            BindingPattern::Identifier { .. } => {
+                let variable = self.analysis.variable(pattern.id).expect(
+                    "internal error: every binding pattern is analysed before it's compiled",
+                );
+                self.declare_from(variable, src, span)
+            }
+            BindingPattern::Sequence(patterns) => {
+                let len = u16::try_from(patterns.len())
+                    .map_err(|_too_many| CompileError::too_many_registers(span))?;
+                let mark = self.next_temp;
+                let base = Self::register(mark, span)?;
+                for _ in 0..len {
+                    self.alloc_temp(span)?;
+                }
+                self.emit(Instr::Unpack { src, base, len }, span);
+                for (index, pattern) in patterns.into_iter().enumerate() {
+                    let element = base
+                        .offset(index)
+                        .expect("internal error: the elements' registers exist");
+                    self.declare_pattern(pattern, element, span)?;
+                }
+                self.next_temp = mark;
+                Ok(())
+            }
+        }
+    }
+
+    /// Declares `variable` with the value in `src`, which it takes if `src`
+    /// is a temporary. A declaration replaces what a captured local's
+    /// register held, as [`Self::store`] does.
+    fn declare_from(
+        &mut self,
+        variable: ResolvedVar,
+        src: Reg,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let owned = src.index() >= self.locals;
+        match variable {
+            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
+                let dst = self.local(slot, span)?;
+                if dst != src {
+                    let copy = if owned {
+                        Instr::Move { dst, src }
+                    } else {
+                        Instr::Copy { dst, src }
+                    };
+                    self.emit(copy, span);
+                }
+            }
+            ResolvedVar::Global { slot } => {
+                let mark = self.next_temp;
+                let src = if owned {
+                    src
+                } else {
+                    let temp = self.alloc_temp(span)?;
+                    self.emit(Instr::Copy { dst: temp, src }, span);
+                    temp
+                };
+                self.emit(
+                    Instr::SetGlobal {
+                        slot: global(slot),
+                        src,
+                    },
+                    span,
+                );
+                self.next_temp = mark;
+            }
+            ResolvedVar::Upvalue { .. } => {
+                unreachable!("internal error: the analyser never declares an upvalue")
+            }
+        }
+        Ok(())
+    }
+
+    /// Compiles a `for` loop, whose value is unit, or a list or map
+    /// comprehension, whose value is the list or map it makes.
+    fn compile_for(
+        &mut self,
+        iterations: &[ForIteration],
+        body: ForBody,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        match body {
+            ForBody::Block(block) => {
+                self.compile_iterations(iterations, span, &mut |this| {
+                    this.compile_expr(block.clone(), Dest::Discard).map(|_| ())
+                })?;
+                self.unit(dest, span)
+            }
+            ForBody::List { expr } => {
+                let list = self.alloc_temp(span)?;
+                self.emit(
+                    Instr::MakeList {
+                        dst: list,
+                        base: list,
+                        len: 0,
+                    },
+                    span,
+                );
+                self.compile_iterations(iterations, span, &mut |this| {
+                    let src = this.alloc_temp(span)?;
+                    this.compile_expr(expr.clone(), Dest::Reg(src))?;
+                    this.emit(Instr::ListPush { list, src }, span);
+                    this.next_temp = src.index();
+                    Ok(())
+                })?;
+                Ok(self.built(list, dest, span))
+            }
+            ForBody::Map {
+                key,
+                value,
+                default,
+            } => {
+                // The default is made once, before the loop.
+                let map = self.alloc_temp(span)?;
+                let has_default = default.is_some();
+                if let Some(default) = default {
+                    let reg = self.alloc_temp(span)?;
+                    self.compile_expr(*default, Dest::Reg(reg))?;
+                    self.next_temp = map.index() + 1;
+                }
+                let base = map
+                    .offset(1)
+                    .ok_or_else(|| CompileError::too_many_registers(span))?;
+                self.emit(
+                    Instr::MakeMap {
+                        dst: map,
+                        base,
+                        pairs: 0,
+                        default: has_default,
+                    },
+                    span,
+                );
+                self.compile_iterations(iterations, span, &mut |this| {
+                    let (key, value) = this.compile_pair(key.clone(), value.clone(), span)?;
+                    this.emit(Instr::MapInsert { map, key, value }, span);
+                    this.next_temp = key.index();
+                    Ok(())
+                })?;
+                Ok(self.built(map, dest, span))
+            }
+        }
+    }
+
+    /// Compiles the `iterations` of a `for` loop at `span`, each loop inside
+    /// the one before, and a guard's code inside the loop before it, with
+    /// `compile_leaf` compiling the body inside them all. A `break` or
+    /// `continue` in the body leaves or goes on with the innermost loop.
+    fn compile_iterations(
+        &mut self,
+        iterations: &[ForIteration],
+        span: Span,
+        compile_leaf: &mut dyn FnMut(&mut Self) -> Result<(), CompileError>,
+    ) -> Result<(), CompileError> {
+        let Some((first, rest)) = iterations.split_first() else {
+            return compile_leaf(self);
+        };
+        let mark = self.next_temp;
+        match first {
+            ForIteration::Iteration { l_value, sequence } => {
+                let sequence_span = sequence.span;
+                // The iterator takes the sequence's temporary, or one of its
+                // own when the sequence is a local.
+                let (iter, src) = match self.compile_expr(sequence.clone(), Dest::Any)? {
+                    Operand::Temp(reg) => (reg, reg),
+                    Operand::Local(reg) => (self.alloc_temp(sequence_span)?, reg),
+                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                };
+                self.emit(Instr::GetIterator { dst: iter, src }, sequence_span);
+                let start = self.builder.label();
+                let end = self.builder.label();
+                self.builder.bind(start);
+                let value = self.alloc_temp(span)?;
+                self.builder.jump(
+                    Instr::IterNext {
+                        iter,
+                        dst: value,
+                        offset: 0,
+                    },
+                    end,
+                    span,
+                );
+                self.declare_pattern(l_value.clone(), value, span)?;
+                self.next_temp = value.index();
+                self.loops.push(Loop { start, end });
+                self.compile_iterations(rest, span, compile_leaf)?;
+                self.loops.pop();
+                self.builder.jump(Instr::Jump { offset: 0 }, start, span);
+                self.builder.bind(end);
+            }
+            ForIteration::Guard(condition) => {
+                let skip = self.builder.label();
+                self.jump_unless(condition.clone(), skip)?;
+                self.compile_iterations(rest, span, compile_leaf)?;
+                self.builder.bind(skip);
+            }
+        }
+        self.next_temp = mark;
+        Ok(())
     }
 
     /// Compiles `a and b` or `a or b`: `b` only runs when `a` doesn't
