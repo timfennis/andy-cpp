@@ -1,0 +1,82 @@
+// `xs[i] = value` reads `xs` and `i` before the value runs: a value that
+// assigns `i` or `xs` doesn't move the write, which goes to the list that was
+// in `xs` at the index `i` had.
+// expect-output: [99,20,30] 2
+// expect-output: ([99,20,30],2)
+// expect-output: ([99,20,30],[1,2,3])
+// expect-output: ([10,99,30],[1,2,3])
+// expect-output: ([0],([0],1))
+// expect-output: ([0],1)
+// expect-output: [6,20,30]
+// expect-output: [("a",2)]
+// expect-output: Xbc
+
+let g = [10, 20, 30];
+let gi = 0;
+g[gi] = { gi = 2; 99 };
+print(g, gi);
+
+fn local_index() {
+    let xs = [10, 20, 30];
+    let i = 0;
+    xs[i] = { i = 2; 99 };
+    (xs, i)
+}
+print(local_index());
+
+fn local_list() {
+    let xs = [10, 20, 30];
+    let old = xs;
+    xs[0] = { xs = [1, 2, 3]; 99 };
+    (old, xs)
+}
+print(local_list());
+
+fn index_assigns_list() {
+    let xs = [10, 20, 30];
+    let old = xs;
+    xs[{ xs = [1, 2, 3]; 1 }] = 99;
+    (old, xs)
+}
+print(index_assigns_list());
+
+fn cell() {
+    let xs = [10, 20, 30];
+    let i = 0;
+    let read = fn() { (xs, i) };
+    xs[i] = { i = 1; xs = [0]; 99 };
+    (xs, read())
+}
+print(cell());
+
+fn upvalue() {
+    let xs = [10, 20, 30];
+    let i = 0;
+    let write = fn() { xs[i] = { i = 1; xs = [0]; 99 }; };
+    write();
+    (xs, i)
+}
+print(upvalue());
+
+fn element_written_by_value() {
+    let xs = [10, 20, 30];
+    xs[0] = { xs[0] = 5; xs[0] + 1 };
+    xs
+}
+print(element_written_by_value());
+
+fn maps() {
+    let m = %{"a": 1};
+    let k = "a";
+    m[k] = { k = "b"; 2 };
+    m.sorted
+}
+print(maps());
+
+fn strings() {
+    let s = "abc";
+    let i = 0;
+    s[i] = { i = 2; "X" };
+    s
+}
+print(strings());

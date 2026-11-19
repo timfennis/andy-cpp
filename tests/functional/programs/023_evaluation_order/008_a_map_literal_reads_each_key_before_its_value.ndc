@@ -1,0 +1,41 @@
+// A map literal reads each key, then its value, pair by pair from the left:
+// in `%{x: { x = 2; x }, x: 3}` the first key is 1. A key written twice
+// keeps the last value. (Where the default is read is pinned in
+// `998_not_desired`.)
+// expect-output: [(1,2),(2,3)]
+// expect-output: [(1,2),(2,3),(3,10)]
+// expect-output: ([(1,2)],2)
+// expect-output: [(1,2),(2,0)]
+// expect-output: [(1,20)]
+
+let g = 1;
+print(%{g: { g = 2; g }, g: 3}.sorted);
+
+fn local() {
+    let x = 1;
+    let m = %{x: { x = 2; x }, x: { x = 3; x }, x: 10};
+    m.sorted
+}
+print(local());
+
+fn cell() {
+    let x = 1;
+    let read = fn() { x };
+    let m = %{x: { x = 2; x }};
+    (m.sorted, read())
+}
+print(cell());
+
+fn upvalue() {
+    let x = 1;
+    let make = fn() { %{x: { x = 2; x }, x: 0} };
+    make().sorted
+}
+print(upvalue());
+
+fn same_key() {
+    let x = 1;
+    let m = %{x: 10, { x = 1; x }: 20};
+    m.sorted
+}
+print(same_key());

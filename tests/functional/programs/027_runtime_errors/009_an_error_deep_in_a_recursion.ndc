@@ -1,0 +1,8 @@
+// An error a thousand calls deep stops the whole program with the error's
+// message, reported where it happened. The expected error ends with the span,
+// which counts bytes from the start of this file.
+fn down(n: Int) -> Int {
+    if n == 0 { [1][n + 1] } else { 1 + down(n - 1) }
+}
+print(down(1000));
+// expect-error: message: "index 1 is out of bounds for a list of 1 element", span: Some(Span { source_id: SourceId(0), offset: 249, length: 1 })

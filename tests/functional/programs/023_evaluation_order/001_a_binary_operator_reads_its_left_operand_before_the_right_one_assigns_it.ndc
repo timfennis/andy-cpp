@@ -1,0 +1,81 @@
+// The left operand of an operator is read before the right operand runs, so
+// a right operand that assigns the variable doesn't change what the left one
+// read: `x + { x = 5; x }` is `1 + 5`. The same for a global, a local, a
+// local a closure captures (read through its cell) and a closure's captured
+// variable (an upvalue), and for operators that are instructions (`+` on
+// Ints and Floats) and ones that are calls (`^`, `<>`, `++`).
+// expect-output: 6
+// expect-output: 6
+// expect-output: 6
+// expect-output: 6
+// expect-output: 6
+// expect-output: 3.0
+// expect-output: 8
+// expect-output: 4
+// expect-output: ab
+// expect-output: ab
+// expect-output: [1,2]
+
+let g = 1;
+print(g + { g = 5; g });
+
+fn local() {
+    let x = 1;
+    x + { x = 5; x }
+}
+print(local());
+
+fn cell() {
+    let x = 1;
+    let read = fn() { x };
+    x + { x = 5; x }
+}
+print(cell());
+
+fn upvalue() {
+    let x = 1;
+    let add = fn() { x + { x = 5; x } };
+    add()
+}
+print(upvalue());
+
+{
+    let x = 1;
+    print(x + { x = 5; x });
+}
+
+fn float() {
+    let x = 1.5;
+    x * { x = 2.0; x }
+}
+print(float());
+
+fn power() {
+    let x = 2;
+    x ^ { x = 3; x }
+}
+print(power());
+
+fn negated() {
+    let x = 1;
+    -x + { x = 5; x }
+}
+print(negated());
+
+fn display_concat() {
+    let s = "a";
+    s <> { s = "b"; s }
+}
+print(display_concat());
+
+fn string_concat() {
+    let s = "a";
+    s ++ { s = "b"; s }
+}
+print(string_concat());
+
+fn list_concat() {
+    let xs = [1];
+    xs ++ { xs = [2]; xs }
+}
+print(list_concat());

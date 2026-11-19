@@ -1,0 +1,39 @@
+// `s.f(a)` is `f(s, a)`: the receiver is read before the arguments run.
+// expect-output: true xyz
+// expect-output: (true,6,"xyz")
+// expect-output: (true,[9])
+// expect-output: (true,[9])
+// expect-output: ([1,2],[7])
+
+let g = "ab";
+print(g.starts_with({ g = "xyz"; "a" }), g);
+
+fn local() {
+    let s = "ab";
+    let xs = [1, 2];
+    (s.starts_with({ s = "xyz"; "a" }), xs.len() + { xs = [1, 2, 3, 4]; xs.len() }, s)
+}
+print(local());
+
+fn cell() {
+    let xs = [3, 1, 2];
+    let read = fn() { xs };
+    let found = xs.contains({ xs = [9]; 3 });
+    (found, read())
+}
+print(cell());
+
+fn upvalue() {
+    let xs = [3, 1, 2];
+    let check = fn() { xs.contains({ xs = [9]; 3 }) };
+    (check(), xs)
+}
+print(upvalue());
+
+fn mutating() {
+    let xs = [1];
+    let old = xs;
+    xs.push({ xs = [7]; 2 });
+    (old, xs)
+}
+print(mutating());

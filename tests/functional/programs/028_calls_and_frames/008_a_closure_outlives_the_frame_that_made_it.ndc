@@ -1,0 +1,46 @@
+// A closure returned from the function that made it keeps the variables it
+// captured after that function returned. Each call of the maker makes new
+// variables, so two counters count apart; two closures made by one call share
+// theirs.
+// expect-output: 1 2 3 1
+// expect-output: [0,1,2]
+// expect-output: 13 15 15
+
+fn counter() {
+    let count = 0;
+    fn() {
+        count += 1;
+        count
+    }
+}
+
+let a = counter();
+let b = counter();
+print(a(), a(), a(), b());
+
+fn pair() {
+    let value = [0];
+    let get = fn() { value };
+    let push = fn(x: Int) { value.push(x); };
+    (get, push)
+}
+let (get, push) = pair();
+push(1);
+push(2);
+print(get());
+
+fn nested() {
+    let outer = 1;
+    fn() {
+        let inner = 10;
+        fn() {
+            outer += 1;
+            inner += 1;
+            outer + inner
+        }
+    }
+}
+let make = nested();
+let f = make();
+let g = make();
+print(f(), f(), g());

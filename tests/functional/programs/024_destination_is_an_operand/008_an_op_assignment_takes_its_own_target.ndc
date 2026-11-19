@@ -1,0 +1,55 @@
+// `x += x`, `xs[0] += xs[1]`, `m[k] += m[k]` and `t += t` read the target as
+// the right operand too. Appending a list or string to itself is
+// `006_lists/061_a_list_extends_itself.ndc` and
+// `004_basic/030_string_extend_self.ndc`.
+// expect-output: 6
+// expect-output: (36,[3,4],%{"a": 2},(2,4),2.25)
+// expect-output: 6
+// expect-output: 12
+// expect-output: [[1,1],[2,1,1]]
+
+let g = 3;
+g += g;
+print(g);
+
+fn local() {
+    let x = 3;
+    x += x;
+    x *= x;
+    let xs = [1, 2];
+    xs[0] += xs[1];
+    xs[1] *= xs[1];
+    let m = %{"a": 1};
+    m["a"] += m["a"];
+    let t = (1, 2);
+    t += t;
+    let f = 1.5;
+    f *= f;
+    (x, xs, m, t, f)
+}
+print(local());
+
+fn cell() {
+    let x = 3;
+    let read = fn() { x };
+    x += x;
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let x = 3;
+    let double = fn() { x += x; };
+    double();
+    double();
+    x
+}
+print(upvalue());
+
+fn element_appends_itself() {
+    let rows = [[1], [2]];
+    rows[0] ++= rows[0];
+    rows[1] ++= rows[0];
+    rows
+}
+print(element_appends_itself());

@@ -1,0 +1,47 @@
+// `p.v op= value` reads `p` and its field before the value runs, and writes
+// the result to the struct that was in `p`.
+// expect-output: P {v: 2} P {v: 50}
+// expect-output: (P {v: 2},P {v: 7})
+// expect-output: P {v: 2}
+// expect-output: (P {v: 2},P {v: 50})
+// expect-output: (P {v: 2},P {v: 50})
+
+struct P { v: Int }
+
+let g = P(1);
+let g_old = g;
+g.v += { g = P(50); 1 };
+print(g_old, g);
+
+fn local() {
+    let p = P(1);
+    let old = p;
+    p.v += { p = P(50); p.v = 7; 1 };
+    (old, p)
+}
+print(local());
+
+fn field() {
+    let p = P(1);
+    p.v += { p.v = 50; 1 };
+    p
+}
+print(field());
+
+fn cell() {
+    let p = P(1);
+    let old = p;
+    let read = fn() { p };
+    p.v += { p = P(50); 1 };
+    (old, read())
+}
+print(cell());
+
+fn upvalue() {
+    let p = P(1);
+    let old = p;
+    let bump = fn() { p.v += { p = P(50); 1 }; };
+    bump();
+    (old, p)
+}
+print(upvalue());

@@ -1,0 +1,33 @@
+// `x ++ [3]` leaves the list alone when `x` reads it out of something that
+// keeps holding it: a struct field, a list element, a map value or a tuple
+// element.
+// expect-output: Box {items: [1,2]} [1,2,3]
+// expect-output: [[1,2],[5]] [1,2,3]
+// expect-output: %{"k": [1,2]} [1,2,3]
+// expect-output: ([1,2],0) [1,2,3]
+// expect-output: ([1,2,3],[2,3],Box {items: [1,2]},[[1],[2]])
+
+struct Box { items: [Int] }
+
+let bx = Box([1, 2]);
+let from_field = bx.items ++ [3];
+print(bx, from_field);
+
+let nested = [[1, 2], [5]];
+let from_element = nested[0] ++ [3];
+print(nested, from_element);
+
+let m = %{"k": [1, 2]};
+let from_value = m["k"] ++ [3];
+print(m, from_value);
+
+let tup = ([1, 2], 0);
+let from_tuple = tup[0] ++ [3];
+print(tup, from_tuple);
+
+fn in_a_function() {
+    let bx = Box([1, 2]);
+    let rows = [[1], [2]];
+    (bx.items ++ [3], rows[1] ++ [3], bx, rows)
+}
+print(in_a_function());

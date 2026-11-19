@@ -1,0 +1,9 @@
+// An Int overflow in `xs[0] += 1` is reported at the whole op-assignment. The
+// message for a variable is pinned by
+// `001_math/084_int_augmented_assignment_overflows.ndc`. The expected error
+// ends with the span, which counts bytes from the start of this file.
+fn bump(xs: [Int]) {
+    xs[0] += 1;
+}
+bump([9223372036854775807]);
+// expect-error: message: "integer operation overflowed or is undefined: 9223372036854775807 + 1", span: Some(Span { source_id: SourceId(0), offset: 291, length: 10 })

@@ -1,0 +1,53 @@
+// A `for` loop over a list goes over the list as it is when it gets to each
+// index: elements pushed in the loop are visited, an element changed ahead of
+// the loop is read changed, and the loop ends early when elements are popped.
+// Assigning another list to the variable doesn't change what the loop goes
+// over.
+// expect-output: [1,2,3,10,20,30] [1,2,3,10,20,30]
+// expect-output: [1,2] [1,2]
+// expect-output: [1,2,3] [7,8,9,10]
+// expect-output: [1,2,99]
+// expect-output: [1,2,3,4]
+
+let xs = [1, 2, 3];
+let seen = [];
+for x in xs {
+    seen.push(x);
+    if xs.len() < 6 { xs.push(x * 10); }
+}
+print(seen, xs);
+
+let ys = [1, 2, 3, 4];
+let popped = [];
+for y in ys {
+    popped.push(y);
+    ys.pop();
+}
+print(popped, ys);
+
+let zs = [1, 2, 3];
+let reassigned = [];
+for z in zs {
+    reassigned.push(z);
+    zs = [7, 8, 9, 10];
+}
+print(reassigned, zs);
+
+let ws = [1, 2, 3];
+let changed = [];
+for w in ws {
+    ws[2] = 99;
+    changed.push(w);
+}
+print(changed);
+
+fn in_a_function() {
+    let xs = [1, 2];
+    let seen = [];
+    for x in xs {
+        seen.push(x);
+        if x < 3 { xs.push(x + 2); }
+    }
+    seen
+}
+print(in_a_function());

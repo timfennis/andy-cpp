@@ -1,0 +1,44 @@
+// `xs ++= ys` appends the elements of `ys` to the list in `xs`, which every
+// variable holding that list sees. `ys` keeps its elements when something
+// else holds it: a variable, a global a function returns, a `pure fn`'s
+// cache. `xs ++= xs` is `006_lists/061_a_list_extends_itself.ndc`.
+// expect-output: [1,7,8] [1,7,8]
+// expect-output: [1,4] [4]
+// expect-output: ([1,4,4],[4])
+// expect-output: [1,5] [5]
+// expect-output: [1,2,3,4]
+
+fn make() { [7, 8] }
+let xs = [1];
+let alias = xs;
+xs ++= make();
+print(xs, alias);
+
+let shared = [4];
+fn returns_shared() { shared }
+let ys = [1];
+ys ++= returns_shared();
+print(ys, shared);
+
+fn variable() {
+    let source = [4];
+    let target = [1];
+    target ++= source;
+    target ++= source;
+    (target, source)
+}
+print(variable());
+
+pure fn cached() -> [Int] => [5];
+let zs = [1];
+zs ++= cached();
+print(zs, cached());
+
+fn captured() {
+    let target = [1];
+    let add = fn(more: [Int]) { target ++= more; };
+    add([2]);
+    add([3, 4]);
+    target
+}
+print(captured());

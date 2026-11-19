@@ -1,0 +1,57 @@
+// `x = f(x, x)` passes `x` twice and writes the result back to `x`. A list
+// passed twice is the same list in both parameters, and stays the same list
+// in what the call returns.
+// expect-output: 4
+// expect-output: (6,8)
+// expect-output: [[1,2],[1,2]]
+// expect-output: 6
+// expect-output: 6
+// expect-output: [3,4]
+
+fn pair(a, b) { [a, b] }
+
+let g = 3;
+g = max(g, g) + 1;
+print(g);
+
+fn local() {
+    let x = 3;
+    x = max(x, x) + min(x, x);
+    let add = fn(a, b) { a + b };
+    let y = 4;
+    y = add(y, y);
+    (x, y)
+}
+print(local());
+
+fn shared_list() {
+    let inner = [1];
+    let xs: Any = inner;
+    xs = pair(xs, xs);
+    inner.push(2);
+    xs
+}
+print(shared_list());
+
+fn cell() {
+    let x = 3;
+    let read = fn() { x };
+    x = max(x, x) * 2;
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let x = 3;
+    let grow = fn() { x = max(x, x) * 2; };
+    grow();
+    x
+}
+print(upvalue());
+
+fn native_that_calls_back() {
+    let xs = [1, 2];
+    xs = xs.map(fn(v) { v + xs.len() });
+    xs
+}
+print(native_that_calls_back());

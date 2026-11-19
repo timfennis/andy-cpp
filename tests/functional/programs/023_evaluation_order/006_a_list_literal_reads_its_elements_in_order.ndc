@@ -1,0 +1,36 @@
+// A list literal reads its elements left to right: in
+// `[x, { x = 2; x }, x]` the first element is 1 and the last is 2.
+// expect-output: [1,2,2]
+// expect-output: [1,2,2,20]
+// expect-output: [1,2,2]
+// expect-output: [1,2,2]
+// expect-output: [[1],[2],[2]]
+
+let g = 1;
+print([g, { g = 2; g }, g]);
+
+fn local() {
+    let x = 1;
+    [x, { x = 2; x }, x, { x = x * 10; x }]
+}
+print(local());
+
+fn cell() {
+    let x = 1;
+    let read = fn() { x };
+    [x, { x = 2; x }, read()]
+}
+print(cell());
+
+fn upvalue() {
+    let x = 1;
+    let make = fn() { [x, { x = 2; x }, x] };
+    make()
+}
+print(upvalue());
+
+fn lists() {
+    let xs = [1];
+    [xs, { xs = [2]; xs }, xs]
+}
+print(lists());

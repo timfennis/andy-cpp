@@ -1,0 +1,8 @@
+// An error in a function called as the second operand stops the program with
+// the error's message, at the place in the function where it happened (the
+// `[` of `[5]`), with the first operand already read. The expected error ends
+// with the span, which counts bytes from the start of this file.
+fn boom() -> Int { [1][5] }
+let x = 1;
+let y = x + boom();
+// expect-error: message: "index 5 is out of bounds for a list of 1 element", span: Some(Span { source_id: SourceId(0), offset: 321, length: 1 })

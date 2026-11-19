@@ -1,0 +1,32 @@
+// List and map comprehensions with several iterations, guards and
+// destructuring, nested in each other, reading variables of the function
+// around them and of the comprehension around them.
+// expect-output: ([[110],[120,121],[130,131,132]],[110,120,130,132],[(1,[0]),(2,[0,1]),(3,[0,1,2])],[3,7],[6],[(1,"a"),(2,"b")])
+// expect-output: ([0,1,2],[5,5],5)
+// expect-output: [("a",2),("b",1)]
+
+fn make(limit: Int) {
+    let offset = 100;
+    let grid = [[x * 10 + y + offset for y in 0..x] for x in 1..limit];
+    let flat = [v for row in grid, v in row, if v % 2 == 0];
+    let by_key = %{k: [v for v in 0..k] for k in 0..limit, if k > 0};
+    let pairs = [a + b for a, b in [(1, 2), (3, 4)]];
+    let from_map = [k * v for k, v in %{2: 3}];
+    let inverted = %{v: k for k, v in %{"a": 1, "b": 2}};
+    (grid, flat, by_key.sorted, pairs, from_map, inverted.sorted)
+}
+print(make(4));
+
+fn shadowing() {
+    let x = 5;
+    let inner = [x for x in 0..3];
+    let outer = [x for y in 0..2];
+    (inner, outer, x)
+}
+print(shadowing());
+
+let counts = %{c: 0 for c in "aab"};
+for c in "aab" {
+    counts[c] += 1;
+}
+print(counts.sorted);

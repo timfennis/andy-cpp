@@ -1,0 +1,35 @@
+// Recursion a few thousand calls deep, each call with an operand waiting for
+// the call it makes, returns through every frame with the right value. The
+// recursion limit is `005_functions/059_calls_that_go_too_deep_stop_with_an_error.ndc`,
+// a recursion that returns nothing `005_functions/027_10k_recursion_depth.ndc`.
+// expect-output: 12502500
+// expect-output: 3000 2 6000
+// expect-output: 2000
+// expect-output: 4000
+
+fn sum(n: Int) -> Int {
+    if n == 0 { 0 } else { n + sum(n - 1) }
+}
+print(sum(5000));
+
+fn build(n: Int) -> [Int] {
+    if n == 0 {
+        []
+    } else {
+        let below = build(n - 1);
+        let mine = n * 2;
+        below.push(mine);
+        below
+    }
+}
+let built = build(3000);
+print(built.len(), built[0], built[2999]);
+
+fn count_down(n: Int, acc: [Int]) -> Int {
+    if n == 0 { acc.len() } else { count_down(n - 1, acc ++ [n]) }
+}
+print(count_down(2000, []));
+
+let depth = fn(n: Int) -> Int { 0 };
+depth = fn(n: Int) -> Int { if n == 0 { 0 } else { 1 + depth(n - 1) } };
+print(depth(4000));

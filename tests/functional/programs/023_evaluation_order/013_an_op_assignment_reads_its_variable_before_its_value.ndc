@@ -1,0 +1,62 @@
+// `x op= value` reads `x` before the value runs, then writes the result: in
+// `x += { x = 10; 1 }` the assignment in the value is overwritten and `x` is
+// 2. The same for an operator that's an instruction (`+=` on Ints), one
+// that's a call (`^=`), one that appends in place (`++=`), and a function
+// used as an operator (`x f= value`).
+// expect-output: 2
+// expect-output: (2,8,12,3.0)
+// expect-output: (2,2)
+// expect-output: 2
+// expect-output: ([1,2],[1,2],"ab")
+// expect-output: 11
+
+let g = 1;
+g += { g = 10; 1 };
+print(g);
+
+fn local() {
+    let x = 1;
+    x += { x = 10; 1 };
+    let y = 2;
+    y ^= { y = 10; 3 };
+    let f = fn(a, b) { a * 10 + b };
+    let z = 1;
+    z f= { z = 5; 2 };
+    let w = 1.5;
+    w *= { w = 100.0; 2.0 };
+    (x, y, z, w)
+}
+print(local());
+
+fn cell() {
+    let x = 1;
+    let read = fn() { x };
+    x += { x = 10; 1 };
+    (x, read())
+}
+print(cell());
+
+fn upvalue() {
+    let x = 1;
+    let bump = fn() { x += { x = 10; 1 }; };
+    bump();
+    x
+}
+print(upvalue());
+
+fn appends() {
+    let xs = [1];
+    let old = xs;
+    xs ++= { xs = [5]; [2] };
+    let s = "a";
+    s ++= { s = "z"; "b" };
+    (xs, old, s)
+}
+print(appends());
+
+fn the_value_reads_the_variable() {
+    let x = 1;
+    x += { x = 10; x };
+    x
+}
+print(the_value_reads_the_variable());

@@ -1,0 +1,20 @@
+// `f() ++ xs` where `f` returns a fresh list gives the elements of both.
+// Where `f` returns a list a global also holds, or a `pure fn` returns the
+// list it keeps in its cache, that list keeps its elements.
+// expect-output: [1,2,3] [1,2]
+// expect-output: [1,2,3] [1,2]
+// expect-output: [1,2,3] [1,2]
+// expect-output: [5,5,5]
+
+fn fresh() { [1, 2] }
+print(fresh() ++ [3], fresh());
+
+let shared = [1, 2];
+fn returns_shared() { shared }
+print(returns_shared() ++ [3], shared);
+
+pure fn cached() -> [Int] => [1, 2];
+print(cached() ++ [3], cached());
+
+let make = fn() { [5] };
+print(make() ++ make() ++ make());

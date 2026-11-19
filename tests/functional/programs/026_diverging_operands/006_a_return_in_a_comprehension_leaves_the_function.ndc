@@ -1,0 +1,26 @@
+// A `return` in a comprehension's element or guard leaves the function, and
+// one in a lambda the comprehension calls leaves only the lambda.
+// expect-output: [-1] [0,1,2,3,4]
+// expect-output: [-2] [0,1,2,3,4]
+// expect-output: 104
+// expect-output: [[4]] [[0,1,2],[0,1,2],[0,1,2]]
+
+fn in_the_element(n: Int) -> [Int] {
+    [if i == n { return [-1] } else { i } for i in 0..5]
+}
+print(in_the_element(2), in_the_element(9));
+
+fn in_the_guard(n: Int) -> [Int] {
+    [i for i in 0..5, if if i == n { return [-2] } else { true }]
+}
+print(in_the_guard(3), in_the_guard(9));
+
+fn in_a_lambda(xs: [Int]) -> Int {
+    xs.map(fn(x) { if x == 2 { return 100 } else { x } }).sum()
+}
+print(in_a_lambda([1, 2, 3]));
+
+fn in_a_nested_comprehension(n: Int) -> [[Int]] {
+    [[if i * j == n { return [[n]] } else { j } for j in 0..3] for i in 0..3]
+}
+print(in_a_nested_comprehension(4), in_a_nested_comprehension(5));

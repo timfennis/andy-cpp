@@ -1,0 +1,68 @@
+// `a, b = b, a` swaps: the right side is made from the old values before any
+// of them is assigned. The same for three variables in a rotation, for
+// parenthesised patterns, and for globals, captured locals and upvalues.
+// Swapping two elements of a list is `006_lists/045_index_swapping.ndc`.
+// expect-output: 2 1
+// expect-output: (2,1,3,1,2,"q","p",[2,10],[1])
+// expect-output: (2,1)
+// expect-output: ((2,1),1,2)
+// expect-output: (2,1)
+// expect-output: ([9,2],1)
+
+let ga = 1;
+let gb = 2;
+ga, gb = gb, ga;
+print(ga, gb);
+
+fn local() {
+    let a = 1;
+    let b = 2;
+    a, b = b, a;
+    let x, y, z = 1, 2, 3;
+    x, y, z = z, x, y;
+    let (p, q) = ("p", "q");
+    (p, q) = (q, p);
+    let l1 = [1];
+    let l2 = [2];
+    l1, l2 = l2, l1;
+    l1.push(10);
+    (a, b, x, y, z, p, q, l1, l2)
+}
+print(local());
+
+fn cell() {
+    let a = 1;
+    let b = 2;
+    let read = fn() { (a, b) };
+    a, b = b, a;
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let a = 1;
+    let b = 2;
+    let swap = fn() { a, b = b, a; };
+    swap();
+    let once = (a, b);
+    swap();
+    (once, a, b)
+}
+print(upvalue());
+
+fn mixed() {
+    let a = 1;
+    let read = fn() { a };
+    let b = 2;
+    a, b = b, a;
+    (read(), b)
+}
+print(mixed());
+
+fn element_and_variable() {
+    let xs = [1, 2];
+    let v = 9;
+    xs[0], v = v, xs[0];
+    (xs, v)
+}
+print(element_and_variable());

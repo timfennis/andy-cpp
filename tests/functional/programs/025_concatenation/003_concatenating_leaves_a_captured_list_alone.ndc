@@ -1,0 +1,33 @@
+// `a ++ [3]` leaves `a` alone when a closure captures it, both where it's
+// declared (read through its cell) and in the closure (an upvalue).
+// expect-output: ([1,2],[1,2,3],[1,2])
+// expect-output: ([1,2],[1,2,3],[1,2,3])
+// expect-output: [([0,9],[0]),([1,9],[1])]
+
+fn cell() {
+    let a = [1, 2];
+    let read = fn() { a };
+    let b = a ++ [3];
+    (a, b, read())
+}
+print(cell());
+
+fn upvalue() {
+    let a = [1, 2];
+    let extend = fn() { a ++ [3] };
+    let b = extend();
+    let c = extend();
+    (a, b, c)
+}
+print(upvalue());
+
+fn made_in_a_loop() {
+    let out = [];
+    for i in 0..2 {
+        let a = [i];
+        let extend = fn() { a ++ [9] };
+        out.push((extend(), a));
+    }
+    out
+}
+print(made_in_a_loop());

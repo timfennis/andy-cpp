@@ -1,0 +1,60 @@
+// `xs = id(xs)`, where `id` returns its argument, writes the same list back:
+// another variable holding it still sees changes made through `xs`. A
+// function that changes its argument and returns it does the same.
+// expect-output: [1,2] [1,2]
+// expect-output: ([1,9,2],[1,9,2],5)
+// expect-output: [1,2]
+// expect-output: ([1,2],[1,2])
+// expect-output: [1,2]
+
+fn id(v) { v }
+fn push_and_return(xs: [Int]) -> [Int] {
+    xs.push(9);
+    xs
+}
+
+let g = [1];
+let g_alias = g;
+g = id(g);
+g.push(2);
+print(g, g_alias);
+
+fn local() {
+    let xs = [1];
+    let alias = xs;
+    xs = id(xs);
+    xs = push_and_return(xs);
+    xs.push(2);
+    let n = 5;
+    n = id(n);
+    (xs, alias, n)
+}
+print(local());
+
+fn cell() {
+    let xs = [1];
+    let read = fn() { xs };
+    xs = id(xs);
+    xs.push(2);
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let xs = [1];
+    let alias = xs;
+    let again = fn() { xs = id(xs); xs.push(2); };
+    again();
+    (xs, alias)
+}
+print(upvalue());
+
+fn lambda() {
+    let xs = [1];
+    let alias = xs;
+    let same = fn(v) { v };
+    xs = same(xs);
+    xs.push(2);
+    alias
+}
+print(lambda());

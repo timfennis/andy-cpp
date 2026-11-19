@@ -1,0 +1,26 @@
+// A `pure fn` call that misses its cache runs the function; one that hits
+// gives the cached value without running it. Both give their value in the
+// middle of an expression, between operands already read and ones still to
+// come. `010_memoization` pins the cache itself.
+// expect-output: 100 1
+// expect-output: [4,9,4,84] 3
+// expect-output: 26 4
+// expect-output: [0,1,4,0,1,4] 6
+// expect-output: (56,42) (56,42) 7
+
+let runs = 0;
+pure fn square(n: Int) -> Int {
+    runs += 1;
+    n * n
+}
+
+print(1 + square(3) * 10 + square(3), runs);
+print([square(2), square(3), square(2), 100 - square(4)], runs);
+print(max(square(5), square(5) + 1), runs);
+print([square(i % 3) for i in 0..6], runs);
+
+fn in_a_function(x: Int) -> (Int, Int) {
+    let before = x;
+    (before + square(x), square(x) - before)
+}
+print(in_a_function(7), in_a_function(7), runs);

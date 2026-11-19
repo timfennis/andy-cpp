@@ -1,0 +1,52 @@
+// A call in a later operand can assign a global or a captured variable that
+// an earlier operand read; the earlier operand keeps what it read:
+// `x + bump()`, where `bump` sets `x` to 100, is `1 + 100`.
+// expect-output: 101 [100,100] 100
+// expect-output: (101,[1,100,100],1)
+// expect-output: 101
+// expect-output: 18
+
+let g = 1;
+fn bump_g() {
+    g = 100;
+    g
+}
+print(g + bump_g(), [g, bump_g()], g);
+
+fn cell() {
+    let x = 1;
+    let bump = fn() {
+        x = 100;
+        x
+    };
+    let sum = x + bump();
+    x = 1;
+    let list = [x, bump(), x];
+    x = 1;
+    let call = max(x, bump() - 99);
+    (sum, list, call)
+}
+print(cell());
+
+fn upvalue() {
+    let x = 1;
+    let bump = fn() {
+        x = 100;
+        x
+    };
+    let read = fn() { x + bump() };
+    read()
+}
+print(upvalue());
+
+fn index() {
+    let xs = [10, 20];
+    let i = 0;
+    let move_on = fn() {
+        i = 1;
+        xs = [7, 8];
+        0
+    };
+    xs[i] + move_on() + xs[i]
+}
+print(index());

@@ -1,0 +1,35 @@
+// A native that calls back a function that calls a native that calls back
+// another function, several levels deep, gives each level's result to the
+// level above. Natives called as callbacks, and callbacks that capture
+// variables of the function around the native call, work too.
+// expect-output: [60,170,50]
+// expect-output: [123,89,5]
+// expect-output: [3,2,1] [6,17,5] [[2,2,2],[2,2],[2]]
+// expect-output: [[7,3,5],[19,17],[11]]
+// expect-output: 2509
+
+let rows = [[3, 1, 2], [9, 8], [5]];
+
+print(rows.map(fn(row) { row.map(fn(x) { x * 10 }).sum() }));
+
+print(rows.map(fn(row) {
+    row.sorted_by(fn(a, b) { [a].map(fn(v) { v }).sum() <=> b }).fold(0, fn(acc, x) { acc * 10 + x })
+}));
+
+print(rows.map(len), rows.map(sum), rows.map(fn(r) { r.map(fn(x) { [x, x].len() }) }));
+
+fn scaled(factor: Int) -> [[Int]] {
+    let offset = 1;
+    rows.map(fn(row) { row.map(fn(x) { x * factor + offset }) })
+}
+print(scaled(2));
+
+fn total_of_totals() -> Int {
+    let calls = 0;
+    let result = rows.fold(0, fn(acc, row) {
+        calls += 1;
+        acc + row.filter(fn(x) { calls += 1; x > 2 }).sum()
+    });
+    result * 100 + calls
+}
+print(total_of_totals());

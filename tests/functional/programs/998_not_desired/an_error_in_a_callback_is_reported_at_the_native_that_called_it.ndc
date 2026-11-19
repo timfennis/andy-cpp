@@ -1,0 +1,7 @@
+// An error in a callback is reported at the name of the native that called
+// it, `map`, not where it happened in the callback, `[x][x]`: the native
+// passes on the message and drops the span. This looks wrong, as it hides
+// which code failed. The expected error ends with the span, which counts
+// bytes from the start of this file.
+let r = [1, 2, 3].map(fn(x) { [x][x] });
+// expect-error: message: "index 1 is out of bounds for a list of 1 element", span: Some(Span { source_id: SourceId(0), offset: 355, length: 3 })

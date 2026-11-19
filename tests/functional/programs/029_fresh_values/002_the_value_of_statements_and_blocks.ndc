@@ -1,0 +1,44 @@
+// A block whose last statement ends with `;` is `()`, as is an empty block,
+// an `if` without `else` (whether it runs or not), a `while` and a `for`
+// loop. A block that ends with an expression is that expression's value, also
+// when it's nested. `004_basic/017_statements_evaluate_to_unit.ndc`,
+// `004_basic/080_an_if_without_else_is_unit.ndc` and
+// `900_bugs/bug0031_non_value_expression_corrupts_stack.ndc` pin parts of this.
+// expect-output: ((),(),(),(),(),(),7,6,1,[1])
+// expect-output: ((),(),(),(),(),(),7,6,2,[2])
+// expect-output: ((),1)
+// expect-output: ((),2)
+// expect-output: ran
+// expect-output: ((),())
+
+fn values(c: Bool) {
+    let a = { 1; };
+    let b = {};
+    let d = if c { 1 };
+    let e = while false {};
+    let f = for i in 0..3 { i; };
+    let g = { let inner = 5; };
+    let h = { { { 7 } } };
+    let i = { let x = 2; { let y = 3; x * y } };
+    let j = if c { 1 } else { 2 };
+    let k = if c { [1] } else if !c { [2] } else { [3] };
+    (a, b, d, e, f, g, h, i, j, k)
+}
+print(values(true));
+print(values(false));
+
+fn ends_with_a_statement() {
+    let x = 1;
+    x += 1;
+}
+print((ends_with_a_statement(), 1));
+
+fn ends_with_a_loop() {
+    for i in 0..2 {}
+}
+print((ends_with_a_loop(), 2));
+
+fn ends_with_an_if(c: Bool) {
+    if c { print("ran"); }
+}
+print((ends_with_an_if(true), ends_with_an_if(false)));

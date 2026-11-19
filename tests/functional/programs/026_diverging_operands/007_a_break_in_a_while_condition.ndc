@@ -1,0 +1,28 @@
+// A `break` in a `while` loop's condition leaves the loop, also from inside
+// an operand of the condition. A `return` there leaves the function.
+// expect-output: 3
+// expect-output: [0,1,2,3]
+// expect-output: 2
+
+let i = 0;
+while if i == 3 { break } else { true } {
+    i += 1;
+}
+print(i);
+
+let j = 0;
+let steps = [];
+while j < max(10, if j == 4 { break } else { 0 }) {
+    steps.push(j);
+    j += 1;
+}
+print(steps);
+
+fn find(xs: [Int], target: Int) -> Int {
+    let k = 0;
+    while xs[k] != if xs[k] == target { return k } else { target } {
+        k += 1;
+    }
+    -1
+}
+print(find([5, 6, 7], 7));

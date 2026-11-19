@@ -1,0 +1,8 @@
+// An Int overflow in the second operand of `+` is reported at the operator
+// that overflowed, the inner `+`. The expected error ends with the span, which
+// counts bytes from the start of this file.
+fn sum(big: Int) -> Int {
+    1 + (big + 1)
+}
+print(sum(9223372036854775807));
+// expect-error: message: "integer operation overflowed or is undefined: 9223372036854775807 + 1", span: Some(Span { source_id: SourceId(0), offset: 240, length: 1 })
