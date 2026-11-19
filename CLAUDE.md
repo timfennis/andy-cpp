@@ -27,6 +27,8 @@ cargo bench -p benches
 # Compare two ndc binaries on whole programs (benches/programs and, when it's
 # checked out, Advent of Brian): CPU time and peak memory per program, totals
 python3 benches/compare.py path/to/baseline/ndc path/to/candidate/ndc
+# ...or the two VMs of one binary
+python3 benches/compare.py target/release/ndc target/release/ndc --candidate-env NDC_VM=register
 
 # Start REPL
 cargo run --bin ndc
