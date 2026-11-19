@@ -60,7 +60,7 @@ enum Parts {
 
 /// What all the bounds in a [`Bounds`] say together, kept up to date as
 /// bounds join, so the questions it answers don't look at each bound.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct Summary {
     pub(super) len: usize,
     /// Whether one is a [`Bound::Number`].
@@ -235,5 +235,86 @@ impl Drop for Node {
                 todo.push(std::mem::take(second));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Bound, Bounds, Held, Literals};
+    use ndc_core::{StaticType, TypeVar};
+    use ndc_lexer::Span;
+
+    fn holds(typ: StaticType, literal: u32) -> Bound {
+        Bound::Holds(typ, TypeVar(literal), Span::synthetic())
+    }
+
+    fn number(literal: u32) -> Bound {
+        Bound::Number(TypeVar(literal), Span::synthetic())
+    }
+
+    fn sample() -> Vec<Bound> {
+        vec![
+            number(0),
+            holds(StaticType::Int, 1),
+            holds(StaticType::Never, 1),
+            holds(StaticType::Var(TypeVar(7)), 2),
+            holds(StaticType::String, 3),
+        ]
+    }
+
+    #[test]
+    fn joined_bounds_keep_their_order() {
+        let all = sample();
+        for split in 0..=all.len() {
+            let joined =
+                Bounds::new(all[..split].to_vec()).then(&Bounds::new(all[split..].to_vec()));
+            let literals = joined.iter().map(Bound::literal).collect::<Vec<_>>();
+            assert_eq!(literals, all.iter().map(Bound::literal).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn a_summary_is_what_its_bounds_say_together() {
+        let all = sample();
+        let whole = Bounds::new(all.clone());
+        for split in 0..=all.len() {
+            let joined =
+                Bounds::new(all[..split].to_vec()).then(&Bounds::new(all[split..].to_vec()));
+            assert_eq!(joined.summary(), whole.summary(), "split at {split}");
+        }
+        let summary = whole.summary();
+        assert_eq!(summary.len, all.len());
+        assert!(summary.numbers && summary.holds && summary.holds_variables);
+        assert_eq!(summary.held, Held::Open);
+        assert_eq!(summary.literals, Literals::Several);
+    }
+
+    #[test]
+    fn values_of_one_known_type_are_held_as_that_type() {
+        let one = Bounds::new(vec![holds(StaticType::Int, 0), holds(StaticType::Never, 0)])
+            .then(&Bounds::new(vec![holds(StaticType::Int, 0)]));
+        assert_eq!(one.summary().held, Held::One(StaticType::Int));
+        assert_eq!(one.summary().literals, Literals::One(TypeVar(0)));
+        assert!(!one.summary().holds_variables);
+        let two = one.then(&Bounds::new(vec![holds(StaticType::String, 1)]));
+        assert_eq!(two.summary().held, Held::Open);
+        let unknown = Bounds::new(vec![holds(
+            StaticType::List(Box::new(StaticType::Var(TypeVar(3)))),
+            0,
+        )]);
+        assert_eq!(unknown.summary().held, Held::Open);
+        assert!(!unknown.summary().holds_variables);
+    }
+
+    #[test]
+    fn deeply_joined_bounds_drop_and_print_without_recursing() {
+        let mut bounds = Bounds::default();
+        for literal in 0..100_000 {
+            bounds = bounds.then(&Bounds::new(vec![number(literal)]));
+        }
+        assert_eq!(bounds.summary().len, 100_000);
+        assert_eq!(bounds.iter().count(), 100_000);
+        assert!(format!("{bounds:?}").starts_with("[Number("));
+        drop(bounds);
     }
 }
