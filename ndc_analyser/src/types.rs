@@ -5,6 +5,10 @@ use ndc_lexer::Span;
 use ndc_resolver::SymbolId;
 use std::cell::RefCell;
 
+mod bounds;
+
+use bounds::{Bound, Bounds, Held, Literals};
+
 /// The type of every value the name resolver declared, natives included,
 /// keyed by its symbol. A value keeps its type: an assignment must fit it.
 #[derive(Debug, Default)]
@@ -51,29 +55,17 @@ struct Deferred {
 /// that the assignment settles as `Int`.
 #[derive(Debug, Default)]
 pub(crate) struct TypeVars {
-    /// Which variables were unified with which, and what each set of them
-    /// stands for once settled, with the rest of [`VarValue`]. Looking a
-    /// variable up shortens the path to the one standing for its set, which
-    /// needs `&mut`, as finding it does for the methods taking `&self`.
+    /// Which variables were unified with which, and what's known about each
+    /// set of them: see [`VarSet`]. Looking a variable up shortens the path
+    /// to the one standing for its set, which needs `&mut`, as finding it
+    /// does for the methods taking `&self`.
     table: RefCell<InPlaceUnificationTable<Key>>,
-    /// What each variable becomes if nothing settles it: `Unknown`, as
-    /// for what `[]` holds, or `Any` for a literal's type whose values
-    /// don't say what it is, or a failed check's type: see
-    /// [`Self::fall_back_as_errors`].
-    fallbacks: Vec<StaticType>,
     /// The variables in the order they were settled, so a [`Snapshot`] can
     /// unsettle the ones settled after it, and the solver can tell which
     /// ones were settled since it last looked.
     trail: Vec<TypeVar>,
-    /// The level new variables get: see [`VarValue::level`].
+    /// The level new variables get: see [`VarSet::level`].
     level: u32,
-    /// What each variable may stand for beyond what unifying says, which
-    /// settling it checks: the type of the literal `1` is an `Int`, a
-    /// `Float` or a `Number`.
-    bounds: Vec<Vec<Bound>>,
-    /// The variables a bound was added to after they were made, in order,
-    /// so a [`Snapshot`] can take the bounds off again.
-    bounded: Vec<TypeVar>,
     /// The variables that got a bound, in the order they got it, which are
     /// the types of literals.
     literals: Vec<TypeVar>,
@@ -102,21 +94,6 @@ pub(crate) struct Unshared {
     pub(crate) span: Span,
 }
 
-/// What a variable may stand for, beyond what unifying says.
-#[derive(Debug, Clone)]
-enum Bound {
-    /// It's the type of an integer literal, like `1`: an `Int`, a `Float`
-    /// or a `Number`, or `Any`, which takes anything. It's an `Int` unless
-    /// something says otherwise. With the literal's type as it was made,
-    /// and where the literal is.
-    Number(TypeVar, Span),
-    /// It's the type of the elements of a literal that holds a value of
-    /// this type, like `[1, 2.5]`, so the value has to fit it. With the
-    /// literal, as the type of the elements it was made for, and where the
-    /// value is.
-    Holds(StaticType, TypeVar, Span),
-}
-
 /// A type variable as a key of [`TypeVars::table`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Key(u32);
@@ -132,7 +109,7 @@ impl Key {
 }
 
 impl UnifyKey for Key {
-    type Value = VarValue;
+    type Value = Entry;
 
     fn index(&self) -> u32 {
         self.0
@@ -147,16 +124,23 @@ impl UnifyKey for Key {
     }
 
     /// The variable another is unified with stands for both, as `b` does
-    /// once `a` is settled as `b`: its bounds are the ones that count.
-    fn order_roots(a: Self, _: &VarValue, b: Self, _: &VarValue) -> Option<(Self, Self)> {
+    /// once `a` is settled as `b`.
+    fn order_roots(a: Self, _: &Entry, b: Self, _: &Entry) -> Option<(Self, Self)> {
         Some((b, a))
     }
 }
 
-/// What's known about a set of type variables unified with each other, or
-/// a change to it: see [`VarValue::update`].
+/// What [`TypeVars::table`] keeps for a set of variables, or a change to
+/// make to what it keeps, which only passes through.
 #[derive(Debug, Clone)]
-struct VarValue {
+enum Entry {
+    Set(VarSet),
+    Change(Change),
+}
+
+/// What's known about a set of type variables unified with each other.
+#[derive(Debug, Clone)]
+struct VarSet {
     /// What they stand for, once settled as something other than a variable.
     solution: Option<StaticType>,
     /// How deep in generic functions they belong: 0 for the program's top
@@ -164,77 +148,63 @@ struct VarValue {
     /// function's body made but that something outside it now refers to,
     /// like `n` in `let xs = []; fn f(n) { xs.push(n) }`, belongs outside.
     level: u32,
+    /// What they become if nothing settles them: `Unknown`, as for what
+    /// `[]` holds, or `Any` for a literal's type whose values don't say
+    /// what it is, or a failed check's type: see
+    /// [`TypeVars::fall_back_as_errors`].
+    fallback: StaticType,
+    /// What they may stand for beyond what unifying says, which settling
+    /// them checks: the type of the literal `1` is an `Int`, a `Float` or a
+    /// `Number`.
+    bounds: Bounds,
     /// Whether one is the type of an `if` or a `match` whose branches
     /// weren't known yet: see [`TypeVars::mark_join`].
     join: bool,
     /// Whether an `Any` was expected of such an `if` or `match`.
     expects_any: bool,
-    /// Whether this is a change to make to a set's value rather than one:
-    /// it lowers the level, where unifying with another set keeps the level
-    /// of the set unified with, as settling `a` as `b` keeps `b`'s.
-    update: bool,
 }
 
-impl VarValue {
-    /// What a new variable of `level` is.
-    fn new(level: u32) -> Self {
-        Self {
-            solution: None,
-            level,
-            join: false,
-            expects_any: false,
-            update: false,
-        }
-    }
-
-    /// The change that settles a set as `solution`.
-    fn settled(solution: StaticType) -> Self {
-        Self {
-            solution: Some(solution),
-            ..Self::lowered(u32::MAX)
-        }
-    }
-
-    /// The change that makes a set belong at `level`, if it's deeper.
-    fn lowered(level: u32) -> Self {
-        Self {
-            update: true,
-            ..Self::new(level)
-        }
-    }
-
-    /// The change that marks a set as the type of a join.
-    fn joined() -> Self {
-        Self {
-            join: true,
-            ..Self::lowered(u32::MAX)
-        }
-    }
-
-    /// The change that marks a set as a join an `Any` is expected of.
-    fn expecting_any() -> Self {
-        Self {
-            expects_any: true,
-            ..Self::lowered(u32::MAX)
-        }
-    }
+/// A change to what's known about a set of variables.
+#[derive(Debug, Clone)]
+enum Change {
+    Settle(StaticType),
+    /// Makes them belong at this level, if they belong deeper.
+    Lower(u32),
+    FallBack(StaticType),
+    MarkJoin,
+    ExpectAny,
+    /// Leaves them only these bounds, of the ones they have.
+    KeepBounds(Bounds),
 }
 
-impl UnifyValue for VarValue {
+impl UnifyValue for Entry {
     type Error = NoError;
 
+    /// What's known about the set `a` after the change `b`, or once the set
+    /// `b` is unified with it, as `a` is settled as `b`: `b`'s level,
+    /// fallback and bounds come first.
     fn unify_values(a: &Self, b: &Self) -> Result<Self, NoError> {
-        Ok(Self {
-            solution: a.solution.clone().or_else(|| b.solution.clone()),
-            level: if b.update {
-                a.level.min(b.level)
-            } else {
-                b.level
-            },
-            join: a.join || b.join,
-            expects_any: a.expects_any || b.expects_any,
-            update: false,
-        })
+        let Self::Set(a) = a else {
+            unreachable!("the variable standing for a set keeps what's known about it");
+        };
+        let mut set = a.clone();
+        match b {
+            Self::Set(b) => {
+                set.solution = a.solution.clone().or_else(|| b.solution.clone());
+                set.level = b.level;
+                set.fallback = b.fallback.clone();
+                set.bounds = b.bounds.then(&a.bounds);
+                set.join |= b.join;
+                set.expects_any |= b.expects_any;
+            }
+            Self::Change(Change::Settle(solution)) => set.solution = Some(solution.clone()),
+            Self::Change(Change::Lower(level)) => set.level = set.level.min(*level),
+            Self::Change(Change::FallBack(fallback)) => set.fallback = fallback.clone(),
+            Self::Change(Change::MarkJoin) => set.join = true,
+            Self::Change(Change::ExpectAny) => set.expects_any = true,
+            Self::Change(Change::KeepBounds(bounds)) => set.bounds = bounds.clone(),
+        }
+        Ok(Self::Set(set))
     }
 }
 
@@ -246,7 +216,6 @@ pub(crate) struct Snapshot {
     table: ena::unify::Snapshot<InPlace<Key>>,
     vars: usize,
     trail: usize,
-    bounded: usize,
 }
 
 impl TypeVars {
@@ -260,10 +229,27 @@ impl TypeVars {
     /// A new variable of `level`, which becomes `fallback` if nothing
     /// settles it.
     fn fresh_with(&mut self, fallback: StaticType, level: u32) -> StaticType {
-        let var = self.table.get_mut().new_key(VarValue::new(level)).var();
-        self.fallbacks.push(fallback);
-        self.bounds.push(Vec::new());
-        StaticType::Var(var)
+        self.fresh_set(VarSet {
+            solution: None,
+            level,
+            fallback,
+            bounds: Bounds::default(),
+            join: false,
+            expects_any: false,
+        })
+    }
+
+    /// A new variable, the only one of a set that `set` says what's known
+    /// about.
+    fn fresh_set(&mut self, set: VarSet) -> StaticType {
+        StaticType::Var(self.table.get_mut().new_key(Entry::Set(set)).var())
+    }
+
+    /// Makes `change` to what's known about `var`'s set.
+    fn change(&mut self, var: TypeVar, change: Change) {
+        self.table
+            .get_mut()
+            .union_value(Key::of(var), Entry::Change(change));
     }
 
     /// What an empty `[]`, `%{}` or `None` holds, which its uses settle. If
@@ -322,9 +308,7 @@ impl TypeVars {
     /// [`Self::any_is_expected_of`].
     pub(crate) fn mark_join(&mut self, typ: &StaticType) {
         if let StaticType::Var(var) = self.shallow(typ) {
-            self.table
-                .get_mut()
-                .union_value(Key::of(var), VarValue::joined());
+            self.change(var, Change::MarkJoin);
         }
     }
 
@@ -400,7 +384,7 @@ impl TypeVars {
     pub(crate) fn held_literals(&self, var: TypeVar) -> Vec<TypeVar> {
         let mut held_literals = Vec::new();
         let mut seen = AHashSet::new();
-        for bound in &self.bounds[var.0 as usize] {
+        for bound in self.bounds(var).iter() {
             if let Bound::Holds(held, _, _) = bound
                 && let StaticType::Var(held) = self.resolve(held)
                 && held != var
@@ -415,7 +399,7 @@ impl TypeVars {
 
     /// The values the literal type `var` holds, with where each is.
     pub(crate) fn held(&self, var: TypeVar) -> Vec<(StaticType, Span)> {
-        self.bounds[var.0 as usize]
+        self.bounds(var)
             .iter()
             .map(|bound| match bound {
                 Bound::Holds(typ, _, span) => (typ.clone(), *span),
@@ -429,23 +413,26 @@ impl TypeVars {
     /// `["s"]` too. Values of one literal that share no type are held as
     /// `Any`, but two literals of different types are an error.
     pub(crate) fn holds_several_literals(&self, var: TypeVar) -> bool {
-        let mut literals = self.bounds[var.0 as usize].iter().map(|bound| match bound {
-            Bound::Holds(_, literal, _) | Bound::Number(literal, _) => *literal,
-        });
-        literals
-            .next()
-            .is_some_and(|first| literals.any(|literal| literal != first))
+        self.read(var, |_, set| {
+            set.bounds.summary().literals == Literals::Several
+        })
     }
 
     /// A new literal's type, within `bounds`. If nothing settles it, it's
     /// the first of its [`Self::literal_defaults`] that fits, or, while
     /// what it holds doesn't say yet, `Any`, which takes whatever it holds.
     fn fresh_bounded(&mut self, bounds: Vec<Bound>) -> StaticType {
-        let typ = self.fresh_with(StaticType::Any, self.level);
+        let typ = self.fresh_set(VarSet {
+            solution: None,
+            level: self.level,
+            fallback: StaticType::Any,
+            bounds: Bounds::new(bounds),
+            join: false,
+            expects_any: false,
+        });
         let StaticType::Var(var) = typ else {
             unreachable!("a fresh type is a variable");
         };
-        self.bounds[var.0 as usize] = bounds;
         self.literals.push(var);
         typ
     }
@@ -465,7 +452,7 @@ impl TypeVars {
         for &var in &self.literals {
             if (var.0 as usize) < self.count()
                 && !self.is_settled(var)
-                && !self.bounds[var.0 as usize].is_empty()
+                && !self.bounds(var).is_empty()
                 && belongs(self, var)
                 && seen.insert(var)
             {
@@ -477,9 +464,9 @@ impl TypeVars {
         // gives the `1` back depends on the index `0` being an Int.
         let held = literals
             .iter()
-            .flat_map(|&var| self.bounds[var.0 as usize].iter())
+            .flat_map(|&var| self.bounds(var).to_vec())
             .filter_map(|bound| match bound {
-                Bound::Holds(held, _, _) => match self.resolve(held) {
+                Bound::Holds(held, _, _) => match self.resolve(&held) {
                     StaticType::Var(held) => Some(held),
                     _ => None,
                 },
@@ -526,7 +513,7 @@ impl TypeVars {
                 holds_a_number = true;
                 continue;
             }
-            for bound in &self.bounds[var.0 as usize] {
+            for bound in self.bounds(var).iter() {
                 let Bound::Holds(held, _, _) = bound else {
                     continue;
                 };
@@ -581,9 +568,7 @@ impl TypeVars {
 
     /// Whether `var` is the type of an integer literal.
     pub(crate) fn is_number(&self, var: TypeVar) -> bool {
-        self.bounds[var.0 as usize]
-            .iter()
-            .any(|bound| matches!(bound, Bound::Number(..)))
+        self.read(var, |_, set| set.bounds.summary().numbers)
     }
 
     /// What the unsettled literal type `var` could be when nothing says
@@ -591,19 +576,19 @@ impl TypeVars {
     /// numbers is a list of whatever the numbers are, which is up to them.
     pub(crate) fn literal_defaults(&mut self, var: TypeVar) -> Option<Vec<StaticType>> {
         let mut defaults = Vec::new();
+        let mut seen = AHashSet::new();
         let mut waits = false;
         let mut unknown = None;
         // The literal made first says first what the type is: after `let v
         // = ["s"]; v = [1]`, it's what `v` was.
-        let mut bounds = self.bounds[var.0 as usize].iter().collect::<Vec<_>>();
-        bounds.sort_by_key(|bound| match bound {
-            Bound::Holds(_, literal, _) | Bound::Number(literal, _) => literal.0,
-        });
+        let all = self.bounds(var);
+        let mut bounds = all.iter().collect::<Vec<_>>();
+        bounds.sort_by_key(|bound| bound.literal().0);
         for bound in bounds {
             let held = match bound {
                 Bound::Number(..) => {
                     for number in [StaticType::Int, StaticType::Float, StaticType::Number] {
-                        if !defaults.contains(&number) {
+                        if seen.insert(number.clone()) {
                             defaults.push(number);
                         }
                     }
@@ -621,7 +606,7 @@ impl TypeVars {
                 // A value that never arrives says nothing about the type.
                 StaticType::Never => {}
                 held => {
-                    if !defaults.contains(&held) {
+                    if seen.insert(held.clone()) {
                         defaults.push(held);
                     }
                 }
@@ -633,7 +618,7 @@ impl TypeVars {
         if defaults.is_empty() {
             // Values that never arrive are held as `Any`.
             defaults.push(unknown.unwrap_or(StaticType::Any));
-        } else if !defaults.contains(&StaticType::Any) && self.unshared_values(var).is_some() {
+        } else if !seen.contains(&StaticType::Any) && self.unshared_values(var).is_some() {
             // A literal whose values share no type is an error, which is
             // what's left when nothing asked for `Any`: in `let xs = [1,
             // "a"]`, the elements are neither Ints nor Strings.
@@ -662,7 +647,7 @@ impl TypeVars {
     ) -> Option<Unshared> {
         seen.push(var);
         let mut literals: Vec<(TypeVar, Vec<StaticType>)> = Vec::new();
-        for bound in &self.bounds[var.0 as usize] {
+        for bound in self.bounds(var).iter() {
             match bound {
                 Bound::Holds(held, literal, _) => {
                     match literals.iter_mut().find(|(found, _)| found == literal) {
@@ -784,6 +769,31 @@ impl TypeVars {
     /// Whether the unsettled literal type `var` could still be settled as
     /// one of its defaults, or waits for the literals it holds to say.
     fn some_default_fits(&mut self, var: TypeVar) -> bool {
+        // Values of one type with nothing left to find out about it fit that
+        // type, and numbers fit a type of number, which doesn't need a look
+        // at each value: unifying the elements of a literal of thousands of
+        // tuples asks this once for each.
+        let plainly = self.read(var, |_, set| {
+            let summary = set.bounds.summary();
+            match &summary.held {
+                Held::Nothing => true,
+                Held::One(held) => {
+                    !summary.numbers
+                        || matches!(
+                            held,
+                            StaticType::Int
+                                | StaticType::Float
+                                | StaticType::Number
+                                | StaticType::Any
+                                | StaticType::Error
+                        )
+                }
+                Held::Open => false,
+            }
+        });
+        if plainly {
+            return true;
+        }
         let Some(defaults) = self.literal_defaults(var) else {
             return true;
         };
@@ -802,7 +812,7 @@ impl TypeVars {
             return StaticType::Int;
         }
         let mut held = Vec::new();
-        for bound in &self.bounds[var.0 as usize] {
+        for bound in self.bounds(var).iter() {
             // A literal that holds itself, like `[xs]` pushed to `xs`, says
             // nothing more about what it is.
             if let Bound::Holds(typ, _, _) = bound
@@ -824,7 +834,7 @@ impl TypeVars {
 
     /// Whether `var` is unsettled and has bounds, as a literal's type does.
     pub(crate) fn is_literal(&self, var: TypeVar) -> bool {
-        !self.is_settled(var) && !self.bounds[var.0 as usize].is_empty()
+        !self.is_settled(var) && !self.bounds(var).is_empty()
     }
 
     /// Whether the resolved type `typ` is a variable nothing is known about
@@ -902,9 +912,7 @@ impl TypeVars {
     fn lower(&mut self, typ: &StaticType, level: u32) {
         for var in self.unsettled(typ) {
             if self.read(var, |_, value| value.level) > level {
-                self.table
-                    .get_mut()
-                    .union_value(Key::of(var), VarValue::lowered(level));
+                self.change(var, Change::Lower(level));
             }
         }
     }
@@ -913,13 +921,14 @@ impl TypeVars {
     /// type of integer literals only, as the `1` in `fn inc(x) => x + 1`
     /// has, and not of a literal holding values.
     pub(crate) fn number_literal_span(&self, var: TypeVar) -> Option<Span> {
-        let bounds = &self.bounds[var.0 as usize];
-        let mut spans = bounds.iter().map(|bound| match bound {
+        let bounds = self.bounds(var);
+        if bounds.summary().holds {
+            return None;
+        }
+        match bounds.iter().next()? {
             Bound::Number(_, span) => Some(*span),
             Bound::Holds(..) => None,
-        });
-        let first = spans.next()??;
-        spans.all(|span| span.is_some()).then_some(first)
+        }
     }
 
     /// Settles `var` as the type parameter `name` of the generic function
@@ -987,7 +996,7 @@ impl TypeVars {
 
     /// The types the literal type `var` holds: `x`'s and `Int` in `[x, 1]`.
     fn held_types(&self, var: TypeVar) -> Vec<StaticType> {
-        self.bounds[var.0 as usize]
+        self.bounds(var)
             .iter()
             .filter_map(|bound| match bound {
                 Bound::Holds(held, _, _) => Some(held.clone()),
@@ -1021,13 +1030,13 @@ impl TypeVars {
 
     /// What `read` makes of the variable standing for `var` and the ones
     /// unified with it, and what's known about them.
-    fn read<R>(&self, var: TypeVar, read: impl FnOnce(TypeVar, &VarValue) -> R) -> R {
+    fn read<R>(&self, var: TypeVar, read: impl FnOnce(TypeVar, &VarSet) -> R) -> R {
         let mut table = self.table.borrow_mut();
         let root = table.find(Key::of(var));
-        let value = table
-            .try_probe_value(root)
-            .expect("the variable standing for a set has its value");
-        read(root.var(), value)
+        let Some(Entry::Set(set)) = table.try_probe_value(root) else {
+            unreachable!("the variable standing for a set keeps what's known about it");
+        };
+        read(root.var(), set)
     }
 
     /// Settles `var` as `typ`, and returns whether `typ` is within the
@@ -1036,51 +1045,66 @@ impl TypeVars {
     fn settle(&mut self, var: TypeVar, typ: StaticType) -> bool {
         debug_assert!(!self.is_settled(var), "{var:?} is settled twice");
         // What `var` stands for now belongs where `var` does.
-        let level = self.read(var, |_, value| value.level);
+        let level = self.read(var, |_, set| set.level);
         if level < self.level {
             self.lower(&typ, level);
         }
         let shallow = self.shallow(&typ);
-        let table = self.table.get_mut();
-        match shallow {
-            StaticType::Var(other) => table.union(Key::of(var), Key::of(other)),
-            _ => table.union_value(Key::of(var), VarValue::settled(typ)),
-        }
+        let bounds = self.bounds(var);
         self.trail.push(var);
-        let bounds = self.bounds[var.0 as usize].clone();
-        if bounds.is_empty() {
-            return true;
-        }
         match shallow {
             StaticType::Var(other) => {
-                for bound in bounds {
-                    // A literal holding a value of the type the other
-                    // variable already is says nothing more.
-                    if let Bound::Holds(held, _, _) = &bound
-                        && self.shallow(held) == StaticType::Var(other)
-                    {
-                        continue;
-                    }
-                    self.bounds[other.0 as usize].push(bound);
-                    self.bounded.push(other);
+                let others = self.bounds(other);
+                self.table.get_mut().union(Key::of(var), Key::of(other));
+                if bounds.is_empty() {
+                    return true;
+                }
+                // A literal holding a value of the type the other variable
+                // already is, as it is now, says nothing more.
+                let held_by_it = |vars: &Self, bound: &Bound| {
+                    matches!(bound, Bound::Holds(held @ StaticType::Var(_), _, _)
+                        if vars.shallow(held) == StaticType::Var(other))
+                };
+                let mut kept_any = true;
+                if bounds.summary().holds_variables
+                    && bounds.iter().any(|bound| held_by_it(self, bound))
+                {
+                    let kept = bounds
+                        .iter()
+                        .filter(|bound| !held_by_it(self, bound))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    kept_any = !kept.is_empty();
+                    let bounds = others.then(&Bounds::new(kept));
+                    self.change(other, Change::KeepBounds(bounds));
+                }
+                if kept_any {
                     self.literals.push(other);
                 }
                 // The values of two literals have to have a type in common:
                 // `["s"]` and `[1]` can't be one literal's type.
                 !self.holds_several_literals(other) || self.some_default_fits(other)
             }
-            typ => bounds.iter().all(|bound| match bound {
-                Bound::Number(..) => matches!(
-                    typ,
-                    StaticType::Int
-                        | StaticType::Float
-                        | StaticType::Number
-                        | StaticType::Any
-                        | StaticType::Error
-                ),
-                Bound::Holds(held, _, _) => self.bind_argument(&typ, held),
-            }),
+            settled => {
+                self.change(var, Change::Settle(typ));
+                bounds.iter().all(|bound| match bound {
+                    Bound::Number(..) => matches!(
+                        settled,
+                        StaticType::Int
+                            | StaticType::Float
+                            | StaticType::Number
+                            | StaticType::Any
+                            | StaticType::Error
+                    ),
+                    Bound::Holds(held, _, _) => self.bind_argument(&settled, held),
+                })
+            }
         }
+    }
+
+    /// The bounds of the set `var` belongs to.
+    fn bounds(&self, var: TypeVar) -> Bounds {
+        self.read(var, |_, set| set.bounds.clone())
     }
 
     /// How many settlings there have been, to pass to
@@ -1102,7 +1126,6 @@ impl TypeVars {
             table: self.table.get_mut().snapshot(),
             vars: self.count(),
             trail: self.trail.len(),
-            bounded: self.bounded.len(),
         }
     }
 
@@ -1111,13 +1134,6 @@ impl TypeVars {
     pub(crate) fn rollback(&mut self, snapshot: Snapshot) {
         self.table.get_mut().rollback_to(snapshot.table);
         self.trail.truncate(snapshot.trail);
-        for var in self.bounded.drain(snapshot.bounded..).rev() {
-            if (var.0 as usize) < snapshot.vars {
-                self.bounds[var.0 as usize].pop();
-            }
-        }
-        self.fallbacks.truncate(snapshot.vars);
-        self.bounds.truncate(snapshot.vars);
         self.contents.retain(|var| (var.0 as usize) < snapshot.vars);
     }
 
@@ -1179,8 +1195,8 @@ impl TypeVars {
                 continue;
             }
             let defaults = match self.literal_defaults(var) {
-                Some(defaults) if !self.bounds[var.0 as usize].is_empty() => defaults,
-                _ => vec![self.fallbacks[var.0 as usize].clone()],
+                Some(defaults) if !self.bounds(var).is_empty() => defaults,
+                _ => vec![self.read(var, |_, set| set.fallback.clone())],
             };
             if !defaults.iter().any(|default| {
                 let snapshot = self.snapshot();
@@ -1453,9 +1469,7 @@ impl TypeVars {
             && let StaticType::Var(join) = self.shallow(argument)
             && self.read(join, |_, value| value.join)
         {
-            self.table
-                .get_mut()
-                .union_value(Key::of(join), VarValue::expecting_any());
+            self.change(join, Change::ExpectAny);
         }
         let (parameter, argument) = (self.shallow(parameter), self.shallow(argument));
         match (&parameter, &argument) {
@@ -1621,7 +1635,7 @@ impl TypeVars {
     pub(crate) fn fall_back_as_errors(&mut self, typ: &StaticType) {
         for var in self.unsettled(typ) {
             if !self.is_settled(var) && !self.is_literal(var) {
-                self.fallbacks[var.0 as usize] = StaticType::Error;
+                self.change(var, Change::FallBack(StaticType::Error));
             }
         }
     }
