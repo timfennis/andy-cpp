@@ -14,8 +14,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build
 cargo build
 
-# Run all tests
+# Run all tests (on the stack VM; NDC_VM=register runs them on the register VM)
 cargo test
+NDC_VM=register cargo test
 
 # Run a single test by name (substring match on the filename)
 cargo test test_001_math_001_addition

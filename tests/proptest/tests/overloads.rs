@@ -36,6 +36,7 @@ use std::panic;
 use std::sync::Once;
 use std::thread;
 // The other harnesses in this crate run programs; this one only analyses.
+use ndc_interpreter as _;
 use ndc_vm as _;
 use num as _;
 

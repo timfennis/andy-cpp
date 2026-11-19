@@ -486,9 +486,16 @@ mod tests {
         registry
     }
 
+    /// The VM the tests run on: the one the environment variable `NDC_VM`
+    /// names, the stack VM if it names none.
+    fn backend() -> Backend {
+        Backend::from_env().expect("NDC_VM names a VM")
+    }
+
     #[test]
     fn natives_can_be_added_after_an_evaluation() {
         let mut interpreter = Interpreter::capturing();
+        interpreter.set_backend(backend());
         interpreter.configure(|env| *env = constant("one", 1));
         assert_eq!(interpreter.eval("one()").expect("one").to_string(), "1");
         interpreter.configure(|env| *env = constant("two", 2));
@@ -504,6 +511,7 @@ mod tests {
     #[test]
     fn a_one_shot_interpreter_forgets_earlier_declarations() {
         let mut interpreter = Interpreter::one_shot();
+        interpreter.set_backend(backend());
         interpreter
             .eval("let value = 1;")
             .expect("first program should succeed");

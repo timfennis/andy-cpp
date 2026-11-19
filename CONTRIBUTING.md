@@ -50,6 +50,17 @@ This runs all three crates. The proptest crate's fuzz test is `#[ignore]`d
 by default (see below); only its **regression replay** runs as part of
 `cargo test`.
 
+Programs run on the stack VM unless the environment variable `NDC_VM`
+says `register`. To run the whole suite on the register VM:
+
+```bash
+NDC_VM=register cargo test
+```
+
+`tests/functional/tests/register_vm.rs` and the compiler snapshots use
+both VMs whichever `NDC_VM` names; every other test that runs a program
+runs it on the VM `NDC_VM` names.
+
 ### Run a single crate
 
 ```bash

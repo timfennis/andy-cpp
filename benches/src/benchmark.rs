@@ -1,6 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use ndc_interpreter::Interpreter;
 use ndc_interpreter::InterpreterError;
+use ndc_interpreter::{Backend, Interpreter};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::fs;
@@ -10,6 +10,9 @@ use std::time::Duration;
 fn run_string(input: &str) -> Result<String, InterpreterError> {
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
+    // The VM the environment variable `NDC_VM` names, the stack VM if it
+    // names none.
+    interpreter.set_backend(Backend::from_env().expect("NDC_VM names a VM"));
     interpreter
         .eval(std::hint::black_box(input))
         .map(|v| v.to_string())
