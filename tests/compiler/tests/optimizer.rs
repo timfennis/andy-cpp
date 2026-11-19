@@ -153,8 +153,9 @@ fn elides_every_load_pop_pair() {
         ops.windows(2)
             .any(|pair| matches!(pair, [GetGlobal(_) | GetLocal(_) | GetCell(_), Pop]))
     };
-    // `a` is global 2, after the intrinsics `cast` and `cast?`.
-    for op in [GetGlobal(2), GetLocal(0), GetCell(1)] {
+    // `a` is global 3, after the intrinsics `cast`, `cast?` and the tuple
+    // index.
+    for op in [GetGlobal(3), GetLocal(0), GetCell(1)] {
         assert!(
             raw.opcodes()
                 .windows(2)
