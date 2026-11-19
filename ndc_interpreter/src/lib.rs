@@ -513,4 +513,87 @@ mod tests {
             "a one-shot interpreter must treat each program as isolated",
         );
     }
+
+    /// What a [`Recorder`] saw: each instruction as the print tracer shows
+    /// it, and how many times the run completed.
+    #[cfg(feature = "trace")]
+    #[derive(Default)]
+    struct Recorded {
+        instructions: Vec<String>,
+        completions: usize,
+    }
+
+    /// A tracer that records what it's told in a [`Recorded`] it shares.
+    #[cfg(feature = "trace")]
+    struct Recorder(Rc<std::cell::RefCell<Recorded>>);
+
+    #[cfg(feature = "trace")]
+    impl tracer::VmTracer for Recorder {
+        fn on_instruction(&mut self, ctx: &tracer::InstructionContext<'_>) {
+            self.0
+                .borrow_mut()
+                .instructions
+                .push(ctx.instruction.to_string());
+        }
+
+        fn on_complete(&mut self) {
+            self.0.borrow_mut().completions += 1;
+        }
+    }
+
+    /// What tracing `program` on `backend` records.
+    #[cfg(feature = "trace")]
+    fn trace(backend: Backend, program: &str) -> Recorded {
+        let recorded = Rc::new(std::cell::RefCell::new(Recorded::default()));
+        let mut interpreter = Interpreter::capturing();
+        interpreter.set_backend(backend);
+        interpreter.set_tracer(Box::new(Recorder(Rc::clone(&recorded))));
+        // A program that fails is traced too.
+        let _ = interpreter.eval(program);
+        drop(interpreter);
+        Rc::into_inner(recorded)
+            .expect("the interpreter is dropped")
+            .into_inner()
+    }
+
+    #[cfg(feature = "trace")]
+    #[test]
+    fn either_vm_traces_its_instructions_and_completes_once() {
+        // With no natives, so no operators.
+        let program = "fn pick(a, b) { if true { a } else { b } } pick(pick(1, 2), 3)";
+        let stack = trace(Backend::Stack, program);
+        assert_eq!(stack.completions, 1);
+        let calls = |recorded: &Recorded, call: &str| {
+            recorded
+                .instructions
+                .iter()
+                .filter(|i| i.starts_with(call))
+                .count()
+        };
+        assert_eq!(calls(&stack, "Call("), 2);
+        assert_eq!(stack.instructions.last().unwrap(), "Halt");
+
+        let register = trace(Backend::Register, program);
+        assert_eq!(register.completions, 1);
+        assert_eq!(calls(&register, "Call r"), 2);
+        assert_eq!(register.instructions.last().unwrap(), "Halt r0");
+    }
+
+    #[cfg(feature = "trace")]
+    #[test]
+    fn a_run_that_fails_completes_its_trace_on_either_vm() {
+        for backend in [Backend::Stack, Backend::Register] {
+            let recorded = trace(backend, "let x: Any = 1.5; cast::<Int>(x)");
+            assert_eq!(recorded.completions, 1, "{backend:?}");
+            assert!(
+                recorded
+                    .instructions
+                    .last()
+                    .unwrap()
+                    .starts_with("CheckType"),
+                "{backend:?}: {:?}",
+                recorded.instructions
+            );
+        }
+    }
 }

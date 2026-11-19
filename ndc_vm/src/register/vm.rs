@@ -142,6 +142,13 @@ impl Vm {
 
             let exit = loop {
                 let instr = code[ip];
+                #[cfg(feature = "trace")]
+                crate::tracer::on_register_instruction(
+                    &mut self.tracer,
+                    self.source.as_deref(),
+                    chunk,
+                    ip,
+                );
                 ip += 1;
                 match instr {
                     Instr::LoadK { dst, k } => regs[dst.index()] = constants[k as usize].clone(),
