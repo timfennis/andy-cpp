@@ -401,3 +401,16 @@ fn a_lambda_with_a_parameter_its_line_said_nothing_about_asks_for_an_annotation(
         "nothing said what its parameters are when it was made",
     );
 }
+
+/// A generic function's body is compiled per instance, so a native only one
+/// instance calls is first reached by the line that makes that instance.
+#[test]
+fn a_later_lines_instance_reaches_its_own_natives() {
+    let out = repl_output(&[
+        "fn size(x) => x.len",
+        "print(size([1, 2]))",
+        "print(size(\"abc\"))",
+        "print(size(%{1: 2}))",
+    ]);
+    assert_eq!(out, "2\n3\n1\n");
+}

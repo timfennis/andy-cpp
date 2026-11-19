@@ -251,13 +251,14 @@ mod inner {
 }
 
 pub mod ops {
-    use ndc_core::{FunctionRegistry, StaticType};
+    use ndc_core::FunctionRegistry;
+    use ndc_vm::NativeSpec;
     use ndc_vm::error::VmError;
-    use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
+    use ndc_vm::value::{NativeFunc, Object, Value};
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+    pub fn register(env: &mut FunctionRegistry<NativeSpec>) {
         register_list_concat(env);
         register_list_append(env);
     }
@@ -279,73 +280,75 @@ pub mod ops {
         )))
     }
 
-    fn register_list_concat(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-        let native = Rc::new(NativeFunction {
-            name: "++".to_string(),
-            documentation: Some("Concatenates two lists into a new list.".to_string()),
-            static_type: StaticType::signature("<T>([T], [T]) -> [T]").expect("valid signature"),
-            func: NativeFunc::Simple(Box::new(|args| {
-                let [left, right] = args else {
-                    return Err(VmError::native(format!(
-                        "++ requires exactly 2 arguments, got {}",
-                        args.len()
-                    )));
-                };
-                let (left_obj, left_cell) = list_operand("++", "left", left)?;
-                let (_, right_cell) = list_operand("++", "right", right)?;
+    fn register_list_concat(env: &mut FunctionRegistry<NativeSpec>) {
+        let native = NativeSpec::with_signature(
+            "++",
+            "Concatenates two lists into a new list.",
+            "<T>([T], [T]) -> [T]",
+            move || {
+                NativeFunc::Simple(Box::new(|args| {
+                    let [left, right] = args else {
+                        return Err(VmError::native(format!(
+                            "++ requires exactly 2 arguments, got {}",
+                            args.len()
+                        )));
+                    };
+                    let (left_obj, left_cell) = list_operand("++", "left", left)?;
+                    let (_, right_cell) = list_operand("++", "right", right)?;
 
-                if Rc::strong_count(left_obj) == 1 {
-                    left_cell
-                        .borrow_mut()
-                        .extend_from_slice(&right_cell.borrow());
-                    Ok(Value::Object(left_obj.clone()))
-                } else {
-                    let new_list: Vec<Value> = left_cell
-                        .borrow()
-                        .iter()
-                        .chain(right_cell.borrow().iter())
-                        .cloned()
-                        .collect();
-                    Ok(Value::Object(Rc::new(Object::list(new_list))))
-                }
-            })),
-        });
+                    if Rc::strong_count(left_obj) == 1 {
+                        left_cell
+                            .borrow_mut()
+                            .extend_from_slice(&right_cell.borrow());
+                        Ok(Value::Object(left_obj.clone()))
+                    } else {
+                        let new_list: Vec<Value> = left_cell
+                            .borrow()
+                            .iter()
+                            .chain(right_cell.borrow().iter())
+                            .cloned()
+                            .collect();
+                        Ok(Value::Object(Rc::new(Object::list(new_list))))
+                    }
+                }))
+            },
+        );
         env.declare_global_fn(native);
     }
 
-    fn register_list_append(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-        let native = Rc::new(NativeFunction {
-            name: "++=".to_string(),
-            documentation: Some(
-                "Appends all elements from the right list to the left list in place.".to_string(),
-            ),
-            static_type: StaticType::signature("<T>([T], [T]) -> [T]").expect("valid signature"),
-            func: NativeFunc::Simple(Box::new(|args| {
-                let [left, right] = args else {
-                    return Err(VmError::native(format!(
-                        "++= requires exactly 2 arguments, got {}",
-                        args.len()
-                    )));
-                };
-                let (left_obj, left_cell) = list_operand("++=", "left", left)?;
-                let (right_obj, right_cell) = list_operand("++=", "right", right)?;
+    fn register_list_append(env: &mut FunctionRegistry<NativeSpec>) {
+        let native = NativeSpec::with_signature(
+            "++=",
+            "Appends all elements from the right list to the left list in place.",
+            "<T>([T], [T]) -> [T]",
+            move || {
+                NativeFunc::Simple(Box::new(|args| {
+                    let [left, right] = args else {
+                        return Err(VmError::native(format!(
+                            "++= requires exactly 2 arguments, got {}",
+                            args.len()
+                        )));
+                    };
+                    let (left_obj, left_cell) = list_operand("++=", "left", left)?;
+                    let (right_obj, right_cell) = list_operand("++=", "right", right)?;
 
-                if Rc::ptr_eq(left_obj, right_obj) {
-                    left_cell.borrow_mut().extend_from_within(..);
-                } else if Rc::strong_count(right_obj) == 1 {
-                    left_cell.borrow_mut().append(
-                        &mut right_cell
-                            .try_borrow_mut()
-                            .expect("Failed to borrow_mut right in `++=`"),
-                    );
-                } else {
-                    left_cell
-                        .borrow_mut()
-                        .extend_from_slice(&right_cell.borrow());
-                }
-                Ok(left.clone())
-            })),
-        });
+                    if Rc::ptr_eq(left_obj, right_obj) {
+                        left_cell.borrow_mut().extend_from_within(..);
+                    } else if Rc::strong_count(right_obj) == 1 {
+                        left_cell.borrow_mut().append(
+                            &mut right_cell
+                                .try_borrow_mut()
+                                .expect("Failed to borrow_mut right in `++=`"),
+                        );
+                    } else {
+                        left_cell
+                            .borrow_mut()
+                            .extend_from_slice(&right_cell.borrow());
+                    }
+                    Ok(left.clone())
+                }))
+            },
+        );
         env.declare_global_fn(native);
     }
 }

@@ -6,10 +6,10 @@ use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
-use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
-use crate::{ClosureFunction, Object, Value};
+use crate::value::{CompiledFunction, Function, NativeFunc};
+use crate::{ClosureFunction, Natives, Object, Value};
 use ndc_analysis::CaptureSource;
-use ndc_core::{FunctionRegistry, StaticType};
+use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -65,30 +65,46 @@ pub struct CallFrame {
     returns: Option<Box<StaticType>>,
 }
 
-/// The VM's globals for the built-ins in `registry`: native `i` is global
-/// slot `i`, and the intrinsics follow. The analyser numbers them the same
-/// way. An intrinsic's slot holds unit: the compiler writes it as bytecode
-/// where it's used and never reads its slot.
-pub fn native_globals(registry: &FunctionRegistry<Rc<NativeFunction>>) -> Vec<Value> {
-    registry
-        .iter()
-        .map(|native| {
-            Value::Object(Rc::new(Object::Function(Function::Native(Rc::clone(
-                native,
-            )))))
-        })
-        .chain(registry.intrinsics().map(|_| Value::unit()))
-        .collect()
+/// The VM's globals for `natives`: native `i` is global slot `i`, and the
+/// intrinsics follow. The analyser numbers them the same way. Each holds unit
+/// until [`Vm::new`] puts the native there for code that reads it: a native
+/// nothing uses is never made. An intrinsic's slot keeps unit: the compiler
+/// writes it as bytecode where it's used and never reads its slot.
+pub fn native_globals(natives: &Natives) -> Vec<Value> {
+    vec![Value::unit(); natives.len() + natives.intrinsics().len()]
+}
+
+/// Puts each native `code` reads in its global slot, making the ones that
+/// aren't made yet, before `code` runs at the top level.
+fn fill_natives(globals: &mut [Value], natives: &Natives, code: &CompiledFunction) {
+    for &slot in &code.natives {
+        // An intrinsic's slot is never read: see `native_globals`.
+        if slot >= natives.len() {
+            continue;
+        }
+        let filled = matches!(&globals[slot], Value::Object(object)
+            if matches!(object.as_ref(), Object::Function(Function::Native(_))));
+        if !filled {
+            globals[slot] = Value::Object(Rc::new(Object::Function(Function::Native(Rc::clone(
+                natives.function(slot),
+            )))));
+        }
+    }
 }
 
 impl Vm {
-    pub fn new(function: CompiledFunction, mut globals: Vec<Value>) -> Self {
+    /// A VM that runs `function` at the top level with `globals`, which
+    /// [`native_globals`] starts, and which a VM that ran earlier code hands
+    /// on. Each native `function` reads is put in its slot first, made from
+    /// `natives` if it isn't made yet.
+    pub fn new(function: CompiledFunction, mut globals: Vec<Value>, natives: &Natives) -> Self {
         let num_locals = function.num_locals;
         // Every global the program declares has a slot, holding unit until its
         // declaration runs, like a local.
         if globals.len() < function.num_globals {
             globals.resize(function.num_globals, Value::unit());
         }
+        fill_natives(&mut globals, natives, &function);
         let mut vm = Self {
             stack: Vec::with_capacity(256),
             globals,

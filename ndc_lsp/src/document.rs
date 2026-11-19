@@ -1,9 +1,8 @@
 use ls_types::{CompletionResponse, Diagnostic, DocumentSymbol, Hover, InlayHint, Position, Range};
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
-use ndc_interpreter::{Interpreter, NativeFunction};
+use ndc_interpreter::{Interpreter, NativeSpec};
 use ndc_parser::ExpressionLocation;
-use std::rc::Rc;
 
 use crate::diagnostics;
 use crate::features::completion::FunctionInfo;
@@ -11,7 +10,7 @@ use crate::features::{completion, definition, hover, inlay_hints, symbols};
 use crate::state::DocumentState;
 
 /// The registered functions, the way an interpreter's registry is configured.
-pub type Configure = fn(&mut FunctionRegistry<Rc<NativeFunction>>);
+pub type Configure = fn(&mut FunctionRegistry<NativeSpec>);
 
 /// An interpreter that knows the registered functions and nothing else.
 pub(crate) fn interpreter(configure: Configure) -> Interpreter {

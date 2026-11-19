@@ -4,7 +4,7 @@
 //! a program pass the checker and then fail as it runs. Errors about values,
 //! as a division by zero or an index out of bounds, are what values can do.
 
-use ndc_interpreter::{Interpreter, InterpreterError, StaticType};
+use ndc_interpreter::{Builtins, Interpreter, InterpreterError, StaticType};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Natives this test doesn't call: they print, read files or input, stop the
@@ -254,10 +254,15 @@ fn is_allowed(name: &str, signature: &StaticType, message: &str) -> bool {
 fn every_native_takes_what_its_signature_says() {
     let mut interpreter = Interpreter::one_shot();
     interpreter.configure(ndc_stdlib::register);
-    let natives = interpreter
-        .functions()
-        .filter(|native| !SKIPPED.contains(&native.name.as_str()))
-        .map(|native| (native.name.clone(), native.static_type.clone()))
+    let table = interpreter.natives();
+    let natives = (0..table.len())
+        .filter(|&slot| !SKIPPED.contains(&table.name(slot)))
+        .map(|slot| {
+            (
+                table.name(slot).to_string(),
+                table.static_type(slot).clone(),
+            )
+        })
         .collect::<Vec<_>>();
 
     let mut failures = Vec::new();
@@ -375,9 +380,9 @@ fn a_native_without_parameters_is_called_once() {
 fn every_in_place_operator_has_its_operator() {
     let mut interpreter = Interpreter::one_shot();
     interpreter.configure(ndc_stdlib::register);
-    let names = interpreter
-        .functions()
-        .map(|native| native.name.clone())
+    let table = interpreter.natives();
+    let names = (0..table.len())
+        .map(|slot| table.name(slot).to_string())
         .collect::<Vec<_>>();
     let comparisons = ["==", "!=", "<=", ">=", "[]="];
     for name in &names {

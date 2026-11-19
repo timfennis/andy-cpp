@@ -75,6 +75,10 @@ pub struct CompiledFunction {
     /// a declaration that never runs still has its slot; 0 for any other
     /// function.
     pub(crate) num_globals: usize,
+    /// For a program run at the top level, the global slots of the natives
+    /// its code reads, in the functions it declares too, each of which must
+    /// hold its native before it runs; empty for any other function.
+    pub(crate) natives: Vec<usize>,
 }
 
 #[derive(Clone)]
@@ -89,6 +93,14 @@ impl CompiledFunction {
     #[must_use]
     pub fn num_locals(&self) -> usize {
         self.num_locals
+    }
+
+    /// For a program run at the top level, the global slots of the natives
+    /// its code reads, each of which must hold its native before it runs, as
+    /// [`crate::Vm::new`] puts them there.
+    #[must_use]
+    pub fn natives(&self) -> &[usize] {
+        &self.natives
     }
 
     pub fn opcodes(&self) -> &[OpCode] {

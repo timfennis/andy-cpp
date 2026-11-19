@@ -4,7 +4,7 @@ use crate::types::{TypeTable, TypeVars};
 use ahash::{AHashMap, AHashSet};
 use ndc_analysis::Analysis;
 use ndc_core::r#struct::{StructInfo, StructRegistry};
-use ndc_core::{Intrinsic, NodeId, StaticType, TypeVar};
+use ndc_core::{Builtins, Intrinsic, NodeId, StaticType, TypeVar};
 use ndc_layout::{Layout, Picks};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{Expression, ExpressionLocation, ForBody, ForIteration, TypeExpr};
@@ -195,31 +195,26 @@ impl Analyser {
     /// which the compiler writes as bytecode where they're used, as a
     /// [`ndc_core::FunctionRegistry`] lists them.
     pub fn with_natives(natives: Vec<(String, StaticType, Option<Intrinsic>)>) -> Self {
+        Self::with_builtins(Rc::new(natives))
+    }
+
+    /// An analyser for programs that can call `builtins`. Their types are
+    /// only asked for when a program uses them.
+    pub fn with_builtins(builtins: Rc<dyn Builtins>) -> Self {
         let resolver = NameResolver::new(
-            natives
-                .iter()
-                .map(|(name, _, intrinsic)| (name.as_str(), *intrinsic)),
+            (0..builtins.count()).map(|slot| (builtins.name(slot), builtins.intrinsic(slot))),
             StaticType::BUILTIN_TYPE_NAMES.iter().copied(),
         );
-        let mut types = TypeTable::default();
-        let mut any_index = None;
-        let mut explicit_type_parameters = AHashMap::new();
-        for ((name, typ, _), symbol) in natives.into_iter().zip(resolver.native_symbols()) {
-            if name == ndc_core::ANY_INDEX {
-                any_index = Some(symbol);
-            }
-            // A signature declares its type parameters in the order they're
-            // first used in, which is the order of `type_parameters`.
-            let declared = typ
-                .type_parameters()
-                .into_iter()
-                .map(StaticType::Generic)
-                .collect::<Vec<_>>();
-            if !declared.is_empty() {
-                explicit_type_parameters.insert(symbol, declared);
-            }
-            types.declare(symbol, typ);
-        }
+        let symbols = resolver.native_symbols();
+        let any_index = (0..builtins.count())
+            .find(|&slot| builtins.name(slot) == ndc_core::ANY_INDEX)
+            .map(|slot| symbols[slot]);
+        let builtin_slots = symbols
+            .into_iter()
+            .enumerate()
+            .map(|(slot, symbol)| (symbol, slot))
+            .collect();
+        let types = TypeTable::with_builtins(builtins, builtin_slots);
         Self {
             any_index,
             resolver,
@@ -227,7 +222,7 @@ impl Analyser {
             vars: TypeVars::default(),
             waiting: BTreeMap::new(),
             schemes: AHashMap::new(),
-            explicit_type_parameters,
+            explicit_type_parameters: AHashMap::new(),
             type_parameter_vars: AHashMap::new(),
             pending: Pending::default(),
             uses: Vec::new(),

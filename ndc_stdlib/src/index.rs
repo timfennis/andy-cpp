@@ -1,10 +1,11 @@
 use ndc_core::{ANY_INDEX, FunctionRegistry, StaticType};
+use ndc_vm::NativeSpec;
 use ndc_vm::Vm;
 use ndc_vm::error::VmError;
-use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
+use ndc_vm::value::{NativeFunc, Object, Value};
 use std::rc::Rc;
 
-pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+pub fn register(env: &mut FunctionRegistry<NativeSpec>) {
     register_get(env);
     register_set(env);
 }
@@ -51,9 +52,8 @@ fn make_set_func() -> NativeFunc {
     }))
 }
 
-fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    let doc =
-        "Retrieves an element by index. Supports negative indices and range slicing.".to_string();
+fn register_get(env: &mut FunctionRegistry<NativeSpec>) {
+    let doc = "Retrieves an element by index. Supports negative indices and range slicing.";
 
     // An element by its index, or a slice by a range of indices. A range of a
     // deque is a list.
@@ -65,62 +65,62 @@ fn register_get(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         "<T>(Deque<T>, Int) -> T",
         "<T>(Deque<T>, Iterator<Int>) -> [T]",
     ] {
-        env.declare_global_fn(Rc::new(NativeFunction {
-            name: "[]".to_string(),
-            documentation: Some(doc.clone()),
-            static_type: StaticType::signature(signature).expect("valid signature"),
-            func: make_get_func_simple(),
-        }));
+        env.declare_global_fn(NativeSpec::with_signature(
+            "[]",
+            doc,
+            signature,
+            make_get_func_simple,
+        ));
     }
 
     // Indexing a tuple or an `Any`: see `ANY_INDEX`. A map can come here as an
     // `Any`, and its default function takes the VM.
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: ANY_INDEX.to_string(),
-        documentation: Some(doc.clone()),
-        static_type: StaticType::Function {
+    env.declare_global_fn(NativeSpec::new(
+        ANY_INDEX,
+        doc,
+        || StaticType::Function {
             parameters: Some(vec![StaticType::Any, StaticType::Any]),
             return_type: Box::new(StaticType::Any),
         },
-        func: make_get_func(),
-    }));
+        make_get_func,
+    ));
 
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]".to_string(),
-        documentation: Some(doc),
-        static_type: StaticType::signature("<K, V>(%{K: V}, K) -> V").expect("valid signature"),
-        func: make_get_func(),
-    }));
+    env.declare_global_fn(NativeSpec::with_signature(
+        "[]",
+        doc,
+        "<K, V>(%{K: V}, K) -> V",
+        make_get_func,
+    ));
 }
 
-fn register_set(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
-    let doc = "Sets an element by index. Supports negative indices and range slicing for lists and strings.".to_string();
+fn register_set(env: &mut FunctionRegistry<NativeSpec>) {
+    let doc = "Sets an element by index. Supports negative indices and range slicing for lists and strings.";
 
     // An element by its index, or a slice by a range of indices.
     for signature in ["<T>([T], Int, T)", "<T>([T], Iterator<Int>, Iterable<T>)"] {
-        env.declare_global_fn(Rc::new(NativeFunction {
-            name: "[]=".to_string(),
-            documentation: Some(doc.clone()),
-            static_type: StaticType::signature(signature).expect("valid signature"),
-            func: make_set_func(),
-        }));
+        env.declare_global_fn(NativeSpec::with_signature(
+            "[]=",
+            doc,
+            signature,
+            make_set_func,
+        ));
     }
 
     for signature in ["(String, Int, String)", "(String, Iterator<Int>, String)"] {
-        env.declare_global_fn(Rc::new(NativeFunction {
-            name: "[]=".to_string(),
-            documentation: Some(doc.clone()),
-            static_type: StaticType::signature(signature).expect("valid signature"),
-            func: make_set_func(),
-        }));
+        env.declare_global_fn(NativeSpec::with_signature(
+            "[]=",
+            doc,
+            signature,
+            make_set_func,
+        ));
     }
 
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: "[]=".to_string(),
-        documentation: Some(doc),
-        static_type: StaticType::signature("<K, V>(%{K: V}, K, V)").expect("valid signature"),
-        func: make_set_func(),
-    }));
+    env.declare_global_fn(NativeSpec::with_signature(
+        "[]=",
+        doc,
+        "<K, V>(%{K: V}, K, V)",
+        make_set_func,
+    ));
 }
 
 fn vm_sequence_length(v: &Value) -> Option<usize> {

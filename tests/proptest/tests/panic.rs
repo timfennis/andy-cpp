@@ -27,11 +27,12 @@
 //! will guard against the regression automatically.
 
 use ndc_analyser::Analyser;
+use ndc_core::Builtins;
 use ndc_core::FunctionRegistry;
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 use ndc_parser::Parser;
 use ndc_vm::compiler::Compiler;
-use ndc_vm::{NativeFunction, OutputSink, Vm};
+use ndc_vm::{Natives, OutputSink, Vm};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 use std::fmt;
@@ -218,15 +219,14 @@ fn arb_program() -> impl Strategy<Value = Program> {
     prop::collection::vec(arb_token().prop_map(loc), 0..=MAX_PROGRAM_LEN).prop_map(Program)
 }
 
-/// Build a fresh stdlib `FunctionRegistry`. Cannot be cached across worker
-/// threads because `Rc<NativeFunction>` is `!Send`, so we rebuild it once
-/// per case. In release mode this is sub-millisecond; in debug it adds
-/// noticeable overhead but the regression-replay test only triggers it
-/// for failing seeds, and the fuzz test is opt-in.
-fn build_stdlib_registry() -> FunctionRegistry<Rc<NativeFunction>> {
+/// The stdlib's natives. Cannot be cached across worker threads because
+/// `Rc<NativeFunction>` is `!Send`, so we rebuild them once per case.
+fn stdlib_natives() -> Natives {
     let mut registry = FunctionRegistry::default();
     ndc_stdlib::register(&mut registry);
-    registry
+    let mut natives = Natives::default();
+    natives.extend(registry);
+    natives
 }
 
 /// Drive parser → analyser → compiler → VM with the stdlib registered, so
@@ -239,18 +239,8 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         Err(_) => return,
     };
 
-    let registry = build_stdlib_registry();
-    let scope = registry
-        .iter()
-        .map(|f| (f.name.clone(), f.static_type.clone(), None))
-        .chain(
-            registry
-                .intrinsics()
-                .map(|f| (f.name.clone(), f.static_type.clone(), Some(f.intrinsic))),
-        )
-        .collect();
-
-    let mut analyser = Analyser::with_natives(scope);
+    let natives = Rc::new(stdlib_natives());
+    let mut analyser = Analyser::with_builtins(Rc::clone(&natives) as Rc<dyn Builtins>);
     for e in &expressions {
         analyser.analyse(e);
     }
@@ -265,8 +255,8 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         Err(_) => return,
     };
 
-    let globals = ndc_vm::native_globals(&registry);
-    let mut vm = Vm::new(compiled, globals).with_output(OutputSink::Buffer(Vec::new()));
+    let globals = ndc_vm::native_globals(&natives);
+    let mut vm = Vm::new(compiled, globals, &natives).with_output(OutputSink::Buffer(Vec::new()));
     let _ = vm.run();
 }
 

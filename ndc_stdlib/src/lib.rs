@@ -1,6 +1,5 @@
 use ndc_core::FunctionRegistry;
-use ndc_vm::NativeFunction;
-use std::rc::Rc;
+use ndc_vm::NativeSpec;
 
 pub mod aoc;
 pub mod cmp;
@@ -24,7 +23,7 @@ pub mod regex;
 #[cfg(feature = "serde")]
 pub mod serde;
 
-pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+pub fn register(env: &mut FunctionRegistry<NativeSpec>) {
     aoc::register(env);
     cmp::register(env);
     #[cfg(feature = "crypto")]
@@ -50,6 +49,21 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     value::register(env);
 }
 
+/// Every native `register` declares, made: for tests that look at their
+/// types and documentation.
+#[cfg(test)]
+pub(crate) fn built(
+    register: fn(&mut FunctionRegistry<NativeSpec>),
+) -> Vec<std::rc::Rc<ndc_vm::NativeFunction>> {
+    let mut registry = FunctionRegistry::default();
+    register(&mut registry);
+    let mut natives = ndc_vm::Natives::default();
+    natives.extend(registry);
+    (0..natives.len())
+        .map(|slot| std::rc::Rc::clone(natives.function(slot)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,8 +73,7 @@ mod tests {
     /// more specific, so it never has to choose between generic overloads.
     #[test]
     fn no_two_overloads_tie() {
-        let mut registry = FunctionRegistry::default();
-        register(&mut registry);
+        let registry = built(register);
         let natives = registry
             .iter()
             .map(|function| (function.name.clone(), function.static_type.clone()))
@@ -75,8 +88,7 @@ mod tests {
     fn an_iterable_is_only_a_parameter() {
         let iterable =
             |typ: &StaticType| typ.contains(&|part| matches!(part, StaticType::Iterable(_)));
-        let mut registry = FunctionRegistry::default();
-        register(&mut registry);
+        let registry = built(register);
         for function in registry.iter() {
             let StaticType::Function {
                 parameters,
