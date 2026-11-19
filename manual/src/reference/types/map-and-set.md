@@ -83,7 +83,15 @@ for (k, v) in m {
 }
 ```
 
-**Iteration order is unspecified.** Maps are hash-based, so keys may appear in any order.
+**Keys come in the order they were inserted**, in maps and sets alike. Removing a key moves the last key into its place, which keeps removing fast:
+
+```ndc
+let m = %{"b": 2, "a": 1, "c": 3};
+m["d"] = 4;
+print(m.keys());  // ["b","a","c","d"]
+remove(m, "b");
+print(m.keys());  // ["d","a","c"]
+```
 
 **Keys are snapshotted at the start of the loop.** Mutations to the map during iteration, such as adding or removing keys, are not reflected in the current loop. The set of keys visited is fixed when the `for` loop begins. Values read during iteration do reflect changes to existing keys.
 

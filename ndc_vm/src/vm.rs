@@ -30,7 +30,7 @@ pub struct Vm {
     tracer: Option<Box<dyn crate::tracer::VmTracer>>,
 }
 
-type MemoCache = (Rc<RefCell<HashMap<u64, Value>>>, u64);
+type MemoCache = (Rc<RefCell<ndc_core::collections::HashMap<u64, Value>>>, u64);
 
 /// What a dispatched call left behind. Callees split into two kinds: compiled
 /// functions and closures push a frame that still has to be executed, while
@@ -634,7 +634,7 @@ impl Vm {
                     };
                     let func = func.clone();
                     self.stack.push(Value::function(Function::Memoized {
-                        cache: Rc::new(RefCell::new(HashMap::default())),
+                        cache: Rc::new(RefCell::new(ndc_core::collections::HashMap::default())),
                         function: Rc::new(func),
                     }));
                 }

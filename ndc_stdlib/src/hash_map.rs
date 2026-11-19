@@ -44,14 +44,14 @@ mod inner {
     /// Removes a key from the map or a value from a set.
     #[function(signature = "<K, V>(%{K: V}, K)")]
     pub fn remove(map: &mut HashMap<Value, Value>, key: Value) {
-        map.remove(&key);
+        map.swap_remove(&key);
     }
 
     /// Removes all keys from the `left` map/set that are present in the `right` map/set.
     #[function(name = "remove", signature = "<K, V, W>(%{K: V}, %{K: W})")]
     pub fn remove_map(left: &mut HashMap<Value, Value>, right: &HashMap<Value, Value>) {
         for key in right.keys() {
-            left.remove(key);
+            left.swap_remove(key);
         }
     }
 

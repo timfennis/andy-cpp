@@ -1,7 +1,7 @@
 use crate::Value;
-use crate::hash_map::HashMap;
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
+use ndc_core::collections::HashMap;
 use ndc_core::collections::HashSet;
 use ndc_lexer::Span;
 use std::rc::Rc;

@@ -28,7 +28,7 @@ thread_local! {
 const DIAGNOSTIC_TYPE_MAX_DEPTH: usize = 4;
 const DIAGNOSTIC_TYPE_VALUE_BUDGET: usize = 256;
 type ConformanceKey = (*const Object, *const StaticType);
-type ConformanceCache = HashMap<ConformanceKey, bool>;
+type ConformanceCache = ndc_core::collections::HashMap<ConformanceKey, bool>;
 
 fn bounded_element_type<'a>(
     values: impl Iterator<Item = &'a Value>,
@@ -126,7 +126,7 @@ impl Ord for OrdValue {
 pub enum ValueIter {
     List(std::vec::IntoIter<Value>),
     Deque(std::collections::vec_deque::IntoIter<Value>),
-    Map(std::collections::hash_map::IntoIter<Value, Value>),
+    Map(indexmap::map::IntoIter<Value, Value>),
     Shared(SharedIterator),
 }
 
