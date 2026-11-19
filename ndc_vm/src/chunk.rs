@@ -170,11 +170,6 @@ pub enum OpCode {
     Memoize,
     /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
     CheckType(Rc<StaticType>),
-    /// Peeks top; errors if the value is of the type but a container the
-    /// cast would give that type is held by anything but the value (or the
-    /// container it's in). A value not of the type is left to the cast's own
-    /// test. `[… value → … value]`
-    CheckUnshared(Rc<StaticType>),
     /// Pops a value, pushes `Some(value)` if it conforms to the type and
     /// `None` if it doesn't. `[… value → … option]`
     TryCast(Rc<StaticType>),
@@ -278,7 +273,6 @@ impl OpCode {
             Self::NewCell(_) => "NewCell",
             Self::Memoize => "Memoize",
             Self::CheckType(_) => "CheckType",
-            Self::CheckUnshared(_) => "CheckUnshared",
             Self::TryCast(_) => "TryCast",
             Self::TupleIndex(_) => "TupleIndex",
             Self::GetLocalTupleIndex { .. } => "GetLocalTupleIndex",
@@ -357,7 +351,7 @@ impl OpCode {
             Self::NewCell(_) => 0,
             Self::Memoize => 0,
             // Peeks the value without popping it.
-            Self::CheckType(_) | Self::CheckUnshared(_) => 0,
+            Self::CheckType(_) => 0,
             // Replaces the value with the option holding it.
             Self::TryCast(_) => 0,
             // Replaces the tuple with its element.
@@ -435,7 +429,6 @@ impl std::fmt::Debug for OpCode {
             Self::UnpackLocals { first, count } => write!(f, "UnpackLocals({first}, {count})"),
             Self::Memoize => write!(f, "Memoize"),
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
-            Self::CheckUnshared(typ) => write!(f, "CheckUnshared({typ})"),
             Self::TryCast(typ) => write!(f, "TryCast({typ})"),
             Self::TupleIndex(index) => write!(f, "TupleIndex({index})"),
             Self::GetLocalTupleIndex { slot, index } => {

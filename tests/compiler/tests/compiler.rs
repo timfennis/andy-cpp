@@ -639,24 +639,18 @@ fn an_unproven_cast_checks_the_type_at_runtime() {
     );
 }
 
-// let x: Any = [1]; cast::<[Int]>(x); cast::<Int>(x)
+// let x: Any = [1]; cast::<[Int]>(x)
 //
-// A cast to a container type checks that nothing else holds the container,
-// ahead of the type check. A cast to a type without a container in it has
-// nothing to check.
+// A cast to a container type is the same type check as a cast to any other
+// type, right after the value is loaded.
 #[test]
-fn a_cast_to_a_container_checks_it_is_unshared() {
-    let ops = compile_with_analysis("let x: Any = [1]; cast::<[Int]>(x); cast::<Int>(x)");
-    let checks: Vec<usize> = ops
-        .iter()
-        .enumerate()
-        .filter(|(_, op)| matches!(op, CheckUnshared(_)))
-        .map(|(at, _)| at)
-        .collect();
-    assert_eq!(checks.len(), 1, "got: {ops:?}");
+fn a_cast_to_a_container_checks_only_its_type() {
+    let ops = compile_with_analysis("let x: Any = [1]; cast::<[Int]>(x)");
+    let list_of_ints = ndc_core::StaticType::List(Box::new(ndc_core::StaticType::Int));
     assert!(
-        matches!(&ops[checks[0] + 1], CheckType(t) if t.holds_a_mutable_container()),
-        "expected the type check right after, got: {ops:?}",
+        ops.windows(2)
+            .any(|window| matches!(window, [GetGlobal(_), CheckType(t)] if **t == list_of_ints)),
+        "expected the value loaded and then a CheckType([Int]), got: {ops:?}",
     );
 }
 

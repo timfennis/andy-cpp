@@ -1,0 +1,9 @@
+// Not desired, fixed by step 6 of docs/register-vm/plan.md: `words` holds
+// Strings, but the cast gives the same list as a `[Any]`, so a push of an Int
+// through `anything` puts an Int in `words` too.
+// expect-output: ["a","b",1]
+let words = "a b".split(" ");
+let any: Any = words;
+let anything = cast::<[Any]>(any);
+anything.push(1);
+print(words);
