@@ -1,0 +1,37 @@
+== <script> (registers: 3, globals: 3, natives: +) ==
+0000  LoadK r1, k0                         <fn #1 adder>
+0001  SetGlobal g1, r1
+0002  LoadK r1, k1                         <fn #2 adder>
+0003  SetGlobal g2, r1
+0004  LoadUnit r0
+0005  GetGlobal r1, g1
+0006  LoadK r2, k2                         1
+0007  Call r1, 1
+0008  GetGlobal r1, g2
+0009  LoadK r2, k3                         1.5
+0010  Call r1, 1
+0011  Halt r0
+
+== #1 adder (registers: 4) ==
+0000  LoadK r1, k0                         <fn #3 <lambda>>
+0001  Copy r2, r1
+0002  Copy r3, r0
+0003  Call r2, 1
+0004  Return r2
+
+== #2 adder (registers: 4) ==
+0000  LoadK r1, k0                         <fn #4 <lambda>>
+0001  Copy r2, r1
+0002  Copy r3, r0
+0003  Call r2, 1
+0004  Return r2
+
+== #3 <lambda> (registers: 2) ==
+0000  AddIntI r1, r0, #1
+0001  Return r1
+
+== #4 <lambda> (registers: 3) ==
+0000  Copy r1, r0
+0001  LoadK r2, k0                         1
+0002  CallNative r1, +, r1, 2
+0003  Return r1

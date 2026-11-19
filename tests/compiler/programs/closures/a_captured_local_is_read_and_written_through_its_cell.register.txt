@@ -1,0 +1,17 @@
+== <script> (registers: 2, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 outer>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  Halt r0
+
+== #1 outer (registers: 3) ==
+0000  LoadK r0, k0                         1
+0001  Closure r1, c0                       <fn #2 <lambda>> captures r0
+0002  LoadK r2, k1                         2
+0003  SetCell r0, r2
+0004  GetCell r2, r0
+0005  Return r2
+
+== #2 <lambda> (registers: 1) ==
+0000  GetUpvalue r0, u0
+0001  Return r0

@@ -1,0 +1,6 @@
+== <script> (registers: 3, globals: 0, natives: %) ==
+0000  LoadK r1, k0                         7
+0001  LoadK r2, k1                         2
+0002  CallNative r1, %, r1, 2
+0003  LoadUnit r0
+0004  Halt r0

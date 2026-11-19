@@ -1,0 +1,5 @@
+== <script> (registers: 1, globals: 0) ==
+0000  LoadK r0, k0                         true
+0001  JumpIfTrue r0, +1                    -> 0003
+0002  LoadK r0, k1                         false
+0003  Halt r0

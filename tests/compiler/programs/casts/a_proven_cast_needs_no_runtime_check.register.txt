@@ -1,0 +1,5 @@
+== <script> (registers: 2, globals: 0) ==
+0000  LoadK r1, k0                         1
+0001  LoadK r1, k1                         1
+0002  MakeList r0, r1, 1
+0003  Halt r0

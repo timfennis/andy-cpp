@@ -290,12 +290,11 @@ impl Interpreter {
 
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         let compiled = self.compile_str(input)?;
-        Ok(match self.backend {
-            Backend::Stack => {
-                ndc_vm::disassemble::disassemble(&compiled, &self.natives, Some(input))
-            }
-            Backend::Register => ndc_vm::register::disassemble::disassemble(&compiled, Some(input)),
-        })
+        Ok(ndc_vm::disassemble::disassemble(
+            &compiled,
+            &self.natives,
+            Some(input),
+        ))
     }
 
     /// Execute source code and return the resulting [`Value`].

@@ -1,5 +1,5 @@
-//! A readable listing of compiled bytecode, as `ndc disassemble` prints it.
-//! `fn f() { fn g() => len([1]); g } let h = print;` lists as:
+//! A readable listing of compiled code, as `ndc disassemble` prints it, for
+//! either VM. `fn f() { fn g() => len([1]); g } let h = print;` lists as:
 //!
 //! ```text
 //! == <script> (locals: 0, globals: 2, natives: len, print) ==
@@ -27,11 +27,36 @@
 //! 0003  Return
 //! ```
 //!
-//! Each function's first line gives how many local slots it uses, and the
-//! top-level code's also how many globals the program declares and the
-//! natives it reads. A function is numbered where it's first loaded and
-//! listed once, after the functions before it, so two that load the same
-//! function show the same number. A jump shows where it lands (`-> 0007`).
+//! and compiled for the register VM, one instruction per line with the
+//! registers it reads and writes, as:
+//!
+//! ```text
+//! == <script> (registers: 2, globals: 2, natives: len, print) ==
+//! 0000  LoadK r1, k0                         <fn #1 f>
+//! 0001  SetGlobal g0, r1
+//! 0002  LoadUnit r0
+//! 0003  GetGlobal r1, print
+//! 0004  SetGlobal g1, r1
+//! 0005  Halt r0
+//!
+//! == #1 f (registers: 1) ==
+//! 0000  LoadK r0, k0                         <fn #2 g>
+//! 0001  Return r0
+//!
+//! == #2 g (registers: 2) ==
+//! 0000  LoadK r1, k0                         1
+//! 0001  MakeList r0, r1, 1
+//! 0002  CallNative r0, len, r0, 1
+//! 0003  Return r0
+//! ```
+//!
+//! Each function's first line gives how many local slots (stack VM) or
+//! registers (register VM) it uses, and the top-level code's also how many
+//! globals the program declares and the natives it reads. A function is
+//! numbered where it's first loaded and listed once, after the functions
+//! before it, so two that load the same function show the same number. A
+//! jump shows where it lands (`-> 0007`), and an instruction that loads a
+//! constant shows it in its debug form (`"abc"` for a string).
 //!
 //! A global slot reads as the name of the native or intrinsic in it (`len`),
 //! or as `g` and the position among the program's own globals (`g0` for its
@@ -39,10 +64,11 @@
 //! standard library gains a native.
 
 use crate::Natives;
-use crate::chunk::{JumpTarget, OpCode};
+use crate::chunk::{Chunk, JumpTarget, OpCode};
 use crate::value::{CompiledFunction, Value};
 use ndc_core::Builtins;
 use ndc_core::collections::HashMap;
+use ndc_lexer::Span;
 use std::collections::VecDeque;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -51,9 +77,9 @@ use std::rc::Rc;
 const INSTRUCTION_WIDTH: usize = 35;
 
 /// The listing of `function`, the top-level code of a program compiled with
-/// `natives`, followed by each function it declares, in the order they're
-/// found, so each comes after the function that declares it. With `source`,
-/// each instruction shows the code it was compiled from.
+/// `natives` for either VM, followed by each function it declares, in the
+/// order they're found, so each comes after the function that declares it.
+/// With `source`, each instruction shows the code it was compiled from.
 pub fn disassemble(function: &CompiledFunction, natives: &Natives, source: Option<&str>) -> String {
     let mut disassembler = Disassembler {
         natives,
@@ -69,9 +95,18 @@ pub fn disassemble(function: &CompiledFunction, natives: &Natives, source: Optio
     disassembler.out
 }
 
+/// One instruction as the listing shows it: `CallNative(len, 1)` or
+/// `LoadK r1, k0`, with what it loads or where it jumps, if anything, and
+/// the source it came from.
+pub(crate) struct Line {
+    pub instruction: String,
+    pub annotation: Option<String>,
+    pub span: Span,
+}
+
 /// Writes a listing, numbering each function the first time it's found so
 /// a function two others share is listed once, under one number.
-struct Disassembler<'a> {
+pub(crate) struct Disassembler<'a> {
     natives: &'a Natives,
     source: Option<&'a str>,
     numbers: HashMap<*const CompiledFunction, usize>,
@@ -92,8 +127,8 @@ impl Disassembler<'_> {
         let name = function.name.as_deref().unwrap_or("<script>");
         write!(
             self.out,
-            "== {name} (locals: {}, globals: {own_globals}",
-            function.num_locals
+            "== {name} ({}, globals: {own_globals}",
+            Self::frame(function)
         )
         .unwrap();
         if !natives.is_empty() {
@@ -107,25 +142,45 @@ impl Disassembler<'_> {
         writeln!(self.out).unwrap();
         writeln!(
             self.out,
-            "== #{number} {} (locals: {}) ==",
+            "== #{number} {} ({}) ==",
             Self::name(function),
-            function.num_locals
+            Self::frame(function)
         )
         .unwrap();
         self.body(function);
     }
 
+    /// How big a call of `function` is: `locals: 2` of the stack VM's, or
+    /// `registers: 5` of the register VM's.
+    fn frame(function: &CompiledFunction) -> String {
+        if function.is_register_code() {
+            format!("registers: {}", function.frame_size)
+        } else {
+            format!("locals: {}", function.num_locals)
+        }
+    }
+
     /// Lists `function`'s instructions.
     fn body(&mut self, function: &CompiledFunction) {
-        for (index, op, constant) in function.body.iter() {
-            let instruction = self.instruction(op);
-            let annotation = match constant {
-                Some(value) => Some(self.constant(value)),
-                None => Self::jump_destination(op, index),
+        let registers = function.is_register_code();
+        let len = if registers {
+            function.registers.len()
+        } else {
+            function.body.len()
+        };
+        for index in 0..len {
+            let Line {
+                instruction,
+                annotation,
+                span,
+            } = if registers {
+                crate::register::disassemble::line(self, &function.registers, index)
+            } else {
+                self.stack_line(&function.body, index)
             };
             let excerpt = self
                 .source
-                .and_then(|source| source.get(function.body.span(index).range()))
+                .and_then(|source| source.get(span.range()))
                 .map(|excerpt| excerpt.trim().replace('\n', "↵"));
 
             let line = match (annotation, excerpt) {
@@ -138,22 +193,35 @@ impl Disassembler<'_> {
         }
     }
 
-    /// `op` as it reads in the listing: `GetGlobal(g0)` for the program's
-    /// first global, `CallNative(len, 1)` for a call of `len`.
-    fn instruction(&self, op: &OpCode) -> String {
-        match op {
+    /// The stack VM's instruction at `index` of `chunk`.
+    fn stack_line(&mut self, chunk: &Chunk, index: usize) -> Line {
+        let op = chunk.opcode(index);
+        let annotation = match op {
+            OpCode::Constant(k)
+            | OpCode::MakeString(k)
+            | OpCode::Closure {
+                constant_idx: k, ..
+            } => Some(self.constant(chunk.constant(*k))),
+            _ => Self::jump_destination(op, index),
+        };
+        let instruction = match op {
             OpCode::GetGlobal(slot) => format!("GetGlobal({})", self.global(*slot)),
             OpCode::SetGlobal(slot) => format!("SetGlobal({})", self.global(*slot)),
             OpCode::CallNative { slot, args } => {
                 format!("CallNative({}, {args})", self.global(*slot))
             }
             _ => format!("{op:?}"),
+        };
+        Line {
+            instruction,
+            annotation,
+            span: chunk.span(index),
         }
     }
 
     /// The name of global `slot`: `len` for a native's, `g0` for the
     /// program's first declaration.
-    fn global(&self, slot: usize) -> String {
+    pub(crate) fn global(&self, slot: usize) -> String {
         match slot.checked_sub(self.natives.count()) {
             None => self.natives.name(slot).to_string(),
             Some(own) => format!("g{own}"),
@@ -162,10 +230,16 @@ impl Disassembler<'_> {
 
     /// A constant as it reads in the listing: `"abc"` for a string, `<fn #1 f>`
     /// for a function, which is listed later if this is the first to load it.
-    fn constant(&mut self, value: &Value) -> String {
-        let Some(function) = value.function_prototype() else {
-            return format!("{value:?}");
-        };
+    pub(crate) fn constant(&mut self, value: &Value) -> String {
+        match value.function_prototype() {
+            Some(function) => self.function(function),
+            None => format!("{value:?}"),
+        }
+    }
+
+    /// A function as it reads in the listing, `<fn #1 f>`, numbered the
+    /// first time it's found and listed later.
+    pub(crate) fn function(&mut self, function: &Rc<CompiledFunction>) -> String {
         let next = self.numbers.len() + 1;
         let number = *self.numbers.entry(Rc::as_ptr(function)).or_insert_with(|| {
             self.pending.push_back((Rc::clone(function), next));

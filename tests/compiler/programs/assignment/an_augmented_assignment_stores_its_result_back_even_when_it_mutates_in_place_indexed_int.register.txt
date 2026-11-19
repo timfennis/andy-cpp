@@ -1,0 +1,16 @@
+== <script> (registers: 7, globals: 1, natives: [], []=) ==
+0000  LoadK r1, k0                         1
+0001  MakeList r1, r1, 1
+0002  SetGlobal g0, r1
+0003  GetGlobal r1, g0
+0004  LoadK r2, k1                         0
+0005  Copy r4, r1
+0006  Copy r5, r2
+0007  CallNative r4, [], r4, 2
+0008  AddIntI r3, r4, #2
+0009  Copy r4, r1
+0010  Copy r5, r2
+0011  Copy r6, r3
+0012  CallNative r4, []=, r4, 3
+0013  LoadUnit r0
+0014  Halt r0

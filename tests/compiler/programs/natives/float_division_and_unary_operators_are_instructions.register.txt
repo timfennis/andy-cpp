@@ -1,0 +1,13 @@
+== <script> (registers: 2, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 f>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  Halt r0
+
+== #1 f (registers: 8) ==
+0000  DivFloat r4, r0, r1
+0001  NegInt r5, r2
+0002  NegFloat r6, r0
+0003  Not r7, r3
+0004  MakeTuple r4, r4, 4
+0005  Return r4

@@ -1,0 +1,17 @@
+== <script> (registers: 4, globals: 4) ==
+0000  LoadK r1, k0                         <fn Point>
+0001  SetGlobal g0, r1
+0002  LoadK r1, k1                         <fn Point.x>
+0003  SetGlobal g1, r1
+0004  LoadK r1, k2                         <fn Point.x=>
+0005  SetGlobal g2, r1
+0006  LoadUnit r0
+0007  GetGlobal r1, g0
+0008  LoadK r2, k3                         1
+0009  Call r1, 1
+0010  SetGlobal g3, r1
+0011  GetGlobal r1, g2
+0012  GetGlobal r2, g3
+0013  LoadK r3, k4                         2
+0014  Call r1, 2
+0015  Halt r0

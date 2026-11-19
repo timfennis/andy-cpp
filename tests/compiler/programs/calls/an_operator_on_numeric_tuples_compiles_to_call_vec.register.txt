@@ -1,0 +1,11 @@
+== <script> (registers: 6, globals: 0, natives: +) ==
+0000  GetGlobal r1, +
+0001  LoadK r4, k0                         1
+0002  LoadK r5, k1                         2
+0003  MakeTuple r2, r4, 2
+0004  LoadK r4, k2                         3
+0005  LoadK r5, k3                         4
+0006  MakeTuple r3, r4, 2
+0007  CallVec r1, 2
+0008  Move r0, r1
+0009  Halt r0

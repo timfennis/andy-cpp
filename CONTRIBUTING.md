@@ -37,7 +37,7 @@ The workspace has three test crates, each living under `tests/`:
 | Crate              | Path                | What it covers |
 |---|---|---|
 | `functional_tests` | `tests/functional/` | End-to-end `.ndc` programs and REPL integration tests. The crate's `build.rs` auto-generates one Rust `#[test]` per `.ndc` file under `tests/functional/programs/`. |
-| `compiler_tests`   | `tests/compiler/`   | Disassembly snapshots: each `.ndc` program under `tests/compiler/programs/` is compiled and its listing compared with the expected one next to it. |
+| `compiler_tests`   | `tests/compiler/`   | Disassembly snapshots: each `.ndc` program under `tests/compiler/programs/` is compiled for each VM and its listings compared with the expected ones next to it. |
 | `proptest_tests`   | `tests/proptest/`   | Property-based fuzz harnesses: random token streams through the parser → analyser → compiler → VM, and generated programs that stress the analyser's overload choices. Both look for panics. |
 
 ### Run everything
@@ -143,11 +143,16 @@ The setup is `parsed` (no analysis, no natives), `analysed` (no natives) or
 run the peephole optimizer. `// compile: parsed, parsed optimized` lists the
 program once per mode, in a section each.
 
-The expected listing lives next to the program as `<name>.stack.txt`, in
-the format `ndc disassemble` prints, without source excerpts. Natives and
-intrinsics show by name (`CallNative(len, 1)`) and the program's own
-globals by their position among them (`SetGlobal(g0)`), so adding a native
-to the standard library changes no listing. To write the listing of a new
+The expected listings live next to the program, one per VM:
+`<name>.stack.txt` for the stack VM and `<name>.register.txt` for the
+register VM, in the format `ndc disassemble` prints (`NDC_VM=register ndc
+disassemble` for the register VM's), without source excerpts. Natives and
+intrinsics show by name (`CallNative(len, 1)`, `CallNative r0, len, r1, 1`)
+and the program's own globals by their position among them
+(`SetGlobal(g0)`, `SetGlobal g0, r1`), so adding a native to the standard
+library changes no listing. The register compiler has no peephole
+optimizer, so its listing ignores `optimized`: `parsed, parsed optimized`
+gives it one listing, of `parsed`. To write the listing of a new
 program, or accept a change to existing ones, run:
 
 ```bash
