@@ -12,7 +12,7 @@
 
 pub mod chunk;
 mod compiler;
-pub mod disassemble;
+pub(crate) mod disassemble;
 pub mod instr;
 mod vm;
 

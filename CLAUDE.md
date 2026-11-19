@@ -33,7 +33,7 @@ cargo run --bin ndc
 # Run a .ndc script
 cargo run --bin ndc -- script.ndc
 
-# Disassemble bytecode
+# Disassemble bytecode (NDC_VM=register lists the register VM's code)
 cargo run --bin ndc -- disassemble script.ndc
 
 # Build the interpreter for the browser into manual/src/playground/pkg (needs the

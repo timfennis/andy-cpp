@@ -1,78 +1,93 @@
-use super::instr::Instr;
-use crate::value::CompiledFunction;
-use std::fmt::Write;
-use std::rc::Rc;
+//! How [`crate::disassemble`] lists register code: one instruction per line,
+//! its name and then its operands, `AddIntI r0, r0, #1`, with a global
+//! named as the stack VM's listing names it (`GetGlobal r2, print`, or `g0`
+//! for the program's first declaration) and a native call naming the native
+//! (`CallNative r0, len, r1, 1`).
 
-/// The register code of `function` and of the functions it declares, one
-/// instruction per line, with the constant an instruction loads or the
-/// index a jump goes to, and the source it came from when `source` is given:
+use super::chunk::Chunk;
+use super::instr::Instr;
+use crate::disassemble::{Disassembler, Line};
+use ndc_analysis::CaptureSource;
+
+/// The instruction at `ip` of `chunk`, with the constant it loads, the
+/// function it makes a closure of and what that captures, the type it casts
+/// to, or where it jumps:
 ///
 /// ```text
-/// == f == (2 registers)
-/// 0000  LoadK                   r1, k0            1                1
-/// 0001  JumpIfFalse             r0, +1            -> 0003          c
-/// 0002  AddInt                  r1, r0, r1                         +
-/// 0003  Return                  r1
+/// LoadK r1, k0                         "abc"
+/// Closure r2, c0                       <fn #1 inner> captures r0, u1
+/// CheckType r0, t0                     Int
+/// JumpIfFalse r0, +1                   -> 0003
 /// ```
-pub fn disassemble(function: &CompiledFunction, source: Option<&str>) -> String {
-    let mut out = String::new();
-    disassemble_function(function, source, &mut out);
-    out
-}
-
-fn disassemble_function(function: &CompiledFunction, source: Option<&str>, out: &mut String) {
-    let name = function.name.as_deref().unwrap_or("<script>");
-    let registers = function.frame_size;
-    writeln!(out, "== {name} == ({registers} registers)").unwrap();
-
-    let chunk = &function.registers;
-    let mut nested: Vec<Rc<CompiledFunction>> = Vec::new();
-    for (ip, &instr) in chunk.code().iter().enumerate() {
-        let annotation = match instr {
-            Instr::LoadK { k, .. } | Instr::MakeString { k, .. } => {
-                let constant = chunk.constant(k);
-                match constant.function_prototype() {
-                    Some(prototype) => {
-                        nested.push(Rc::clone(prototype));
-                        let name = prototype.name.as_deref().unwrap_or("?");
-                        format!("<fn {name}>")
-                    }
-                    None => constant.to_string(),
-                }
+pub(crate) fn line(disassembler: &mut Disassembler<'_>, chunk: &Chunk, ip: usize) -> Line {
+    let instr = chunk.code()[ip];
+    let instruction = match instr {
+        Instr::GetGlobal { dst, slot } => {
+            format!("GetGlobal {dst}, {}", disassembler.global(slot as usize))
+        }
+        Instr::SetGlobal { slot, src } => {
+            format!("SetGlobal {}, {src}", disassembler.global(slot as usize))
+        }
+        Instr::CallNative {
+            dst,
+            base,
+            slot,
+            args,
+        } => format!(
+            "CallNative {dst}, {}, {base}, {args}",
+            disassembler.global(usize::from(slot))
+        ),
+        _ => {
+            let operands = instr.to_string();
+            if operands.is_empty() {
+                instr.name().to_string()
+            } else {
+                format!("{} {operands}", instr.name())
             }
-            Instr::Closure { index, .. } => {
-                let function = &chunk.closures()[index as usize].function;
-                nested.push(Rc::clone(function));
-                format!("<fn {}>", function.name.as_deref().unwrap_or("?"))
-            }
-            _ => match chunk.jump_target(ip) {
-                Some(target) => format!("-> {target:04}"),
-                None => String::new(),
-            },
-        };
-        let excerpt = source
-            .and_then(|source| source.get(chunk.span(ip).range()))
-            .map(|excerpt| excerpt.trim().replace('\n', "↵"))
-            .unwrap_or_default();
-        let line = format!(
-            "{ip:04}  {:<22}  {:<16}  {annotation:<15}  {excerpt}",
-            instr.name(),
-            instr.to_string()
-        );
-        writeln!(out, "{}", line.trim_end()).unwrap();
-    }
-
-    for function in nested {
-        writeln!(out).unwrap();
-        disassemble_function(&function, source, out);
+        }
+    };
+    let annotation = match instr {
+        Instr::LoadK { k, .. } | Instr::MakeString { k, .. } => {
+            Some(disassembler.constant(chunk.constant(k)))
+        }
+        Instr::Closure { index, .. } => {
+            let closure = &chunk.closures()[index as usize];
+            let function = disassembler.function(&closure.function);
+            let captures = closure
+                .captures
+                .iter()
+                .map(|capture| match capture {
+                    CaptureSource::Local(slot) => format!("r{slot}"),
+                    CaptureSource::Upvalue(index) => format!("u{index}"),
+                })
+                .collect::<Vec<_>>();
+            Some(if captures.is_empty() {
+                function
+            } else {
+                format!("{function} captures {}", captures.join(", "))
+            })
+        }
+        Instr::CheckType { typ, .. } | Instr::TryCast { typ, .. } => {
+            Some(chunk.types()[typ as usize].to_string())
+        }
+        _ => chunk
+            .jump_target(ip)
+            .map(|target| format!("-> {target:04}")),
+    };
+    Line {
+        instruction,
+        annotation,
+        span: chunk.span(ip),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::Natives;
     use crate::Value;
-    use crate::register::{Builder, Reg};
+    use crate::disassemble::disassemble;
+    use crate::register::{Builder, Instr, Reg};
+    use crate::value::CompiledFunction;
     use ndc_core::StaticType;
     use ndc_lexer::Span;
 
@@ -91,10 +106,10 @@ mod tests {
             Span::synthetic(),
         );
         builder.emit(
-            Instr::AddInt {
+            Instr::AddIntI {
                 dst: Reg(1),
-                left: Reg(0),
-                right: Reg(1),
+                left: Reg(1),
+                imm: 2,
             },
             Span::synthetic(),
         );
@@ -111,12 +126,12 @@ mod tests {
             frame_size: 2,
         };
         assert_eq!(
-            disassemble(&function, None),
-            "== f == (2 registers)\n\
-             0000  LoadK                   r1, k0            1\n\
-             0001  JumpIfFalse             r0, +1            -> 0003\n\
-             0002  AddInt                  r1, r0, r1\n\
-             0003  Return                  r1\n"
+            disassemble(&function, &Natives::default(), None),
+            "== f (registers: 2, globals: 0) ==\n\
+             0000  LoadK r1, k0                         1\n\
+             0001  JumpIfFalse r0, +1                   -> 0003\n\
+             0002  AddIntI r1, r1, #2\n\
+             0003  Return r1\n"
         );
     }
 }
