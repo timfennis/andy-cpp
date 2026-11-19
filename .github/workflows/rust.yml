@@ -4,8 +4,8 @@ on:
   push:
     branches: [ "master" ]
   pull_request:
-  # The merge queue tests each pull request on top of the ones ahead of it.
-  merge_group:
+  # Auto-update starts the checks on the branches it rebases.
+  workflow_dispatch:
 
 # A new push to a pull request cancels its run that is still going.
 concurrency:

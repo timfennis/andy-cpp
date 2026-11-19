@@ -1,0 +1,39 @@
+name: Auto-update
+
+# Merges pull requests with auto-merge on one after another: brings the next
+# one up to date with master by rebasing it, and runs the checks on it, so
+# auto-merge squashes it in once they pass. See .github/scripts/auto-update.sh.
+on:
+  push:
+    branches: [ "master" ]
+  # Runs in the context of master, and checks out nothing from the pull request.
+  pull_request_target:
+    types: [ auto_merge_enabled ]
+  # When the checks on the pull request in progress fail, move on to the next.
+  workflow_run:
+    workflows: [ "Rust" ]
+    types: [ completed ]
+  workflow_dispatch:
+
+# One at a time; each run looks at the queue afresh.
+concurrency:
+  group: auto-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          sparse-checkout: .github/scripts
+      - name: Bring the next pull request up to date
+        run: .github/scripts/auto-update.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
