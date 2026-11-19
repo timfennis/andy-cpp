@@ -1199,6 +1199,24 @@ impl Analyser {
         true
     }
 
+    /// Picks the intrinsic that reads a tuple's element for `call`, if it's
+    /// a read of `[]` and there is one, and returns whether it did: see
+    /// [`ndc_core::Intrinsic::TupleIndex`].
+    fn index_tuple(&mut self, call: &CallConstraint, arguments: &[StaticType]) -> bool {
+        let Some(tuple_index) = self.tuple_index else {
+            return false;
+        };
+        if call.name != "[]" || arguments.len() != 2 {
+            return false;
+        }
+        self.record_pick(
+            call.site,
+            Binding::Resolved(Candidate::Scalar(tuple_index)),
+            arguments,
+        );
+        true
+    }
+
     /// Picks the overload `call` means, records it, and returns the call's
     /// type, or `None` when the arguments aren't known well enough yet. A
     /// call whose arguments are known is resolved the usual way. Otherwise
@@ -1238,7 +1256,9 @@ impl Analyser {
             if let [_, index_type] = &arguments[..] {
                 self.vars.bind_argument(&StaticType::Int, index_type);
             }
-            if !self.index_any(call, &indexed) {
+            if !(element.is_some() && self.index_tuple(call, &indexed))
+                && !self.index_any(call, &indexed)
+            {
                 self.resolve_call_now(call, &indexed);
             }
             let Some(element) = element else {

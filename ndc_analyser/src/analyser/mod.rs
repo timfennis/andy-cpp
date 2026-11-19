@@ -107,6 +107,9 @@ pub struct Analyser {
     /// The native that indexes a tuple or an `Any`: see
     /// [`ndc_core::ANY_INDEX`].
     any_index: Option<SymbolId>,
+    /// The intrinsic that reads a tuple's element at an index written in the
+    /// code: see [`ndc_core::Intrinsic::TupleIndex`].
+    tuple_index: Option<SymbolId>,
     /// The nodes of overloaded function values that waited for the type
     /// expected of them, as `abs` in `[len, abs]` does.
     waiting_function_values: HashSet<NodeId>,
@@ -209,6 +212,9 @@ impl Analyser {
         let any_index = (0..builtins.count())
             .find(|&slot| builtins.name(slot) == ndc_core::ANY_INDEX)
             .map(|slot| symbols[slot]);
+        let tuple_index = (0..builtins.count())
+            .find(|&slot| builtins.intrinsic(slot) == Some(Intrinsic::TupleIndex))
+            .map(|slot| symbols[slot]);
         let builtin_slots = symbols
             .into_iter()
             .enumerate()
@@ -217,6 +223,7 @@ impl Analyser {
         let types = TypeTable::with_builtins(builtins, builtin_slots);
         Self {
             any_index,
+            tuple_index,
             resolver,
             types,
             vars: TypeVars::default(),

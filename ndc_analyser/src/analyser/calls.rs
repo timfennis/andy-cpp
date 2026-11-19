@@ -308,6 +308,9 @@ impl Analyser {
                     span,
                 )
             }
+            Intrinsic::TupleIndex => {
+                unreachable!("internal error: no identifier names the tuple index")
+            }
         }
     }
 

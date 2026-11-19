@@ -289,6 +289,11 @@ impl Vm {
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
+                OpCode::TupleIndex => {
+                    if let Err(message) = tuple_index(&mut self.stack) {
+                        return Err(VmError::new(message, span));
+                    }
+                }
                 OpCode::AddInt => run_native_op(&mut self.stack, NativeOp::AddInt, span)?,
                 OpCode::SubInt => run_native_op(&mut self.stack, NativeOp::SubInt, span)?,
                 OpCode::MulInt => run_native_op(&mut self.stack, NativeOp::MulInt, span)?,
@@ -1137,6 +1142,47 @@ fn bad_range_bound(value: &Value) -> String {
 fn try_cast(stack: &mut [Value], target: &StaticType) {
     let value = stack.last_mut().expect("stack underflow");
     *value = Value::option(value.converted_to(target));
+}
+
+/// Replaces the tuple and the index on top of `stack` with the tuple's
+/// element at the index, counting a negative index from the end: `-1` is the
+/// last element.
+fn tuple_index(stack: &mut Vec<Value>) -> Result<(), String> {
+    let index = stack.pop().expect("stack underflow");
+    let tuple = stack.last_mut().expect("stack underflow");
+    let element = match (&*tuple, index) {
+        (Value::Object(object), Value::Int(index)) => match object.as_ref() {
+            Object::Tuple(elements) => {
+                let position = if index < 0 {
+                    elements.len().checked_sub(index.unsigned_abs() as usize)
+                } else {
+                    usize::try_from(index).ok()
+                };
+                match position.and_then(|position| elements.get(position)) {
+                    Some(element) => element.clone(),
+                    None => return Err(tuple_index_out_of_bounds(index, elements.len())),
+                }
+            }
+            _ => return Err(format!("cannot index into {}", tuple.static_type())),
+        },
+        (Value::Object(_), index) => {
+            return Err(format!(
+                "a tuple's index must be an Int, got {}",
+                index.static_type()
+            ));
+        }
+        _ => return Err(format!("cannot index into {}", tuple.static_type())),
+    };
+    *tuple = element;
+    Ok(())
+}
+
+/// The analyser rejects an index written in the code that's outside the
+/// tuple; this is what a VM that's given one says.
+#[cold]
+fn tuple_index_out_of_bounds(index: i64, length: usize) -> String {
+    let plural = if length == 1 { "" } else { "s" };
+    format!("index {index} is out of bounds for a tuple of {length} element{plural}")
 }
 
 /// Checks that the value on top of `stack` is a `target`, and makes it one:

@@ -1,0 +1,15 @@
+// A number written in the code indexes a tuple wherever it comes from: a
+// variable, a list, a map, a function's parameter, a closure's capture, or
+// another tuple. A negative index counts from the end. An index that's a
+// variable, or a tuple held as an `Any`, is checked as the program runs.
+// expect-output: 1 c 3 4 6 (5,"x") 9 b 2 1
+let t = (1, "b", "c");
+let pairs = [(3, 4), (5, 6)];
+let m = %{"k": ((5, "x"), 7)};
+fn second(p) => p[1];
+let nested = ((8, 9), 10);
+let offset = 1;
+let held: Any = (1, 2);
+let picks = pairs.map(fn(p) => p[0] + second(p));
+assert_eq(picks, [7, 11]);
+print(t[0], t[-1], pairs[0][0], second(pairs[0]), pairs[-1][1], m["k"][0], nested[0][-1], t[offset], cast::<(Int, Int)>(held)[1], held[0]);

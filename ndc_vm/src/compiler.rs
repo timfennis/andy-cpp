@@ -899,6 +899,10 @@ impl Compiler {
         match intrinsic {
             Intrinsic::Cast => self.emit_cast(site, false, span),
             Intrinsic::TryCast => self.emit_cast(site, true, span),
+            Intrinsic::TupleIndex => {
+                self.ir.write(OpCode::TupleIndex, span);
+                Ok(())
+            }
         }
     }
 
