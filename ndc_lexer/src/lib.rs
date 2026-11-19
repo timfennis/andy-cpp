@@ -200,10 +200,20 @@ impl SourceIterator<'_> {
         Span::new(self.source_id, self.current_offset(), 1)
     }
 
+    /// Skips the next `count` characters, which the caller has already seen with
+    /// [`peek`](Self::peek) or [`peek_n`](Self::peek_n): after `peek_n(2)` returned
+    /// `Some('=')`, `consume(3)` skips the three characters up to and including that `=`.
+    ///
+    /// # Panics
+    ///
+    /// If fewer than `count` characters are left, which means the caller consumed
+    /// characters it never peeked: a bug in the lexer, not in the program it lexes.
     pub fn consume(&mut self, count: usize) {
-        for _ in 0..count {
-            self.next()
-                .expect("tried to consume but iterator was empty");
+        for consumed in 0..count {
+            assert!(
+                self.next().is_some(),
+                "consume({count}) ran out of input after {consumed} characters; consume only what was peeked"
+            );
         }
     }
 }
