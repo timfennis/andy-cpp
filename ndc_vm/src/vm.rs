@@ -1,18 +1,18 @@
 use crate::chunk::OpCode;
 use crate::error::VmError;
-use crate::hash_map::{HashMap, hasher};
+use crate::hash_map::HashMap;
 use crate::io::{InputSource, OutputSink};
 use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
+use crate::memo::{MemoCache, MemoKey};
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Natives, Object, Value};
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
-use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::rc::Rc;
 
@@ -30,7 +30,8 @@ pub struct Vm {
     tracer: Option<Box<dyn crate::tracer::VmTracer>>,
 }
 
-type MemoCache = (Rc<RefCell<HashMap<u64, Value>>>, u64);
+/// Where a call of a `pure fn` keeps its result, and under which arguments.
+type PendingMemo = Box<(Rc<RefCell<MemoCache>>, MemoKey)>;
 
 /// What a dispatched call left behind. Callees split into two kinds: compiled
 /// functions and closures push a frame that still has to be executed, while
@@ -57,9 +58,9 @@ pub struct CallFrame {
     /// Absolute index of the first local slot for this frame.
     frame_pointer: usize,
     /// If this frame was called from a `pure` (memoized) function, holds the
-    /// cache to write into and the hash key when the frame returns.  `None`
+    /// cache to write into and the arguments it was called with.  `None`
     /// for ordinary (non-memoized) calls.
-    memo: Option<MemoCache>,
+    memo: Option<PendingMemo>,
     /// What the frame's call has to return, when it's a call of a
     /// [`Function::Checked`]. Boxed to keep frames small.
     returns: Option<Box<StaticType>>,
@@ -226,8 +227,9 @@ impl Vm {
                     let frame_pointer = frame.frame_pointer;
                     // If this was a memoized call, cache the return value now,
                     // before the frame is torn down.
-                    if let Some((cache, key)) = &frame.memo {
-                        cache.borrow_mut().insert(*key, ret.clone());
+                    if let Some(memo) = frame.memo.take() {
+                        let (cache, key) = *memo;
+                        cache.borrow_mut().insert(key, ret.clone());
                     }
                     let returns = frame.returns.take();
                     if frame_pointer == 0 {
@@ -634,7 +636,7 @@ impl Vm {
                     };
                     let func = func.clone();
                     self.stack.push(Value::function(Function::Memoized {
-                        cache: Rc::new(RefCell::new(HashMap::default())),
+                        cache: Rc::new(RefCell::new(MemoCache::default())),
                         function: Rc::new(func),
                     }));
                 }
@@ -671,16 +673,9 @@ impl Vm {
         // the cache once the call finishes.
         if let Function::Memoized { cache, function } = func {
             let start = self.stack.len() - args;
-            let mut hasher = hasher();
-            // Arguments `==` calls equal share a result: a `pure fn` takes
-            // only values it compares by what they are, which hash alike when
-            // they're equal.
-            for arg in &self.stack[start..] {
-                arg.hash(&mut hasher);
-            }
-            let key = hasher.finish();
+            let hash = MemoKey::hash(&self.stack[start..]);
 
-            if let Some(cached) = cache.borrow().get(&key).cloned() {
+            if let Some(cached) = cache.borrow().get(hash, &self.stack[start..]).cloned() {
                 // Cache hit: discard the callee slot and arguments, push result.
                 self.stack.truncate(start - 1);
                 self.stack.push(cached);
@@ -688,8 +683,14 @@ impl Vm {
             }
 
             // Cache miss: dispatch the inner function and remember to store
-            // the result in the cache when this frame returns.
-            self.dispatch_call_with_memo(Rc::unwrap_or_clone(function), args, Some((cache, key)))
+            // the result in the cache when this frame returns. The key holds
+            // the arguments as they are now, before the body can change them.
+            let key = cache.borrow_mut().key(hash, &self.stack[start..]);
+            self.dispatch_call_with_memo(
+                Rc::unwrap_or_clone(function),
+                args,
+                Some(Box::new((cache, key))),
+            )
         } else {
             self.dispatch_call_with_memo(func, args, None)
         }
@@ -740,7 +741,7 @@ impl Vm {
         &mut self,
         func: Function,
         args: usize,
-        memo: Option<MemoCache>,
+        memo: Option<PendingMemo>,
     ) -> Result<Dispatch, VmError> {
         let closure = match func {
             Function::Native(native) => {
@@ -760,7 +761,8 @@ impl Vm {
                         f(&call_args, self)?
                     }
                 };
-                if let Some((cache, key)) = memo {
+                if let Some(memo) = memo {
+                    let (cache, key) = *memo;
                     cache.borrow_mut().insert(key, result.clone());
                 }
                 self.stack.push(result);

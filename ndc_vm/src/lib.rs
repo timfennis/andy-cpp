@@ -6,6 +6,7 @@ pub mod error;
 pub mod hash_map;
 mod io;
 pub mod iterator;
+pub mod memo;
 mod natives;
 #[cfg(feature = "trace")]
 #[allow(clippy::print_stderr)]

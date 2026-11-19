@@ -1203,6 +1203,7 @@ name = "ndc_vm"
 version = "0.4.1"
 dependencies = [
  "char_index",
+ "hashbrown 0.17.1",
  "ndc_analysis",
  "ndc_core",
  "ndc_lexer",

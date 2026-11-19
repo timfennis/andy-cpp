@@ -1,7 +1,7 @@
 use super::{Object, Value};
 use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
-use crate::hash_map::HashMap;
+use crate::memo::MemoCache;
 use ndc_core::StaticType;
 use ndc_core::r#struct::StructInfo;
 use std::cell::RefCell;
@@ -19,7 +19,7 @@ pub enum Function {
     Native(Rc<NativeFunction>),
 
     Memoized {
-        cache: Rc<RefCell<HashMap<u64, Value>>>,
+        cache: Rc<RefCell<MemoCache>>,
         function: Rc<Self>,
     },
 
