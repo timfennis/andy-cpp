@@ -1,0 +1,3 @@
+// An invalid escape is reported as an invalid escape sequence.
+// expect-error: Invalid escape sequence
+let s = "\q";
