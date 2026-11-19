@@ -199,19 +199,17 @@ impl Vm {
             panic!("no call frames")
         }
 
+        let mut cursor = Cursor::load(self.frames.last().expect("must not be empty"));
         let result = loop {
-            let frame = self.frames.last_mut().expect("must not be empty");
-            let ip = frame.ip;
-            let span = frame.closure.prototype.body.span(ip);
-            let op = frame.closure.prototype.body.opcode(ip);
-            frame.ip += 1;
+            let op = cursor.code.body.opcode(cursor.ip);
+            cursor.ip += 1;
 
             #[cfg(feature = "trace")]
             if let Some(tracer) = &mut self.tracer {
                 tracer.on_instruction(&crate::tracer::InstructionContext {
-                    ip,
+                    ip: cursor.ip - 1,
                     opcode: op,
-                    span,
+                    span: cursor.span(),
                     source: self.source.as_deref(),
                 });
             }
@@ -231,7 +229,7 @@ impl Vm {
                     }
                     let returns = frame.returns.take();
                     if frame_pointer == 0 {
-                        return Err(VmError::new("Return at top level", span));
+                        return Err(VmError::new("Return at top level", cursor.span()));
                     }
                     self.stack.truncate(frame_pointer - 1);
                     self.frames.pop().expect("no frame to pop");
@@ -246,14 +244,14 @@ impl Vm {
                     if self.frames.len() == target_depth {
                         break Ok(());
                     }
+                    cursor = Cursor::load(self.frames.last().expect("a call has a caller"));
                 }
                 OpCode::Constant(idx) => {
                     let idx = *idx;
-                    self.stack
-                        .push(frame.closure.prototype.body.constant(idx).clone());
+                    self.stack.push(cursor.code.body.constant(idx).clone());
                 }
                 OpCode::MakeString(idx) => {
-                    let Value::Object(object) = frame.closure.prototype.body.constant(*idx) else {
+                    let Value::Object(object) = cursor.code.body.constant(*idx) else {
                         unreachable!("MakeString's constant is a string");
                     };
                     let Object::String(text) = object.as_ref() else {
@@ -267,7 +265,7 @@ impl Vm {
                         let value = self.stack.last().expect("stack underflow");
                         return Err(VmError::new(
                             format!("cannot cast {} to {target}", value.diagnostic_type()),
-                            span,
+                            cursor.span(),
                         ));
                     }
                 }
@@ -283,17 +281,17 @@ impl Vm {
                                 "cannot cast to {target}: the {kind} is also held by something else, \
                                  which would still expect what it held before"
                             ),
-                            span,
+                            cursor.span(),
                         ));
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
-                    self.stack.push(self.stack[frame.slot(slot)].clone());
+                    self.stack.push(self.stack[cursor.slot(slot)].clone());
                 }
                 OpCode::GetCell(slot) => {
-                    let value = &self.stack[frame.slot(*slot)];
+                    let value = &self.stack[cursor.slot(*slot)];
                     let value = match value.as_cell() {
                         Some(cell) => cell.borrow().clone(),
                         None => value.clone(),
@@ -301,7 +299,7 @@ impl Vm {
                     self.stack.push(value);
                 }
                 OpCode::SetCell(slot) => {
-                    let index = frame.slot(*slot);
+                    let index = cursor.slot(*slot);
                     let value = self.stack.pop().expect("stack underflow");
                     match self.stack[index].as_cell() {
                         Some(cell) => *cell.borrow_mut() = value,
@@ -309,7 +307,7 @@ impl Vm {
                     }
                 }
                 OpCode::NewCell(slot) => {
-                    let index = frame.slot(*slot);
+                    let index = cursor.slot(*slot);
                     let cell = Value::Cell(Rc::new(RefCell::new(Value::unit())));
                     if index < self.stack.len() {
                         self.stack[index] = cell;
@@ -329,8 +327,8 @@ impl Vm {
                 OpCode::SetLocal(slot) => {
                     let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
-                    if frame.slot(slot) < self.stack.len() {
-                        self.stack[frame.slot(slot)] = value;
+                    if cursor.slot(slot) < self.stack.len() {
+                        self.stack[cursor.slot(slot)] = value;
                     } else {
                         self.stack.push(value);
                     }
@@ -340,10 +338,10 @@ impl Vm {
                     let top = self.stack.last().expect("stack underflow");
                     match top {
                         Value::Bool(false) => {
-                            frame.ip = offset.apply(frame.ip);
+                            cursor.ip = offset.apply(cursor.ip);
                         }
                         Value::Bool(true) => {}
-                        value => return Err(VmError::new(not_a_bool(value), span)),
+                        value => return Err(VmError::new(not_a_bool(value), cursor.span())),
                     }
                 }
                 OpCode::JumpIfTrue(offset) => {
@@ -351,14 +349,14 @@ impl Vm {
                     let top = self.stack.last().expect("stack underflow");
                     match top {
                         Value::Bool(true) => {
-                            frame.ip = offset.apply(frame.ip);
+                            cursor.ip = offset.apply(cursor.ip);
                         }
                         Value::Bool(false) => {}
-                        value => return Err(VmError::new(not_a_bool(value), span)),
+                        value => return Err(VmError::new(not_a_bool(value), cursor.span())),
                     }
                 }
                 OpCode::Jump(offset) => {
-                    frame.ip = offset.apply(frame.ip);
+                    cursor.ip = offset.apply(cursor.ip);
                 }
                 OpCode::Pop => {
                     self.stack.pop();
@@ -367,10 +365,19 @@ impl Vm {
                     let args = *args;
                     let func = self
                         .resolve_callee(args)
-                        .map_err(|msg| VmError::new(msg, span))?;
-                    if let Err(mut e) = self.dispatch_call(func, args) {
-                        e.span.get_or_insert(span);
-                        return Err(e);
+                        .map_err(|msg| VmError::new(msg, cursor.span()))?;
+                    // The call may run other frames, which find where this
+                    // one called them by its `ip`.
+                    cursor.save(&mut self.frames);
+                    match self.dispatch_call(func, args) {
+                        Ok(Dispatch::FramePushed) => {
+                            cursor = Cursor::load(self.frames.last().expect("a frame was pushed"));
+                        }
+                        Ok(Dispatch::Completed) => {}
+                        Err(mut e) => {
+                            e.span.get_or_insert(cursor.span());
+                            return Err(e);
+                        }
                     }
                 }
                 OpCode::CallVec(args) => {
@@ -382,7 +389,7 @@ impl Vm {
                         callee => {
                             return Err(VmError::new(
                                 format!("Unable to invoke {} as a function.", callee.static_type()),
-                                span,
+                                cursor.span(),
                             ));
                         }
                     };
@@ -405,7 +412,7 @@ impl Vm {
                                 "Unable to invoke {} as a function.",
                                 callee.as_ref().static_type()
                             ),
-                            span,
+                            cursor.span(),
                         ));
                     };
                     let name = first.name();
@@ -416,9 +423,11 @@ impl Vm {
                                 "vec call '{}' requires tuple arguments of equal non-zero length",
                                 name.unwrap_or("?")
                             ),
-                            span,
+                            cursor.span(),
                         ));
                     };
+                    let span = cursor.span();
+                    cursor.save(&mut self.frames);
                     if let Err(mut e) = self.call_elementwise(args, axis_len, name, span, |i| {
                         at_position(i).cloned().ok_or_else(|| {
                             VmError::new(format!("no function for tuple position {i}"), span)
@@ -457,11 +466,13 @@ impl Vm {
                         .push(Value::Object(Rc::new(Object::map(map, default))));
                 }
                 OpCode::GetUpvalue(slot) => {
+                    let frame = self.frames.last().expect("no frame");
                     let value = frame.closure.upvalues[*slot].borrow().clone();
                     self.stack.push(value);
                 }
                 OpCode::SetUpvalue(slot) => {
                     let value = self.stack.pop().expect("stack underflow");
+                    let frame = self.frames.last().expect("no frame");
                     *frame.closure.upvalues[*slot].borrow_mut() = value;
                 }
                 OpCode::GetIterator => {
@@ -501,7 +512,7 @@ impl Vm {
                         None => {
                             return Err(VmError::new(
                                 format!("{} is not iterable", val.static_type()),
-                                span,
+                                cursor.span(),
                             ));
                         }
                     }
@@ -521,20 +532,19 @@ impl Vm {
                             self.stack.push(value);
                         }
                         None => {
-                            frame.ip = offset.apply(frame.ip);
+                            cursor.ip = offset.apply(cursor.ip);
                         }
                     }
                 }
                 OpCode::ListPush(slot) => {
                     let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
-                    let frame = self.frames.last().expect("no frame");
-                    let list_val = &self.stack[frame.slot(slot)];
+                    let list_val = &self.stack[cursor.slot(slot)];
                     let Value::Object(obj) = list_val else {
-                        return Err(VmError::new("ListPush expects a list", span));
+                        return Err(VmError::new("ListPush expects a list", cursor.span()));
                     };
                     let Object::List(rc) = &**obj else {
-                        return Err(VmError::new("ListPush expects a list", span));
+                        return Err(VmError::new("ListPush expects a list", cursor.span()));
                     };
                     rc.borrow_mut().push(value);
                 }
@@ -542,13 +552,12 @@ impl Vm {
                     let slot = *slot;
                     let value = self.stack.pop().expect("stack underflow");
                     let key = self.stack.pop().expect("stack underflow");
-                    let frame = self.frames.last().expect("no frame");
-                    let map_val = &self.stack[frame.slot(slot)];
+                    let map_val = &self.stack[cursor.slot(slot)];
                     let Value::Object(obj) = map_val else {
-                        return Err(VmError::new("MapInsert expects a map", span));
+                        return Err(VmError::new("MapInsert expects a map", cursor.span()));
                     };
                     let Object::Map { entries, .. } = &**obj else {
-                        return Err(VmError::new("MapInsert expects a map", span));
+                        return Err(VmError::new("MapInsert expects a map", cursor.span()));
                     };
                     entries.borrow_mut().insert(key, value);
                 }
@@ -557,7 +566,7 @@ impl Vm {
                     let end = if bounded {
                         let v = self.stack.pop().expect("stack underflow");
                         let Value::Int(n) = v else {
-                            return Err(VmError::new(bad_range_bound(&v), span));
+                            return Err(VmError::new(bad_range_bound(&v), cursor.span()));
                         };
                         Some(n)
                     } else {
@@ -565,7 +574,7 @@ impl Vm {
                     };
                     let start = self.stack.pop().expect("stack underflow");
                     let Value::Int(start) = start else {
-                        return Err(VmError::new(bad_range_bound(&start), span));
+                        return Err(VmError::new(bad_range_bound(&start), cursor.span()));
                     };
                     let iter: Rc<RefCell<dyn VmIterator>> = match (inclusive, end) {
                         (_, None) => Rc::new(RefCell::new(UnboundedRangeIter::new(start))),
@@ -580,23 +589,17 @@ impl Vm {
                     constant_idx: idx,
                     values,
                 } => {
-                    // Clone the Rc<[CaptureSource]> (just a refcount bump) and copy the index
-                    // so that `op`'s borrow of `self.frames` ends before we re-borrow the frame
-                    // and before `capture_local` needs `&mut self`.
                     let idx = *idx;
-                    let values = Rc::clone(values);
-                    let (compiled, frame_pointer) = {
-                        let frame = self.frames.last().expect("no frame");
-                        let Value::Object(obj) = frame.closure.prototype.body.constant(idx) else {
-                            panic!("Closure opcode: constant at index {idx} is not an Object");
-                        };
-                        let Object::Function(Function::Compiled(compiled)) = &**obj else {
-                            panic!(
-                                "Closure opcode: constant at index {idx} is not a Compiled function"
-                            );
-                        };
-                        (Rc::clone(compiled), frame.frame_pointer)
+                    let Value::Object(obj) = cursor.code.body.constant(idx) else {
+                        panic!("Closure opcode: constant at index {idx} is not an Object");
                     };
+                    let Object::Function(Function::Compiled(compiled)) = &**obj else {
+                        panic!(
+                            "Closure opcode: constant at index {idx} is not a Compiled function"
+                        );
+                    };
+                    let compiled = Rc::clone(compiled);
+                    let frame_pointer = cursor.frame_pointer;
                     // Share the cells of captured locals, moving a local into a new
                     // cell on its first capture, and the parent's own upvalues.
                     let upvalues = values
@@ -618,7 +621,7 @@ impl Vm {
                 }
                 OpCode::Unpack(size) => {
                     let size = *size;
-                    self.exec_unpack(size, span)?;
+                    self.exec_unpack(size, cursor.span())?;
                 }
                 // Wraps the function on top of the stack in a fresh memoization
                 // cache.  Emitted by the compiler for every `pure fn` declaration.
@@ -1036,7 +1039,39 @@ fn vec_element_at(arg: &Value, i: usize) -> Value {
     arg.clone()
 }
 
-impl CallFrame {
+/// Where [`Vm::run_to_depth`] is in the frame it runs: a copy of the top
+/// frame's code, instruction pointer and frame pointer, kept in locals so an
+/// instruction doesn't reach them through the frame stack. The frame's own
+/// `ip` falls behind while the frame runs, and is brought up to date with
+/// [`Cursor::save`] before anything that can run other frames.
+struct Cursor {
+    code: Rc<CompiledFunction>,
+    ip: usize,
+    frame_pointer: usize,
+}
+
+impl Cursor {
+    fn load(frame: &CallFrame) -> Self {
+        Self {
+            code: Rc::clone(&frame.closure.prototype),
+            ip: frame.ip,
+            frame_pointer: frame.frame_pointer,
+        }
+    }
+
+    /// Writes the instruction pointer back to the top frame, the one this
+    /// cursor was loaded from.
+    fn save(&self, frames: &mut [CallFrame]) {
+        frames.last_mut().expect("no frame").ip = self.ip;
+    }
+
+    /// The span of the instruction being run, the one before `ip`. Only
+    /// errors need one.
+    #[cold]
+    fn span(&self) -> Span {
+        self.code.body.span(self.ip - 1)
+    }
+
     #[inline(always)]
     fn slot(&self, local: usize) -> usize {
         self.frame_pointer + local
