@@ -1,0 +1,2 @@
+// expect-error: Unexpected 'else' without an 'if' before it
+for x in [1] { print(x); } else { print(0); }

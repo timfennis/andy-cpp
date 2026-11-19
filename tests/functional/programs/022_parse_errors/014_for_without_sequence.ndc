@@ -1,0 +1,2 @@
+// expect-error: Expected something to loop over between 'in' and the loop's block
+for x in { print(x); }

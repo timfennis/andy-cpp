@@ -1,0 +1,2 @@
+// expect-error: Expected a condition between 'if' and its block
+if { print(1); }

@@ -1,0 +1,2 @@
+// expect-error: Expected a condition between 'while' and its block
+while { print(1); }

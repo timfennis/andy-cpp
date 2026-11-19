@@ -1,0 +1,2 @@
+// expect-error: A number can't start with '.'
+let x = .5;

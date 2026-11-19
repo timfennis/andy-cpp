@@ -1,0 +1,2 @@
+// expect-error: Expected an expression after '=' but got ';' instead
+let x = ;

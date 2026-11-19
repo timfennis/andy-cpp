@@ -1,0 +1,3 @@
+// expect-error: Expected a name after '.' but the program ended
+let xs = [1];
+xs.
