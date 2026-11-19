@@ -799,28 +799,48 @@ fn the_test_programs_it_compiles() {
     assert!(compiled > 0);
 }
 
-/// A REPL line can't make new instances of a generic function an earlier
-/// line declared yet.
-#[test]
-fn instances_of_an_earlier_lines_function_are_errors() {
-    let mut interpreter = Interpreter::capturing();
+/// What running `lines` one after the other, as the REPL does, printed and
+/// gave, line by line.
+fn run_lines(backend: Backend, lines: &[&str]) -> Vec<Outcome> {
+    let mut interpreter = Interpreter::capturing().line_by_line();
     interpreter.configure(ndc_stdlib::register);
-    interpreter.set_backend(Backend::Register);
-    interpreter
-        .eval("fn inc(x) { x + 1 }")
-        .expect("a declaration");
-    let error = interpreter
-        .eval("inc(1)")
-        .expect_err("an instance of `inc`");
-    let InterpreterError::Compiler { cause } = error else {
-        panic!("a compile error: {error:?}");
-    };
-    assert!(
-        cause.to_string().contains(
-            "not yet supported on the register VM: a generic function declared by an earlier REPL line"
-        ),
-        "{cause}"
-    );
+    interpreter.set_backend(backend);
+    let mut printed = 0;
+    lines
+        .iter()
+        .map(|line| {
+            let result = match interpreter.eval(line) {
+                Ok(value) => Ok(value.to_string()),
+                Err(error) => Err(format!("{error:?}")),
+            };
+            let output = interpreter.get_output().expect("captured output");
+            let output = String::from_utf8(output[printed..].to_vec()).expect("output is UTF-8");
+            printed += output.len();
+            Outcome { output, result }
+        })
+        .collect()
+}
+
+/// A REPL line sees what earlier lines declared, and makes new instances
+/// of their generic functions.
+#[test]
+fn repl_lines() {
+    let lines = [
+        "fn inc(x) { x + 1 }",
+        "let total = inc(1);",
+        "print(inc(2.5), total)",
+        "pure fn twice(x) { print(\"once\"); x ++ x }",
+        "twice(\"a\") ++ twice(\"a\")",
+        "twice([1])",
+        "let xs = [];",
+        "xs.push(inc(total));",
+        "xs",
+    ];
+    let stack = run_lines(Backend::Stack, &lines);
+    let register = run_lines(Backend::Register, &lines);
+    assert_eq!(stack, register);
+    assert_eq!(register[2].output, "3.5 2\n");
+    assert_eq!(register[8].result, Ok("[3]".to_string()));
 }
 
 /// A map hashes a key by what it holds when the key goes in, and every key

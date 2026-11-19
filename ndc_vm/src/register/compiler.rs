@@ -11,7 +11,7 @@
 
 use super::chunk::{Builder, Label};
 use super::instr::{Instr, Reg, WINDOW};
-use crate::compiler::CompileError;
+use crate::compiler::{CompileError, DeclaredFunction, Session};
 use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function};
 use crate::{Natives, Value};
@@ -176,6 +176,9 @@ pub struct Compiler {
     /// without using its picks, so `fn f() => 42` in a generic body is one
     /// function across its instances and keeps its identity.
     prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
+    /// The functions the code compiled so far declared in globals, kept when
+    /// compiling a REPL line, whose later lines may need instances of them.
+    functions: Option<HashMap<NodeId, DeclaredFunction>>,
     /// The global slots of the natives the code reads or calls, shared with
     /// the compilers of the functions it declares, which the VM puts in its
     /// globals.
@@ -202,13 +205,53 @@ impl Compiler {
         analysis: Analysis,
         natives: &Natives,
     ) -> Result<CompiledFunction, CompileError> {
+        let mut compiler = Self::top_level(Rc::new(analysis), natives, Rc::default(), None);
+        compiler.compile_statements(expressions)?;
+        compiler.finish_program()
+    }
+
+    /// Compiles one line of a REPL session, `analysis` being what the
+    /// analyser worked out about it, and keeps in `session` what later lines
+    /// need, as [`crate::compiler::Compiler::compile_line`] does. The line
+    /// starts by storing the instances it made of earlier lines' functions.
+    pub fn compile_line(
+        expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
+        natives: &Natives,
+        session: &mut Session,
+    ) -> Result<CompiledFunction, CompileError> {
+        Rc::make_mut(&mut session.analysis).extend(analysis);
+        let mut compiler = Self::top_level(
+            Rc::clone(&session.analysis),
+            natives,
+            Rc::clone(&session.prototypes),
+            Some(std::mem::take(&mut session.functions)),
+        );
+        let result = compiler
+            .compile_earlier_instances()
+            .and_then(|()| compiler.compile_statements(expressions));
+        session.functions = compiler.functions.take().unwrap_or_default();
+        result?;
+        compiler.finish_program()
+    }
+
+    /// A compiler for code run at the top level, which `analysis` is about.
+    /// `functions` keeps the functions it declares in globals, for a REPL
+    /// line, whose later lines may make instances of them.
+    fn top_level(
+        analysis: Rc<Analysis>,
+        natives: &Natives,
+        prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
+        functions: Option<HashMap<NodeId, DeclaredFunction>>,
+    ) -> Self {
         let locals = analysis.top_level_frame_size;
-        let mut compiler = Self {
+        Self {
             builder: Builder::default(),
-            analysis: Rc::new(analysis),
+            analysis,
             instance: None,
             used_instance: Cell::new(false),
-            prototypes: Rc::default(),
+            prototypes,
+            functions,
             natives: Rc::default(),
             native_ops: natives.ops(),
             compiled_instances: HashSet::default(),
@@ -216,7 +259,51 @@ impl Compiler {
             next_temp: locals,
             frame_size: locals,
             loops: Vec::new(),
-        };
+        }
+    }
+
+    /// Stores the instances the line made of functions earlier lines
+    /// declared, each its function's body compiled with the instance's
+    /// picks, as [`Self::compile_function_declaration`] stores a function's
+    /// own.
+    fn compile_earlier_instances(&mut self) -> Result<(), CompileError> {
+        let analysis = Rc::clone(&self.analysis);
+        let earlier = analysis
+            .instances
+            .iter()
+            .filter_map(|(declaration, instances)| {
+                let function = self.functions.as_ref()?.get(declaration)?;
+                Some((*declaration, function.clone(), instances))
+            })
+            .collect::<Vec<_>>();
+        for (declaration, function, instances) in earlier {
+            for (index, instance) in instances.iter().enumerate() {
+                let at = InstanceAt { declaration, index };
+                let (body, _) = self.compile_function_body(
+                    declaration,
+                    function.name.clone(),
+                    function.body.clone(),
+                    Some(at),
+                )?;
+                self.store_function(
+                    Rc::new(body),
+                    &[],
+                    function.pure,
+                    instance.variable,
+                    function.span,
+                )?;
+            }
+            self.compiled_instances.insert(declaration);
+        }
+        Ok(())
+    }
+
+    /// Compiles the program's `expressions`, then `Halt` with the value of
+    /// the last one that isn't a `;`-statement.
+    fn compile_statements(
+        &mut self,
+        expressions: impl Iterator<Item = ExpressionLocation>,
+    ) -> Result<(), CompileError> {
         let expressions = expressions.collect::<Vec<_>>();
         // The program's value is its last expression's that isn't a
         // `;`-statement, kept in a register of its own while the statements
@@ -224,36 +311,39 @@ impl Compiler {
         let last_value = expressions
             .iter()
             .rposition(|expression| !matches!(expression.expression, Expression::Statement(_)));
-        let result = compiler.alloc_temp(Span::synthetic())?;
+        let result = self.alloc_temp(Span::synthetic())?;
         for (index, expression) in expressions.into_iter().enumerate() {
             let dest = if Some(index) == last_value {
                 Dest::Reg(result)
             } else {
                 Dest::Discard
             };
-            compiler.compile_expr(expression, dest)?;
+            self.compile_expr(expression, dest)?;
         }
         if last_value.is_none() {
-            compiler.emit(Instr::LoadUnit { dst: result }, Span::synthetic());
+            self.emit(Instr::LoadUnit { dst: result }, Span::synthetic());
         }
-        compiler.emit(Instr::Halt { src: result }, Span::synthetic());
+        self.emit(Instr::Halt { src: result }, Span::synthetic());
+        Ok(())
+    }
 
-        if compiler
+    /// The program compiled so far, as a function the register VM runs at
+    /// the top level.
+    fn finish_program(self) -> Result<CompiledFunction, CompileError> {
+        // Only `compile_line` makes instances of functions declared before
+        // the code it compiles.
+        if self
             .analysis
             .instances
             .keys()
-            .any(|declaration| !compiler.compiled_instances.contains(declaration))
+            .any(|declaration| !self.compiled_instances.contains(declaration))
         {
-            return Err(CompileError::not_yet_supported(
-                "a generic function declared by an earlier REPL line",
-                Span::synthetic(),
-            ));
+            return Err(CompileError::uncompiled_instances());
         }
-
-        let mut natives = compiler.natives.take().into_iter().collect::<Vec<_>>();
+        let mut natives = self.natives.take().into_iter().collect::<Vec<_>>();
         natives.sort_unstable();
-        let num_globals = compiler.analysis.global_count;
-        Ok(compiler.finish(
+        let num_globals = self.analysis.global_count;
+        Ok(self.finish(
             None,
             StaticType::Function {
                 parameters: Some(vec![]),
@@ -274,6 +364,7 @@ impl Compiler {
             instance,
             used_instance: Cell::new(false),
             prototypes: Rc::clone(&self.prototypes),
+            functions: None,
             natives: Rc::clone(&self.natives),
             native_ops: Rc::clone(&self.native_ops),
             compiled_instances: HashSet::default(),
@@ -2021,6 +2112,19 @@ impl Compiler {
         span: Span,
     ) -> Result<Operand, CompileError> {
         let analysis = Rc::clone(&self.analysis);
+        // A later REPL line may make instances of a function in a global.
+        if let Some(functions) = &mut self.functions
+            && self.instance.is_none()
+            && let Some(ResolvedVar::Global { .. }) = analysis.variable(id)
+        {
+            let declared = DeclaredFunction {
+                name: name.clone(),
+                body: body.clone(),
+                pure,
+                span,
+            };
+            functions.insert(id, declared);
+        }
         if let Some(instances) = analysis.instances.get(&id) {
             for (index, instance) in instances.iter().enumerate() {
                 let at = InstanceAt {
