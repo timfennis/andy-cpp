@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.1](https://github.com/timfennis/andy-cpp/compare/v0.4.0...v0.4.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* hash with fixed seeds so every run iterates maps the same way 🌱 ([#468](https://github.com/timfennis/andy-cpp/issues/468)) ([808f87c](https://github.com/timfennis/andy-cpp/commit/808f87c0d23c8f94f85e3bf519739b6b61fe0859))
+* **layout:** list each function's instances in the order they were made 🎲 ([#467](https://github.com/timfennis/andy-cpp/issues/467)) ([46320da](https://github.com/timfennis/andy-cpp/commit/46320da9a59c2cc368220b16acb920ad5b0bba12))
+
 ## [0.4.0](https://github.com/timfennis/andy-cpp/compare/v0.3.0...v0.4.0) (2026-11-19)
 
 
