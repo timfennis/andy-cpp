@@ -888,7 +888,7 @@ impl Compiler {
     /// Emit the call of `intrinsic` named at `site` with `arguments`, in
     /// place of the call. The tuple index takes its index, a number written
     /// in the code, as the instruction's operand: `t[1]` is `t`, then
-    /// `TupleIndex(1)`.
+    /// `TupleIndex(1)`, or `GetLocalTupleIndex` when `t` is a local.
     fn compile_intrinsic_call(
         &mut self,
         intrinsic: Intrinsic,
@@ -902,8 +902,17 @@ impl Compiler {
             let index = index
                 .integer_literal()
                 .expect("internal error: the analyser picks the tuple index for a number written in the code");
-            self.compile_expr(tuple)?;
-            self.ir.write(OpCode::TupleIndex(index), span);
+            if let Expression::Identifier { .. } = tuple.expression
+                && let Binding::Resolved(Candidate::Scalar(Callee::Var(ResolvedVar::Local {
+                    slot,
+                }))) = self.binding(tuple.id)
+            {
+                self.ir
+                    .write(OpCode::GetLocalTupleIndex { slot, index }, span);
+            } else {
+                self.compile_expr(tuple)?;
+                self.ir.write(OpCode::TupleIndex(index), span);
+            }
             return Ok(());
         }
         for argument in arguments {

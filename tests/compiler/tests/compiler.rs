@@ -1113,6 +1113,18 @@ fn a_literal_index_of_a_tuple_is_read_in_place() {
     );
 }
 
+// fn f(t: (Int, Int)) { t[1] }
+//
+// A local tuple's element is read straight from its slot, in one
+// instruction.
+#[test]
+fn a_literal_index_of_a_local_tuple_is_one_instruction() {
+    assert_eq!(
+        compile_nested_function_with_stdlib("fn f(t: (Int, Int)) { t[-1] }", &[0]),
+        [GetLocalTupleIndex { slot: 0, index: -1 }, Return],
+    );
+}
+
 // let t = (1, "a"); t[-1]
 //
 // A negative index is the operand too, counted from the end when it runs.

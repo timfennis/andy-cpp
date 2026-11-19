@@ -296,6 +296,12 @@ impl Vm {
                         Err(message) => return Err(VmError::new(message, span)),
                     }
                 }
+                OpCode::GetLocalTupleIndex { slot, index } => {
+                    match tuple_element(&self.stack[frame.slot(*slot)], *index) {
+                        Ok(element) => self.stack.push(element),
+                        Err(message) => return Err(VmError::new(message, span)),
+                    }
+                }
                 OpCode::AddInt => run_native_op(&mut self.stack, NativeOp::AddInt, span)?,
                 OpCode::SubInt => run_native_op(&mut self.stack, NativeOp::SubInt, span)?,
                 OpCode::MulInt => run_native_op(&mut self.stack, NativeOp::MulInt, span)?,
