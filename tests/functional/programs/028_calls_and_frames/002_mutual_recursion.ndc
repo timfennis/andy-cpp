@@ -1,0 +1,19 @@
+// Two functions that call each other, the first through a variable assigned
+// once the second exists, take turns a few thousand calls deep.
+// expect-output: true false true
+// expect-output: 111
+
+let is_odd = fn(n: Int) -> Bool { false };
+fn is_even(n: Int) -> Bool {
+    if n == 0 { true } else { is_odd(n - 1) }
+}
+is_odd = fn(n: Int) -> Bool { if n == 0 { false } else { is_even(n - 1) } };
+print(is_even(3000), is_even(3001), is_odd(2001));
+
+fn collatz_steps(n: Int) -> Int {
+    let even_step = fn(m: Int) -> Int { 0 };
+    let odd_step = fn(m: Int) -> Int { if m == 1 { 0 } else { 1 + even_step(3 * m + 1) } };
+    even_step = fn(m: Int) -> Int { if m % 2 == 1 { odd_step(m) } else { 1 + even_step(m / 2) } };
+    even_step(n)
+}
+print(collatz_steps(27));

@@ -1,0 +1,13 @@
+// Assigning a list of three to two variables fails at the whole assignment,
+// before either variable is assigned. Declarations of the wrong length are
+// `006_lists/071_destructuring_a_list_of_the_wrong_length_in_a_function_fails.ndc`.
+// The expected error ends with the span, which counts bytes from the start of
+// this file.
+fn unpack(xs: [Int]) -> Int {
+    let a = 0;
+    let b = 0;
+    a, b = xs;
+    a + b
+}
+print(unpack([1, 2, 3]));
+// expect-error: message: "cannot unpack a list of length 3 into 2 variables", span: Some(Span { source_id: SourceId(0), offset: 395, length: 9 })

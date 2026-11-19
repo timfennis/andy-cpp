@@ -1,0 +1,54 @@
+// `x = x + x` reads `x` twice and writes the result back to it. The same for
+// a global, a local, a captured local and an upvalue, and for an operator
+// that's an instruction and one that's a call.
+// expect-output: 6
+// expect-output: (36,2.25,4,"abab")
+// expect-output: 6
+// expect-output: 12
+// expect-output: (true,false)
+
+let g = 3;
+g = g + g;
+print(g);
+
+fn local() {
+    let x = 3;
+    x = x + x;
+    x = x * x;
+    x = -x;
+    x = x - x * 2;
+    let f = 1.5;
+    f = f * f;
+    let p = 2;
+    p = p ^ p;
+    let s = "ab";
+    s = s ++ s;
+    (x, f, p, s)
+}
+print(local());
+
+fn cell() {
+    let x = 3;
+    let read = fn() { x };
+    x = x + x;
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let x = 3;
+    let double = fn() { x = x + x; };
+    double();
+    double();
+    x
+}
+print(upvalue());
+
+fn compare() {
+    let b = true;
+    b = b == b;
+    let n = 1;
+    let m = n < n;
+    (b, m)
+}
+print(compare());

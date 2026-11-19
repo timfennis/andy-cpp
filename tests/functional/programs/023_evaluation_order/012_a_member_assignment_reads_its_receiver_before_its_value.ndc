@@ -1,0 +1,47 @@
+// `p.v = value` reads `p` before the value runs: a value that assigns `p`
+// doesn't move the write, which goes to the struct that was in `p`.
+// expect-output: P {v: 99} P {v: 2}
+// expect-output: (P {v: 99},P {v: 2})
+// expect-output: (P {v: 99},P {v: 2})
+// expect-output: (P {v: 99},P {v: 2})
+// expect-output: P {v: 6}
+
+struct P { v: Int }
+
+let g = P(1);
+let g_old = g;
+g.v = { g = P(2); 99 };
+print(g_old, g);
+
+fn local() {
+    let p = P(1);
+    let old = p;
+    p.v = { p = P(2); 99 };
+    (old, p)
+}
+print(local());
+
+fn cell() {
+    let p = P(1);
+    let old = p;
+    let read = fn() { p };
+    p.v = { p = P(2); 99 };
+    (old, read())
+}
+print(cell());
+
+fn upvalue() {
+    let p = P(1);
+    let old = p;
+    let write = fn() { p.v = { p = P(2); 99 }; };
+    write();
+    (old, p)
+}
+print(upvalue());
+
+fn field_written_by_value() {
+    let p = P(1);
+    p.v = { p.v = 5; p.v + 1 };
+    p
+}
+print(field_written_by_value());

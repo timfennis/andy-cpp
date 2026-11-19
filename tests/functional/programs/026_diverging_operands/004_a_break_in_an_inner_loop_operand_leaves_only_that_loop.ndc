@@ -1,0 +1,22 @@
+// A `break` in an operand inside an inner loop leaves the inner loop only:
+// the outer loop goes on with its next element.
+// expect-output: [[(0,0,0)],[(1,0,0)],[(2,0,0)]]
+// expect-output: [1,2,10,12,20,21]
+
+let rows = [];
+for i in 0..3 {
+    let row = [];
+    for j in 0..3 {
+        row.push((i, j, if j == 1 { break } else { j }));
+    }
+    rows.push(row);
+}
+print(rows);
+
+let skipped = [];
+for i in 0..3 {
+    for j in 0..3 {
+        skipped.push(i * 10 + if j == i { continue } else { j });
+    }
+}
+print(skipped);

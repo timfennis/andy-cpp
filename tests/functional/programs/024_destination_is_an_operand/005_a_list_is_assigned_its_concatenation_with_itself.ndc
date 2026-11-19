@@ -1,0 +1,49 @@
+// `xs = xs ++ xs` makes a new list of the elements twice and writes it to
+// `xs`; another variable that held the list keeps the old one.
+// `s = s ++ s` does the same for a string.
+// expect-output: [1,2,1,2] [1,2]
+// expect-output: ([1,2,1,2,3],[1,2],"abab","ab")
+// expect-output: [1,2,1,2]
+// expect-output: ([1,2,1,2],[1,2])
+// expect-output: [1,2,1,2] [1,2]
+
+let g = [1, 2];
+let g_alias = g;
+g = g ++ g;
+print(g, g_alias);
+
+fn local() {
+    let xs = [1, 2];
+    let alias = xs;
+    xs = xs ++ xs;
+    xs.push(3);
+    let s = "ab";
+    let s_alias = s;
+    s = s ++ s;
+    (xs, alias, s, s_alias)
+}
+print(local());
+
+fn cell() {
+    let xs = [1, 2];
+    let read = fn() { xs };
+    xs = xs ++ xs;
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let xs = [1, 2];
+    let alias = xs;
+    let double = fn() { xs = xs ++ xs; };
+    double();
+    (xs, alias)
+}
+print(upvalue());
+
+fn parameter(xs) {
+    xs = xs ++ xs;
+    xs
+}
+let p = [1, 2];
+print(parameter(p), p);

@@ -1,0 +1,9 @@
+// An Int overflow in the second argument of a call stops the program before
+// the call, at the operator that overflowed. The expected error ends with the
+// span, which counts bytes from the start of this file.
+fn pair(a: Int, b: Int) -> (Int, Int) { (a, b) }
+fn make(big: Int) -> (Int, Int) {
+    pair(1, big * 2)
+}
+print(make(9223372036854775807));
+// expect-error: message: "integer operation overflowed or is undefined: 9223372036854775807 * 2", span: Some(Span { source_id: SourceId(0), offset: 312, length: 1 })

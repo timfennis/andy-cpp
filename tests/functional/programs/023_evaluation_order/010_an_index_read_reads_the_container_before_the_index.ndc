@@ -1,0 +1,65 @@
+// `xs[i]` reads `xs` before the index runs, so an index that assigns `xs`
+// still indexes the list that was there. An index read as an operand is read
+// when the operator gets to it: in `xs[i] + xs[{ i = 2; i }] + xs[i]` the
+// first `xs[i]` reads index 0 and the last index 2. A tuple read at an index
+// written in the code is read in place, and the same holds for it.
+// expect-output: 10 [7,8,9]
+// expect-output: (10,25)
+// expect-output: (10,[7,8,9])
+// expect-output: (10,[7,8,9])
+// expect-output: 11
+// expect-output: (11,80,(3,4))
+// expect-output: 101
+// expect-output: ab
+
+let g = [10, 20, 30];
+print(g[{ g = [7, 8, 9]; 0 }], g);
+
+fn local() {
+    let xs = [10, 20, 30];
+    let first = xs[{ xs = [7, 8, 9]; 0 }];
+    let i = 0;
+    let sum = xs[i] + xs[{ i = 2; i }] + xs[i];
+    (first, sum)
+}
+print(local());
+
+fn cell() {
+    let xs = [10, 20, 30];
+    let read = fn() { xs };
+    (xs[{ xs = [7, 8, 9]; 0 }], read())
+}
+print(cell());
+
+fn upvalue() {
+    let xs = [10, 20, 30];
+    let get = fn() { xs[{ xs = [7, 8, 9]; 0 }] };
+    (get(), xs)
+}
+print(upvalue());
+
+fn element_changed() {
+    let xs = [10, 20, 30];
+    xs[0] + { xs[0] = 1; xs[0] }
+}
+print(element_changed());
+
+fn tuple() {
+    let t = (1, 2);
+    let a = t[0] + { t = (10, 20); t[0] };
+    let b = t[1] * { t = (3, 4); t[1] };
+    (a, b, t)
+}
+print(tuple());
+
+fn maps() {
+    let m = %{"a": 1};
+    m["a"] + { m = %{"a": 100}; m["a"] }
+}
+print(maps());
+
+fn strings() {
+    let s = "abc";
+    s[0] ++ s[{ s = "xyz"; 1 }]
+}
+print(strings());

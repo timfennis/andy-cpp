@@ -1,0 +1,61 @@
+// `xs = [xs, xs]` and `t = (t, t)` make a collection of what the variable
+// held, then write it to the variable. A list put in twice is one list:
+// a change to it shows in both places.
+// expect-output: ((1,2),(1,2))
+// expect-output: [[1,2],[1,2]]
+// expect-output: (((1,2),(1,2)),3)
+// expect-output: %{1: 1}
+// expect-output: ((1,2),(1,2))
+// expect-output: ((1,2),(1,2))
+// expect-output: 2
+
+let g: Any = (1, 2);
+g = (g, g);
+print(g);
+
+fn lists() {
+    let inner = [1];
+    let xs: Any = inner;
+    xs = [xs, xs];
+    inner.push(2);
+    xs
+}
+print(lists());
+
+fn tuples() {
+    let t: Any = (1, 2);
+    t = (t, t);
+    t = (t, 3);
+    t
+}
+print(tuples());
+
+fn maps() {
+    let m: Any = 1;
+    m = %{m: m};
+    m
+}
+print(maps());
+
+fn cell() {
+    let t: Any = (1, 2);
+    let read = fn() { t };
+    t = (t, t);
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let t: Any = (1, 2);
+    let wrap = fn() { t = (t, t); };
+    wrap();
+    t
+}
+print(upvalue());
+
+fn holds_itself() {
+    let xs: [Any] = [1];
+    xs.push(xs);
+    xs.len()
+}
+print(holds_itself());

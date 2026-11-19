@@ -1,0 +1,38 @@
+// An index op-assignment whose value runs another index op-assignment, on
+// the same list or another one, keeps the target it read first: each writes
+// to its own element, and the outer one's result is made from the element as
+// it was before the inner one ran.
+// expect-output: ([26,2],[10,25])
+// expect-output: [102,2]
+// expect-output: ([21,20],1)
+// expect-output: [("a",13),("b",12)]
+
+fn other_list() {
+    let xs = [1, 2];
+    let ys = [10, 20];
+    xs[0] += { ys[1] += 5; ys[1] };
+    (xs, ys)
+}
+print(other_list());
+
+fn same_element() {
+    let xs = [1, 2];
+    xs[0] += { xs[0] += 100; xs[0] };
+    xs
+}
+print(same_element());
+
+fn other_element() {
+    let xs = [1, 2];
+    let i = 0;
+    xs[i] += { xs[{ i = 1; i }] *= 10; xs[i] };
+    (xs, i)
+}
+print(other_element());
+
+fn fields() {
+    let m = %{"a": 1, "b": 2};
+    m["a"] += { m["b"] += { m["a"] += 1000; 10 }; m["b"] };
+    m.sorted
+}
+print(fields());

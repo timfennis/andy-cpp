@@ -1,0 +1,20 @@
+// A comprehension whose element calls the function the comprehension is in
+// builds its own list: the call's comprehension doesn't add to it. The same
+// for a comprehension in a callback that a comprehension calls.
+// expect-output: ["0","10","2010","30102010"]
+// expect-output: [0,102,204]
+// expect-output: [[1,2],[2,4]]
+// expect-output: [(0,[]),(1,[(0,1)]),(2,[(0,2),(1,2)])]
+
+fn tree(n: Int) -> [String] {
+    [string(i) <> tree(i).join("") for i in 0..n]
+}
+print(tree(4));
+
+fn sizes(n: Int) -> [Int] {
+    [x + sizes(x).len() * 100 for x in 0..n, if x % 2 == 0]
+}
+print(sizes(5));
+
+print([[y * x for y in [1, 2].map(fn(v) { [v for v in 0..v].len() })] for x in 1..3]);
+print(%{k: %{v: k for v in 0..k}.sorted for k in 0..3}.sorted);

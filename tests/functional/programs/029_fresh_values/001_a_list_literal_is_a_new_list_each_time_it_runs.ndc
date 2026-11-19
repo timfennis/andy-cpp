@@ -1,0 +1,60 @@
+// A list or map literal makes a new list or map each time it runs: changing
+// the one an iteration made doesn't change the next one, in a `for` or
+// `while` loop, a comprehension, a function called twice, or a closure.
+// Strings are `003_string/002_a_string_literal_is_a_new_string_each_time.ndc`.
+// expect-output: [0] %{0: 0} ([0,0],1)
+// expect-output: [1] %{1: 1} ([0,1],1)
+// expect-output: [2] %{2: 2} ([0,2],1)
+// expect-output: [1,0]
+// expect-output: [1,1]
+// expect-output: [[1],[],[]]
+// expect-output: [[0,9],[1]]
+// expect-output: [1,2] [1,2]
+// expect-output: [0,1] [0]
+// expect-output: [[1],[],[]]
+
+for i in 0..3 {
+    let xs = [];
+    xs.push(i);
+    let m = %{};
+    m[i] = i;
+    let t = ([0], 1);
+    t[0].push(i);
+    print(xs, m, t);
+}
+
+let n = 0;
+while n < 2 {
+    let xs = [1];
+    xs.push(n);
+    print(xs);
+    n += 1;
+}
+
+let made = [[] for i in 0..3];
+made[0].push(1);
+print(made);
+
+let lists = [[i] for i in 0..2];
+lists[0].push(9);
+print(lists);
+
+fn fresh() -> [Int] {
+    let xs = [1];
+    xs.push(2);
+    xs
+}
+print(fresh(), fresh());
+
+let make = fn() { [0] };
+let a = make();
+let b = make();
+a.push(1);
+print(a, b);
+
+let filled = [];
+for i in 0..3 {
+    filled.push([]);
+}
+filled[0].push(1);
+print(filled);

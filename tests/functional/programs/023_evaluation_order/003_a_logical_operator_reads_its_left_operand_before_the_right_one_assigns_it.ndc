@@ -1,0 +1,40 @@
+// `and` and `or` decide on the left operand as it was read, and give the
+// right operand's value when they run it, even if it assigned the left one.
+// expect-output: false false
+// expect-output: (true,false,false,true)
+// expect-output: (true,true)
+// expect-output: (false,false)
+// expect-output: (false,false)
+
+let g = true;
+print(g and { g = false; g }, g);
+
+fn local() {
+    let b = true;
+    let both = b and { b = false; true };
+    let c = false;
+    let either = c or { c = true; false };
+    (both, b, either, c)
+}
+print(local());
+
+fn cell() {
+    let b = false;
+    let read = fn() { b };
+    (b or { b = true; b }, read())
+}
+print(cell());
+
+fn upvalue() {
+    let b = true;
+    let check = fn() { b and { b = false; b } };
+    (check(), b)
+}
+print(upvalue());
+
+fn skipped() {
+    let b = false;
+    let r = b and { b = true; true };
+    (r, b)
+}
+print(skipped());

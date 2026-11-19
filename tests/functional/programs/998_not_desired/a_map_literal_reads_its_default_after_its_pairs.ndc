@@ -1,0 +1,11 @@
+// The default of a map literal is written first, `%{:default, key: value}`,
+// but read after all the pairs, so a pair that assigns a variable the default
+// reads changes the default. Everything else is read in the order it's
+// written, so this looks wrong: the default should be 1 here.
+// expect-output: 5 5
+fn default() {
+    let x = 1;
+    let m = %{:x, x: { x = 5; x }};
+    print(m[1], m[100]);
+}
+default();
