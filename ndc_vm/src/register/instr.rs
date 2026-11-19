@@ -60,6 +60,29 @@ pub enum Instr {
     GetGlobal { dst: Reg, slot: u32 },
     /// `globals[slot] = src`, leaving `None` in `src`.
     SetGlobal { slot: u32, src: Reg },
+    /// `dst` = the value of the local in register `src`, which closures
+    /// capture: what its cell holds once a closure captured it, and before
+    /// that, what the register holds.
+    GetCell { dst: Reg, src: Reg },
+    /// Writes `src` to the local in register `cell`, which closures capture:
+    /// into its cell once a closure captured it, and before that, into the
+    /// register. Leaves `None` in `src`.
+    SetCell { cell: Reg, src: Reg },
+    /// `reg` = a new cell holding unit, for a function that captures itself
+    /// and needs its cell before its value exists.
+    NewCell { reg: Reg },
+    /// `dst` = what the running closure's captured variable `index` holds.
+    GetUpvalue { dst: Reg, index: u16 },
+    /// Writes `src` to the running closure's captured variable `index`,
+    /// leaving `None` in `src`.
+    SetUpvalue { index: u16, src: Reg },
+    /// `dst` = a closure of the chunk's closure `index`: its function, over
+    /// what it captures. A local it captures moves into a cell on its first
+    /// capture, which takes its place in the register.
+    Closure { dst: Reg, index: u32 },
+    /// Puts the function in `reg` in a memoising wrapper with a new cache:
+    /// a `pure fn`.
+    Memoize { reg: Reg },
     /// [`NativeOp::AddInt`]: `dst = left + right`.
     AddInt { dst: Reg, left: Reg, right: Reg },
     /// [`NativeOp::SubInt`]: `dst = left - right`.
@@ -269,6 +292,13 @@ impl Instr {
             Self::Move { .. } => "Move",
             Self::GetGlobal { .. } => "GetGlobal",
             Self::SetGlobal { .. } => "SetGlobal",
+            Self::GetCell { .. } => "GetCell",
+            Self::SetCell { .. } => "SetCell",
+            Self::NewCell { .. } => "NewCell",
+            Self::GetUpvalue { .. } => "GetUpvalue",
+            Self::SetUpvalue { .. } => "SetUpvalue",
+            Self::Closure { .. } => "Closure",
+            Self::Memoize { .. } => "Memoize",
             Self::AddInt { .. } => "AddInt",
             Self::SubInt { .. } => "SubInt",
             Self::MulInt { .. } => "MulInt",
@@ -413,8 +443,9 @@ pub const FAR: i16 = i16::MIN;
 
 /// The operands as the disassembler prints them, without the name:
 /// `r2, r0, r1` for `AddInt { dst: r2, left: r0, right: r1 }`. A
-/// constant is `k3`, a global `g12`, a native `n25`, and a jump's
-/// offset is signed: `+4`.
+/// constant is `k3`, a global `g12`, a native `n25`, one of the chunk's
+/// closures `c0`, a closure's captured variable `u1`, and a jump's offset is
+/// signed: `+4`.
 impl fmt::Display for Instr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
@@ -424,9 +455,15 @@ impl fmt::Display for Instr {
             | Self::Move { dst, src }
             | Self::NegInt { dst, src }
             | Self::NegFloat { dst, src }
-            | Self::Not { dst, src } => write!(f, "{dst}, {src}"),
+            | Self::Not { dst, src }
+            | Self::GetCell { dst, src } => write!(f, "{dst}, {src}"),
             Self::GetGlobal { dst, slot } => write!(f, "{dst}, g{slot}"),
             Self::SetGlobal { slot, src } => write!(f, "g{slot}, {src}"),
+            Self::SetCell { cell, src } => write!(f, "{cell}, {src}"),
+            Self::NewCell { reg } | Self::Memoize { reg } => write!(f, "{reg}"),
+            Self::GetUpvalue { dst, index } => write!(f, "{dst}, u{index}"),
+            Self::SetUpvalue { index, src } => write!(f, "u{index}, {src}"),
+            Self::Closure { dst, index } => write!(f, "{dst}, c{index}"),
             Self::AddInt { dst, left, right }
             | Self::SubInt { dst, left, right }
             | Self::MulInt { dst, left, right }

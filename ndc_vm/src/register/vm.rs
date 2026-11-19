@@ -1,15 +1,17 @@
-use super::chunk::far_target;
+use super::chunk::{ClosureCode, far_target};
 use super::instr::{FAR, Instr, Reg, WINDOW};
 use crate::error::VmError;
 use crate::native_op::NativeOp;
-use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
+use crate::value::{ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::vm::{
     MAX_CALL_DEPTH, MemoCache, calls_too_deep, convert_returned, memo_key, not_a_bool,
     refused_arguments,
 };
 use crate::{Object, Value, Vm};
+use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A running call of register code. Its registers are
@@ -18,11 +20,16 @@ use std::rc::Rc;
 /// caller's argument registers are the callee's parameters.
 pub(crate) struct Frame {
     function: Rc<CompiledFunction>,
+    /// The closure called, if the function is one, whose upvalues are the
+    /// cells of the variables it captures. The closure itself rather than a
+    /// copy of its upvalues, which keeps frames small and calls cheap.
+    closure: Option<Rc<Object>>,
     /// The next instruction to run, kept here only while another frame runs
-    /// or the inner loop is left.
-    ip: usize,
+    /// or the inner loop is left. This and `base` are `u32`s, which keeps a
+    /// frame to 32 bytes: calls take measurably longer with bigger frames.
+    ip: u32,
     /// The index in the stack of the frame's first register.
-    base: usize,
+    base: u32,
     /// What the call does with what it returns besides giving it to the
     /// caller, for the few calls that do something: boxed, so that frames
     /// stay small.
@@ -44,9 +51,19 @@ impl Frame {
     pub(crate) fn top_level(function: Rc<CompiledFunction>) -> Self {
         Self {
             function,
+            closure: None,
             ip: 0,
             base: 0,
             on_return: None,
+        }
+    }
+
+    /// The cells of the variables the function captures, if it's a
+    /// closure.
+    fn upvalues(&self) -> &[Rc<RefCell<Value>>] {
+        match self.closure.as_deref() {
+            Some(Object::Function(Function::Closure(closure))) => &closure.upvalues,
+            _ => &[],
         }
     }
 }
@@ -96,8 +113,8 @@ impl Vm {
             let chunk = &frame.function.registers;
             let code = chunk.code();
             let constants = chunk.constants();
-            let base = frame.base;
-            let mut ip = frame.ip;
+            let base = frame.base as usize;
+            let mut ip = frame.ip as usize;
             let regs: &mut [Value; WINDOW] = (&mut self.stack[base..base + WINDOW])
                 .try_into()
                 .expect("internal error: the stack reaches a window past every frame");
@@ -483,6 +500,34 @@ impl Vm {
                             Err(error) => break Exit::Error(error),
                         }
                     }
+                    Instr::GetCell { dst, src } => {
+                        regs[dst.index()] = match &regs[src.index()] {
+                            Value::Cell(cell) => cell.borrow().clone(),
+                            value => value.clone(),
+                        };
+                    }
+                    Instr::SetCell { cell, src } => {
+                        let value = std::mem::replace(&mut regs[src.index()], Value::None);
+                        match &regs[cell.index()] {
+                            Value::Cell(cell) => *cell.borrow_mut() = value,
+                            _ => regs[cell.index()] = value,
+                        }
+                    }
+                    Instr::NewCell { reg } => {
+                        regs[reg.index()] = Value::Cell(Rc::new(RefCell::new(Value::unit())));
+                    }
+                    Instr::GetUpvalue { dst, index } => {
+                        regs[dst.index()] = frame.upvalues()[usize::from(index)].borrow().clone();
+                    }
+                    Instr::SetUpvalue { index, src } => {
+                        *frame.upvalues()[usize::from(index)].borrow_mut() =
+                            std::mem::replace(&mut regs[src.index()], Value::None);
+                    }
+                    Instr::Closure { dst, index } => {
+                        regs[dst.index()] =
+                            make_closure(&chunk.closures()[index as usize], regs, frame.upvalues());
+                    }
+                    Instr::Memoize { reg } => memoize(&mut regs[reg.index()]),
                     Instr::MakeTuple { dst, base, len } => {
                         let elements =
                             take_all(&mut regs[base.index()..base.index() + usize::from(len)]);
@@ -498,8 +543,8 @@ impl Vm {
                 .register_frames
                 .last_mut()
                 .expect("internal error: a running VM has a frame");
-            frame.ip = ip;
-            let base = frame.base;
+            frame.ip = ip as u32;
+            let base = frame.base as usize;
             let result = match exit {
                 Exit::Call { base: callee, args } => {
                     self.call_register(base + callee.index(), usize::from(args))
@@ -539,7 +584,7 @@ impl Vm {
                     .expect("internal error: a running VM has a frame");
                 error
                     .span
-                    .get_or_insert_with(|| frame.function.registers.span(frame.ip - 1));
+                    .get_or_insert_with(|| frame.function.registers.span(frame.ip as usize - 1));
                 return Err(error);
             }
         }
@@ -579,10 +624,16 @@ impl Vm {
     fn call_register(&mut self, callee: usize, args: usize) -> Result<(), VmError> {
         let function = match &self.stack[callee] {
             Value::Object(object) => match object.as_ref() {
-                // The usual call, of a function that captures nothing.
+                // The usual calls, which the frame takes the function of
+                // without copying anything.
                 Object::Function(Function::Compiled(function)) => {
                     let function = Rc::clone(function);
-                    return self.enter_register_frame(function, callee, None);
+                    return self.enter_register_frame(function, None, callee, None);
+                }
+                Object::Function(Function::Closure(closure)) => {
+                    let function = Rc::clone(&closure.prototype);
+                    let closure = Some(Rc::clone(object));
+                    return self.enter_register_frame(function, closure, callee, None);
                 }
                 Object::Function(function) => function.clone(),
                 other => return Err(unable_to_invoke(&other.static_type())),
@@ -603,10 +654,12 @@ impl Vm {
         memo: Option<MemoCache>,
     ) -> Result<(), VmError> {
         match function {
-            Function::Compiled(function) => self.enter_register_frame(function, callee, memo),
-            Function::Closure(_) => Err(VmError::native(
-                "not yet supported on the register VM: calling a closure",
-            )),
+            Function::Compiled(function) => self.enter_register_frame(function, None, callee, memo),
+            Function::Closure(closure) => {
+                let function = Rc::clone(&closure.prototype);
+                let closure = Rc::new(Object::Function(Function::Closure(closure)));
+                self.enter_register_frame(function, Some(closure), callee, memo)
+            }
             Function::Native(native) => {
                 let value = self.run_native_in_registers(&native, callee + 1, args)?;
                 if let Some((cache, key)) = memo {
@@ -670,12 +723,13 @@ impl Vm {
         convert_returned(&mut self.stack[callee], &return_type).map_err(VmError::native)
     }
 
-    /// Pushes the frame of a call of `function`, whose callee register is
-    /// `callee`, an index in the stack: its parameters are the registers
-    /// after it.
+    /// Pushes the frame of a call of `function`, which `closure` is a
+    /// closure of if it's one, whose callee register is `callee`, an index
+    /// in the stack: its parameters are the registers after it.
     fn enter_register_frame(
         &mut self,
         function: Rc<CompiledFunction>,
+        closure: Option<Rc<Object>>,
         callee: usize,
         memo: Option<MemoCache>,
     ) -> Result<(), VmError> {
@@ -690,13 +744,19 @@ impl Vm {
             return Err(calls_too_deep());
         }
         let base = callee + 1;
+        // More registers than a `u32` counts would take more memory than a
+        // machine has, deep in a recursion.
+        let Ok(first) = u32::try_from(base) else {
+            return Err(calls_too_deep());
+        };
         if self.stack.len() < base + WINDOW {
             self.stack.resize(base + WINDOW, Value::None);
         }
         self.register_frames.push(Frame {
             function,
+            closure,
             ip: 0,
-            base,
+            base: first,
             on_return: memo.map(|memo| {
                 Box::new(OnReturn {
                     memo: Some(memo),
@@ -757,7 +817,7 @@ impl Vm {
             .register_frames
             .last()
             .expect("internal error: a native runs in a frame");
-        let callee = top.base + top.function.frame_size;
+        let callee = top.base as usize + top.function.frame_size;
         let end = callee + 1 + args.len();
         if self.stack.len() < end {
             self.stack.resize(end, Value::None);
@@ -781,6 +841,55 @@ impl Vm {
         result?;
         Ok(std::mem::replace(&mut self.stack[callee], Value::None))
     }
+}
+
+/// A closure of `code`, made in a frame whose registers are `regs` and
+/// which is a closure over `upvalues`: it shares the cells of the locals it
+/// captures, moving a local into a new cell on its first capture, and its
+/// maker's own captured variables.
+fn make_closure(
+    code: &ClosureCode,
+    regs: &mut [Value; WINDOW],
+    upvalues: &[Rc<RefCell<Value>>],
+) -> Value {
+    let upvalues = code
+        .captures
+        .iter()
+        .map(|capture| match *capture {
+            CaptureSource::Local(slot) => capture_local(&mut regs[slot]),
+            CaptureSource::Upvalue(index) => Rc::clone(&upvalues[index]),
+        })
+        .collect();
+    Value::function(Function::Closure(ClosureFunction {
+        prototype: Rc::clone(&code.function),
+        upvalues,
+    }))
+}
+
+/// The cell a closure shares with the local in `register`. On the first
+/// capture the local's value moves into a new cell, which takes its place,
+/// so the frame and every closure see one variable.
+fn capture_local(register: &mut Value) -> Rc<RefCell<Value>> {
+    if let Value::Cell(cell) = register {
+        return Rc::clone(cell);
+    }
+    let cell = Rc::new(RefCell::new(std::mem::replace(register, Value::None)));
+    *register = Value::Cell(Rc::clone(&cell));
+    cell
+}
+
+/// Puts the function in `register` in a memoising wrapper with a new cache.
+fn memoize(register: &mut Value) {
+    let Value::Object(object) = register else {
+        unreachable!("internal error: Memoize's register holds a function");
+    };
+    let Object::Function(function) = object.as_ref() else {
+        unreachable!("internal error: Memoize's register holds a function");
+    };
+    *register = Value::function(Function::Memoized {
+        cache: Rc::default(),
+        function: Rc::new(function.clone()),
+    });
 }
 
 /// The values of `registers`, which are `None` afterwards.
@@ -1227,6 +1336,188 @@ mod tests {
             "expected the function to return String but it returned Int"
         );
         assert_eq!(error.span, Some(span));
+    }
+
+    /// A captured local is its register's value until a closure captures
+    /// it, and its cell's after; reading or writing it into its own
+    /// register leaves it as it was.
+    #[test]
+    fn a_captured_local_before_and_after_it_has_a_cell() {
+        let function = program(5, vec![], |b| {
+            load_int(b, Reg(0), 5);
+            emit(
+                b,
+                Instr::GetCell {
+                    dst: Reg(1),
+                    src: Reg(0),
+                },
+            );
+            load_int(b, Reg(2), 7);
+            emit(
+                b,
+                Instr::SetCell {
+                    cell: Reg(0),
+                    src: Reg(2),
+                },
+            );
+            emit(
+                b,
+                Instr::GetCell {
+                    dst: Reg(2),
+                    src: Reg(0),
+                },
+            );
+            emit(
+                b,
+                Instr::GetCell {
+                    dst: Reg(0),
+                    src: Reg(0),
+                },
+            );
+            emit(b, Instr::NewCell { reg: Reg(3) });
+            load_int(b, Reg(4), 9);
+            emit(
+                b,
+                Instr::SetCell {
+                    cell: Reg(3),
+                    src: Reg(4),
+                },
+            );
+            emit(
+                b,
+                Instr::SetCell {
+                    cell: Reg(3),
+                    src: Reg(3),
+                },
+            );
+            emit(
+                b,
+                Instr::GetCell {
+                    dst: Reg(3),
+                    src: Reg(3),
+                },
+            );
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    len: 4,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        assert_eq!(
+            run(&Natives::default(), function).unwrap(),
+            tuple(&[7, 5, 7, 9])
+        );
+    }
+
+    /// A closure shares the cell of the local it captures with the frame
+    /// that made it, even when it's made in the local's own register.
+    #[test]
+    fn a_closure_shares_the_local_it_captures() {
+        // `fn() { n = n + 1; n }`, over `n`.
+        let increment = Rc::new(program(1, vec![], |b| {
+            emit(
+                b,
+                Instr::GetUpvalue {
+                    dst: Reg(0),
+                    index: 0,
+                },
+            );
+            emit(
+                b,
+                Instr::AddIntI {
+                    dst: Reg(0),
+                    left: Reg(0),
+                    imm: 1,
+                },
+            );
+            emit(
+                b,
+                Instr::SetUpvalue {
+                    index: 0,
+                    src: Reg(0),
+                },
+            );
+            emit(
+                b,
+                Instr::GetUpvalue {
+                    dst: Reg(0),
+                    index: 0,
+                },
+            );
+            emit(b, Instr::Return { src: Reg(0) });
+        }));
+        // r0 is `n`, r1 the first closure, r2 to r4 the results, and r5
+        // where the calls are.
+        let call = |b: &mut Builder, closure: Reg, result: Reg| {
+            emit(
+                b,
+                Instr::Copy {
+                    dst: Reg(5),
+                    src: closure,
+                },
+            );
+            emit(
+                b,
+                Instr::Call {
+                    base: Reg(5),
+                    args: 0,
+                },
+            );
+            emit(
+                b,
+                Instr::Move {
+                    dst: result,
+                    src: Reg(5),
+                },
+            );
+        };
+        let function = program(6, vec![], |b| {
+            let index = b.closure(Rc::clone(&increment), &[CaptureSource::Local(0)]);
+            load_int(b, Reg(0), 1);
+            emit(b, Instr::Closure { dst: Reg(1), index });
+            call(b, Reg(1), Reg(2));
+            // A closure made in the register of the local it captures: the
+            // register holds the closure, and the closure the cell.
+            emit(b, Instr::Closure { dst: Reg(0), index });
+            call(b, Reg(0), Reg(3));
+            call(b, Reg(1), Reg(4));
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(2),
+                    len: 3,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        assert_eq!(
+            run(&Natives::default(), function).unwrap(),
+            tuple(&[2, 3, 4])
+        );
+    }
+
+    #[test]
+    fn memoize_wraps_the_function_in_its_register() {
+        let function = program(2, vec![], |b| {
+            let k = b.constant(function_value(double()));
+            emit(b, Instr::LoadK { dst: Reg(0), k });
+            emit(b, Instr::Memoize { reg: Reg(0) });
+            load_int(b, Reg(1), 4);
+            emit(
+                b,
+                Instr::Call {
+                    base: Reg(0),
+                    args: 1,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        assert_eq!(run(&Natives::default(), function).unwrap(), Value::Int(8));
     }
 
     #[test]
