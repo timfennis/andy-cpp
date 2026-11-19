@@ -109,6 +109,9 @@ fn math_benches(c: &mut Criterion) {
 }
 fn directory_benches(c: &mut Criterion) {
     let mut group = c.benchmark_group("programs");
+    // Each program runs for a few hundred milliseconds, so the default of
+    // 100 samples would take minutes per program.
+    group.sample_size(10);
     let dir = Path::new("../benches/programs/");
     let mut names = Vec::new();
     match fs::read_dir(dir) {

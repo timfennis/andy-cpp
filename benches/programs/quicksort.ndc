@@ -111,7 +111,7 @@ let arr = [
 ];
 
 let result = [];
-for _ in 0..200 {
+for _ in 0..1000 {
   result = quicksort(arr);
 };
 print(result);
