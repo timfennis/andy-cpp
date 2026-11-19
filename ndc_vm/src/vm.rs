@@ -17,10 +17,23 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::rc::Rc;
 
+/// Runs compiled code: stack code on a value stack, or register code (see
+/// [`crate::register`]) on a register stack, which a VM made for register
+/// code holds instead. The natives that take a VM are given this one, so a
+/// native that calls back into the program, as `map` does, runs the
+/// callback on the same VM, whichever code the program was compiled to.
 pub struct Vm {
-    stack: Vec<Value>,
-    globals: Vec<Value>,
+    /// The stack VM's value stack, or the register VM's registers: every
+    /// running call's frame, one above the other, with
+    /// [`crate::register::WINDOW`] values past the top frame's first
+    /// register.
+    pub(crate) stack: Vec<Value>,
+    pub(crate) globals: Vec<Value>,
     frames: Vec<CallFrame>,
+    /// The register VM's running calls, empty for stack code.
+    pub(crate) register_frames: Vec<crate::register::Frame>,
+    /// What the program's last expression gave, once register code halts.
+    pub(crate) result: Value,
     /// Output sink for `print`, `dbg`, and similar I/O built-ins.
     output: OutputSink,
     /// Input source for `read_stdin`.
@@ -31,7 +44,9 @@ pub struct Vm {
     tracer: Option<Box<dyn crate::tracer::VmTracer>>,
 }
 
-type MemoCache = (Rc<RefCell<HashMap<u64, Value>>>, u64);
+/// The cache of a memoised function's results, and the key of the call
+/// whose result goes in it when the call returns.
+pub(crate) type MemoCache = (Rc<RefCell<HashMap<u64, Value>>>, u64);
 
 /// What a dispatched call left behind. Callees split into two kinds: compiled
 /// functions and closures push a frame that still has to be executed, while
@@ -107,18 +122,11 @@ impl Vm {
         }
         fill_natives(&mut globals, natives, &function);
         let mut vm = Self {
-            stack: Vec::with_capacity(256),
+            stack: Vec::new(),
             globals,
-            frames: vec![CallFrame {
-                closure: ClosureFunction {
-                    prototype: Rc::new(function),
-                    upvalues: Vec::new(),
-                },
-                ip: 0,
-                frame_pointer: 0,
-                memo: None,
-                returns: None,
-            }],
+            frames: Vec::new(),
+            register_frames: Vec::new(),
+            result: Value::unit(),
             output: OutputSink::Stdout,
             input: InputSource::Stdin,
             #[cfg(feature = "trace")]
@@ -126,26 +134,27 @@ impl Vm {
             #[cfg(feature = "trace")]
             tracer: None,
         };
+        if function.is_register_code() {
+            vm.stack = vec![Value::None; crate::register::WINDOW];
+            vm.register_frames
+                .push(crate::register::Frame::top_level(Rc::new(function)));
+            return vm;
+        }
+        vm.stack = Vec::with_capacity(256);
+        vm.frames.push(CallFrame {
+            closure: ClosureFunction {
+                prototype: Rc::new(function),
+                upvalues: Vec::new(),
+            },
+            ip: 0,
+            frame_pointer: 0,
+            memo: None,
+            returns: None,
+        });
         for _ in 0..num_locals {
             vm.stack.push(Value::unit());
         }
         vm
-    }
-
-    /// A VM that runs no code, which the register VM gives the natives that
-    /// take a VM, for its output and input: `print` writes to its output.
-    pub(crate) fn host() -> Self {
-        Self {
-            stack: Vec::new(),
-            globals: Vec::new(),
-            frames: Vec::new(),
-            output: OutputSink::Stdout,
-            input: InputSource::Stdin,
-            #[cfg(feature = "trace")]
-            source: None,
-            #[cfg(feature = "trace")]
-            tracer: None,
-        }
     }
 
     /// Replace the output sink used by I/O built-ins (e.g. `print`, `dbg`).
@@ -205,7 +214,15 @@ impl Vm {
     }
 
     pub fn run(&mut self) -> Result<(), VmError> {
+        if self.runs_registers() {
+            return self.run_registers(0);
+        }
         self.run_to_depth(0)
+    }
+
+    /// Whether the VM runs register code.
+    fn runs_registers(&self) -> bool {
+        !self.register_frames.is_empty()
     }
 
     /// Run the VM until the frame stack drops back to `target_depth`.
@@ -282,10 +299,7 @@ impl Vm {
                 OpCode::CheckType(target) => {
                     if !convert_top(&mut self.stack, target) {
                         let value = self.stack.last().expect("stack underflow");
-                        return Err(VmError::new(
-                            format!("cannot cast {} to {target}", value.diagnostic_type()),
-                            span,
-                        ));
+                        return Err(VmError::new(cannot_cast(value, target), span));
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
@@ -414,58 +428,10 @@ impl Vm {
                 }
                 OpCode::CallVec(args) => {
                     let args = *args;
-                    // The analyser picked the function for each position: one
-                    // for all of them, or a tuple with one for each.
-                    let callee = match &self.stack[self.stack.len() - args - 1] {
-                        Value::Object(obj) => Rc::clone(obj),
-                        callee => {
-                            return Err(VmError::new(
-                                format!("Unable to invoke {} as a function.", callee.static_type()),
-                                span,
-                            ));
-                        }
-                    };
-                    let at_position = |i: usize| -> Option<&Function> {
-                        match callee.as_ref() {
-                            Object::Function(f) => Some(f),
-                            Object::Tuple(overloads) => match overloads.get(i)? {
-                                Value::Object(obj) => match obj.as_ref() {
-                                    Object::Function(f) => Some(f),
-                                    _ => None,
-                                },
-                                _ => None,
-                            },
-                            _ => None,
-                        }
-                    };
-                    let Some(first) = at_position(0) else {
-                        return Err(VmError::new(
-                            format!(
-                                "Unable to invoke {} as a function.",
-                                callee.as_ref().static_type()
-                            ),
-                            span,
-                        ));
-                    };
-                    let name = first.name();
-                    let Some(axis_len) = vec_axis_len(&self.stack[self.stack.len() - args..])
-                    else {
-                        return Err(VmError::new(
-                            format!(
-                                "vec call '{}' requires tuple arguments of equal non-zero length",
-                                name.unwrap_or("?")
-                            ),
-                            span,
-                        ));
-                    };
-                    if let Err(mut e) = self.call_elementwise(args, axis_len, name, span, |i| {
-                        at_position(i).cloned().ok_or_else(|| {
-                            VmError::new(format!("no function for tuple position {i}"), span)
-                        })
-                    }) {
-                        e.span.get_or_insert(span);
-                        return Err(e);
-                    }
+                    let arguments = self.stack.split_off(self.stack.len() - args);
+                    let callee = self.stack.pop().expect("stack underflow");
+                    let result = self.call_vec(&callee, &arguments, span)?;
+                    self.stack.push(result);
                 }
                 OpCode::MakeList(size) => {
                     let size = *size;
@@ -715,14 +681,7 @@ impl Vm {
         // the cache once the call finishes.
         if let Function::Memoized { cache, function } = func {
             let start = self.stack.len() - args;
-            let mut hasher = hasher();
-            // Arguments `==` calls equal share a result: a `pure fn` takes
-            // only values it compares by what they are, which hash alike when
-            // they're equal.
-            for arg in &self.stack[start..] {
-                arg.hash(&mut hasher);
-            }
-            let key = hasher.finish();
+            let key = memo_key(&self.stack[start..]);
 
             if let Some(cached) = cache.borrow().get(&key).cloned() {
                 // Cache hit: discard the callee slot and arguments, push result.
@@ -756,14 +715,7 @@ impl Vm {
         // does, as `fn(Any) -> Int` would of a function taking an Int.
         let arguments = &self.stack[self.stack.len() - args..];
         if !function.conforms_value_args(arguments) {
-            return Err(VmError::native(format!(
-                "the function doesn't take the arguments ({})",
-                arguments
-                    .iter()
-                    .map(|argument| argument.diagnostic_type().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )));
+            return Err(refused_arguments(arguments));
         }
         match self.dispatch_call(Rc::unwrap_or_clone(function), args)? {
             Dispatch::FramePushed => {
@@ -870,15 +822,8 @@ impl Vm {
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
     pub fn call_callback(&mut self, func: Function, args: &[Value]) -> Result<Value, VmError> {
-        // A native the register VM calls gets a VM that can't run the
-        // program's functions, which have no stack code.
-        if func
-            .prototype()
-            .is_some_and(|prototype| prototype.is_register_code())
-        {
-            return Err(VmError::native(
-                "not yet supported on the register VM: a native calling back into the program",
-            ));
+        if self.runs_registers() {
+            return self.register_callback(func, args);
         }
         if let Function::Native(native) = func {
             match &native.func {
@@ -901,7 +846,11 @@ impl Vm {
     /// If the last top-level expression was a statement (semicolon-terminated)
     /// its value was already popped, so the stack is exactly `num_locals` deep
     /// and this returns `Value::unit()`.
+    /// For register code, it's the value `Halt` gave.
     pub fn last_value(&self, num_locals: usize) -> Value {
+        if self.runs_registers() {
+            return self.result.clone();
+        }
         if self.stack.len() > num_locals {
             self.stack.last().cloned().unwrap_or_else(Value::unit)
         } else {
@@ -933,31 +882,62 @@ impl Vm {
         }
     }
 
-    /// Calls the function `pick` gives for each element position of the
-    /// tuple arguments on the stack, and replaces the callee and arguments
-    /// with the tuple of the results: `(1, 2) + (3, 4)` is `(1 + 3, 2 + 4)`.
-    fn call_elementwise(
+    /// Calls `callee`, an operator the analyser picked for each element
+    /// position of the tuples among `arguments`, element by element, and
+    /// returns the tuple of the results: `(1, 2) + (3, 4)` is
+    /// `(1 + 3, 2 + 4)`. The callee is one function for every position, or
+    /// a tuple of one for each. An argument that isn't a tuple is used at
+    /// every position: `(1, 2) * 3` is `(3, 6)`. An error is at `span`, the
+    /// call's, unless it has a place of its own.
+    pub(crate) fn call_vec(
         &mut self,
-        args: usize,
-        axis_len: usize,
-        callee_name: Option<&str>,
+        callee: &Value,
+        arguments: &[Value],
         span: Span,
-        pick: impl Fn(usize) -> Result<Function, VmError>,
-    ) -> Result<(), VmError> {
-        // Materialise the broadcast arguments up front so the inner
-        // call_callback can hold &mut self without conflicting with stack
-        // borrows. Element values clone Rcs only.
-        let arg_values: Vec<Value> = self.stack.split_off(self.stack.len() - args);
-        self.stack.pop(); // discard the callee slot
+    ) -> Result<Value, VmError> {
+        let unable = |callee: StaticType| {
+            VmError::new(format!("Unable to invoke {callee} as a function."), span)
+        };
+        let Value::Object(callee) = callee else {
+            return Err(unable(callee.static_type()));
+        };
+        let at_position = |i: usize| -> Option<&Function> {
+            match callee.as_ref() {
+                Object::Function(f) => Some(f),
+                Object::Tuple(overloads) => match overloads.get(i)? {
+                    Value::Object(obj) => match obj.as_ref() {
+                        Object::Function(f) => Some(f),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            }
+        };
+        let Some(first) = at_position(0) else {
+            return Err(unable(callee.as_ref().static_type()));
+        };
+        let name = first.name();
+        let Some(axis_len) = vec_axis_len(arguments) else {
+            return Err(VmError::new(
+                format!(
+                    "vec call '{}' requires tuple arguments of equal non-zero length",
+                    name.unwrap_or("?")
+                ),
+                span,
+            ));
+        };
 
-        let mut elem_args: Vec<Value> = Vec::with_capacity(args);
+        let mut elem_args: Vec<Value> = Vec::with_capacity(arguments.len());
         let mut results: Vec<Value> = Vec::with_capacity(axis_len);
         for i in 0..axis_len {
             elem_args.clear();
-            elem_args.extend(arg_values.iter().map(|arg| vec_element_at(arg, i)));
-            let scalar = pick(i)?;
+            elem_args.extend(arguments.iter().map(|arg| vec_element_at(arg, i)));
+            let scalar = at_position(i)
+                .cloned()
+                .ok_or_else(|| VmError::new(format!("no function for tuple position {i}"), span))?;
             let result = self.call_callback(scalar, &elem_args).map_err(|mut e| {
-                let prefix = match callee_name {
+                let prefix = match name {
                     Some(name) => format!("while vectorising '{name}' at index {i}: "),
                     None => format!("while vectorising at index {i}: "),
                 };
@@ -967,10 +947,7 @@ impl Vm {
             })?;
             results.push(result);
         }
-
-        self.stack
-            .push(Value::Object(Rc::new(Object::Tuple(results))));
-        Ok(())
+        Ok(Value::Object(Rc::new(Object::Tuple(results))))
     }
 
     /// Pops a value from the stack and pushes `size` unpacked elements back.
@@ -1110,6 +1087,17 @@ impl Vm {
     }
 }
 
+/// The key a memoised function's result for `arguments` is cached under.
+/// Arguments `==` calls equal share a result: a `pure fn` takes only values
+/// it compares by what they are, which hash alike when they're equal.
+pub(crate) fn memo_key(arguments: &[Value]) -> u64 {
+    let mut hasher = hasher();
+    for argument in arguments {
+        argument.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 /// Find the broadcast-axis length for a vec call: the shared length of every
 /// tuple-shaped argument. Empty tuples and length mismatches return `None`,
 /// which `CallVec` reports as an error.
@@ -1178,6 +1166,20 @@ pub(crate) fn calls_too_deep() -> VmError {
     ))
 }
 
+/// What a call of a [`Function::Checked`] fails with when the function it
+/// checks doesn't take `arguments`.
+#[cold]
+pub(crate) fn refused_arguments(arguments: &[Value]) -> VmError {
+    VmError::native(format!(
+        "the function doesn't take the arguments ({})",
+        arguments
+            .iter()
+            .map(|argument| argument.diagnostic_type().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
 /// The analyser makes a condition a `Bool`; this is what a VM that's given
 /// something else says.
 #[cold]
@@ -1200,13 +1202,19 @@ fn bad_range_bound(value: &Value) -> String {
 /// one.
 #[cold]
 fn try_cast(stack: &mut [Value], target: &StaticType) {
-    let value = stack.last_mut().expect("stack underflow");
+    try_cast_value(stack.last_mut().expect("stack underflow"), target);
+}
+
+/// Replaces `value` with `Some` of it, made the `target` as
+/// [`Value::converted_to`] does, or with `None` when it isn't one.
+#[cold]
+pub(crate) fn try_cast_value(value: &mut Value, target: &StaticType) {
     *value = Value::option(value.converted_to(target));
 }
 
 /// The element of `tuple` at `index`, counting a negative index from the
 /// end: `-1` is the last element.
-fn tuple_element(tuple: &Value, index: i64) -> Result<Value, String> {
+pub(crate) fn tuple_element(tuple: &Value, index: i64) -> Result<Value, String> {
     if let Value::Object(object) = tuple
         && let Object::Tuple(elements) = object.as_ref()
     {
@@ -1231,11 +1239,16 @@ fn tuple_index_out_of_bounds(index: i64, length: usize) -> String {
     format!("index {index} is out of bounds for a tuple of {length} element{plural}")
 }
 
-/// Checks that the value on top of `stack` is a `target`, and makes it one:
-/// a function that may be a function `target` gets its calls checked (see
-/// [`Value::converted_to`]).
+/// Checks that the value on top of `stack` is a `target`, and makes it one,
+/// as [`convert`] does.
 fn convert_top(stack: &mut [Value], target: &StaticType) -> bool {
-    let value = stack.last_mut().expect("stack underflow");
+    convert(stack.last_mut().expect("stack underflow"), target)
+}
+
+/// Checks that `value` is a `target`, and makes it one: a function that may
+/// be a function `target` gets its calls checked (see
+/// [`Value::converted_to`]).
+pub(crate) fn convert(value: &mut Value, target: &StaticType) -> bool {
     if !matches!(target, StaticType::Function { .. }) {
         return value.conforms_to(target);
     }
@@ -1249,17 +1262,28 @@ fn convert_top(stack: &mut [Value], target: &StaticType) -> bool {
 }
 
 /// Checks that the result of a call of a [`Function::Checked`], on top of
-/// `stack`, is a `returns`, and makes it one, as [`convert_top`] does: a
-/// function it returns may get its own calls checked.
+/// `stack`, is a `returns`, and makes it one, as [`convert_returned`] does.
 fn convert_result(stack: &mut [Value], returns: &StaticType) -> Result<(), String> {
-    if convert_top(stack, returns) {
+    convert_returned(stack.last_mut().expect("a call leaves its result"), returns)
+}
+
+/// Checks that `returned`, the result of a call of a [`Function::Checked`],
+/// is a `returns`, and makes it one, as [`convert`] does: a function it
+/// returns may get its own calls checked.
+pub(crate) fn convert_returned(returned: &mut Value, returns: &StaticType) -> Result<(), String> {
+    if convert(returned, returns) {
         return Ok(());
     }
-    let returned = stack.last().expect("a call leaves its result");
     Err(format!(
         "expected the function to return {returns} but it returned {}",
         returned.diagnostic_type()
     ))
+}
+
+/// What a cast of `value` that fails says: `cannot cast String to Int`.
+#[cold]
+pub(crate) fn cannot_cast(value: &Value, target: &StaticType) -> String {
+    format!("cannot cast {} to {target}", value.diagnostic_type())
 }
 
 /// Runs the native function `f`, which doesn't take the VM, with the `args`
