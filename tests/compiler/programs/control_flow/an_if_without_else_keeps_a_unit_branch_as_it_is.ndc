@@ -1,0 +1,4 @@
+// A branch that's already `()` needs no extra ops: nothing drops its value for
+// another `()`.
+// compile: analysed
+if true { () }

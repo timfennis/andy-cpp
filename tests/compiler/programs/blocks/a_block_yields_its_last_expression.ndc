@@ -1,0 +1,3 @@
+// A block yields its last expression: `{ 5 }` pushes its `5` and nothing else.
+// compile: parsed
+{ 5 }

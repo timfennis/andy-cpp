@@ -1,0 +1,3 @@
+// A proven optional cast is always `Some`, which a `TryCast` to `Any` makes.
+// compile: analysed
+cast?::<Int>(1)

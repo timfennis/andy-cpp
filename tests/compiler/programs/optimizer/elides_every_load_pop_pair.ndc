@@ -1,0 +1,5 @@
+// `{ 1; 2; 3; }` is three discarded statements followed by the block's unit
+// result. Every `Load; Pop` pair is elided; only the trailing block result
+// remains. Exercises the peephole loop catching multiple pairs.
+// compile: parsed, parsed optimized
+{ 1; 2; 3; }

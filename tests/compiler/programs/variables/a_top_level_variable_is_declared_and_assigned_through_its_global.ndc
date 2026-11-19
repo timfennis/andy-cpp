@@ -1,0 +1,7 @@
+// A top-level declaration is a global: `a` is the program's first, `g0`, after
+// the language's intrinsics `cast`, `cast?` and the tuple index. The
+// declaration stores 1 into it with `SetGlobal`, and the assignment overwrites
+// it the same way; each pushes `()` as its value, which the statement pops.
+// compile: analysed
+let a = 1;
+a = 5;

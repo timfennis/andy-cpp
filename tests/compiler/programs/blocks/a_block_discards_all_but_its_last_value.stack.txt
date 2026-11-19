@@ -1,0 +1,5 @@
+== <script> (locals: 0, globals: 0) ==
+0000  Constant(0)                          5
+0001  Pop
+0002  Constant(1)                          6
+0003  Halt

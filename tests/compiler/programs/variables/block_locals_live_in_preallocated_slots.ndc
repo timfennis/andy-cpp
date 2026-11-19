@@ -1,0 +1,5 @@
+// Block locals live in slots of the frame, allocated up front, so the block
+// stores and reads them with `SetLocal` and `GetLocal` and cleans nothing up
+// when it ends.
+// compile: analysed
+{ let a = 1; let b = 2; a }

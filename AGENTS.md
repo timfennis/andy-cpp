@@ -25,7 +25,7 @@ For the VS Code extension:
 Follow standard Rust formatting and run `cargo fmt --all` before submitting changes. Use 4-space indentation, `snake_case` for functions/modules/files, `PascalCase` for types, and keep crate names prefixed with `ndc_` for language components. Prefer small, focused modules over large multi-purpose files. In the extension, keep TypeScript files under `src/` and rely on the existing `eslint` setup.
 
 ## Testing Guidelines
-Add language behavior tests as `.ndc` programs under `tests/programs/<category>/` using the existing numeric prefixes such as `001_addition.ndc`. Encode expectations inline with `// expect-output:` or `// expect-error:` comments. Add compiler bytecode assertions to `compiler_tests/tests/compiler.rs` for VM-level changes. Run `cargo test --workspace` before opening a PR.
+Add language behavior tests as `.ndc` programs under `tests/programs/<category>/` using the existing numeric prefixes such as `001_addition.ndc`. Encode expectations inline with `// expect-output:` or `// expect-error:` comments. For VM-level changes, add a program under `tests/compiler/programs/<topic>/` with a `// compile:` directive; its expected disassembly is the `.stack.txt` file next to it, which `BLESS=1 cargo test -p compiler_tests` writes (review the diff). Run `cargo test --workspace` before opening a PR.
 
 ## Commit & Pull Request Guidelines
 Use Conventional Commit subjects for commits and pull request titles: `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, and `chore`. Scopes are optional. When a scope helps, prefer a crate or subsystem such as `lexer`, `parser`, `vm`, `compiler`, or `lsp`, for example `fix(parser): handle trailing commas`.

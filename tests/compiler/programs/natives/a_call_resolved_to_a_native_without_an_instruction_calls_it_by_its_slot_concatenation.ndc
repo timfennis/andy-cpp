@@ -1,0 +1,4 @@
+// A native the VM has no instruction for is called by its global slot
+// (`CallNative`), with no callee under its arguments, and no `GetGlobal`.
+// compile: stdlib
+"a" ++ "b";

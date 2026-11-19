@@ -1,0 +1,5 @@
+// A regular function call (not operator syntax) never compiles to `CallVec`,
+// even when the argument is a tuple: vec dispatch is gated to operator syntax
+// via the `OperatorCall` AST variant. `id((1, 2, 3))` is a `Call(1)`.
+// compile: stdlib optimized
+fn id(x) { x }; id((1, 2, 3))

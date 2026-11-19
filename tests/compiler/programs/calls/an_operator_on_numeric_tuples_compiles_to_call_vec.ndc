@@ -1,0 +1,5 @@
+// The analyser pins this to a single scalar `+(Int, Int)` overload broadcast
+// across two positions, so the call compiles to a `CallVec(2)` that applies it
+// per position at runtime.
+// compile: stdlib optimized
+(1, 2) + (3, 4)

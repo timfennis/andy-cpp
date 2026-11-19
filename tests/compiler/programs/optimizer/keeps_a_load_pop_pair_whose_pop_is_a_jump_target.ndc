@@ -1,0 +1,7 @@
+// When the left operand is false, `JumpIfFalse` jumps straight to the
+// statement's `Pop`, which then discards that operand. The `Pop` follows the
+// load of the right operand, `false`, but it's a jump target, so the pair must
+// stay: removing it would leave the jump nowhere to land. The optimized code is
+// the same as the raw.
+// compile: parsed, parsed optimized
+true and false;

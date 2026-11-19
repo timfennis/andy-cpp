@@ -1,0 +1,6 @@
+// A generic function's declaration compiles each of its instances: one of
+// `adder` for Ints and one for Floats. A lambda in the body is compiled with
+// the instance, whose `+` is picked for its types, so the two lambdas are
+// different functions (two numbers in the listing) with different code.
+// compile: stdlib
+fn adder(x) { let g = fn(y) => y + 1; g(x) } adder(1); adder(1.5);

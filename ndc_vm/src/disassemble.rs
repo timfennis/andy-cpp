@@ -1,56 +1,198 @@
-use crate::chunk::OpCode;
+//! A readable listing of compiled bytecode, as `ndc disassemble` prints it.
+//! `fn f() { fn g() => len([1]); g } let h = print;` lists as:
+//!
+//! ```text
+//! == <script> (locals: 0, globals: 2, natives: len, print) ==
+//! 0000  Constant(0)                          <fn #1 f>
+//! 0001  SetGlobal(g0)
+//! 0002  Constant(1)                          ()
+//! 0003  GetGlobal(print)
+//! 0004  SetGlobal(g1)
+//! 0005  Constant(2)                          ()
+//! 0006  Pop
+//! 0007  Halt
+//!
+//! == #1 f (locals: 1) ==
+//! 0000  Constant(0)                          <fn #2 g>
+//! 0001  SetLocal(0)
+//! 0002  Constant(1)                          ()
+//! 0003  Pop
+//! 0004  GetLocal(0)
+//! 0005  Return
+//!
+//! == #2 g (locals: 0) ==
+//! 0000  Constant(0)                          1
+//! 0001  MakeList(1)
+//! 0002  CallNative(len, 1)
+//! 0003  Return
+//! ```
+//!
+//! Each function's first line gives how many local slots it uses, and the
+//! top-level code's also how many globals the program declares and the
+//! natives it reads. A function is numbered where it's first loaded and
+//! listed once, after the functions before it, so two that load the same
+//! function show the same number. A jump shows where it lands (`-> 0007`).
+//!
+//! A global slot reads as the name of the native or intrinsic in it (`len`),
+//! or as `g` and the position among the program's own globals (`g0` for its
+//! first declaration), so the listing of a program doesn't change when the
+//! standard library gains a native.
+
+use crate::Natives;
+use crate::chunk::{JumpTarget, OpCode};
 use crate::value::{CompiledFunction, Value};
+use ndc_core::Builtins;
+use ndc_core::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt::Write;
 use std::rc::Rc;
 
-pub fn disassemble(function: &CompiledFunction, source: Option<&str>) -> String {
-    let mut out = String::new();
-    disassemble_function(function, source, &mut out);
-    out
+/// The width the instruction column is padded to when an annotation follows.
+const INSTRUCTION_WIDTH: usize = 35;
+
+/// The listing of `function`, the top-level code of a program compiled with
+/// `natives`, followed by each function it declares, in the order they're
+/// found, so each comes after the function that declares it. With `source`,
+/// each instruction shows the code it was compiled from.
+pub fn disassemble(function: &CompiledFunction, natives: &Natives, source: Option<&str>) -> String {
+    let mut disassembler = Disassembler {
+        natives,
+        source,
+        numbers: HashMap::default(),
+        pending: VecDeque::new(),
+        out: String::new(),
+    };
+    disassembler.top_level(function);
+    while let Some((function, number)) = disassembler.pending.pop_front() {
+        disassembler.nested(&function, number);
+    }
+    disassembler.out
 }
 
-fn disassemble_function(function: &CompiledFunction, source: Option<&str>, out: &mut String) {
-    let name = function.name.as_deref().unwrap_or("<script>");
-    writeln!(out, "== {name} ==").unwrap();
+/// Writes a listing, numbering each function the first time it's found so
+/// a function two others share is listed once, under one number.
+struct Disassembler<'a> {
+    natives: &'a Natives,
+    source: Option<&'a str>,
+    numbers: HashMap<*const CompiledFunction, usize>,
+    /// The functions found but not listed yet, in the order they were found.
+    pending: VecDeque<(Rc<CompiledFunction>, usize)>,
+    out: String,
+}
 
-    let mut nested: Vec<Rc<CompiledFunction>> = Vec::new();
+impl Disassembler<'_> {
+    fn top_level(&mut self, function: &CompiledFunction) {
+        let own_globals = function.num_globals.saturating_sub(self.natives.count());
+        let mut natives = function
+            .natives()
+            .iter()
+            .map(|&slot| self.natives.name(slot))
+            .collect::<Vec<_>>();
+        natives.sort_unstable();
+        let name = function.name.as_deref().unwrap_or("<script>");
+        write!(
+            self.out,
+            "== {name} (locals: {}, globals: {own_globals}",
+            function.num_locals
+        )
+        .unwrap();
+        if !natives.is_empty() {
+            write!(self.out, ", natives: {}", natives.join(", ")).unwrap();
+        }
+        writeln!(self.out, ") ==").unwrap();
+        self.body(function);
+    }
 
-    for (i, op, constant) in function.body.iter() {
-        let annotation = constant_annotation(op, constant, &mut nested);
-        let excerpt = source
-            .and_then(|src| src.get(function.body.span(i).range()))
-            .map(|s| s.trim().replace('\n', "↵"));
+    fn nested(&mut self, function: &CompiledFunction, number: usize) {
+        writeln!(self.out).unwrap();
+        writeln!(
+            self.out,
+            "== #{number} {} (locals: {}) ==",
+            Self::name(function),
+            function.num_locals
+        )
+        .unwrap();
+        self.body(function);
+    }
 
-        let op_str = format!("{op:?}");
-        match (annotation, excerpt) {
-            (Some(a), Some(e)) => writeln!(out, "{i:04}  {op_str:<35}  {a:<20}  {e}").unwrap(),
-            (Some(a), None) => writeln!(out, "{i:04}  {op_str:<35}  {a}").unwrap(),
-            (None, Some(e)) => writeln!(out, "{i:04}  {op_str:<35}  {e}").unwrap(),
-            (None, None) => writeln!(out, "{i:04}  {op_str}").unwrap(),
+    /// Lists `function`'s instructions.
+    fn body(&mut self, function: &CompiledFunction) {
+        for (index, op, constant) in function.body.iter() {
+            let instruction = self.instruction(op);
+            let annotation = match constant {
+                Some(value) => Some(self.constant(value)),
+                None => Self::jump_destination(op, index),
+            };
+            let excerpt = self
+                .source
+                .and_then(|source| source.get(function.body.span(index).range()))
+                .map(|excerpt| excerpt.trim().replace('\n', "↵"));
+
+            let line = match (annotation, excerpt) {
+                (Some(a), Some(e)) => format!("{instruction:<INSTRUCTION_WIDTH$}  {a:<20}  {e}"),
+                (Some(a), None) => format!("{instruction:<INSTRUCTION_WIDTH$}  {a}"),
+                (None, Some(e)) => format!("{instruction:<INSTRUCTION_WIDTH$}  {e}"),
+                (None, None) => instruction,
+            };
+            writeln!(self.out, "{index:04}  {}", line.trim_end()).unwrap();
         }
     }
 
-    for func in nested {
-        writeln!(out).unwrap();
-        disassemble_function(&func, source, out);
-    }
-}
-
-fn constant_annotation(
-    op: &OpCode,
-    constant: Option<&Value>,
-    nested: &mut Vec<Rc<CompiledFunction>>,
-) -> Option<String> {
-    let val = constant?;
-    if let Some(proto) = val.function_prototype() {
-        let fn_name = proto.name.as_deref().unwrap_or("?");
-        nested.push(Rc::clone(proto));
-        return Some(format!("<fn {fn_name}>"));
-    }
-    match op {
-        OpCode::Constant(_) | OpCode::MakeString(_) | OpCode::Closure { .. } => {
-            Some(format!("{val}"))
+    /// `op` as it reads in the listing: `GetGlobal(g0)` for the program's
+    /// first global, `CallNative(len, 1)` for a call of `len`.
+    fn instruction(&self, op: &OpCode) -> String {
+        match op {
+            OpCode::GetGlobal(slot) => format!("GetGlobal({})", self.global(*slot)),
+            OpCode::SetGlobal(slot) => format!("SetGlobal({})", self.global(*slot)),
+            OpCode::CallNative { slot, args } => {
+                format!("CallNative({}, {args})", self.global(*slot))
+            }
+            _ => format!("{op:?}"),
         }
-        _ => None,
+    }
+
+    /// The name of global `slot`: `len` for a native's, `g0` for the
+    /// program's first declaration.
+    fn global(&self, slot: usize) -> String {
+        match slot.checked_sub(self.natives.count()) {
+            None => self.natives.name(slot).to_string(),
+            Some(own) => format!("g{own}"),
+        }
+    }
+
+    /// A constant as it reads in the listing: `"abc"` for a string, `<fn #1 f>`
+    /// for a function, which is listed later if this is the first to load it.
+    fn constant(&mut self, value: &Value) -> String {
+        let Some(function) = value.function_prototype() else {
+            return format!("{value:?}");
+        };
+        let next = self.numbers.len() + 1;
+        let number = *self.numbers.entry(Rc::as_ptr(function)).or_insert_with(|| {
+            self.pending.push_back((Rc::clone(function), next));
+            next
+        });
+        format!("<fn #{number} {}>", Self::name(function))
+    }
+
+    /// Where the jump at `index` goes: `-> 0007`.
+    fn jump_destination(op: &OpCode, index: usize) -> Option<String> {
+        let (OpCode::Jump(target)
+        | OpCode::JumpIfTrue(target)
+        | OpCode::JumpIfFalse(target)
+        | OpCode::IterNext(target)) = op
+        else {
+            return None;
+        };
+        let JumpTarget::Offset(offset) = target else {
+            return None;
+        };
+        Some(format!(
+            "-> {:04}",
+            (index + 1).wrapping_add_signed(*offset)
+        ))
+    }
+
+    fn name(function: &CompiledFunction) -> &str {
+        function.name.as_deref().unwrap_or("<lambda>")
     }
 }

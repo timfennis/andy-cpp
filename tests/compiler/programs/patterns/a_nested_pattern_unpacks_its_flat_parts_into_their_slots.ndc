@@ -1,0 +1,4 @@
+// A nested pattern unpacks the outer compound onto the stack and declares its
+// elements one by one; the inner flat pattern is an `UnpackLocals`.
+// compile: analysed
+fn f(t: ((Int, Int), Int)) { let ((a, b), c) = t; c }

@@ -1,0 +1,5 @@
+// The program lists every native its code reads, in the functions it declares
+// too, whether or not they're called, so the VM's globals hold them: `len` and
+// `print` and nothing else, as the listing's first line shows.
+// compile: stdlib
+fn f() { fn g() => len([1]); g } let h = print;

@@ -1,0 +1,5 @@
+// An `if` without an `else` yields `()` when its condition is false: the false
+// path pops the condition and pushes the unit constant. Without analysis, the
+// true path keeps its branch's value.
+// compile: parsed
+if true { 1 }

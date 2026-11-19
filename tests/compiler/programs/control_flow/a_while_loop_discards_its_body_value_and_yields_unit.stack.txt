@@ -1,0 +1,10 @@
+== <script> (locals: 0, globals: 0) ==
+0000  Constant(0)                          true
+0001  JumpIfFalse(4)                       -> 0006
+0002  Pop
+0003  Constant(1)                          1
+0004  Pop
+0005  Jump(-6)                             -> 0000
+0006  Pop
+0007  Constant(2)                          ()
+0008  Halt

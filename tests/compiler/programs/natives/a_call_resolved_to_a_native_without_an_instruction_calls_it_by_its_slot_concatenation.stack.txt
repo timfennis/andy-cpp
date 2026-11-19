@@ -1,0 +1,6 @@
+== <script> (locals: 0, globals: 0, natives: ++) ==
+0000  MakeString(0)                        "a"
+0001  MakeString(1)                        "b"
+0002  CallNative(++, 2)
+0003  Pop
+0004  Halt

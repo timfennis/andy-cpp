@@ -331,7 +331,6 @@ name = "compiler_tests"
 version = "0.4.1"
 dependencies = [
  "ndc_analysis",
- "ndc_core",
  "ndc_interpreter",
  "ndc_lexer",
  "ndc_parser",

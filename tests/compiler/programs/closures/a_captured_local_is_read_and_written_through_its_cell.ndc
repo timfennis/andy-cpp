@@ -1,0 +1,11 @@
+// `x` is captured, so its reads and writes in `outer` go through the cell the
+// closure shares (`SetCell`, `GetCell`). Its declaration writes the slot
+// directly (`SetLocal`): the first capture is what moves the value into a cell.
+// (At the top level `x` would be a global, which closures reach directly.)
+// compile: analysed
+fn outer() {
+    let x = 1;
+    let f = fn() { x };
+    x = 2;
+    x
+}

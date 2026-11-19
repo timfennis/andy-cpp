@@ -1,0 +1,4 @@
+// A block pops the value of every statement but the last, whose value it
+// yields.
+// compile: parsed
+{ 5; 6 }

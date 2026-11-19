@@ -1,0 +1,5 @@
+// `JumpIfFalse` only peeks at the condition, so each path starts by popping it:
+// the true path after the jump, and the false path where the jump lands. The
+// true path then jumps over the false one.
+// compile: parsed
+if true { 1 } else { 2 }

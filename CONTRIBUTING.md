@@ -37,7 +37,7 @@ The workspace has three test crates, each living under `tests/`:
 | Crate              | Path                | What it covers |
 |---|---|---|
 | `functional_tests` | `tests/functional/` | End-to-end `.ndc` programs and REPL integration tests. The crate's `build.rs` auto-generates one Rust `#[test]` per `.ndc` file under `tests/functional/programs/`. |
-| `compiler_tests`   | `tests/compiler/`   | Asserts exact bytecode `OpCode` sequences for given source. |
+| `compiler_tests`   | `tests/compiler/`   | Disassembly snapshots: each `.ndc` program under `tests/compiler/programs/` is compiled and its listing compared with the expected one next to it. |
 | `proptest_tests`   | `tests/proptest/`   | Property-based fuzz harnesses: random token streams through the parser → analyser → compiler → VM, and generated programs that stress the analyser's overload choices. Both look for panics. |
 
 ### Run everything
@@ -128,9 +128,34 @@ directives at the top of the file to assert behaviour:
 
 ### Compiler bytecode tests
 
-Add cases to `tests/compiler/tests/compiler.rs` when introducing a new
-`OpCode` or changing emit logic. Each test asserts the exact instruction
-sequence for a given source snippet.
+Add a program under `tests/compiler/programs/<topic>/` when introducing a
+new `OpCode` or changing emit logic. Start it with a comment that says what
+it shows, then a directive that says how to compile it:
+
+```ndc
+// A string literal pushes a new string with the text of its constant.
+// compile: parsed
+"abc"
+```
+
+The setup is `parsed` (no analysis, no natives), `analysed` (no natives) or
+`stdlib` (with the standard library), optionally followed by `optimized` to
+run the peephole optimizer. `// compile: parsed, parsed optimized` lists the
+program once per mode, in a section each.
+
+The expected listing lives next to the program as `<name>.stack.txt`, in
+the format `ndc disassemble` prints, without source excerpts. Natives and
+intrinsics show by name (`CallNative(len, 1)`) and the program's own
+globals by their position among them (`SetGlobal(g0)`), so adding a native
+to the standard library changes no listing. To write the listing of a new
+program, or accept a change to existing ones, run:
+
+```bash
+BLESS=1 cargo test -p compiler_tests
+```
+
+and review the diff of the `.txt` files before committing. Without `BLESS`,
+a listing that differs fails its test with a diff.
 
 ## Before opening a PR
 

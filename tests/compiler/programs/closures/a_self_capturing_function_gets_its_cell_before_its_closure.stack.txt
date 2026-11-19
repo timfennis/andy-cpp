@@ -1,0 +1,16 @@
+== <script> (locals: 0, globals: 1) ==
+0000  Constant(0)                          <fn #1 outer>
+0001  SetGlobal(g0)
+0002  Constant(1)                          ()
+0003  Halt
+
+== #1 outer (locals: 1) ==
+0000  NewCell(0)
+0001  Closure(0, local(0))                 <fn #2 f>
+0002  SetCell(0)
+0003  Constant(1)                          ()
+0004  Return
+
+== #2 f (locals: 0) ==
+0000  GetUpvalue(0)
+0001  Return

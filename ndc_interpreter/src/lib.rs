@@ -245,7 +245,11 @@ impl Interpreter {
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         let compiled = self.compile_str(input)?;
         let mut out = String::new();
-        out.push_str(&ndc_vm::disassemble::disassemble(&compiled, Some(input)));
+        out.push_str(&ndc_vm::disassemble::disassemble(
+            &compiled,
+            &self.natives,
+            Some(input),
+        ));
         Ok(out)
     }
 

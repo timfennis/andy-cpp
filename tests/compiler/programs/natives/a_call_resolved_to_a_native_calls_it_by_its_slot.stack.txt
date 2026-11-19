@@ -1,0 +1,8 @@
+== <script> (locals: 0, globals: 1, natives: len) ==
+0000  Constant(0)                          1
+0001  Constant(1)                          2
+0002  MakeList(2)
+0003  SetGlobal(g0)
+0004  GetGlobal(g0)
+0005  CallNative(len, 1)
+0006  Halt

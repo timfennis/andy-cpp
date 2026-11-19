@@ -1,0 +1,5 @@
+// Float division and the unary operators the VM has instructions for are
+// instructions too, with one operand for the unary ones: `DivFloat`, `NegInt`,
+// `NegFloat` and `Not`.
+// compile: stdlib
+fn f(x: Float, y: Float, a: Int, p: Bool) { (x / y, -a, -x, !p) }
