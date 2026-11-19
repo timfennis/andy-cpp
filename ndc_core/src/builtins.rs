@@ -1,4 +1,4 @@
-use crate::{Intrinsic, NativeOp, StaticType};
+use crate::{Intrinsic, StaticType};
 use std::borrow::Cow;
 
 /// The natives and intrinsics a program can call, in global slot order: the
@@ -23,12 +23,6 @@ pub trait Builtins {
 
     /// Which intrinsic the built-in in `slot` is, if it's one.
     fn intrinsic(&self, slot: usize) -> Option<Intrinsic>;
-
-    /// The instruction that does what the native in `slot` does, if the VM
-    /// has one.
-    fn native_op(&self, _slot: usize) -> Option<NativeOp> {
-        None
-    }
 }
 
 /// Built-ins listed with their types, as tests give them.

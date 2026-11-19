@@ -1,10 +1,10 @@
-use crate::Value;
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
+use crate::{Natives, Value};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_core::collections::{HashMap, HashSet};
-use ndc_core::{Intrinsic, NodeId};
+use ndc_core::{Intrinsic, NativeOp, NodeId};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -73,6 +73,9 @@ pub struct Compiler {
     /// global is the only way code reaches a native, so this lists every
     /// native the program can call.
     natives: Rc<RefCell<HashSet<usize>>>,
+    /// The op each native does, if it's one, in global slot order: a call
+    /// resolved to one is written as the op's instruction.
+    native_ops: Rc<[Option<NativeOp>]>,
 }
 
 impl Compiler {
@@ -91,6 +94,7 @@ impl Compiler {
             prototypes: Rc::default(),
             functions: None,
             natives: Rc::default(),
+            native_ops: Rc::new([]),
         }
     }
 
@@ -109,6 +113,7 @@ impl Compiler {
             prototypes: Rc::default(),
             functions: None,
             natives: Rc::default(),
+            native_ops: Rc::new([]),
         }
     }
     /// Compiles a program, or one REPL line, into a function the VM runs at
@@ -117,9 +122,11 @@ impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self {
             analysis: Rc::new(analysis),
+            native_ops: natives.ops(),
             ..Self::new()
         };
         compiler.compile_batch(expressions)?;
@@ -133,11 +140,13 @@ impl Compiler {
     pub fn compile_line(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
         session: &mut Session,
     ) -> Result<CompiledFunction, CompileError> {
         Rc::make_mut(&mut session.analysis).extend(analysis);
         let mut compiler = Self {
             analysis: Rc::clone(&session.analysis),
+            native_ops: natives.ops(),
             prototypes: Rc::clone(&session.prototypes),
             functions: Some(std::mem::take(&mut session.functions)),
             ..Self::new()
@@ -203,9 +212,11 @@ impl Compiler {
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self {
             analysis: Rc::new(analysis),
+            native_ops: natives.ops(),
             ..Self::new_without_optimization()
         };
         compiler.compile_batch(expressions)?;
@@ -945,7 +956,7 @@ impl Compiler {
         if slot >= self.analysis.builtin_count {
             return None;
         }
-        match self.analysis.native_op(slot) {
+        match self.native_ops.get(slot).copied().flatten() {
             Some(op) if op.arity() == args => Some(OpCode::native(op)),
             _ => {
                 self.natives.borrow_mut().insert(slot);
@@ -1316,6 +1327,7 @@ impl Compiler {
             prototypes: Rc::clone(&self.prototypes),
             functions: None,
             natives: Rc::clone(&self.natives),
+            native_ops: Rc::clone(&self.native_ops),
         }
     }
 

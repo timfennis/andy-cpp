@@ -21,8 +21,12 @@ fn compile_function(input: &str) -> CompiledFunction {
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-    Compiler::compile_unoptimized(expressions.into_iter(), Analysis::default())
-        .expect("compile failed")
+    Compiler::compile_unoptimized(
+        expressions.into_iter(),
+        Analysis::default(),
+        &ndc_vm::Natives::default(),
+    )
+    .expect("compile failed")
 }
 
 fn compile_with_analysis(input: &str) -> Vec<OpCode> {

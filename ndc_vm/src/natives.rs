@@ -83,7 +83,6 @@ impl NativeSpec {
 struct Native {
     name: &'static str,
     documentation: Option<Cow<'static, str>>,
-    op: Option<NativeOp>,
     make_type: Cell<Option<MakeType>>,
     make_func: Cell<Option<MakeFunc>>,
     static_type: OnceCell<StaticType>,
@@ -98,6 +97,9 @@ struct Native {
 pub struct Natives {
     natives: Vec<Native>,
     intrinsics: Vec<IntrinsicFunction>,
+    /// The op each native does, if it's one, in global slot order: the
+    /// compiler writes a call resolved to one as the op's instruction.
+    ops: Rc<[Option<NativeOp>]>,
 }
 
 impl Default for Natives {
@@ -106,6 +108,7 @@ impl Default for Natives {
         Self {
             natives: Vec::new(),
             intrinsics: IntrinsicFunction::all(),
+            ops: Rc::new([]),
         }
     }
 }
@@ -113,17 +116,22 @@ impl Default for Natives {
 impl Natives {
     /// Adds the natives of `registry` after the ones already here.
     pub fn extend(&mut self, registry: FunctionRegistry<NativeSpec>) {
-        self.natives
-            .extend(registry.into_vec().into_iter().map(|spec| Native {
-                name: spec.name,
-                documentation: spec.documentation,
-                op: spec.op,
-                make_type: Cell::new(Some(spec.static_type)),
-                make_func: Cell::new(Some(spec.func)),
-                static_type: OnceCell::new(),
-                type_parameters: OnceCell::new(),
-                function: OnceCell::new(),
-            }));
+        let specs = registry.into_vec();
+        self.ops = self
+            .ops
+            .iter()
+            .copied()
+            .chain(specs.iter().map(|spec| spec.op))
+            .collect();
+        self.natives.extend(specs.into_iter().map(|spec| Native {
+            name: spec.name,
+            documentation: spec.documentation,
+            make_type: Cell::new(Some(spec.static_type)),
+            make_func: Cell::new(Some(spec.func)),
+            static_type: OnceCell::new(),
+            type_parameters: OnceCell::new(),
+            function: OnceCell::new(),
+        }));
     }
 
     /// How many natives there are, not counting the intrinsics.
@@ -158,6 +166,12 @@ impl Natives {
                 func: make(),
             })
         })
+    }
+
+    /// The op each native does, if it's one, in global slot order.
+    #[must_use]
+    pub fn ops(&self) -> Rc<[Option<NativeOp>]> {
+        Rc::clone(&self.ops)
     }
 
     /// The language's intrinsics, whose global slots follow the natives'.
@@ -213,9 +227,5 @@ impl Builtins for Natives {
     fn intrinsic(&self, slot: usize) -> Option<Intrinsic> {
         let index = slot.checked_sub(self.natives.len())?;
         Some(self.intrinsics[index].intrinsic)
-    }
-
-    fn native_op(&self, slot: usize) -> Option<NativeOp> {
-        self.natives.get(slot)?.op
     }
 }

@@ -220,7 +220,11 @@ impl Interpreter {
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile(expressions.into_iter(), result.analysis)?)
+        Ok(Compiler::compile(
+            expressions.into_iter(),
+            result.analysis,
+            &self.natives,
+        )?)
     }
 
     /// Like [`Self::compile_str`] but skips the peephole optimizer.
@@ -234,6 +238,7 @@ impl Interpreter {
         Ok(Compiler::compile_unoptimized(
             expressions.into_iter(),
             result.analysis,
+            &self.natives,
         )?)
     }
 
@@ -341,9 +346,9 @@ impl Interpreter {
         let mut timings = ExecutionTimings::default();
         let code = measure(&mut timings, Phase::Compiling, || {
             if self.resumable {
-                Compiler::compile_line(expressions, analysis, &mut self.session)
+                Compiler::compile_line(expressions, analysis, &self.natives, &mut self.session)
             } else {
-                Compiler::compile(expressions, analysis)
+                Compiler::compile(expressions, analysis, &self.natives)
             }
         })?;
         let num_locals = code.num_locals();
