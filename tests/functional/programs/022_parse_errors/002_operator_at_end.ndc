@@ -1,0 +1,2 @@
+// expect-error: Expected an expression after '*' but the program ended
+let x = 2 *

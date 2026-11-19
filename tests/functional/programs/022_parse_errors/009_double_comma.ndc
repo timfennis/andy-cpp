@@ -1,0 +1,2 @@
+// expect-error: Expected a value between these two commas
+let xs = [1,,2];

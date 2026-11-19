@@ -1,0 +1,2 @@
+// expect-error: this '[' is never closed
+let xs = [1, 2

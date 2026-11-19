@@ -1,0 +1,2 @@
+// expect-error: 'fn' is a keyword, so it can't be a variable name
+let fn = 1;

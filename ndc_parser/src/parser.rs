@@ -80,6 +80,9 @@ impl Parser {
         let found = self
             .peek_current_token_location()
             .expect("a statement is followed by a token");
+        if let Some(error) = self.unmatched_closing_bracket(found) {
+            return error;
+        }
         let span = match self.current.checked_sub(1).map(|i| &self.tokens[i]) {
             Some(last) => Span::new(last.span.source_id(), last.span.end(), 0),
             None => found.span,
@@ -115,18 +118,19 @@ impl Parser {
         }
 
         if let Some(current_token) = self.peek_current_token_location() {
+            let expected = match tokens {
+                [token] => format!("'{token}'"),
+                _ => format!("one of {}", tokens_to_string(tokens)),
+            };
             Err(Error::text(
                 format!(
-                    "expected one of {} but got {} instead",
-                    tokens_to_string(tokens),
+                    "Expected {expected} but got '{}' instead",
                     current_token.token
                 ),
                 current_token.span,
             ))
         } else {
-            Err(Error::end_of_input(
-                self.tokens.last().expect("last token exists").span,
-            ))
+            Err(self.unexpected_end_of_input())
         }
         // if self.current_token_location().is_some() {
     }
@@ -166,9 +170,7 @@ impl Parser {
     fn require_current_token(&mut self) -> Result<TokenLocation, Error> {
         let token = self
             .peek_current_token_location()
-            .ok_or_else(|| {
-                Error::end_of_input(self.tokens.last().expect("last token exists").span)
-            })?
+            .ok_or_else(|| self.unexpected_end_of_input())?
             .clone();
         self.advance();
         Ok(token)
@@ -354,6 +356,26 @@ impl Parser {
         let let_token = self
             .require_current_token_matches(&Token::Let)
             .expect("guaranteed to match by caller");
+
+        if let Some(name) = self.peek_current_token_location() {
+            if name.token == Token::EqualsSign {
+                return Err(Error::with_help(
+                    "Expected a name after 'let'".to_string(),
+                    name.span,
+                    "Give the variable a name, as in `let x = 5;`".to_string(),
+                ));
+            }
+            if is_keyword(&name.token) {
+                return Err(Error::with_help(
+                    format!(
+                        "'{}' is a keyword, so it can't be a variable name",
+                        name.token
+                    ),
+                    name.span,
+                    "Choose another name for the variable".to_string(),
+                ));
+            }
+        }
 
         let (lvalue, annotated_type) = self.named_binding()?;
 
@@ -1148,7 +1170,9 @@ impl Parser {
             return Ok(grouped);
         }
 
-        let token_location = self.require_current_token()?;
+        let Some(token_location) = self.peek_current_token_location().cloned() else {
+            return Err(self.expected_expression_at_end());
+        };
 
         let expression = match token_location.token {
             Token::False => Expression::BoolLiteral(false),
@@ -1157,6 +1181,7 @@ impl Parser {
             Token::NumericLiteral(literal) => Expression::NumericLiteral(literal),
             Token::String(value) => Expression::StringLiteral(value),
             Token::Identifier(identifier) => {
+                self.advance();
                 let (type_arguments, span) = self.turbofish(token_location.span)?;
                 return Ok(Expression::Identifier {
                     name: identifier,
@@ -1165,18 +1190,170 @@ impl Parser {
                 }
                 .to_location(span));
             }
-            _ => {
-                return Err(Error::text(
-                    format!(
-                        "Expected an expression but got '{}' instead",
-                        token_location.token
-                    ),
-                    token_location.span,
-                ));
-            }
+            _ => return Err(self.expected_expression(&token_location)),
         };
+        self.advance();
 
         Ok(expression.to_location(token_location.span))
+    }
+
+    /// The token before the current one, if any.
+    fn previous_token_location(&self) -> Option<&TokenLocation> {
+        self.current.checked_sub(1).and_then(|i| self.tokens.get(i))
+    }
+
+    /// The error for `found`, the current token, where an expression should
+    /// start. It names the mistake where it can tell what it is: `1 + ;`
+    /// says the `+` has nothing after it, a lone `)` that nothing opened says
+    /// so, and `[1,,2]` points out the extra comma.
+    fn expected_expression(&self, found: &TokenLocation) -> Error {
+        let previous = self.previous_token_location();
+
+        if let Some(error) = self.unmatched_closing_bracket(found) {
+            return error;
+        }
+
+        match (&found.token, previous.map(|p| &p.token)) {
+            (Token::Else, _) => {
+                return Error::with_help(
+                    "Unexpected 'else' without an 'if' before it".to_string(),
+                    found.span,
+                    "'else' can only follow the block of an 'if', as in `if x > 0 { 1 } else { 2 }`"
+                        .to_string(),
+                );
+            }
+            (Token::Dot, _) if matches!(self.peek_next_token(), Some(Token::NumericLiteral(_))) => {
+                return Error::with_help(
+                    "A number can't start with '.'".to_string(),
+                    found.span,
+                    "Put a digit before the decimal point: write `0.5` instead of `.5`".to_string(),
+                );
+            }
+            (Token::Comma, Some(Token::Comma)) => {
+                return Error::with_help(
+                    "Expected a value between these two commas".to_string(),
+                    found.span,
+                    "Remove the extra ',' or put a value between the commas".to_string(),
+                );
+            }
+            (
+                Token::Comma,
+                Some(Token::LeftParentheses | Token::LeftSquareBracket | Token::MapOpen),
+            ) => {
+                return Error::with_help(
+                    "Expected a value before ','".to_string(),
+                    found.span,
+                    "Remove the ',' or put a value in front of it".to_string(),
+                );
+            }
+            _ => {}
+        }
+
+        if let Some(previous) = previous.filter(|p| expects_expression_after(&p.token)) {
+            return Error::with_help(
+                format!(
+                    "Expected an expression after '{}' but got '{}' instead",
+                    previous.token, found.token
+                ),
+                found.span,
+                expression_after_help(&previous.token),
+            );
+        }
+
+        Error::text(
+            format!("Expected an expression but got '{}' instead", found.token),
+            found.span,
+        )
+    }
+
+    /// The error for a program that ends where an expression should start,
+    /// as in `let x = 1 +`.
+    fn expected_expression_at_end(&self) -> Error {
+        match self
+            .previous_token_location()
+            .filter(|p| expects_expression_after(&p.token))
+        {
+            Some(previous) => Error::with_help(
+                format!(
+                    "Expected an expression after '{}' but the program ended",
+                    previous.token
+                ),
+                previous.span,
+                expression_after_help(&previous.token),
+            ),
+            None => self.unexpected_end_of_input(),
+        }
+    }
+
+    /// The error for a program that ends too soon. It points at the last
+    /// bracket that is never closed, if there is one, as that is the usual
+    /// reason: in `print([1, 2`, the `[`.
+    fn unexpected_end_of_input(&self) -> Error {
+        let mut open: Vec<&TokenLocation> = Vec::new();
+        for token in &self.tokens {
+            if closing_bracket_for(&token.token).is_some() {
+                open.push(token);
+            } else if open
+                .last()
+                .is_some_and(|last| closing_bracket_for(&last.token).as_ref() == Some(&token.token))
+            {
+                open.pop();
+            }
+        }
+
+        match open.last() {
+            Some(bracket) => Error::with_help(
+                format!(
+                    "Unexpected end of input: this '{}' is never closed",
+                    bracket.token
+                ),
+                bracket.span,
+                format!(
+                    "Add a '{}' to close it",
+                    closing_bracket_for(&bracket.token).expect("is an opening bracket")
+                ),
+            ),
+            None => Error::end_of_input(self.tokens.last().expect("last token exists").span),
+        }
+    }
+
+    /// The error for `found`, the current token, if it is a closing bracket
+    /// that no bracket before it opened, as the `)` in `print(x));`.
+    fn unmatched_closing_bracket(&self, found: &TokenLocation) -> Option<Error> {
+        let open = opening_bracket_for(&found.token)?;
+        if self.has_unclosed(&found.token) {
+            return None;
+        }
+        Some(Error::with_help(
+            format!("Unexpected '{}' without a matching '{open}'", found.token),
+            found.span,
+            format!(
+                "Remove the '{}', or add the '{open}' it is meant to close",
+                found.token
+            ),
+        ))
+    }
+
+    /// Whether a bracket before the current token is still open that
+    /// `closing` would close.
+    fn has_unclosed(&self, closing: &Token) -> bool {
+        let mut depth = 0i32;
+        for token in &self.tokens[..self.current] {
+            if closing_bracket_for(&token.token).as_ref() == Some(closing) {
+                depth += 1;
+            } else if &token.token == closing {
+                depth -= 1;
+            }
+        }
+        depth > 0
+    }
+
+    /// Whether `header`, the condition of an `if` or `while` or the sequence
+    /// of a `for`, is a block with no block after it: then the header is
+    /// missing and its body was taken for it, as in `if { }`.
+    fn took_body_as_header(&self, header: &ExpressionLocation) -> bool {
+        matches!(header.expression, Expression::Block { .. })
+            && self.peek_current_token() != Some(&Token::LeftCurlyBracket)
     }
 
     /// Parses if expression without the `if` token
@@ -1194,6 +1371,13 @@ impl Parser {
     /// spans from the keyword to the end of its last branch.
     fn if_expression(&mut self, if_span: Span) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
+        if self.took_body_as_header(&expression) {
+            return Err(Error::with_help(
+                "Expected a condition between 'if' and its block".to_string(),
+                if_span,
+                "Write the condition after 'if', as in `if x > 0 { ... }`".to_string(),
+            ));
+        }
         let on_true = self.block()?;
 
         let on_false = if self.consume_token_if(&[Token::Else]).is_some() {
@@ -1221,6 +1405,13 @@ impl Parser {
     /// expression spans from the keyword to the end of its body.
     fn while_expression(&mut self, while_span: Span) -> Result<ExpressionLocation, Error> {
         let expression = self.expression()?;
+        if self.took_body_as_header(&expression) {
+            return Err(Error::with_help(
+                "Expected a condition between 'while' and its block".to_string(),
+                while_span,
+                "Write the condition after 'while', as in `while x > 0 { ... }`".to_string(),
+            ));
+        }
         let loop_body = self.block()?;
 
         let span = while_span.merge(loop_body.span);
@@ -1244,11 +1435,20 @@ impl Parser {
                 Some(Token::If) => iterations.push(self.if_guard()?),
                 Some(_) => iterations.push(self.for_iteration()?),
                 _ => {
-                    return Err(Error::end_of_input(
-                        self.tokens.last().expect("must have tokens").span,
-                    ));
+                    return Err(self.unexpected_end_of_input());
                 }
             }
+        }
+
+        if let Some(ForIteration::Iteration { sequence, .. }) = iterations.last()
+            && self.took_body_as_header(sequence)
+        {
+            return Err(Error::with_help(
+                "Expected something to loop over between 'in' and the loop's block".to_string(),
+                for_token_span,
+                "Write what to loop over after 'in', as in `for x in [1, 2, 3] { ... }`"
+                    .to_string(),
+            ));
         }
 
         let body = self.block()?;
@@ -1264,8 +1464,33 @@ impl Parser {
     /// A name: an identifier with no type arguments, as a declaration and
     /// a member are named. `x.f::<T>()` takes its type arguments itself.
     fn require_identifier(&mut self) -> Result<ExpressionLocation, Error> {
+        let after_dot = self
+            .previous_token_location()
+            .filter(|previous| previous.token == Token::Dot)
+            .cloned();
+        if let Some(dot) = &after_dot
+            && self.peek_current_token().is_none()
+        {
+            return Err(Error::with_help(
+                "Expected a name after '.' but the program ended".to_string(),
+                dot.span,
+                "Write the name of a field or a function after the '.', as in `xs.len()`"
+                    .to_string(),
+            ));
+        }
         let token = self.require_current_token()?;
         let Token::Identifier(name) = token.token else {
+            if after_dot.is_some() {
+                return Err(Error::with_help(
+                    format!(
+                        "Expected a name after '.' but got '{}' instead",
+                        token.token
+                    ),
+                    token.span,
+                    "Write the name of a field or a function after the '.', as in `xs.len()`"
+                        .to_string(),
+                ));
+            }
             return Err(Error::text(
                 "expected an identifier".to_string(),
                 token.span,
@@ -1521,9 +1746,7 @@ impl Parser {
 
     pub fn type_annotation(&mut self) -> Result<TypeExpr, Error> {
         let Some(TokenLocation { token, span }) = self.peek_current_token_location() else {
-            return Err(Error::end_of_input(
-                self.tokens.last().expect("last token exists").span,
-            ));
+            return Err(self.unexpected_end_of_input());
         };
 
         match token {
@@ -1663,9 +1886,7 @@ impl Parser {
         }
 
         let Some(loc) = self.peek_current_token_location() else {
-            return Err(Error::end_of_input(
-                self.tokens.last().expect("last token exists").span,
-            ));
+            return Err(self.unexpected_end_of_input());
         };
 
         let greater_span = Span::new(loc.span.source_id(), loc.span.offset(), 1);
@@ -1944,6 +2165,100 @@ impl Error {
 
     pub fn help_text(&self) -> Option<&str> {
         self.help_text.as_deref()
+    }
+}
+
+/// The bracket that closes `token`, if it opens one: `)` for `(`, and `}`
+/// for both `{` and `%{`.
+fn closing_bracket_for(token: &Token) -> Option<Token> {
+    match token {
+        Token::LeftParentheses => Some(Token::RightParentheses),
+        Token::LeftSquareBracket => Some(Token::RightSquareBracket),
+        Token::LeftCurlyBracket | Token::MapOpen => Some(Token::RightCurlyBracket),
+        _ => None,
+    }
+}
+
+/// Whether `token` is a keyword, a word with a meaning of its own such as
+/// `fn` or `if`, which can't name a variable.
+fn is_keyword(token: &Token) -> bool {
+    !matches!(
+        token,
+        Token::Identifier(_) | Token::String(_) | Token::NumericLiteral(_)
+    ) && token
+        .to_string()
+        .chars()
+        .all(|c| c.is_ascii_alphabetic() || c == '?')
+}
+
+/// The bracket that `token` closes, if it closes one: `(` for `)`.
+fn opening_bracket_for(token: &Token) -> Option<&'static str> {
+    match token {
+        Token::RightParentheses => Some("("),
+        Token::RightSquareBracket => Some("["),
+        Token::RightCurlyBracket => Some("{"),
+        _ => None,
+    }
+}
+
+/// Whether `token` needs an expression after it, so that an expression
+/// missing after it is best explained by naming it: an operator as in
+/// `1 + ;`, the `=` of `let x = ;`, or a keyword such as `return` or `in`.
+fn expects_expression_after(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::EqualsSign
+            | Token::OpAssign(_)
+            | Token::FatArrow
+            | Token::Colon
+            | Token::Return
+            | Token::If
+            | Token::While
+            | Token::LogicAnd
+            | Token::LogicOr
+            | Token::LogicNot
+            | Token::Bang
+            | Token::DotDot
+            | Token::DotDotEquals
+            // The binary operators
+            | Token::EqualsEquals
+            | Token::BangEquals
+            | Token::Greater
+            | Token::GreaterEquals
+            | Token::Less
+            | Token::LessEquals
+            | Token::Spaceship
+            | Token::InverseSpaceship
+            | Token::Plus
+            | Token::Minus
+            | Token::Asterix
+            | Token::ForwardSlash
+            | Token::Backslash
+            | Token::Percent
+            | Token::PercentPercent
+            | Token::Caret
+            | Token::Ampersand
+            | Token::Tilde
+            | Token::Pipe
+            | Token::In
+            | Token::PlusPlus
+            | Token::Diamond
+            | Token::GreaterGreater
+            | Token::LessLess
+    )
+}
+
+/// The help for an expression missing after `token`, one that
+/// `expects_expression_after`.
+fn expression_after_help(token: &Token) -> String {
+    match token {
+        Token::Return => "To return without a value, write `return;`".to_string(),
+        Token::EqualsSign | Token::OpAssign(_) => {
+            format!("Put the value to assign after the '{token}'")
+        }
+        Token::Colon => "Every key in a map needs a value after its ':'".to_string(),
+        Token::If | Token::While => format!("Put a condition after '{token}'"),
+        _ => format!("Put a value after '{token}', or remove the '{token}'"),
     }
 }
 

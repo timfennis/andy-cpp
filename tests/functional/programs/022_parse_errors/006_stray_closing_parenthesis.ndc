@@ -1,0 +1,3 @@
+// expect-error: Unexpected ')' without a matching '('
+let x = 1;
+print(x));

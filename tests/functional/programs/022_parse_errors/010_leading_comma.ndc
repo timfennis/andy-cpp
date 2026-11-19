@@ -1,0 +1,2 @@
+// expect-error: Expected a value before ','
+print(, 1);

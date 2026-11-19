@@ -1,0 +1,2 @@
+// expect-error: Expected a name after 'let'
+let = 5;

@@ -1,0 +1,2 @@
+// expect-error: Expected an expression after 'return' but got '}' instead
+fn f() { return }
