@@ -91,6 +91,29 @@ fn function_constant(function: &CompiledFunction, index: usize) -> Rc<CompiledFu
     Rc::clone(function)
 }
 
+/// Whether `op` is the instruction of a native's op, as `AddInt` is.
+fn is_native_op(op: &OpCode) -> bool {
+    matches!(
+        op,
+        AddInt
+            | SubInt
+            | MulInt
+            | AddFloat
+            | SubFloat
+            | MulFloat
+            | DivFloat
+            | NegInt
+            | NegFloat
+            | Not
+            | Less
+            | LessEqual
+            | Greater
+            | GreaterEqual
+            | Equal
+            | NotEqual
+    )
+}
+
 fn compile_with_stdlib_unoptimized(input: &str) -> Vec<OpCode> {
     let mut interp = ndc_interpreter::Interpreter::capturing();
     interp.configure(ndc_stdlib::register);
@@ -443,8 +466,7 @@ fn an_augmented_assignment_stores_its_result_back_even_when_it_mutates_in_place(
         assert!(
             ops.windows(4).any(|ops| match ops {
                 [operation, SetGlobal(_), Constant(_), Pop] => {
-                    operation.native_op().is_some()
-                        || matches!(operation, CallNative { args: 2, .. })
+                    is_native_op(operation) || matches!(operation, CallNative { args: 2, .. })
                 }
                 _ => false,
             }),
@@ -995,7 +1017,7 @@ fn an_augmented_assignment_resolved_to_a_native_with_an_instruction_is_the_instr
     );
     let operations = ops
         .iter()
-        .filter(|op| op.native_op().is_some() || matches!(op, Call(_)))
+        .filter(|op| is_native_op(op) || matches!(op, Call(_)))
         .collect::<Vec<_>>();
     assert_eq!(operations, [&AddFloat, &SubFloat, &MulFloat,], "{ops:?}");
 }
@@ -1013,7 +1035,7 @@ fn a_call_resolved_to_a_native_without_an_instruction_calls_it_by_its_slot() {
                 .any(|op| matches!(op, CallNative { args: 2, .. }))
                 && !ops
                     .iter()
-                    .any(|op| op.native_op().is_some() || matches!(op, Call(_) | GetGlobal(_))),
+                    .any(|op| is_native_op(op) || matches!(op, Call(_) | GetGlobal(_))),
             "`{source}` must call the native by its slot: {ops:?}"
         );
     }
@@ -1028,7 +1050,7 @@ fn comparisons_of_any_values_are_instructions() {
     let ops = compile_with_stdlib_unoptimized("\"a\" < \"b\"; [1] == [1]; (1, 2) != (2, 1);");
     let operations = ops
         .iter()
-        .filter(|op| op.native_op().is_some() || matches!(op, Call(_)))
+        .filter(|op| is_native_op(op) || matches!(op, Call(_)))
         .collect::<Vec<_>>();
     assert_eq!(operations, [&Less, &Equal, &NotEqual,], "{ops:?}");
 }
@@ -1063,7 +1085,7 @@ fn float_division_and_unary_operators_are_instructions() {
     );
     let operations = ops
         .iter()
-        .filter(|op| op.native_op().is_some() || matches!(op, Call(_) | CallNative { .. }))
+        .filter(|op| is_native_op(op) || matches!(op, Call(_) | CallNative { .. }))
         .collect::<Vec<_>>();
     assert_eq!(
         operations,

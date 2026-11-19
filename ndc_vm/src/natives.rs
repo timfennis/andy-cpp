@@ -18,10 +18,11 @@ pub struct NativeSpec {
     pub documentation: Option<Cow<'static, str>>,
     pub static_type: MakeType,
     pub func: MakeFunc,
-    /// The instruction the compiler writes in place of a call it resolved
-    /// to this native, which does what `func` does: a native made with
-    /// [`NativeSpec::operator`] runs the op's own code as its function.
-    pub op: Option<NativeOp>,
+    /// The op the native does, if it's one, which the compiler writes as an
+    /// instruction where a call resolves to the native. Only
+    /// [`NativeSpec::operator`] sets it, with the op's own code as `func`,
+    /// so the instruction and the native can't disagree.
+    op: Option<NativeOp>,
 }
 
 impl NativeSpec {
@@ -33,9 +34,19 @@ impl NativeSpec {
         static_type: impl FnOnce() -> StaticType + 'static,
         func: impl FnOnce() -> NativeFunc + 'static,
     ) -> Self {
+        Self::maybe_documented(name, Some(documentation.into()), static_type, func)
+    }
+
+    /// [`Self::new`] for a native that may have no documentation.
+    pub fn maybe_documented(
+        name: &'static str,
+        documentation: Option<Cow<'static, str>>,
+        static_type: impl FnOnce() -> StaticType + 'static,
+        func: impl FnOnce() -> NativeFunc + 'static,
+    ) -> Self {
         Self {
             name,
-            documentation: Some(documentation.into()),
+            documentation,
             static_type: Box::new(static_type),
             func: Box::new(func),
             op: None,
@@ -59,6 +70,17 @@ impl NativeSpec {
         }
     }
 
+    /// [`Self::operator`] for a native whose type is `signature`, such as
+    /// `<A, B>(A, B) -> Bool`.
+    pub fn operator_with_signature(
+        name: &'static str,
+        documentation: impl Into<Cow<'static, str>>,
+        signature: impl AsRef<str> + 'static,
+        op: NativeOp,
+    ) -> Self {
+        Self::operator(name, documentation, parse_signature(name, signature), op)
+    }
+
     /// A native whose type is `signature`, such as `<T>([T], T) -> T`,
     /// parsed when it's first asked for.
     pub fn with_signature(
@@ -67,16 +89,19 @@ impl NativeSpec {
         signature: impl AsRef<str> + 'static,
         func: impl FnOnce() -> NativeFunc + 'static,
     ) -> Self {
-        Self::new(
-            name,
-            documentation,
-            move || {
-                StaticType::signature(signature.as_ref()).unwrap_or_else(|error| {
-                    panic!("internal error: invalid signature of {name}: {error}")
-                })
-            },
-            func,
-        )
+        Self::new(name, documentation, parse_signature(name, signature), func)
+    }
+}
+
+/// What makes the type `signature` of the native `name`, parsing it when
+/// it's first asked for.
+fn parse_signature(
+    name: &'static str,
+    signature: impl AsRef<str> + 'static,
+) -> impl FnOnce() -> StaticType {
+    move || {
+        StaticType::signature(signature.as_ref())
+            .unwrap_or_else(|error| panic!("internal error: invalid signature of {name}: {error}"))
     }
 }
 

@@ -368,7 +368,7 @@ fn register(
     })
 }
 
-/// `let native = NativeSpec { … };` for a function, or `None` when a
+/// `let native = NativeSpec::maybe_documented(…);` for a function, or `None` when a
 /// parameter or the return type can't be expressed in VM-native terms.
 fn try_generate_vm_native(
     function: &syn::ItemFn,
@@ -514,12 +514,11 @@ fn try_generate_vm_native(
     };
     // The type and the function are made when the native is first used.
     Some(quote! {
-        let native = ndc_vm::NativeSpec {
-            name: #fn_name,
-            documentation: #documentation_tokens,
-            static_type: Box::new(|| #static_type),
-            func: Box::new(|| #func_variant),
-            op: None,
-        };
+        let native = ndc_vm::NativeSpec::maybe_documented(
+            #fn_name,
+            #documentation_tokens,
+            || #static_type,
+            || #func_variant,
+        );
     })
 }

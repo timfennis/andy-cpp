@@ -120,14 +120,10 @@ fn declare_operator(
     documentation: &'static str,
     operator: NativeOp,
 ) {
-    env.declare_global_fn(NativeSpec::operator(
+    env.declare_global_fn(NativeSpec::operator_with_signature(
         name,
         documentation,
-        move || {
-            StaticType::signature(signature.as_ref()).unwrap_or_else(|error| {
-                panic!("internal error: invalid signature of {name}: {error}")
-            })
-        },
+        signature,
         operator,
     ));
 }
@@ -241,6 +237,12 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
         {
             let output_mode = left_mode.promote(right_mode);
             let (name, documentation) = (operation.name(), operation.documentation());
+            let static_type = move || {
+                function_type(
+                    vec![left_mode.static_type(), right_mode.static_type()],
+                    output_mode.static_type(),
+                )
+            };
 
             // Choosing the evaluator per overload here, instead of letting one
             // shared closure rediscover the output mode on every call, is what
@@ -249,68 +251,32 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
                 env.declare_global_fn(NativeSpec::operator(
                     name,
                     documentation,
-                    move || {
-                        function_type(
-                            vec![left_mode.static_type(), right_mode.static_type()],
-                            output_mode.static_type(),
-                        )
-                    },
+                    static_type,
                     operator,
                 ));
                 continue;
             }
             match output_mode {
-                NumericMode::Int => declare(
-                    env,
-                    name,
-                    documentation,
-                    move || {
-                        function_type(
-                            vec![left_mode.static_type(), right_mode.static_type()],
-                            StaticType::Int,
-                        )
-                    },
-                    move |args| {
-                        let [left, right] = args else {
-                            return Err(wrong_arity(args));
-                        };
-                        eval_int_operands(operation, left, right)
-                    },
-                ),
-                NumericMode::Float => declare(
-                    env,
-                    name,
-                    documentation,
-                    move || {
-                        function_type(
-                            vec![left_mode.static_type(), right_mode.static_type()],
-                            StaticType::Float,
-                        )
-                    },
-                    move |args| {
-                        let [left, right] = args else {
-                            return Err(wrong_arity(args));
-                        };
-                        eval_float_operands(operation, left_mode, right_mode, left, right)
-                    },
-                ),
-                NumericMode::Number => declare(
-                    env,
-                    name,
-                    documentation,
-                    move || {
-                        function_type(
-                            vec![left_mode.static_type(), right_mode.static_type()],
-                            StaticType::Number,
-                        )
-                    },
-                    move |args| {
+                NumericMode::Int => declare(env, name, documentation, static_type, move |args| {
+                    let [left, right] = args else {
+                        return Err(wrong_arity(args));
+                    };
+                    eval_int_operands(operation, left, right)
+                }),
+                NumericMode::Float => declare(env, name, documentation, static_type, move |args| {
+                    let [left, right] = args else {
+                        return Err(wrong_arity(args));
+                    };
+                    eval_float_operands(operation, left_mode, right_mode, left, right)
+                }),
+                NumericMode::Number => {
+                    declare(env, name, documentation, static_type, move |args| {
                         let [left, right] = args else {
                             return Err(wrong_arity(args));
                         };
                         eval_number_operands(operation, left_mode, right_mode, left, right)
-                    },
-                ),
+                    })
+                }
             }
         }
     }

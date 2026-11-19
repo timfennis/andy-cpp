@@ -227,30 +227,6 @@ impl OpCode {
         }
     }
 
-    /// The op this instruction does, if it's one: `AddInt` does
-    /// [`NativeOp::AddInt`].
-    pub fn native_op(&self) -> Option<NativeOp> {
-        Some(match self {
-            Self::AddInt => NativeOp::AddInt,
-            Self::SubInt => NativeOp::SubInt,
-            Self::MulInt => NativeOp::MulInt,
-            Self::AddFloat => NativeOp::AddFloat,
-            Self::SubFloat => NativeOp::SubFloat,
-            Self::MulFloat => NativeOp::MulFloat,
-            Self::DivFloat => NativeOp::DivFloat,
-            Self::Less => NativeOp::Less,
-            Self::LessEqual => NativeOp::LessEqual,
-            Self::Greater => NativeOp::Greater,
-            Self::GreaterEqual => NativeOp::GreaterEqual,
-            Self::Equal => NativeOp::Equal,
-            Self::NotEqual => NativeOp::NotEqual,
-            Self::NegInt => NativeOp::NegInt,
-            Self::NegFloat => NativeOp::NegFloat,
-            Self::Not => NativeOp::Not,
-            _ => return None,
-        })
-    }
-
     /// The variant's name, e.g. `"GetLocal"` for `GetLocal(0)`.
     pub fn name(&self) -> &'static str {
         match self {
