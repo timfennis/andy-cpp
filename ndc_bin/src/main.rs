@@ -4,7 +4,7 @@ use crate::docs::docs;
 use anyhow::anyhow;
 use clap::{Args, Parser, Subcommand};
 use highlighter::AndycppHighlighter;
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{Backend, Interpreter};
 use phase_timing::write_phase_timings;
 use std::path::PathBuf;
 use std::process;
@@ -207,6 +207,7 @@ fn main() -> anyhow::Result<()> {
 
             let mut interpreter = Interpreter::one_shot();
             interpreter.configure(ndc_stdlib::register);
+            interpreter.set_backend(backend()?);
 
             #[cfg(feature = "trace")]
             {
@@ -254,6 +255,7 @@ fn main() -> anyhow::Result<()> {
             let string = fs::read_to_string(path)?;
             let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
+            interpreter.set_backend(backend()?);
             match interpreter.disassemble_str(&string) {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
@@ -279,6 +281,21 @@ fn main() -> anyhow::Result<()> {
         Action::RunLsp => start_lsp(),
     }
     Ok(())
+}
+
+/// The VM the environment variable `NDC_VM` asks for: `register` for the
+/// register VM, and the stack VM when it's `stack` or isn't set.
+fn backend() -> anyhow::Result<Backend> {
+    match std::env::var("NDC_VM").as_deref() {
+        Err(std::env::VarError::NotPresent) | Ok("stack") => Ok(Backend::Stack),
+        Ok("register") => Ok(Backend::Register),
+        Ok(other) => Err(anyhow!(
+            "NDC_VM must be `stack` or `register`, not `{other}`"
+        )),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err(anyhow!("NDC_VM must be `stack` or `register`"))
+        }
+    }
 }
 
 fn start_lsp() {

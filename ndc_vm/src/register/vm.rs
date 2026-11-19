@@ -734,4 +734,26 @@ mod tests {
         assert_eq!(error.span, Some(span));
         assert!(error.message.contains("overflowed"), "{}", error.message);
     }
+
+    /// The analyser makes every condition a `Bool`, so no program in the
+    /// language the register VM compiles so far gets here.
+    #[test]
+    fn a_condition_that_isnt_a_bool() {
+        let function = program(1, vec![], |b| {
+            let end = b.label();
+            load_int(b, Reg(0), 1);
+            b.jump(
+                Instr::JumpIfFalse {
+                    cond: Reg(0),
+                    offset: 0,
+                },
+                end,
+                Span::synthetic(),
+            );
+            b.bind(end);
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        let error = run(&Natives::default(), function).unwrap_err();
+        assert_eq!(error.message, "mismatched types: expected Bool, found Int");
+    }
 }

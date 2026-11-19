@@ -9,6 +9,7 @@ use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
 pub use ndc_vm::InputSource;
 use ndc_vm::compiler::{Compiler, Session};
+use ndc_vm::register::{Compiler as RegisterCompiler, Vm as RegisterVm};
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
@@ -22,6 +23,15 @@ pub use ndc_vm::{NativeFunction, NativeSpec, Natives, Value};
 pub use timing::ExecutionTimings;
 
 mod timing;
+
+/// Which VM runs the code: the stack VM, or the register VM that is being
+/// built to replace it, which runs part of the language so far.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Backend {
+    #[default]
+    Stack,
+    Register,
+}
 
 pub struct Interpreter {
     /// Shared with the analyser, which asks for a native's type when a
@@ -61,6 +71,8 @@ pub struct Interpreter {
     /// runs once doesn't make them again after it ends, and registering the
     /// natives doesn't make them for the intrinsics alone first.
     stale: bool,
+    /// Which VM runs the code.
+    backend: Backend,
 }
 
 impl Interpreter {
@@ -102,7 +114,22 @@ impl Interpreter {
             #[cfg(feature = "trace")]
             tracer: None,
             stale: true,
+            backend: Backend::default(),
         }
+    }
+
+    /// Runs the code from now on with `backend`. A REPL line on the
+    /// register VM can't call a generic function an earlier line declared
+    /// with new types yet.
+    ///
+    /// Changing the backend forgets everything evaluated so far: a function
+    /// an earlier evaluation declared is compiled for the VM it ran on, and
+    /// the other one can't run it.
+    pub fn set_backend(&mut self, backend: Backend) {
+        if self.backend != backend {
+            self.start_over();
+        }
+        self.backend = backend;
     }
 
     /// Create an interpreter for executing a complete program once.
@@ -220,7 +247,11 @@ impl Interpreter {
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile(
+        let compile = match self.backend {
+            Backend::Stack => Compiler::compile,
+            Backend::Register => RegisterCompiler::compile,
+        };
+        Ok(compile(
             expressions.into_iter(),
             result.analysis,
             &self.natives,
@@ -244,13 +275,12 @@ impl Interpreter {
 
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         let compiled = self.compile_str(input)?;
-        let mut out = String::new();
-        out.push_str(&ndc_vm::disassemble::disassemble(
-            &compiled,
-            &self.natives,
-            Some(input),
-        ));
-        Ok(out)
+        Ok(match self.backend {
+            Backend::Stack => {
+                ndc_vm::disassemble::disassemble(&compiled, &self.natives, Some(input))
+            }
+            Backend::Register => ndc_vm::register::disassemble::disassemble(&compiled, Some(input)),
+        })
     }
 
     /// Execute source code and return the resulting [`Value`].
@@ -347,6 +377,9 @@ impl Interpreter {
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
+        if self.backend == Backend::Register {
+            return self.interpret_register_vm(expressions, analysis);
+        }
         let mut timings = ExecutionTimings::default();
         let code = measure(&mut timings, Phase::Compiling, || {
             if self.resumable {
@@ -381,6 +414,37 @@ impl Interpreter {
         }
         self.input = vm.take_input();
         let value = vm.last_value(num_locals);
+        (self.globals, self.stack) = vm.into_globals_and_stack();
+        run?;
+        Ok((value, timings))
+    }
+
+    /// [`Self::interpret_vm`] on the register VM.
+    fn interpret_register_vm(
+        &mut self,
+        expressions: impl Iterator<Item = ExpressionLocation>,
+        analysis: Analysis,
+    ) -> Result<(Value, ExecutionTimings), InterpreterError> {
+        let mut timings = ExecutionTimings::default();
+        let code = measure(&mut timings, Phase::Compiling, || {
+            RegisterCompiler::compile(expressions, analysis, &self.natives)
+        })?;
+        let output = if self.capturing {
+            OutputSink::Buffer(Vec::new())
+        } else {
+            OutputSink::Stdout
+        };
+        self.stack = Vec::new();
+        let stdin = std::mem::replace(&mut self.input, InputSource::None);
+        let mut vm = RegisterVm::new(code, std::mem::take(&mut self.globals), &self.natives)
+            .with_output(output)
+            .with_input(stdin);
+        let run = measure(&mut timings, Phase::Running, || vm.run());
+        if let Some(output) = vm.get_output() {
+            self.output.extend_from_slice(output);
+        }
+        self.input = vm.take_input();
+        let value = vm.last_value();
         (self.globals, self.stack) = vm.into_globals_and_stack();
         run?;
         Ok((value, timings))
