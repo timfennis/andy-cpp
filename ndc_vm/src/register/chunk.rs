@@ -1,4 +1,4 @@
-use super::instr::Instr;
+use super::instr::{FAR, Instr};
 use crate::Value;
 use ndc_lexer::Span;
 
@@ -10,6 +10,10 @@ pub struct Chunk {
     code: Vec<Instr>,
     constants: Vec<Value>,
     spans: Vec<Span>,
+    /// Where each jump whose offset is [`FAR`] goes, by the jump's index,
+    /// in order: a loop whose condition is a fused comparison and whose body
+    /// is more than 32,767 instructions long.
+    far_jumps: Vec<(usize, usize)>,
 }
 
 impl Chunk {
@@ -37,6 +41,31 @@ impl Chunk {
     pub fn span(&self, ip: usize) -> Span {
         self.spans[ip]
     }
+
+    /// Where each jump whose offset is [`FAR`] goes, by the jump's index.
+    pub fn far_jumps(&self) -> &[(usize, usize)] {
+        &self.far_jumps
+    }
+
+    /// The index the jump at `ip` goes to, if it jumps.
+    pub fn jump_target(&self, ip: usize) -> Option<usize> {
+        let offset = self.code[ip].jump_offset()?;
+        if self.code[ip].is_far_jump() {
+            return Some(far_target(&self.far_jumps, ip));
+        }
+        Some((ip + 1).wrapping_add_signed(offset as isize))
+    }
+}
+
+/// Where the jump at `ip`, whose offset is [`FAR`], goes, as `far_jumps`
+/// says.
+#[cold]
+#[inline(never)]
+pub(crate) fn far_target(far_jumps: &[(usize, usize)], ip: usize) -> usize {
+    let index = far_jumps
+        .binary_search_by_key(&ip, |&(jump, _)| jump)
+        .expect("internal error: a far jump is in the chunk's far jumps");
+    far_jumps[index].1
 }
 
 /// A place in the code a jump goes to, made before the code it marks is
@@ -106,18 +135,27 @@ impl Builder {
             .expect("internal error: a function has fewer than 2^32 constants")
     }
 
-    /// The chunk, each jump given the offset to its label.
+    /// The chunk, each jump given the offset to its label, or [`FAR`] and
+    /// an entry in the chunk's far jumps if its offset doesn't fit.
     pub fn finish(mut self) -> Chunk {
+        let mut far_jumps = Vec::new();
         for (at, label) in std::mem::take(&mut self.jumps) {
             let target = self.labels[label.0].expect("internal error: every label is bound");
             let offset = i32::try_from(target as isize - (at as isize + 1))
                 .expect("internal error: a jump goes fewer than 2^31 instructions");
-            self.code[at] = self.code[at].with_jump_offset(offset);
+            self.code[at] = if let Some(jump) = self.code[at].with_jump_offset(offset) {
+                jump
+            } else {
+                far_jumps.push((at, target));
+                self.code[at].with_short_offset(FAR)
+            };
         }
+        far_jumps.sort_unstable();
         Chunk {
             code: self.code,
             constants: self.constants,
             spans: self.spans,
+            far_jumps,
         }
     }
 }

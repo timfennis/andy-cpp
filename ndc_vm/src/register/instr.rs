@@ -92,11 +92,45 @@ pub enum Instr {
     NegFloat { dst: Reg, src: Reg },
     /// [`NativeOp::Not`]: `dst = !src`.
     Not { dst: Reg, src: Reg },
+    /// [`NativeOp::AddInt`] of a register and an `Int` written in the code:
+    /// `dst = left + imm`, as in `i + 1`.
+    AddIntI { dst: Reg, left: Reg, imm: i16 },
+    /// [`NativeOp::SubInt`]: `dst = left - imm`, as in `n - 2`.
+    SubIntI { dst: Reg, left: Reg, imm: i16 },
+    /// [`NativeOp::MulInt`]: `dst = left * imm`, as in `i * 2`.
+    MulIntI { dst: Reg, left: Reg, imm: i16 },
     /// Goes `offset` instructions on.
     Jump { offset: i32 },
     /// Goes `offset` instructions on if `cond` is `false`, and fails if it
     /// isn't a `Bool`.
     JumpIfFalse { cond: Reg, offset: i32 },
+    /// Goes `offset` instructions on unless `left < right`: the condition
+    /// `i < n` of a loop, as `Less` then `JumpIfFalse` would, without making
+    /// a `Bool`. An offset of [`FAR`] is in the chunk's far jumps.
+    JumpIfNotLess { left: Reg, right: Reg, offset: i16 },
+    /// As [`Self::JumpIfNotLess`], unless `left <= right`.
+    JumpIfNotLessEqual { left: Reg, right: Reg, offset: i16 },
+    /// As [`Self::JumpIfNotLess`], unless `left > right`.
+    JumpIfNotGreater { left: Reg, right: Reg, offset: i16 },
+    /// As [`Self::JumpIfNotLess`], unless `left >= right`.
+    JumpIfNotGreaterEqual { left: Reg, right: Reg, offset: i16 },
+    /// As [`Self::JumpIfNotLess`], unless `left == right`.
+    JumpIfNotEqual { left: Reg, right: Reg, offset: i16 },
+    /// As [`Self::JumpIfNotLess`], unless `left != right`.
+    JumpIfNotNotEqual { left: Reg, right: Reg, offset: i16 },
+    /// As [`Self::JumpIfNotLess`] with an `Int` written in the code on the
+    /// right: unless `left < imm`, as in `n < 10`.
+    JumpIfNotLessI { left: Reg, imm: i16, offset: i16 },
+    /// As [`Self::JumpIfNotLessI`], unless `left <= imm`.
+    JumpIfNotLessEqualI { left: Reg, imm: i16, offset: i16 },
+    /// As [`Self::JumpIfNotLessI`], unless `left > imm`.
+    JumpIfNotGreaterI { left: Reg, imm: i16, offset: i16 },
+    /// As [`Self::JumpIfNotLessI`], unless `left >= imm`.
+    JumpIfNotGreaterEqualI { left: Reg, imm: i16, offset: i16 },
+    /// As [`Self::JumpIfNotLessI`], unless `left == imm`.
+    JumpIfNotEqualI { left: Reg, imm: i16, offset: i16 },
+    /// As [`Self::JumpIfNotLessI`], unless `left != imm`.
+    JumpIfNotNotEqualI { left: Reg, imm: i16, offset: i16 },
     /// Calls the function in `base` with the `args` values after it, and
     /// puts what it returns in `base`. The callee's frame starts at
     /// `base + 1`, so the arguments are its first registers.
@@ -151,6 +185,72 @@ impl Instr {
         }
     }
 
+    /// The instruction that does the binary `op` of `left` and the `Int`
+    /// `imm` into `dst`, if there's one for `op`: `SubIntI` for
+    /// `NativeOp::SubInt`.
+    pub fn binary_immediate(op: NativeOp, dst: Reg, left: Reg, imm: i16) -> Option<Self> {
+        match op {
+            NativeOp::AddInt => Some(Self::AddIntI { dst, left, imm }),
+            NativeOp::SubInt => Some(Self::SubIntI { dst, left, imm }),
+            NativeOp::MulInt => Some(Self::MulIntI { dst, left, imm }),
+            _ => None,
+        }
+    }
+
+    /// The jump taken unless the comparison `op` of `left` and `right`
+    /// holds, if `op` is a comparison: `JumpIfNotLess` for `NativeOp::Less`.
+    pub fn jump_unless(op: NativeOp, left: Reg, right: Reg) -> Option<Self> {
+        let offset = 0;
+        Some(match op {
+            NativeOp::Less => Self::JumpIfNotLess {
+                left,
+                right,
+                offset,
+            },
+            NativeOp::LessEqual => Self::JumpIfNotLessEqual {
+                left,
+                right,
+                offset,
+            },
+            NativeOp::Greater => Self::JumpIfNotGreater {
+                left,
+                right,
+                offset,
+            },
+            NativeOp::GreaterEqual => Self::JumpIfNotGreaterEqual {
+                left,
+                right,
+                offset,
+            },
+            NativeOp::Equal => Self::JumpIfNotEqual {
+                left,
+                right,
+                offset,
+            },
+            NativeOp::NotEqual => Self::JumpIfNotNotEqual {
+                left,
+                right,
+                offset,
+            },
+            _ => return None,
+        })
+    }
+
+    /// [`Self::jump_unless`] with the `Int` `imm` on the right:
+    /// `JumpIfNotLessI` for `NativeOp::Less`.
+    pub fn jump_unless_immediate(op: NativeOp, left: Reg, imm: i16) -> Option<Self> {
+        let offset = 0;
+        Some(match op {
+            NativeOp::Less => Self::JumpIfNotLessI { left, imm, offset },
+            NativeOp::LessEqual => Self::JumpIfNotLessEqualI { left, imm, offset },
+            NativeOp::Greater => Self::JumpIfNotGreaterI { left, imm, offset },
+            NativeOp::GreaterEqual => Self::JumpIfNotGreaterEqualI { left, imm, offset },
+            NativeOp::Equal => Self::JumpIfNotEqualI { left, imm, offset },
+            NativeOp::NotEqual => Self::JumpIfNotNotEqualI { left, imm, offset },
+            _ => return None,
+        })
+    }
+
     /// The variant's name, as the disassembler prints it: `"AddInt"`.
     pub fn name(self) -> &'static str {
         match self {
@@ -177,8 +277,23 @@ impl Instr {
             Self::NegInt { .. } => "NegInt",
             Self::NegFloat { .. } => "NegFloat",
             Self::Not { .. } => "Not",
+            Self::AddIntI { .. } => "AddIntI",
+            Self::SubIntI { .. } => "SubIntI",
+            Self::MulIntI { .. } => "MulIntI",
             Self::Jump { .. } => "Jump",
             Self::JumpIfFalse { .. } => "JumpIfFalse",
+            Self::JumpIfNotLess { .. } => "JumpIfNotLess",
+            Self::JumpIfNotLessEqual { .. } => "JumpIfNotLessEqual",
+            Self::JumpIfNotGreater { .. } => "JumpIfNotGreater",
+            Self::JumpIfNotGreaterEqual { .. } => "JumpIfNotGreaterEqual",
+            Self::JumpIfNotEqual { .. } => "JumpIfNotEqual",
+            Self::JumpIfNotNotEqual { .. } => "JumpIfNotNotEqual",
+            Self::JumpIfNotLessI { .. } => "JumpIfNotLessI",
+            Self::JumpIfNotLessEqualI { .. } => "JumpIfNotLessEqualI",
+            Self::JumpIfNotGreaterI { .. } => "JumpIfNotGreaterI",
+            Self::JumpIfNotGreaterEqualI { .. } => "JumpIfNotGreaterEqualI",
+            Self::JumpIfNotEqualI { .. } => "JumpIfNotEqualI",
+            Self::JumpIfNotNotEqualI { .. } => "JumpIfNotNotEqualI",
             Self::Call { .. } => "Call",
             Self::CallNative { .. } => "CallNative",
             Self::Return { .. } => "Return",
@@ -186,24 +301,105 @@ impl Instr {
         }
     }
 
-    /// The jump's offset, for an instruction that jumps.
+    /// The jump's offset as it's written, for an instruction that jumps.
+    /// For one whose offset is [`FAR`], [`super::Chunk::jump_target`] says
+    /// where it goes.
     pub fn jump_offset(self) -> Option<i32> {
         match self {
             Self::Jump { offset } | Self::JumpIfFalse { offset, .. } => Some(offset),
+            Self::JumpIfNotLess { offset, .. }
+            | Self::JumpIfNotLessEqual { offset, .. }
+            | Self::JumpIfNotGreater { offset, .. }
+            | Self::JumpIfNotGreaterEqual { offset, .. }
+            | Self::JumpIfNotEqual { offset, .. }
+            | Self::JumpIfNotNotEqual { offset, .. }
+            | Self::JumpIfNotLessI { offset, .. }
+            | Self::JumpIfNotLessEqualI { offset, .. }
+            | Self::JumpIfNotGreaterI { offset, .. }
+            | Self::JumpIfNotGreaterEqualI { offset, .. }
+            | Self::JumpIfNotEqualI { offset, .. }
+            | Self::JumpIfNotNotEqualI { offset, .. } => Some(i32::from(offset)),
             _ => None,
         }
     }
 
-    /// The same jump going `offset` instructions on. Panics for an
+    /// Whether this is a jump whose offset is [`FAR`], so that where it
+    /// goes is in the chunk's far jumps.
+    pub fn is_far_jump(self) -> bool {
+        !matches!(self, Self::Jump { .. } | Self::JumpIfFalse { .. })
+            && self.jump_offset() == Some(i32::from(FAR))
+    }
+
+    /// The same jump going `offset` instructions on, or `None` if `offset`
+    /// doesn't fit the jump's offset, which is then [`FAR`]. Panics for an
     /// instruction that doesn't jump.
-    pub(crate) fn with_jump_offset(self, offset: i32) -> Self {
+    pub(crate) fn with_jump_offset(self, offset: i32) -> Option<Self> {
+        if let Self::Jump { .. } = self {
+            return Some(Self::Jump { offset });
+        }
+        if let Self::JumpIfFalse { cond, .. } = self {
+            return Some(Self::JumpIfFalse { cond, offset });
+        }
+        let offset = i16::try_from(offset).ok().filter(|&offset| offset != FAR)?;
+        Some(self.with_short_offset(offset))
+    }
+
+    /// The same jump, whose offset is an `i16`, going `offset` on: [`FAR`]
+    /// for one that goes where the chunk's far jumps say.
+    pub(crate) fn with_short_offset(self, offset: i16) -> Self {
         match self {
-            Self::Jump { .. } => Self::Jump { offset },
-            Self::JumpIfFalse { cond, .. } => Self::JumpIfFalse { cond, offset },
-            other => panic!("internal error: {} doesn't jump", other.name()),
+            Self::JumpIfNotLess { left, right, .. } => Self::JumpIfNotLess {
+                left,
+                right,
+                offset,
+            },
+            Self::JumpIfNotLessEqual { left, right, .. } => Self::JumpIfNotLessEqual {
+                left,
+                right,
+                offset,
+            },
+            Self::JumpIfNotGreater { left, right, .. } => Self::JumpIfNotGreater {
+                left,
+                right,
+                offset,
+            },
+            Self::JumpIfNotGreaterEqual { left, right, .. } => Self::JumpIfNotGreaterEqual {
+                left,
+                right,
+                offset,
+            },
+            Self::JumpIfNotEqual { left, right, .. } => Self::JumpIfNotEqual {
+                left,
+                right,
+                offset,
+            },
+            Self::JumpIfNotNotEqual { left, right, .. } => Self::JumpIfNotNotEqual {
+                left,
+                right,
+                offset,
+            },
+            Self::JumpIfNotLessI { left, imm, .. } => Self::JumpIfNotLessI { left, imm, offset },
+            Self::JumpIfNotLessEqualI { left, imm, .. } => {
+                Self::JumpIfNotLessEqualI { left, imm, offset }
+            }
+            Self::JumpIfNotGreaterI { left, imm, .. } => {
+                Self::JumpIfNotGreaterI { left, imm, offset }
+            }
+            Self::JumpIfNotGreaterEqualI { left, imm, .. } => {
+                Self::JumpIfNotGreaterEqualI { left, imm, offset }
+            }
+            Self::JumpIfNotEqualI { left, imm, .. } => Self::JumpIfNotEqualI { left, imm, offset },
+            Self::JumpIfNotNotEqualI { left, imm, .. } => {
+                Self::JumpIfNotNotEqualI { left, imm, offset }
+            }
+            other => panic!("internal error: {} has no short jump offset", other.name()),
         }
     }
 }
+
+/// The offset of a jump whose offset is an `i16` that goes further than one
+/// can say: where it goes is in [`super::Chunk`]'s far jumps instead.
+pub const FAR: i16 = i16::MIN;
 
 /// The operands as the disassembler prints them, without the name:
 /// `r2, r0, r1` for `AddInt { dst: r2, left: r0, right: r1 }`. A
@@ -234,8 +430,49 @@ impl fmt::Display for Instr {
             | Self::GreaterEqual { dst, left, right }
             | Self::Equal { dst, left, right }
             | Self::NotEqual { dst, left, right } => write!(f, "{dst}, {left}, {right}"),
+            Self::AddIntI { dst, left, imm }
+            | Self::SubIntI { dst, left, imm }
+            | Self::MulIntI { dst, left, imm } => write!(f, "{dst}, {left}, #{imm}"),
             Self::Jump { offset } => write!(f, "{offset:+}"),
             Self::JumpIfFalse { cond, offset } => write!(f, "{cond}, {offset:+}"),
+            Self::JumpIfNotLess {
+                left,
+                right,
+                offset,
+            }
+            | Self::JumpIfNotLessEqual {
+                left,
+                right,
+                offset,
+            }
+            | Self::JumpIfNotGreater {
+                left,
+                right,
+                offset,
+            }
+            | Self::JumpIfNotGreaterEqual {
+                left,
+                right,
+                offset,
+            }
+            | Self::JumpIfNotEqual {
+                left,
+                right,
+                offset,
+            }
+            | Self::JumpIfNotNotEqual {
+                left,
+                right,
+                offset,
+            } => write!(f, "{left}, {right}, {}", ShortOffset(offset)),
+            Self::JumpIfNotLessI { left, imm, offset }
+            | Self::JumpIfNotLessEqualI { left, imm, offset }
+            | Self::JumpIfNotGreaterI { left, imm, offset }
+            | Self::JumpIfNotGreaterEqualI { left, imm, offset }
+            | Self::JumpIfNotEqualI { left, imm, offset }
+            | Self::JumpIfNotNotEqualI { left, imm, offset } => {
+                write!(f, "{left}, #{imm}, {}", ShortOffset(offset))
+            }
             Self::Call { base, args } => write!(f, "{base}, {args}"),
             Self::CallNative {
                 dst,
@@ -244,6 +481,19 @@ impl fmt::Display for Instr {
                 args,
             } => write!(f, "{dst}, n{slot}, {base}, {args}"),
             Self::Return { src } | Self::Halt { src } => write!(f, "{src}"),
+        }
+    }
+}
+
+/// A short jump offset as the disassembler prints it: `+4`, or `far`.
+struct ShortOffset(i16);
+
+impl fmt::Display for ShortOffset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0 == FAR {
+            write!(f, "far")
+        } else {
+            write!(f, "{:+}", self.0)
         }
     }
 }

@@ -65,6 +65,13 @@ enum NativeCall {
     Native(usize),
 }
 
+/// The right operand of a binary op.
+enum Right {
+    Reg(Reg),
+    /// An `Int` written in the code: `2` in `i * 2`.
+    Immediate(i16),
+}
+
 /// The labels of the loop being compiled, which `break` and `continue` jump
 /// to.
 #[derive(Clone, Copy)]
@@ -594,14 +601,8 @@ impl Compiler {
         dest: Dest,
         span: Span,
     ) -> Result<Operand, CompileError> {
-        let condition_span = condition.span;
         let otherwise = self.builder.label();
-        let cond = self.condition(condition)?;
-        self.builder.jump(
-            Instr::JumpIfFalse { cond, offset: 0 },
-            otherwise,
-            condition_span,
-        );
+        self.jump_unless(condition, otherwise)?;
         let Some(on_false) = on_false else {
             // An `if` without an `else` is `()`, whatever its branch gives.
             self.compile_expr(on_true, Dest::Discard)?;
@@ -632,15 +633,12 @@ impl Compiler {
         condition: ExpressionLocation,
         body: ExpressionLocation,
     ) -> Result<(), CompileError> {
-        let condition_span = condition.span;
         let start = self.builder.label();
         let end = self.builder.label();
         self.builder.bind(start);
         // A `break` in the condition leaves this loop too.
         self.loops.push(Loop { start, end });
-        let cond = self.condition(condition)?;
-        self.builder
-            .jump(Instr::JumpIfFalse { cond, offset: 0 }, end, condition_span);
+        self.jump_unless(condition, end)?;
         self.compile_expr(body, Dest::Discard)?;
         self.loops.pop();
         self.builder
@@ -649,16 +647,72 @@ impl Compiler {
         Ok(())
     }
 
-    /// Compiles a condition, and returns the register it's in. Its
-    /// temporary is free again, as the jump that reads it comes right after.
-    fn condition(&mut self, condition: ExpressionLocation) -> Result<Reg, CompileError> {
+    /// Compiles `condition` and a jump to `target` taken when it's false. A
+    /// condition that compares two values is one instruction that compares
+    /// and jumps, which makes no `Bool`: `i < n` is `JumpIfNotLess i, n`.
+    fn jump_unless(
+        &mut self,
+        condition: ExpressionLocation,
+        target: Label,
+    ) -> Result<(), CompileError> {
         let mark = self.next_temp;
-        let cond = match self.compile_expr(condition, Dest::Any)? {
-            Operand::Local(reg) | Operand::Temp(reg) => reg,
-            Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
-        };
+        let ExpressionLocation {
+            id,
+            expression,
+            span,
+        } = condition;
+        match expression {
+            Expression::Grouping(inner) => return self.jump_unless(*inner, target),
+            Expression::Call {
+                function,
+                arguments,
+            }
+            | Expression::OperatorCall {
+                function,
+                arguments,
+            }
+            | Expression::MethodCall {
+                function,
+                arguments,
+            } if let Some(op) = self.comparison(&function, arguments.len()) => {
+                let jump = match self.compile_binary_operands(arguments, true)? {
+                    (left, Right::Reg(right)) => Instr::jump_unless(op, left, right),
+                    (left, Right::Immediate(imm)) => Instr::jump_unless_immediate(op, left, imm),
+                }
+                .expect("internal error: a comparison has a compare-and-branch");
+                self.builder.jump(jump, target, function.span);
+            }
+            expression => {
+                let condition = ExpressionLocation {
+                    id,
+                    expression,
+                    span,
+                };
+                let cond = match self.compile_expr(condition, Dest::Any)? {
+                    Operand::Local(reg) | Operand::Temp(reg) => reg,
+                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                };
+                self.builder
+                    .jump(Instr::JumpIfFalse { cond, offset: 0 }, target, span);
+            }
+        }
+        // The jump has read its operands.
         self.next_temp = mark;
-        Ok(cond)
+        Ok(())
+    }
+
+    /// The comparison a call of `function` with `args` arguments does, if
+    /// it resolves to one of the comparison ops, as `<` of two Ints does.
+    fn comparison(&self, function: &ExpressionLocation, args: usize) -> Option<NativeOp> {
+        let Expression::Identifier { .. } = function.expression else {
+            return None;
+        };
+        match self.native_call(&self.binding(function.id))? {
+            NativeCall::Op(op) if args == 2 && Instr::jump_unless(op, Reg(0), Reg(0)).is_some() => {
+                Some(op)
+            }
+            _ => None,
+        }
     }
 
     fn current_loop(&self) -> Loop {
@@ -747,18 +801,66 @@ impl Compiler {
             "the analyser picks an overload by arity"
         );
         let mark = self.next_temp;
-        let operands = self.compile_operands(arguments)?;
+        if op.arity() == 1 {
+            let [src] = self.compile_operands(arguments)?[..] else {
+                unreachable!("internal error: a unary op takes one operand");
+            };
+            self.next_temp = mark;
+            let dst = self.place(dest, span)?;
+            self.emit(Instr::unary(op, dst, src), span);
+            return Ok(Self::placed(dest, dst));
+        }
+        let immediate = Instr::binary_immediate(op, Reg(0), Reg(0), 0).is_some();
+        let (left, right) = self.compile_binary_operands(arguments, immediate)?;
         // The instruction reads its operands before it writes its
         // destination, which may be one of them.
         self.next_temp = mark;
         let dst = self.place(dest, span)?;
-        let instr = match operands[..] {
-            [src] => Instr::unary(op, dst, src),
-            [left, right] => Instr::binary(op, dst, left, right),
-            _ => unreachable!("internal error: an op takes one or two operands"),
+        let instr = match right {
+            Right::Reg(right) => Instr::binary(op, dst, left, right),
+            Right::Immediate(imm) => Instr::binary_immediate(op, dst, left, imm)
+                .expect("internal error: the op has an immediate form"),
         };
         self.emit(instr, span);
         Ok(Self::placed(dest, dst))
+    }
+
+    /// Compiles the two operands of a binary op: two registers, or with
+    /// `immediate`, a register and the `Int` on the right when it's a
+    /// number written in the code that fits an `i16`, as `2` in `i * 2`.
+    fn compile_binary_operands(
+        &mut self,
+        arguments: Vec<ExpressionLocation>,
+        immediate: bool,
+    ) -> Result<(Reg, Right), CompileError> {
+        if immediate && let Some(imm) = self.small_int(&arguments[1]) {
+            let [left, _] = <[_; 2]>::try_from(arguments)
+                .expect("internal error: a binary op takes two operands");
+            let left = match self.compile_expr(left, Dest::Any)? {
+                Operand::Local(reg) | Operand::Temp(reg) => reg,
+                Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+            };
+            return Ok((left, Right::Immediate(imm)));
+        }
+        let [left, right] = self.compile_operands(arguments)?[..] else {
+            unreachable!("internal error: a binary op takes two operands");
+        };
+        Ok((left, Right::Reg(right)))
+    }
+
+    /// The value of `expression` if it's an `Int` written in the code that
+    /// fits an `i16`: `2`, but not `2` where the analyser made it a Float.
+    fn small_int(&self, expression: &ExpressionLocation) -> Option<i16> {
+        let Expression::NumericLiteral(NumericLiteral::Int64(value)) = expression.expression else {
+            return None;
+        };
+        if matches!(
+            self.analysis.expr_types.get(&expression.id),
+            Some(StaticType::Float | StaticType::Number)
+        ) {
+            return None;
+        }
+        i16::try_from(value).ok()
     }
 
     /// Compiles `arguments` in order into registers an instruction reads,

@@ -1,4 +1,5 @@
-use super::instr::{Instr, Reg, WINDOW};
+use super::chunk::far_target;
+use super::instr::{FAR, Instr, Reg, WINDOW};
 use crate::error::VmError;
 use crate::io::{InputSource, OutputSink};
 use crate::native_op::NativeOp;
@@ -140,6 +141,24 @@ impl Vm {
                 .try_into()
                 .expect("internal error: the stack reaches a window past every frame");
             let globals = &mut self.globals;
+            let far_jumps = chunk.far_jumps();
+
+            // A compare-and-branch: goes `offset` on unless `holds` of the
+            // two values, as the comparison `op` finds them.
+            macro_rules! jump_unless {
+                ($op:expr, $left:expr, $right:expr, $holds:expr, $offset:expr) => {{
+                    let holds = match ($left, $right) {
+                        (Value::Int(l), Value::Int(r)) => $holds(l, r),
+                        (left, right) => match compare($op, left, right) {
+                            Ok(holds) => holds,
+                            Err(error) => break Exit::Error(error),
+                        },
+                    };
+                    if !holds {
+                        ip = short_jump(ip, $offset, far_jumps);
+                    }
+                }};
+            }
 
             let exit = loop {
                 let instr = code[ip];
@@ -170,10 +189,9 @@ impl Vm {
                             Some(value) => regs[dst.index()] = value,
                             None => {
                                 break Exit::Error(binary_error(
-                                    regs,
                                     NativeOp::AddInt,
-                                    left,
-                                    right,
+                                    &regs[left.index()],
+                                    &regs[right.index()],
                                 ));
                             }
                         }
@@ -187,10 +205,9 @@ impl Vm {
                             Some(value) => regs[dst.index()] = value,
                             None => {
                                 break Exit::Error(binary_error(
-                                    regs,
                                     NativeOp::SubInt,
-                                    left,
-                                    right,
+                                    &regs[left.index()],
+                                    &regs[right.index()],
                                 ));
                             }
                         }
@@ -204,10 +221,9 @@ impl Vm {
                             Some(value) => regs[dst.index()] = value,
                             None => {
                                 break Exit::Error(binary_error(
-                                    regs,
                                     NativeOp::MulInt,
-                                    left,
-                                    right,
+                                    &regs[left.index()],
+                                    &regs[right.index()],
                                 ));
                             }
                         }
@@ -319,6 +335,162 @@ impl Vm {
                             break Exit::Error(error);
                         }
                     }
+                    Instr::AddIntI { dst, left, imm } => {
+                        let value = match &regs[left.index()] {
+                            Value::Int(l) => l.checked_add(i64::from(imm)).map(Value::Int),
+                            _ => None,
+                        };
+                        match value {
+                            Some(value) => regs[dst.index()] = value,
+                            None => {
+                                break Exit::Error(binary_error(
+                                    NativeOp::AddInt,
+                                    &regs[left.index()],
+                                    &Value::Int(i64::from(imm)),
+                                ));
+                            }
+                        }
+                    }
+                    Instr::SubIntI { dst, left, imm } => {
+                        let value = match &regs[left.index()] {
+                            Value::Int(l) => l.checked_sub(i64::from(imm)).map(Value::Int),
+                            _ => None,
+                        };
+                        match value {
+                            Some(value) => regs[dst.index()] = value,
+                            None => {
+                                break Exit::Error(binary_error(
+                                    NativeOp::SubInt,
+                                    &regs[left.index()],
+                                    &Value::Int(i64::from(imm)),
+                                ));
+                            }
+                        }
+                    }
+                    Instr::MulIntI { dst, left, imm } => {
+                        let value = match &regs[left.index()] {
+                            Value::Int(l) => l.checked_mul(i64::from(imm)).map(Value::Int),
+                            _ => None,
+                        };
+                        match value {
+                            Some(value) => regs[dst.index()] = value,
+                            None => {
+                                break Exit::Error(binary_error(
+                                    NativeOp::MulInt,
+                                    &regs[left.index()],
+                                    &Value::Int(i64::from(imm)),
+                                ));
+                            }
+                        }
+                    }
+                    Instr::JumpIfNotLess {
+                        left,
+                        right,
+                        offset,
+                    } => jump_unless!(
+                        NativeOp::Less,
+                        &regs[left.index()],
+                        &regs[right.index()],
+                        |l: &i64, r: &i64| l < r,
+                        offset
+                    ),
+                    Instr::JumpIfNotLessEqual {
+                        left,
+                        right,
+                        offset,
+                    } => jump_unless!(
+                        NativeOp::LessEqual,
+                        &regs[left.index()],
+                        &regs[right.index()],
+                        |l: &i64, r: &i64| l <= r,
+                        offset
+                    ),
+                    Instr::JumpIfNotGreater {
+                        left,
+                        right,
+                        offset,
+                    } => jump_unless!(
+                        NativeOp::Greater,
+                        &regs[left.index()],
+                        &regs[right.index()],
+                        |l: &i64, r: &i64| l > r,
+                        offset
+                    ),
+                    Instr::JumpIfNotGreaterEqual {
+                        left,
+                        right,
+                        offset,
+                    } => jump_unless!(
+                        NativeOp::GreaterEqual,
+                        &regs[left.index()],
+                        &regs[right.index()],
+                        |l: &i64, r: &i64| l >= r,
+                        offset
+                    ),
+                    Instr::JumpIfNotEqual {
+                        left,
+                        right,
+                        offset,
+                    } => jump_unless!(
+                        NativeOp::Equal,
+                        &regs[left.index()],
+                        &regs[right.index()],
+                        |l: &i64, r: &i64| l == r,
+                        offset
+                    ),
+                    Instr::JumpIfNotNotEqual {
+                        left,
+                        right,
+                        offset,
+                    } => jump_unless!(
+                        NativeOp::NotEqual,
+                        &regs[left.index()],
+                        &regs[right.index()],
+                        |l: &i64, r: &i64| l != r,
+                        offset
+                    ),
+                    Instr::JumpIfNotLessI { left, imm, offset } => jump_unless!(
+                        NativeOp::Less,
+                        &regs[left.index()],
+                        &Value::Int(i64::from(imm)),
+                        |l: &i64, r: &i64| l < r,
+                        offset
+                    ),
+                    Instr::JumpIfNotLessEqualI { left, imm, offset } => jump_unless!(
+                        NativeOp::LessEqual,
+                        &regs[left.index()],
+                        &Value::Int(i64::from(imm)),
+                        |l: &i64, r: &i64| l <= r,
+                        offset
+                    ),
+                    Instr::JumpIfNotGreaterI { left, imm, offset } => jump_unless!(
+                        NativeOp::Greater,
+                        &regs[left.index()],
+                        &Value::Int(i64::from(imm)),
+                        |l: &i64, r: &i64| l > r,
+                        offset
+                    ),
+                    Instr::JumpIfNotGreaterEqualI { left, imm, offset } => jump_unless!(
+                        NativeOp::GreaterEqual,
+                        &regs[left.index()],
+                        &Value::Int(i64::from(imm)),
+                        |l: &i64, r: &i64| l >= r,
+                        offset
+                    ),
+                    Instr::JumpIfNotEqualI { left, imm, offset } => jump_unless!(
+                        NativeOp::Equal,
+                        &regs[left.index()],
+                        &Value::Int(i64::from(imm)),
+                        |l: &i64, r: &i64| l == r,
+                        offset
+                    ),
+                    Instr::JumpIfNotNotEqualI { left, imm, offset } => jump_unless!(
+                        NativeOp::NotEqual,
+                        &regs[left.index()],
+                        &Value::Int(i64::from(imm)),
+                        |l: &i64, r: &i64| l != r,
+                        offset
+                    ),
                     Instr::Jump { offset } => ip = ip.wrapping_add_signed(offset as isize),
                     Instr::JumpIfFalse { cond, offset } => match &regs[cond.index()] {
                         Value::Bool(true) => {}
@@ -524,10 +696,31 @@ fn binary(
 /// overflowed, or operands of the wrong type.
 #[cold]
 #[inline(never)]
-fn binary_error(regs: &[Value; WINDOW], op: NativeOp, left: Reg, right: Reg) -> VmError {
-    match op.binary(&regs[left.index()], &regs[right.index()]) {
+fn binary_error(op: NativeOp, left: &Value, right: &Value) -> VmError {
+    match op.binary(left, right) {
         Err(error) => error,
         Ok(_) => unreachable!("internal error: {op:?} failed on its fast path only"),
+    }
+}
+
+/// Whether the comparison `op` of `left` and `right` holds, for values its
+/// instruction's own fast path doesn't compare.
+#[inline(never)]
+fn compare(op: NativeOp, left: &Value, right: &Value) -> Result<bool, VmError> {
+    match op.binary(left, right)? {
+        Value::Bool(holds) => Ok(holds),
+        _ => unreachable!("internal error: {op:?} is a comparison"),
+    }
+}
+
+/// Where a jump whose offset is an `i16` goes from `ip`, the instruction
+/// after it: `offset` on, or for [`FAR`], where `far_jumps` says.
+#[inline(always)]
+fn short_jump(ip: usize, offset: i16, far_jumps: &[(usize, usize)]) -> usize {
+    if offset == FAR {
+        far_target(far_jumps, ip - 1)
+    } else {
+        ip.wrapping_add_signed(offset as isize)
     }
 }
 
@@ -733,6 +926,47 @@ mod tests {
         let error = run(&Natives::default(), function).unwrap_err();
         assert_eq!(error.span, Some(span));
         assert!(error.message.contains("overflowed"), "{}", error.message);
+    }
+
+    /// A compare-and-branch over more instructions than its offset can say
+    /// goes where the chunk's far jumps say.
+    #[test]
+    fn a_compare_and_branch_further_than_its_offset() {
+        for (n, expected) in [(5, 1), (50, 2)] {
+            let function = program(2, vec![], |b| {
+                let far = b.label();
+                load_int(b, Reg(0), n);
+                load_int(b, Reg(1), 1);
+                b.jump(
+                    Instr::JumpIfNotLessI {
+                        left: Reg(0),
+                        imm: 10,
+                        offset: 0,
+                    },
+                    far,
+                    Span::synthetic(),
+                );
+                for _ in 0..40_000 {
+                    emit(
+                        b,
+                        Instr::Copy {
+                            dst: Reg(1),
+                            src: Reg(1),
+                        },
+                    );
+                }
+                emit(b, Instr::Halt { src: Reg(1) });
+                b.bind(far);
+                load_int(b, Reg(1), 2);
+                emit(b, Instr::Halt { src: Reg(1) });
+            });
+            assert!(function.registers.code()[2].is_far_jump());
+            assert_eq!(function.registers.jump_target(2), Some(40_004));
+            assert_eq!(
+                run(&Natives::default(), function).unwrap(),
+                Value::Int(expected)
+            );
+        }
     }
 
     /// The analyser makes every condition a `Bool`, so no program in the
