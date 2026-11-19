@@ -96,7 +96,7 @@ impl StringLexer for Lexer<'_> {
                         }
                         Some(_x) => {
                             return Err(Error::text(
-                                "Invalid escapes equence".to_string(),
+                                "Invalid escape sequence".to_string(),
                                 escape_span.merge(self.source.span()),
                             ));
                         }
