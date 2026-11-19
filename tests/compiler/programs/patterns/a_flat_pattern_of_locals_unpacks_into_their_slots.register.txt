@@ -4,8 +4,6 @@
 0002  LoadUnit r0
 0003  Halt r0
 
-== #1 f (registers: 5) ==
-0000  Unpack r0, r3, 2
-0001  Move r1, r3
-0002  Move r2, r4
-0003  Return r1
+== #1 f (registers: 3) ==
+0000  Unpack r0, r1, 2
+0001  Return r1
