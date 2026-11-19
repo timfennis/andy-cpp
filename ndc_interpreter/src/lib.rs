@@ -32,6 +32,11 @@ pub struct Interpreter {
     /// declarations. A resumable interpreter keeps them from one evaluation to
     /// the next, which is how a REPL line sees what earlier lines declared.
     globals: Vec<Value>,
+    /// What the last run left on the VM's stack, such as the locals of the
+    /// top-level function. Kept until the next run or until the interpreter
+    /// is dropped, so a program that is about to exit can forget the
+    /// interpreter and leave freeing all of it to the OS.
+    stack: Vec<Value>,
     capturing: bool,
     analyser: Analyser,
     /// What compiling the evaluations so far leaves for the next, of a
@@ -81,6 +86,7 @@ impl Interpreter {
             // Made with the natives before the first evaluation.
             analyser: Analyser::with_natives(Vec::new()),
             globals: Vec::new(),
+            stack: Vec::new(),
             natives: Rc::new(Natives::default()),
             capturing,
             session: Session::default(),
@@ -346,6 +352,8 @@ impl Interpreter {
         } else {
             OutputSink::Stdout
         };
+        // Free what the last run left behind before this one needs the memory.
+        self.stack = Vec::new();
         let stdin = std::mem::replace(&mut self.input, InputSource::None);
         let mut vm = Vm::new(code, std::mem::take(&mut self.globals), &self.natives)
             .with_output(output)
@@ -364,7 +372,7 @@ impl Interpreter {
         }
         self.input = vm.take_input();
         let value = vm.last_value(num_locals);
-        self.globals = vm.into_globals();
+        (self.globals, self.stack) = vm.into_globals_and_stack();
         run?;
         Ok((value, timings))
     }

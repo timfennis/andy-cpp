@@ -834,9 +834,11 @@ impl Vm {
         }
     }
 
-    /// The globals as the program left them, for the next REPL line.
-    pub fn into_globals(self) -> Vec<Value> {
-        self.globals
+    /// The globals as the program left them, for the next REPL line, and
+    /// what is left on the stack: the locals of the top-level function, and
+    /// of every function and block the program was in if it failed.
+    pub fn into_globals_and_stack(self) -> (Vec<Value>, Vec<Value>) {
+        (self.globals, self.stack)
     }
 
     /// The function on the stack below the `args` arguments of a call.

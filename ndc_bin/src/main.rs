@@ -244,8 +244,9 @@ fn main() -> anyhow::Result<()> {
                 process::exit(1);
             }
             // The process ends here, which frees everything at once; dropping
-            // the interpreter's analyser and natives one by one first would
-            // only slow down exiting.
+            // the interpreter's analyser, natives and the program's values one
+            // by one first would only slow down exiting. The error paths above
+            // exit without dropping it either.
             #[expect(clippy::mem_forget, reason = "the process is about to exit")]
             std::mem::forget(interpreter);
         }
