@@ -40,6 +40,11 @@ fn disassemble_function(function: &CompiledFunction, source: Option<&str>, out: 
                     None => constant.to_string(),
                 }
             }
+            Instr::Closure { index, .. } => {
+                let function = &chunk.closures()[index as usize].function;
+                nested.push(Rc::clone(function));
+                format!("<fn {}>", function.name.as_deref().unwrap_or("?"))
+            }
             _ => match chunk.jump_target(ip) {
                 Some(target) => format!("-> {target:04}"),
                 None => String::new(),

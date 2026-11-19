@@ -1,6 +1,17 @@
 use super::instr::{FAR, Instr};
 use crate::Value;
+use crate::value::CompiledFunction;
+use ndc_analysis::CaptureSource;
 use ndc_lexer::Span;
+use std::rc::Rc;
+
+/// A function the code makes closures of, with what they capture, in the
+/// order the closure's upvalues are in: `Closure` makes one.
+#[derive(Clone)]
+pub struct ClosureCode {
+    pub function: Rc<CompiledFunction>,
+    pub captures: Rc<[CaptureSource]>,
+}
 
 /// The code of one function for the register VM: its instructions, the
 /// constants they load, and the span of source each instruction came from,
@@ -9,6 +20,8 @@ use ndc_lexer::Span;
 pub struct Chunk {
     code: Vec<Instr>,
     constants: Vec<Value>,
+    /// The functions `Closure` makes closures of, by index.
+    closures: Vec<ClosureCode>,
     spans: Vec<Span>,
     /// Where each jump whose offset is [`FAR`] goes, by the jump's index,
     /// in order: a loop whose condition is a fused comparison and whose body
@@ -35,6 +48,11 @@ impl Chunk {
 
     pub fn constant(&self, k: u32) -> &Value {
         &self.constants[k as usize]
+    }
+
+    /// The functions `Closure` makes closures of, by index.
+    pub fn closures(&self) -> &[ClosureCode] {
+        &self.closures
     }
 
     /// The span of the instruction at `ip`.
@@ -86,6 +104,7 @@ pub struct Label(usize);
 pub struct Builder {
     code: Vec<Instr>,
     constants: Vec<Value>,
+    closures: Vec<ClosureCode>,
     spans: Vec<Span>,
     /// Where each label is bound: the index of the instruction it marks.
     labels: Vec<Option<usize>>,
@@ -135,6 +154,16 @@ impl Builder {
             .expect("internal error: a function has fewer than 2^32 constants")
     }
 
+    /// The index of a new closure of `function`, which captures `captures`.
+    pub fn closure(&mut self, function: Rc<CompiledFunction>, captures: &[CaptureSource]) -> u32 {
+        self.closures.push(ClosureCode {
+            function,
+            captures: captures.into(),
+        });
+        u32::try_from(self.closures.len() - 1)
+            .expect("internal error: a function has fewer than 2^32 closures")
+    }
+
     /// The chunk, each jump given the offset to its label, or [`FAR`] and
     /// an entry in the chunk's far jumps if its offset doesn't fit.
     pub fn finish(mut self) -> Chunk {
@@ -154,6 +183,7 @@ impl Builder {
         Chunk {
             code: self.code,
             constants: self.constants,
+            closures: self.closures,
             spans: self.spans,
             far_jumps,
         }

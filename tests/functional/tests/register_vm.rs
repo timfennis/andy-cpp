@@ -346,6 +346,122 @@ fn struct_constructors_and_accessors() {
 }
 
 #[test]
+fn closures_share_the_variables_they_capture() {
+    let outcome = same_on_both(
+        "fn counter() {
+            let n = 0;
+            fn next() { n = n + 1; n }
+            next
+        }
+        let c = counter();
+        let d = counter();
+        print(c(), c(), d(), c());
+        fn adder(k) { fn(x) => x + k }
+        print(adder(3)(4));
+        fn nested() {
+            let x = 1;
+            fn outer() {
+                fn inner() { x = x + 10; x }
+                inner()
+            }
+            outer();
+            print(x, outer(), x);
+        }
+        nested();
+        print(\"ab\".map(fn(c) => c ++ \"!\"));",
+    );
+    assert_eq!(outcome.output, "1 2 1 3\n7\n11 21 21\n[\"a!\",\"b!\"]\n");
+}
+
+#[test]
+fn functions_that_capture_themselves() {
+    let outcome = same_on_both(
+        "fn fact(n) {
+            fn go(n) { if n <= 1 { 1 } else { n * go(n - 1) } }
+            go(n)
+        }
+        fn even(n) {
+            fn is_even(n) { if n == 0 { true } else { !is_even(n - 1) } }
+            is_even(n)
+        }
+        print(fact(10), even(7), even(8));",
+    );
+    assert_eq!(outcome.output, "3628800 false true\n");
+}
+
+/// Each run of a loop's body declares new variables, so each closure made
+/// in it has its own.
+#[test]
+fn closures_made_in_a_loop() {
+    let outcome = same_on_both(
+        "fn loops() {
+            let a = fn() => 0;
+            let b = fn() => 0;
+            let i = 0;
+            while i < 2 {
+                let j = i * 10;
+                fn get() { j }
+                if i == 0 { a = get; } else { b = fn() => j; }
+                j = j + 1;
+                i = i + 1;
+            }
+            print(a(), b());
+        }
+        loops();",
+    );
+    assert_eq!(outcome.output, "1 11\n");
+}
+
+#[test]
+fn pure_functions_remember_their_results() {
+    let outcome = same_on_both(
+        r#"pure fn slow(n) { print("computing", n); n * 2 }
+        print(slow(2), slow(2), slow(3));
+        fn local() {
+            pure fn fib(n) { if n <= 1 { n } else { fib(n - 1) + fib(n - 2) } }
+            fib(80)
+        }
+        print(local());
+        pure fn generic(x) { print("once", x); x }
+        print(generic(1), generic(1), generic(1.5));"#,
+    );
+    assert_eq!(
+        outcome.output,
+        "computing 2\ncomputing 3\n4 4 6\n23416728348467685\nonce 1\nonce 1.5\n1 1 1.5\n"
+    );
+}
+
+/// A variable that a call can change is read before the call, as the
+/// stack VM reads it: a captured local, a closure's captured variable and a
+/// global.
+#[test]
+fn a_variable_a_call_changes_is_read_before_the_call() {
+    let outcome = same_on_both(
+        "let g = 1;
+        fn set_g() { g = 100; 1 }
+        print(g + set_g(), g);
+        fn cell() {
+            let x = 1;
+            fn set_x() { x = 100; 1 }
+            print(x + set_x(), x);
+            x = 1;
+            print(max(x, set_x()), x);
+        }
+        cell();
+        fn upvalue() {
+            let y = 1;
+            fn inner() {
+                fn set_y() { y = 100; 1 }
+                print(y + set_y(), y);
+            }
+            inner();
+        }
+        upvalue();",
+    );
+    assert_eq!(outcome.output, "2 100\n2 100\n1 100\n2 100\n");
+}
+
+#[test]
 fn deep_recursion() {
     let outcome = same_on_both(
         "fn depth(n) { if n == 0 { 0 } else { 1 + depth(n - 1) } }
@@ -416,10 +532,6 @@ fn constructs_it_cant_compile_yet_are_errors() {
     for (program, construct) in [
         ("[1, 2]", "lists"),
         ("let x = 1; x += 1;", "an assignment with an operator"),
-        (
-            "fn f() { fn g() { 1 } g() }",
-            "a function that isn't declared",
-        ),
         ("for x in 1..3 { }", "`for` loops"),
         ("true and false", "`and` and `or`"),
     ] {

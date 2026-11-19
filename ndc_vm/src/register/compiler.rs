@@ -15,12 +15,12 @@ use crate::compiler::CompileError;
 use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function};
 use crate::{Natives, Value};
-use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
-use ndc_core::collections::HashSet;
+use ndc_analysis::{Analysis, Binding, Callee, Candidate, CaptureSource, Instance, ResolvedVar};
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{AssignmentTarget, BindingPattern, Expression, ExpressionLocation};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Where an expression's value has to go.
@@ -88,6 +88,14 @@ pub struct Compiler {
     /// The instance of a generic function whose body is being compiled,
     /// whose picks take the place of the function's own.
     instance: Option<InstanceAt>,
+    /// Whether the code compiled so far used a pick of `instance` that
+    /// differs from the function's own, so it differs between instances.
+    used_instance: Cell<bool>,
+    /// The functions compiled the same wherever they're declared, by
+    /// declaration: outside of any instance, or in an instance's body
+    /// without using its picks, so `fn f() => 42` in a generic body is one
+    /// function across its instances and keeps its identity.
+    prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
     /// The global slots of the natives the code reads or calls, shared with
     /// the compilers of the functions it declares, which the VM puts in its
     /// globals.
@@ -119,6 +127,8 @@ impl Compiler {
             builder: Builder::default(),
             analysis: Rc::new(analysis),
             instance: None,
+            used_instance: Cell::new(false),
+            prototypes: Rc::default(),
             natives: Rc::default(),
             native_ops: natives.ops(),
             compiled_instances: HashSet::default(),
@@ -182,6 +192,8 @@ impl Compiler {
             builder: Builder::default(),
             analysis: Rc::clone(&self.analysis),
             instance,
+            used_instance: Cell::new(false),
+            prototypes: Rc::clone(&self.prototypes),
             natives: Rc::clone(&self.natives),
             native_ops: Rc::clone(&self.native_ops),
             compiled_instances: HashSet::default(),
@@ -347,7 +359,7 @@ impl Compiler {
                 let variable = self.analysis.variable(l_value.id).expect(
                     "internal error: every binding pattern is analysed before it's compiled",
                 );
-                self.store(variable, *value, span)?;
+                self.store(variable, *value, true, span)?;
                 self.unit(dest, span)
             }
             Expression::Assignment { l_value, r_value } => {
@@ -360,15 +372,12 @@ impl Compiler {
                 let variable = self.analysis.variable(l_value.id).expect(
                     "internal error: every assignment target is analysed before it's compiled",
                 );
-                self.store(variable, *r_value, span)?;
+                self.store(variable, *r_value, false, span)?;
                 self.unit(dest, span)
             }
             Expression::FunctionDeclaration {
                 name, body, pure, ..
-            } => {
-                self.compile_function_declaration(id, name, *body, pure, span)?;
-                self.unit(dest, span)
-            }
+            } => self.compile_function_declaration(id, name, *body, pure, dest, span),
             Expression::Block { statements } => self.compile_block(statements, dest, span),
             Expression::If {
                 condition,
@@ -517,43 +526,63 @@ impl Compiler {
                 );
                 Ok(Self::placed(dest, dst))
             }
-            ResolvedVar::Cell { .. } | ResolvedVar::Upvalue { .. } => Err(
-                CompileError::not_yet_supported("a variable a closure captures", span),
-            ),
+            // A captured local is read through its cell, into a register of
+            // its own: a call may change it, as can a closure it calls.
+            ResolvedVar::Cell { slot } => {
+                let src = self.local(slot, span)?;
+                if dest == Dest::Discard {
+                    return Ok(Operand::Placed);
+                }
+                let dst = self.place(dest, span)?;
+                self.emit(Instr::GetCell { dst, src }, span);
+                Ok(Self::placed(dest, dst))
+            }
+            ResolvedVar::Upvalue { slot } => {
+                let index = upvalue(slot, span)?;
+                if dest == Dest::Discard {
+                    return Ok(Operand::Placed);
+                }
+                let dst = self.place(dest, span)?;
+                self.emit(Instr::GetUpvalue { dst, index }, span);
+                Ok(Self::placed(dest, dst))
+            }
         }
     }
 
-    /// Compiles `value` and stores it in `variable`, which a declaration or
-    /// an assignment at `span` writes.
+    /// Compiles `value` and stores it in `variable`, which a declaration,
+    /// when `declaring`, or an assignment at `span` writes. A declaration of
+    /// a local that closures capture writes its register, which replaces
+    /// the cell a closure made of an earlier run of it, as in a loop, so
+    /// each run makes a new variable; an assignment writes into the cell.
     fn store(
         &mut self,
         variable: ResolvedVar,
         value: ExpressionLocation,
+        declaring: bool,
         span: Span,
     ) -> Result<(), CompileError> {
+        let mark = self.next_temp;
         match variable {
             ResolvedVar::Local { slot } => {
                 let dst = self.local(slot, span)?;
                 self.compile_expr(value, Dest::Reg(dst))?;
             }
+            ResolvedVar::Cell { slot } if declaring => {
+                let dst = self.local(slot, span)?;
+                self.compile_expr(value, Dest::Reg(dst))?;
+            }
+            ResolvedVar::Cell { slot } => {
+                let cell = self.local(slot, span)?;
+                let src = self.compile_owned(value)?;
+                self.emit(Instr::SetCell { cell, src }, span);
+            }
+            ResolvedVar::Upvalue { slot } => {
+                let index = upvalue(slot, span)?;
+                let src = self.compile_owned(value)?;
+                self.emit(Instr::SetUpvalue { index, src }, span);
+            }
             ResolvedVar::Global { slot } => {
-                let mark = self.next_temp;
-                let src = match self.compile_expr(value, Dest::Any)? {
-                    Operand::Temp(reg) => reg,
-                    // `SetGlobal` takes its value, which a local keeps.
-                    Operand::Local(reg) => {
-                        let temp = self.alloc_temp(span)?;
-                        self.emit(
-                            Instr::Copy {
-                                dst: temp,
-                                src: reg,
-                            },
-                            span,
-                        );
-                        temp
-                    }
-                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
-                };
+                let src = self.compile_owned(value)?;
                 self.emit(
                     Instr::SetGlobal {
                         slot: global(slot),
@@ -561,16 +590,33 @@ impl Compiler {
                     },
                     span,
                 );
-                self.next_temp = mark;
-            }
-            ResolvedVar::Cell { .. } | ResolvedVar::Upvalue { .. } => {
-                return Err(CompileError::not_yet_supported(
-                    "a variable a closure captures",
-                    span,
-                ));
             }
         }
+        self.next_temp = mark;
         Ok(())
+    }
+
+    /// Compiles `expression` into a register that nothing else holds, for
+    /// an instruction that takes the value out of it: a temporary, or a
+    /// copy of a local's value. The register stays taken until the caller
+    /// frees it.
+    fn compile_owned(&mut self, expression: ExpressionLocation) -> Result<Reg, CompileError> {
+        let span = expression.span;
+        match self.compile_expr(expression, Dest::Any)? {
+            Operand::Temp(reg) => Ok(reg),
+            Operand::Local(reg) => {
+                let temp = self.alloc_temp(span)?;
+                self.emit(
+                    Instr::Copy {
+                        dst: temp,
+                        src: reg,
+                    },
+                    span,
+                );
+                Ok(temp)
+            }
+            Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+        }
     }
 
     fn compile_block(
@@ -1036,26 +1082,22 @@ impl Compiler {
         }
     }
 
-    /// Compiles a named function declared at the top level, which is stored
-    /// in a global: its body, or for a generic function, the body of each
-    /// of its instances, stored in globals of their own.
+    /// Compiles the function declared at `id`: a closure of its body over
+    /// what it captures, or the body alone if it captures nothing, stored in
+    /// the variable its name declares. A function without a name is the
+    /// expression's value instead, which `dest` says where to put; a
+    /// declaration's value is unit. A generic function, which is declared at
+    /// the top level, runs as its instances, each its body compiled with
+    /// the instance's picks and stored in a global of its own.
     fn compile_function_declaration(
         &mut self,
         id: NodeId,
         name: Option<String>,
         body: ExpressionLocation,
         pure: bool,
+        dest: Dest,
         span: Span,
-    ) -> Result<(), CompileError> {
-        if pure {
-            return Err(CompileError::not_yet_supported("`pure fn`", span));
-        }
-        let Some(ResolvedVar::Global { slot }) = self.analysis.variable(id) else {
-            return Err(CompileError::not_yet_supported(
-                "a function that isn't declared by name at the top level",
-                span,
-            ));
-        };
+    ) -> Result<Operand, CompileError> {
         let analysis = Rc::clone(&self.analysis);
         if let Some(instances) = analysis.instances.get(&id) {
             for (index, instance) in instances.iter().enumerate() {
@@ -1063,35 +1105,95 @@ impl Compiler {
                     declaration: id,
                     index,
                 };
-                let function = self.compile_function(id, name.clone(), body.clone(), Some(at))?;
-                let Instance {
-                    variable: ResolvedVar::Global { slot },
-                    ..
-                } = *instance
-                else {
-                    unreachable!("internal error: an instance is stored in a global");
-                };
-                self.store_function(function, slot, span)?;
+                let (function, _) =
+                    self.compile_function_body(id, name.clone(), body.clone(), Some(at))?;
+                // A `pure fn`'s instance has a cache of its own, as arguments
+                // of different types can be equal: `f(1)` and `f(1.0)` call
+                // different instances, which may return different values.
+                self.store_function(Rc::new(function), &[], pure, instance.variable, span)?;
             }
             self.compiled_instances.insert(id);
-            return Ok(());
+            return self.unit(dest, span);
         }
-        let function = self.compile_function(id, name, body, None)?;
-        self.store_function(function, slot, span)
+        let function = self.prototype(id, name, body)?;
+        let captures = analysis.captures(id);
+        let Some(variable) = analysis.variable(id) else {
+            let dst = self.place(dest, span)?;
+            self.make_function(function, captures, pure, dst, span);
+            return Ok(Self::placed(dest, dst));
+        };
+        self.store_function(function, captures, pure, variable, span)?;
+        self.unit(dest, span)
     }
 
-    /// Stores `function` in global slot `slot`.
+    /// Stores a function made of `function` (see [`Self::make_function`])
+    /// in `variable`, which its declaration at `span` declares.
     fn store_function(
         &mut self,
-        function: CompiledFunction,
-        slot: usize,
+        function: Rc<CompiledFunction>,
+        captures: &[CaptureSource],
+        pure: bool,
+        variable: ResolvedVar,
         span: Span,
     ) -> Result<(), CompileError> {
-        self.declare_value(
-            ResolvedVar::Global { slot },
-            Value::function(Function::Compiled(Rc::new(function))),
-            span,
-        )
+        let mark = self.next_temp;
+        match variable {
+            ResolvedVar::Local { slot } => {
+                let dst = self.local(slot, span)?;
+                self.make_function(function, captures, pure, dst, span);
+            }
+            // A function that captures itself needs its cell before its
+            // value exists.
+            ResolvedVar::Cell { slot } => {
+                let cell = self.local(slot, span)?;
+                self.emit(Instr::NewCell { reg: cell }, span);
+                let src = self.alloc_temp(span)?;
+                self.make_function(function, captures, pure, src, span);
+                self.emit(Instr::SetCell { cell, src }, span);
+            }
+            ResolvedVar::Global { slot } => {
+                let src = self.alloc_temp(span)?;
+                self.make_function(function, captures, pure, src, span);
+                self.emit(
+                    Instr::SetGlobal {
+                        slot: global(slot),
+                        src,
+                    },
+                    span,
+                );
+            }
+            ResolvedVar::Upvalue { .. } => {
+                unreachable!("internal error: the analyser never declares an upvalue")
+            }
+        }
+        self.next_temp = mark;
+        Ok(())
+    }
+
+    /// Puts a function value of `function` in `dst`: a closure over
+    /// `captures` if it captures anything, the function itself if not, and
+    /// for a `pure` one, that in a memoising wrapper with a cache of its
+    /// own, made each time the declaration runs.
+    fn make_function(
+        &mut self,
+        function: Rc<CompiledFunction>,
+        captures: &[CaptureSource],
+        pure: bool,
+        dst: Reg,
+        span: Span,
+    ) {
+        if captures.is_empty() {
+            let k = self
+                .builder
+                .constant(Value::function(Function::Compiled(function)));
+            self.emit(Instr::LoadK { dst, k }, span);
+        } else {
+            let index = self.builder.closure(function, captures);
+            self.emit(Instr::Closure { dst, index }, span);
+        }
+        if pure {
+            self.emit(Instr::Memoize { reg: dst }, span);
+        }
     }
 
     /// Stores `value`, a constant, in `variable`, which a declaration at
@@ -1162,35 +1264,85 @@ impl Compiler {
         Ok(())
     }
 
+    /// The compiled function declared at `id`. Inside an instance's body, a
+    /// function that compiles the same in every instance, not using any of
+    /// the instance's picks, is the one the first of them compiled.
+    fn prototype(
+        &self,
+        id: NodeId,
+        name: Option<String>,
+        body: ExpressionLocation,
+    ) -> Result<Rc<CompiledFunction>, CompileError> {
+        let (compiled, used_instance) = self.compile_function_body(id, name, body, None)?;
+        if self.instance.is_none() {
+            let compiled = Rc::new(compiled);
+            self.prototypes
+                .borrow_mut()
+                .insert(id, Rc::clone(&compiled));
+            return Ok(compiled);
+        }
+        if used_instance {
+            self.used_instance.set(true);
+            return Ok(Rc::new(compiled));
+        }
+        let prototype = self
+            .prototypes
+            .borrow_mut()
+            .entry(id)
+            .or_insert_with(|| Rc::new(compiled))
+            .clone();
+        Ok(prototype)
+    }
+
     /// Compiles the body of the function declared at `id`, with the picks
-    /// of `instance` if it's an instance of a generic function.
-    fn compile_function(
+    /// of `instance` if it's an instance of a generic function. The
+    /// functions it declares are compiled with them too. Also returns
+    /// whether the body used a pick of the instance it's compiled in.
+    fn compile_function_body(
         &self,
         id: NodeId,
         name: Option<String>,
         body: ExpressionLocation,
         instance: Option<InstanceAt>,
-    ) -> Result<CompiledFunction, CompileError> {
+    ) -> Result<(CompiledFunction, bool), CompileError> {
+        // An instance, and a function its body declares, takes what the
+        // instance's types make it take. Only a type that differs from the
+        // function's own makes a declared function the instance's, which
+        // makes the code around it depend on the instance too: otherwise
+        // it's shared, and stays one function across instances.
         let shared = self.analysis.function_type(id);
-        let static_type = instance
-            .and_then(|at| {
-                self.analysis.instances[&at.declaration][at.index]
-                    .function_types
-                    .get(&id)
-            })
-            .unwrap_or(shared)
-            .clone();
+        let static_type = match instance {
+            Some(at) => self.analysis.instances[&at.declaration][at.index]
+                .function_types
+                .get(&id)
+                .unwrap_or(shared),
+            None => self
+                .instance
+                .and_then(|at| {
+                    self.analysis.instances[&at.declaration][at.index]
+                        .function_types
+                        .get(&id)
+                })
+                .filter(|typ| *typ != shared)
+                .and_then(|_| self.instance_pick(|instance| instance.function_types.get(&id)))
+                .unwrap_or(shared),
+        }
+        .clone();
         let locals = self.analysis.frame_size(id);
         if locals > WINDOW {
             return Err(CompileError::too_many_registers(body.span));
         }
-        let mut compiler = self.nested(locals, instance);
+        let mut compiler = self.nested(locals, instance.or(self.instance));
         let src = match compiler.compile_expr(body, Dest::Any)? {
             Operand::Local(reg) | Operand::Temp(reg) => reg,
             Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
         };
         compiler.emit(Instr::Return { src }, Span::synthetic());
-        Ok(compiler.finish(name, static_type, 0, Vec::new()))
+        let used_instance = compiler.used_instance.get();
+        Ok((
+            compiler.finish(name, static_type, 0, Vec::new()),
+            used_instance,
+        ))
     }
 
     /// What the identifier `id` refers to, in the instance being compiled.
@@ -1200,14 +1352,20 @@ impl Compiler {
             .clone()
     }
 
-    /// The pick `pick` finds in the instance being compiled, if any.
+    /// The pick `pick` finds in the instance being compiled, if any, noting
+    /// that the code depends on the instance.
     fn instance_pick<'a, T>(
         &'a self,
         pick: impl FnOnce(&'a Instance) -> Option<&'a T>,
     ) -> Option<&'a T> {
-        self.instance
+        let found = self
+            .instance
             .map(|at| &self.analysis.instances[&at.declaration][at.index])
-            .and_then(pick)
+            .and_then(pick);
+        if found.is_some() {
+            self.used_instance.set(true);
+        }
+        found
     }
 
     /// The function that reads through the target at `id`, if it reads, in
@@ -1217,6 +1375,12 @@ impl Compiler {
             .or_else(|| self.analysis.getter(id))
             .cloned()
     }
+}
+
+/// The `u16` a closure's captured variable `slot` is written as in an
+/// instruction.
+fn upvalue(slot: usize, span: Span) -> Result<u16, CompileError> {
+    u16::try_from(slot).map_err(|_too_many| CompileError::too_many_registers(span))
 }
 
 /// The `u32` a global slot is written as in an instruction.
