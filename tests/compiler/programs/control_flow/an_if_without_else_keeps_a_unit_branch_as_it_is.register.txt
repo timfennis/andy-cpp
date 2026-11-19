@@ -1,6 +1,4 @@
 == <script> (registers: 2, globals: 0) ==
-0000  LoadK r1, k0                         true
-0001  JumpIfFalse r1, +1                   -> 0003
-0002  MakeTuple r1, r1, 0
-0003  LoadUnit r0
-0004  Halt r0
+0000  MakeTuple r1, r1, 0
+0001  LoadUnit r0
+0002  Halt r0

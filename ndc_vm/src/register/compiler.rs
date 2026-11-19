@@ -902,12 +902,25 @@ impl Compiler {
         Ok(())
     }
 
-    /// Compiles `condition` and a jump to `target` taken when it's false. A
-    /// condition that compares two values is one instruction that compares
-    /// and jumps, which makes no `Bool`: `i < n` is `JumpIfNotLess i, n`.
+    /// Compiles `condition` and a jump to `target` taken when it's false.
     fn jump_unless(
         &mut self,
         condition: ExpressionLocation,
+        target: Label,
+    ) -> Result<(), CompileError> {
+        self.jump_when(condition, false, target)
+    }
+
+    /// Compiles `condition` and a jump to `target` taken when it's `when`,
+    /// as jumps that make no `Bool` where they can. A comparison of two
+    /// values is one instruction that compares and jumps: `i < n` is
+    /// `JumpIfNotLess i, n`. `and`, `or` and `!` are jumps on their
+    /// operands: `if a and b` goes past its branch when `a` is false,
+    /// without running `b`.
+    fn jump_when(
+        &mut self,
+        condition: ExpressionLocation,
+        when: bool,
         target: Label,
     ) -> Result<(), CompileError> {
         let mark = self.next_temp;
@@ -917,7 +930,33 @@ impl Compiler {
             span,
         } = condition;
         match expression {
-            Expression::Grouping(inner) => return self.jump_unless(*inner, target),
+            Expression::Grouping(inner) => return self.jump_when(*inner, when, target),
+            Expression::BoolLiteral(value) => {
+                if value == when {
+                    self.builder.jump(Instr::Jump { offset: 0 }, target, span);
+                }
+            }
+            Expression::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                // `a and b` is false as soon as `a` is, and `a or b` true as
+                // soon as `a` is.
+                let settled_by_left = match operator {
+                    LogicalOperator::And => false,
+                    LogicalOperator::Or => true,
+                };
+                if when == settled_by_left {
+                    self.jump_when(*left, when, target)?;
+                    self.jump_when(*right, when, target)?;
+                } else {
+                    let skip = self.builder.label();
+                    self.jump_when(*left, settled_by_left, skip)?;
+                    self.jump_when(*right, when, target)?;
+                    self.builder.bind(skip);
+                }
+            }
             Expression::Call {
                 function,
                 arguments,
@@ -929,13 +968,30 @@ impl Compiler {
             | Expression::MethodCall {
                 function,
                 arguments,
-            } if let Some(op) = self.comparison(&function, arguments.len()) => {
+            } if self.condition_op(&function, arguments.len()).is_some() => {
+                let op = self
+                    .condition_op(&function, arguments.len())
+                    .expect("internal error: the guard found the op");
+                if op == NativeOp::Not {
+                    let Ok([operand]) = <[_; 1]>::try_from(arguments) else {
+                        unreachable!("internal error: `!` takes one operand");
+                    };
+                    return self.jump_when(operand, !when, target);
+                }
+                // A comparison that has to hold to jump jumps over a jump
+                // to `target` when it doesn't.
+                let skip = when.then(|| self.builder.label());
                 let jump = match self.compile_binary_operands(exprs(arguments), true)? {
                     (left, Right::Reg(right)) => Instr::jump_unless(op, left, right),
                     (left, Right::Immediate(imm)) => Instr::jump_unless_immediate(op, left, imm),
                 }
                 .expect("internal error: a comparison has a compare-and-branch");
-                self.builder.jump(jump, target, function.span);
+                self.builder
+                    .jump(jump, skip.unwrap_or(target), function.span);
+                if let Some(skip) = skip {
+                    self.builder.jump(Instr::Jump { offset: 0 }, target, span);
+                    self.builder.bind(skip);
+                }
             }
             expression => {
                 let condition = ExpressionLocation {
@@ -947,8 +1003,12 @@ impl Compiler {
                     Operand::Local(reg) | Operand::Temp(reg) => reg,
                     Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
                 };
-                self.builder
-                    .jump(Instr::JumpIfFalse { cond, offset: 0 }, target, span);
+                let jump = if when {
+                    Instr::JumpIfTrue { cond, offset: 0 }
+                } else {
+                    Instr::JumpIfFalse { cond, offset: 0 }
+                };
+                self.builder.jump(jump, target, span);
             }
         }
         // The jump has read its operands.
@@ -956,13 +1016,15 @@ impl Compiler {
         Ok(())
     }
 
-    /// The comparison a call of `function` with `args` arguments does, if
-    /// it resolves to one of the comparison ops, as `<` of two Ints does.
-    fn comparison(&self, function: &ExpressionLocation, args: usize) -> Option<NativeOp> {
+    /// The op a call of `function` with `args` arguments does, if it
+    /// resolves to one a condition jumps on without making a `Bool`: a
+    /// comparison, as `<` of two Ints, or `!` of a Bool.
+    fn condition_op(&self, function: &ExpressionLocation, args: usize) -> Option<NativeOp> {
         let Expression::Identifier { .. } = function.expression else {
             return None;
         };
         match self.native_call(&self.binding(function.id))? {
+            NativeCall::Op(NativeOp::Not) if args == 1 => Some(NativeOp::Not),
             NativeCall::Op(op) if args == 2 && Instr::jump_unless(op, Reg(0), Reg(0)).is_some() => {
                 Some(op)
             }

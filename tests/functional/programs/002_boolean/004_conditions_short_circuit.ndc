@@ -1,0 +1,22 @@
+// expect-output: [1,2,3,4,5,6,7,8,9,10,11,12,13,15,17,18,19,20,22,23]
+// `and`, `or` and `!` in the condition of an `if`, a `while` and a guard run
+// their operands from the left, and only as far as it takes to settle it.
+let log = [];
+fn yes(n) {
+    log.push(n);
+    true
+}
+fn no(n) {
+    log.push(n);
+    false
+}
+
+if yes(1) and no(2) { log.push(0); }
+if no(3) or yes(4) { log.push(5); }
+if !(no(6) or no(7)) { log.push(8); }
+if !(yes(9) and no(10)) and yes(11) { log.push(12); }
+while no(13) and yes(14) { }
+for _ in [1], if yes(15) or no(16) { log.push(17); }
+if !no(18) and (no(19) or yes(20)) { log.push(22); } else { log.push(21); }
+if 1 < 2 and !(2 < 1) or no(0) { log.push(23); }
+print(log);
