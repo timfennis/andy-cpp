@@ -1,0 +1,12 @@
+// A map and a set give their keys back in the order they were inserted.
+// Removing a key moves the last key into its place.
+let m = %{"b": 2, "a": 1, "c": 3};
+m["d"] = 4;
+print(m);
+remove(m, "b");
+print(m.keys());
+let s = %{3, 1, 2};
+print(s | %{9, 1});
+// expect-output: %{"b": 2,"a": 1,"c": 3,"d": 4}
+// expect-output: ["d","a","c"]
+// expect-output: %{3,1,2,9}
