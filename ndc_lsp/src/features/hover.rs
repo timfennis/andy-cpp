@@ -24,7 +24,12 @@ pub fn hover(
 
     // A declaration's name is an lvalue, not an expression node, so check those
     // first — they are more specific than the enclosing declaration expression.
+    // A type with an error in it is left out: the error is reported where it
+    // happened, and the type would only show its failed parts as `Any`.
     if let Some((span, typ)) = declaration_at(state, offset) {
+        if typ.has_errors() {
+            return None;
+        }
         return Some(markup(state, span, format!("```ndc\n{typ}\n```")));
     }
 
@@ -154,9 +159,13 @@ fn function_markdown(fun: &FunctionInfo) -> String {
     out
 }
 
-/// Markdown showing the inferred type of an expression.
+/// Markdown showing the inferred type of an expression, unless its check failed.
 fn type_hover(state: &DocumentState, id: NodeId) -> Option<String> {
-    let typ = state.analysis.expr_types.get(&id)?;
+    let typ = state
+        .analysis
+        .expr_types
+        .get(&id)
+        .filter(|typ| !typ.has_errors())?;
     Some(format!("```ndc\n{typ}\n```"))
 }
 
@@ -209,6 +218,16 @@ mod tests {
             panic!("expected markup");
         };
         content.value
+    }
+
+    #[test]
+    fn a_type_with_a_failed_check_in_it_has_no_hover() {
+        // `f`'s two returns share no type, so `y`'s type is an error.
+        let source = "fn f(c) { if c { return 1; } }\nlet y = f(true);";
+        let (state, functions) = analyse(source);
+        // On the declared `y`, and on `f`, which returns it.
+        assert_eq!(hover(&state, Position::new(1, 4), &functions), None);
+        assert_eq!(hover(&state, Position::new(1, 8), &functions), None);
     }
 
     #[test]

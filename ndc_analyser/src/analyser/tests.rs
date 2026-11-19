@@ -285,9 +285,10 @@ fn map_default_value_contributes_to_value_type() {
 }
 
 /// `source` reports exactly one error, containing `expected`, and its last
-/// expression is `Any`. For code after a failed declaration: the names it
-/// declared are bound as `Any`, so using them adds no second error.
-fn assert_one_error_then_any(source: &str, expected: &str) {
+/// expression's type has the failed check in it. For code after a failed
+/// declaration: the names it declared are bound as failed, so using them adds
+/// no second error.
+fn assert_one_error_then_failed(source: &str, expected: &str) {
     let (last_type, result) = analyse_with_globals(source, vec![]);
     assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
     assert!(
@@ -295,11 +296,11 @@ fn assert_one_error_then_any(source: &str, expected: &str) {
         "expected an error containing {expected:?}, got {:?}",
         result.errors,
     );
-    assert_eq!(last_type, StaticType::Any);
+    assert!(last_type.has_errors(), "{last_type:?}");
 }
 
 #[test]
-fn a_pattern_that_fails_to_type_check_binds_every_name_as_any() {
+fn a_pattern_that_fails_to_type_check_binds_every_name_as_failed() {
     for (source, expected) in [
         ("let (a, b, c) = (1, 2); c", "mismatched tuple arity"),
         (
@@ -308,7 +309,7 @@ fn a_pattern_that_fails_to_type_check_binds_every_name_as_any() {
         ),
         ("let (a, (b, c)) = (1, 2); c", "Invalid unpacking"),
     ] {
-        assert_one_error_then_any(source, expected);
+        assert_one_error_then_failed(source, expected);
     }
 }
 
@@ -321,7 +322,7 @@ fn an_annotated_name_the_value_has_no_part_for_keeps_its_annotation() {
 }
 
 #[test]
-fn a_statement_with_an_unknown_name_binds_its_declarations_as_any() {
+fn a_statement_with_an_unknown_name_binds_its_declarations_as_failed() {
     for source in [
         "fn f() { missing; } let g = f; g",
         "fn f() { missing; } f()",
@@ -330,7 +331,7 @@ fn a_statement_with_an_unknown_name_binds_its_declarations_as_any() {
         "let a = missing; a",
         "let (a, b) = missing; b",
     ] {
-        assert_one_error_then_any(
+        assert_one_error_then_failed(
             source,
             "Identifier missing has not previously been declared",
         );
