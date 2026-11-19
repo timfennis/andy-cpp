@@ -659,6 +659,11 @@ impl Vm {
                     let size = *size;
                     self.exec_unpack(size, span)?;
                 }
+                OpCode::UnpackLocals { first, count } => {
+                    let (first, count) = (*first, *count);
+                    let frame_pointer = self.frames.last().expect("no frame").frame_pointer;
+                    self.exec_unpack_locals(frame_pointer + first, count, span)?;
+                }
                 // Wraps the function on top of the stack in a fresh memoization
                 // cache.  Emitted by the compiler for every `pure fn` declaration.
                 // On subsequent calls with the same arguments, the cached result
@@ -961,6 +966,44 @@ impl Vm {
     }
 
     /// Pops a value from the stack and pushes `size` unpacked elements back.
+    /// Writes the elements of the compound on top of the stack to the
+    /// `count` stack slots from `base`. A list or tuple is written in place;
+    /// anything else, or slots past the top of the stack, go through
+    /// `exec_unpack` and one write per slot, as `SetLocal` does.
+    fn exec_unpack_locals(&mut self, base: usize, count: usize, span: Span) -> Result<(), VmError> {
+        let len = self.stack.len();
+        if base + count < len
+            && let Value::Object(obj) = &self.stack[len - 1]
+        {
+            let obj = Rc::clone(obj);
+            let in_place = match obj.as_ref() {
+                Object::Tuple(seq) if seq.len() == count => {
+                    self.stack[base..base + count].clone_from_slice(seq);
+                    true
+                }
+                Object::List(seq) if seq.borrow().len() == count => {
+                    self.stack[base..base + count].clone_from_slice(&seq.borrow());
+                    true
+                }
+                _ => false,
+            };
+            if in_place {
+                self.stack.pop();
+                return Ok(());
+            }
+        }
+        self.exec_unpack(count, span)?;
+        for slot in base..base + count {
+            let value = self.stack.pop().expect("stack underflow");
+            if slot < self.stack.len() {
+                self.stack[slot] = value;
+            } else {
+                self.stack.push(value);
+            }
+        }
+        Ok(())
+    }
+
     fn exec_unpack(&mut self, size: usize, span: Span) -> Result<(), VmError> {
         let top = self.stack.pop().expect("stack underflow");
         let Value::Object(obj) = top else {
@@ -989,21 +1032,13 @@ impl Vm {
                         span,
                     ));
                 }
-                // Try to avoid a clone when we're the sole owner.
                 // Elements are pushed in reverse order so that the first element
                 // ends up on top of the stack after all pushes complete.
-                let mut elements = match Rc::try_unwrap(obj) {
-                    Ok(Object::List(seq)) => seq.into_inner(),
-                    Ok(Object::Tuple(seq)) => seq,
-                    Ok(_) => unreachable!(),
-                    Err(rc) => match rc.as_ref() {
-                        Object::List(seq) => seq.borrow().to_vec(),
-                        Object::Tuple(seq) => seq.clone(),
-                        _ => unreachable!(),
-                    },
-                };
-                elements.reverse();
-                self.stack.append(&mut elements);
+                match obj.as_ref() {
+                    Object::List(seq) => self.stack.extend(seq.borrow().iter().rev().cloned()),
+                    Object::Tuple(seq) => self.stack.extend(seq.iter().rev().cloned()),
+                    _ => unreachable!(),
+                }
             }
             Object::String(s) => {
                 let s = s.borrow();

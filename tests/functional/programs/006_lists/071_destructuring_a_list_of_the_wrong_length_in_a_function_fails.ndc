@@ -1,0 +1,7 @@
+// expect-error: cannot unpack a list of length 3 into 2 variables
+fn f(xs) {
+    for [a, b] in xs {
+        print(a + b);
+    }
+}
+f([[1, 2], [1, 2, 3]]);

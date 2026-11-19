@@ -1,0 +1,20 @@
+// A closure in the loop body captures the pattern variables of its own
+// iteration, not the last ones.
+fn make(pairs) {
+    let fs = [];
+    for (a, b) in pairs {
+        fs.push(fn() { a * 10 + b });
+    }
+    fs
+}
+
+fn sum(fs) {
+    let total = 0;
+    for f in fs {
+        total += f();
+    }
+    total
+}
+
+print(sum(make([(1, 2), (3, 4)])));
+// expect-output: 46

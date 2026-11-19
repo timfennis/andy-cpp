@@ -1141,3 +1141,84 @@ fn a_negative_literal_index_of_a_tuple_is_the_operand() {
         "the index should be no negation: {ops:?}",
     );
 }
+
+// fn f(t: (Int, Int)) { let (a, b) = t; a }
+//
+// A flat pattern of locals in consecutive slots declares them all with one
+// UnpackLocals, which writes the tuple's elements straight to the slots.
+//
+// 0: GetLocal(0)               push `t`
+// 1: UnpackLocals(1, 2)        `a` = t[0] in slot 1, `b` = t[1] in slot 2
+#[test]
+fn a_flat_pattern_of_locals_unpacks_into_their_slots() {
+    assert_eq!(
+        compile_nested_function("fn f(t: (Int, Int)) { let (a, b) = t; a }", &[0]),
+        [
+            GetLocal(0),
+            UnpackLocals { first: 1, count: 2 },
+            Constant(0),
+            Pop,
+            GetLocal(1),
+            Return
+        ]
+    );
+}
+
+// fn f(t: ((Int, Int), Int)) { let ((a, b), c) = t; c }
+//
+// A nested pattern unpacks the outer compound onto the stack and declares
+// its elements one by one; the inner flat pattern is an UnpackLocals.
+#[test]
+fn a_nested_pattern_unpacks_its_flat_parts_into_their_slots() {
+    assert_eq!(
+        compile_nested_function(
+            "fn f(t: ((Int, Int), Int)) { let ((a, b), c) = t; c }",
+            &[0]
+        ),
+        [
+            GetLocal(0),
+            Unpack(2),
+            UnpackLocals { first: 1, count: 2 },
+            SetLocal(3),
+            Constant(0),
+            Pop,
+            GetLocal(3),
+            Return
+        ]
+    );
+}
+
+// fn f(xs: [(Int, Int)]) { for (a, b) in xs { fn() { a + b }; } }
+//
+// Pattern variables a closure captures are declared like any other local:
+// the declaration puts the new value in the slot, replacing the cell of the
+// previous iteration, so UnpackLocals covers them too.
+#[test]
+fn captured_pattern_variables_unpack_into_their_slots() {
+    let ops = compile_nested_function_with_stdlib(
+        "fn f(xs: [(Int, Int)]) { for (a, b) in xs { fn() { a + b }; } }",
+        &[0],
+    );
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, UnpackLocals { first: 1, count: 2 })),
+        "expected UnpackLocals(1, 2) for the loop pattern, got: {ops:?}",
+    );
+    assert!(
+        !ops.iter().any(|op| matches!(op, Unpack(_))),
+        "expected no Unpack, got: {ops:?}",
+    );
+}
+
+// let (a, b) = (1, 2);
+//
+// Top-level variables are globals, which UnpackLocals doesn't write.
+#[test]
+fn a_pattern_of_globals_unpacks_onto_the_stack() {
+    let ops = compile_with_analysis("let (a, b) = (1, 2);");
+    assert!(
+        ops.iter().any(|op| matches!(op, Unpack(2)))
+            && !ops.iter().any(|op| matches!(op, UnpackLocals { .. })),
+        "expected Unpack(2) and SetGlobal for globals, got: {ops:?}",
+    );
+}

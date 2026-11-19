@@ -1,0 +1,48 @@
+// Destructuring inside a function, where the variables are locals.
+fn rows_sum(rows) {
+    let total = 0;
+    for (y, r) in rows {
+        total += y * r.len();
+    }
+    total
+}
+
+fn swap_pairs(pairs) {
+    let out = [];
+    for [a, b] in pairs {
+        out.push([b, a]);
+    }
+    out
+}
+
+fn nested(xs) {
+    let out = [];
+    for ((a, b), c) in xs {
+        out.push(a + b + c);
+    }
+    out
+}
+
+fn from_let(t) {
+    let (a, b, c) = t;
+    let [d, e] = [a + b, c];
+    d * e
+}
+
+fn from_deque_and_string() {
+    let q = Deque(); q.push_back(1); q.push_back(2);
+    let a, b = q;
+    let c, d = "xy";
+    (a + b, c <> d)
+}
+
+print(rows_sum([(1, [0]), (2, [0, 0]), (3, [])]));
+print(swap_pairs([[1, 2], [3, 4]]));
+print(nested([((1, 2), 3), ((4, 5), 6)]));
+print(from_let((1, 2, 3)));
+print(from_deque_and_string());
+// expect-output: 5
+// expect-output: [[2,1],[4,3]]
+// expect-output: [6,15]
+// expect-output: 9
+// expect-output: (3,"xy")
