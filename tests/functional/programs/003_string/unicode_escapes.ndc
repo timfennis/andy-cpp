@@ -1,0 +1,8 @@
+assert_eq("\u{41}", "A");
+assert_eq("\u{e9}\u{E9}", "éé");
+assert_eq("\u{1F600}", "😀");
+assert_eq("\u{0}", "\0");
+assert_eq("\u{10FFFF}".len, 1);
+assert_eq("a\u{2764}b", "a❤b");
+print("\u{48}\u{69}");
+// expect-output: Hi

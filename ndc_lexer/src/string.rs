@@ -1,4 +1,4 @@
-use super::{Error, Lexer, Token, TokenLocation};
+use super::{Error, Lexer, Span, Token, TokenLocation};
 
 pub trait StringLexer {
     /// Lexes a literal string that needs to be terminated by `pounds` number of poundsigns
@@ -94,6 +94,9 @@ impl StringLexer for Lexer<'_> {
                         Some('"') => {
                             buf.push('"');
                         }
+                        Some('u') => {
+                            buf.push(self.lex_unicode_escape(escape_span)?);
+                        }
                         Some(_x) => {
                             return Err(Error::text(
                                 "Invalid escape sequence".to_string(),
@@ -124,5 +127,54 @@ impl StringLexer for Lexer<'_> {
         Err(Error::unterminated_string(
             self.source.create_span(start_offset),
         ))
+    }
+}
+
+impl Lexer<'_> {
+    /// Lexes the `{1F600}` of a `\u{1F600}` escape, after the `\u`, into the character
+    /// it names. `escape_span` is the span of the `\`.
+    fn lex_unicode_escape(&mut self, escape_span: Span) -> Result<char, Error> {
+        let invalid = |this: &mut Self, text: &str| {
+            Error::help(
+                text.to_string(),
+                escape_span.merge(this.source.span()),
+                "a Unicode escape is 1 to 6 hexadecimal digits in braces, like \\u{1F600}"
+                    .to_string(),
+            )
+        };
+
+        if self.source.peek() != Some('{') {
+            return Err(invalid(self, "Unicode escape without '{'"));
+        }
+        self.source.next();
+
+        let mut digits = String::new();
+        loop {
+            match self.source.peek() {
+                Some('}') => break,
+                Some(c) if c.is_ascii_hexdigit() && digits.len() < 6 => {
+                    self.source.next();
+                    digits.push(c);
+                }
+                Some(c) if c.is_ascii_hexdigit() => {
+                    return Err(invalid(self, "Unicode escape with more than 6 digits"));
+                }
+                _ => return Err(invalid(self, "Unterminated or invalid Unicode escape")),
+            }
+        }
+
+        if digits.is_empty() {
+            return Err(invalid(self, "Unicode escape without digits"));
+        }
+
+        let code_point = u32::from_str_radix(&digits, 16).expect("1 to 6 hex digits fit in u32");
+        let ch = char::from_u32(code_point).ok_or_else(|| {
+            Error::text(
+                format!("U+{code_point:04X} is not a Unicode character"),
+                escape_span.merge(self.source.span()),
+            )
+        });
+        self.source.next(); // the `}`
+        ch
     }
 }

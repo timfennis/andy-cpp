@@ -1,0 +1,2 @@
+// expect-error: more than 6 digits
+let s = "\u{1000000}";
