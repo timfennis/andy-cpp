@@ -36,32 +36,20 @@ an error when `n` is an `Int`. To turn one type into another, use functions like
 
 ## Casting a list or a map
 
-A cast checks every element of a list, map or other container. It also gives
-the container a new type, so it refuses a container that a variable still
-holds: the variable would still expect the old type. Cast a copy instead, made
-with `clone`:
+A cast checks every element of a list, map or other container:
 
 ```ndc
 let values: Any = [1, 2];
-let ints = cast::<[Int]>(values.clone());
+let ints = cast::<[Int]>(values);
 print(ints.sum());  // 3
 ```
-
-```ndc,fails
-let values: Any = [1, 2];
-cast::<[Int]>(values)
-// error[vm]: cannot cast to [Int]: the list is also held by something else, which would still expect what it held before
-```
-
-A container that nothing else holds, such as what a function returns, can be
-cast without a copy.
 
 A list of `Any`s needs a cast too before you use a function that wants a list
 of something more specific, like `sum`:
 
 ```ndc
 let values: [Any] = [1, 2, 3];
-print(cast::<[Int]>(values.clone()).sum());  // 6
+print(cast::<[Int]>(values).sum());  // 6
 ```
 
 ## Testing a value's type with `cast?`

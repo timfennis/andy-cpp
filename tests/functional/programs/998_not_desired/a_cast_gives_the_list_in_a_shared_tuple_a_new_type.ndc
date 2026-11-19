@@ -1,0 +1,7 @@
+// Not desired, fixed by step 6 of docs/register-vm/plan.md: the list in the
+// tuple is held only by the tuple, but `alias` holds the tuple, so the list
+// stays reachable through it with its old type.
+// expect-output: (1,Some([2]))
+let value: Any = (1, Some([2]));
+let alias = value;
+print(cast::<(Int, Option<[Int]>)>(value));

@@ -1,8 +1,0 @@
-// `cast?` doesn't settle the type of what it tests: the empty list stays open,
-// so the push of a String type-checks. But `xs` still holds the list, so it
-// can't also be had as a `[Int]`, and the cast fails when it runs.
-// expect-error: the list is also held by something else
-let xs = [];
-let ints = cast?::<[Int]>(xs).is_some();
-xs.push("a");
-print(ints, xs);
