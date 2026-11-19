@@ -1,0 +1,20 @@
+== <script> (locals: 0, globals: 4) ==
+0000  Constant(0)                          <fn Point>
+0001  SetGlobal(g0)
+0002  Constant(1)                          <fn Point.x>
+0003  SetGlobal(g1)
+0004  Constant(2)                          <fn Point.x=>
+0005  SetGlobal(g2)
+0006  Constant(3)                          ()
+0007  GetGlobal(g0)
+0008  Constant(4)                          1
+0009  Call(1)
+0010  SetGlobal(g3)
+0011  Constant(5)                          ()
+0012  Pop
+0013  GetGlobal(g2)
+0014  GetGlobal(g3)
+0015  Constant(6)                          2
+0016  Call(2)
+0017  Pop
+0018  Halt

@@ -1,0 +1,10 @@
+// An augmented assignment stores the operation's result back into its target,
+// then pushes unit for the assignment expression. That holds for a `++=` that
+// mutates the list in place as much as for a `+` that makes a new value, which
+// `+(Int, Int)` writes as an instruction and `++` calls by its slot. A variable
+// target stores with its Set opcode: the operation (`AddInt` or `CallNative`),
+// `SetGlobal`, then the `()` constant and the statement's `Pop`. An indexed
+// target passes the result to `[]=` (`Call(3)`), and pops that call's unit
+// before pushing its own.
+// compile: stdlib
+let value = [1]; value ++= [2];

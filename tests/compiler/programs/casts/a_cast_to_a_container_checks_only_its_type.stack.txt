@@ -1,0 +1,9 @@
+== <script> (locals: 0, globals: 1) ==
+0000  Constant(0)                          1
+0001  MakeList(1)
+0002  SetGlobal(g0)
+0003  Constant(1)                          ()
+0004  Pop
+0005  GetGlobal(g0)
+0006  CheckType([Int])
+0007  Halt

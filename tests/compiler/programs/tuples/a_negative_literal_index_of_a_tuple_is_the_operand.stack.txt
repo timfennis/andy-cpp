@@ -1,0 +1,8 @@
+== <script> (locals: 0, globals: 1) ==
+0000  Constant(0)                          1
+0001  MakeString(1)                        "a"
+0002  MakeTuple(2)
+0003  SetGlobal(g0)
+0004  GetGlobal(g0)
+0005  TupleIndex(-1)
+0006  Halt

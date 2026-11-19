@@ -1,0 +1,20 @@
+== <script> (locals: 0, globals: 0) ==
+0000  MakeString(0)                        "a"
+0001  MakeString(1)                        "b"
+0002  Less
+0003  Pop
+0004  Constant(2)                          1
+0005  MakeList(1)
+0006  Constant(3)                          1
+0007  MakeList(1)
+0008  Equal
+0009  Pop
+0010  Constant(4)                          1
+0011  Constant(5)                          2
+0012  MakeTuple(2)
+0013  Constant(6)                          2
+0014  Constant(7)                          1
+0015  MakeTuple(2)
+0016  NotEqual
+0017  Pop
+0018  Halt

@@ -1,0 +1,4 @@
+// A cast to a container type is the same type check as a cast to any other
+// type, right after the value is loaded: a `CheckType([Int])`.
+// compile: analysed
+let x: Any = [1]; cast::<[Int]>(x)

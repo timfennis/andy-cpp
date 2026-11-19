@@ -1,0 +1,26 @@
+== <script> (locals: 3, globals: 1, natives: [], []=) ==
+0000  Constant(0)                          1
+0001  MakeList(1)
+0002  SetGlobal(g0)
+0003  Constant(1)                          ()
+0004  Pop
+0005  GetGlobal(g0)
+0006  SetLocal(0)
+0007  Constant(2)                          0
+0008  SetLocal(1)
+0009  GetGlobal([])
+0010  GetLocal(0)
+0011  GetLocal(1)
+0012  Call(2)
+0013  Constant(3)                          2
+0014  AddInt
+0015  SetLocal(2)
+0016  GetGlobal([]=)
+0017  GetLocal(0)
+0018  GetLocal(1)
+0019  GetLocal(2)
+0020  Call(3)
+0021  Pop
+0022  Constant(4)                          ()
+0023  Pop
+0024  Halt

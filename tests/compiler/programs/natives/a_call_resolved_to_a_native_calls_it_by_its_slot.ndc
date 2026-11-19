@@ -1,0 +1,5 @@
+// A call the analyser resolves to one native names it by its global slot: the
+// arguments go on the stack with no callee under them, and `CallNative` calls
+// the native there.
+// compile: stdlib optimized
+let xs = [1, 2]; len(xs)

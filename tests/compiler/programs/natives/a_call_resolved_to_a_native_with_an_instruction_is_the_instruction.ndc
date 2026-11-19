@@ -1,0 +1,6 @@
+// In the Int instance of `fib`, `<`, `-` and `+` resolve to the natives for two
+// Ints, which the VM has instructions for. The compiler writes those in place
+// of the calls, after the operands; only `fib` itself is called.
+// compile: stdlib
+fn fib(n) { if n < 2 { n } else { fib(n - 1) + fib(n - 2) } }
+fib(30);

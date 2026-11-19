@@ -1,0 +1,30 @@
+== <script> (locals: 0, globals: 1) ==
+0000  Constant(0)                          <fn #1 add>
+0001  SetGlobal(g0)
+0002  Constant(1)                          ()
+0003  Constant(2)                          true
+0004  JumpIfFalse(13)                      -> 0018
+0005  Pop
+0006  GetGlobal(g0)
+0007  Constant(3)                          1
+0008  Constant(4)                          2
+0009  Pop
+0010  Pop
+0011  Pop
+0012  Jump(6)                              -> 0019
+0013  Call(3)
+0014  Pop
+0015  Constant(5)                          ()
+0016  Pop
+0017  Jump(-15)                            -> 0003
+0018  Pop
+0019  Constant(6)                          ()
+0020  Halt
+
+== #1 add (locals: 3) ==
+0000  GetLocal(0)
+0001  GetLocal(1)
+0002  AddInt
+0003  GetLocal(2)
+0004  AddInt
+0005  Return

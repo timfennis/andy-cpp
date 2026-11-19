@@ -1,0 +1,6 @@
+== <script> (locals: 0, globals: 0, natives: /) ==
+0000  Constant(0)                          7
+0001  Constant(1)                          2
+0002  CallNative(/, 2)
+0003  Pop
+0004  Halt

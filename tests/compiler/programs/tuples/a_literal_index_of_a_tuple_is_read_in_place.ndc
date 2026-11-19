@@ -1,0 +1,4 @@
+// A tuple indexed by a number written in the code reads the element in place:
+// the tuple, then `TupleIndex` with the index as its operand, and no call.
+// compile: stdlib optimized
+let t = (1, "a"); t[1]

@@ -1,0 +1,37 @@
+== <script> (locals: 0, globals: 1, natives: [], []=) ==
+0000  Constant(0)                          <fn #1 f>
+0001  SetGlobal(g0)
+0002  Constant(1)                          ()
+0003  Halt
+
+== #1 f (locals: 5) ==
+0000  Constant(0)                          1
+0001  MakeList(1)
+0002  SetLocal(0)
+0003  Constant(1)                          ()
+0004  Pop
+0005  GetLocal(0)
+0006  SetLocal(2)
+0007  Constant(2)                          0
+0008  SetLocal(3)
+0009  GetGlobal([])
+0010  GetLocal(2)
+0011  GetLocal(3)
+0012  Call(2)
+0013  Constant(3)                          2
+0014  SetLocal(1)
+0015  Constant(4)                          ()
+0016  Pop
+0017  GetLocal(1)
+0018  AddInt
+0019  SetLocal(4)
+0020  GetGlobal([]=)
+0021  GetLocal(2)
+0022  GetLocal(3)
+0023  GetLocal(4)
+0024  Call(3)
+0025  Pop
+0026  Constant(5)                          ()
+0027  Pop
+0028  GetLocal(0)
+0029  Return

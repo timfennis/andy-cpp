@@ -1,0 +1,5 @@
+// A flat pattern of locals in consecutive slots declares them all with one
+// `UnpackLocals`, which writes the tuple's elements straight to the slots: `a`
+// = `t[0]` in slot 1, `b` = `t[1]` in slot 2.
+// compile: analysed
+fn f(t: (Int, Int)) { let (a, b) = t; a }

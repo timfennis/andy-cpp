@@ -1,0 +1,12 @@
+== <script> (locals: 0, globals: 1) ==
+0000  Constant(0)                          1
+0001  SetGlobal(g0)
+0002  Constant(1)                          ()
+0003  Pop
+0004  GetGlobal(g0)
+0005  Constant(2)                          2
+0006  AddInt
+0007  SetGlobal(g0)
+0008  Constant(3)                          ()
+0009  Pop
+0010  Halt

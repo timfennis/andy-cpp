@@ -1,0 +1,8 @@
+// A member assignment calls the field's setter `x=` with the receiver and then
+// the value: however the setter itself is loaded, the call is the setter,
+// `point` (the program's global after `Point`, `x` and `x=`), the `2`, then
+// `Call(2)`.
+// compile: analysed
+struct Point { x: Int }
+let point = Point(1);
+point.x = 2;

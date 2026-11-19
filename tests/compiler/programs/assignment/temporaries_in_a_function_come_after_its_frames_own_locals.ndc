@@ -1,0 +1,9 @@
+// `values` and `delta` take slots 0 and 1 of `f`'s frame. The indexed
+// assignment's temporaries (cached container, cached index and the operation
+// result) come after them, in slots 2 to 4, so `f` has 5 locals.
+// compile: stdlib
+fn f() {
+    let values = [1];
+    values[0] += { let delta = 2; delta };
+    values
+}

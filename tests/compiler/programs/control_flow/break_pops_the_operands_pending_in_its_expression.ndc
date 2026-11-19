@@ -1,0 +1,5 @@
+// The `break` sits inside a partially compiled call (the `add` callee and the
+// constants `1` and `2` are already on the stack), so it pops those three
+// pending operands before jumping out of the loop.
+// compile: stdlib
+fn add(a: Int, b: Int, c: Int) -> Int { a + b + c } while true { add(1, 2, break); }

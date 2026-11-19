@@ -1,0 +1,14 @@
+== <script> (locals: 0, globals: 1) ==
+0000  Constant(0)                          <fn #1 id>
+0001  SetGlobal(g0)
+0002  GetGlobal(g0)
+0003  Constant(2)                          1
+0004  Constant(3)                          2
+0005  Constant(4)                          3
+0006  MakeTuple(3)
+0007  Call(1)
+0008  Halt
+
+== #1 id (locals: 1) ==
+0000  GetLocal(0)
+0001  Return

@@ -1,0 +1,5 @@
+// The loop pops its body's value each iteration, as it's unobservable, and
+// jumps back to the condition. When the condition is false the loop pops it and
+// pushes `()`, the loop's value.
+// compile: parsed
+while true { 1 }

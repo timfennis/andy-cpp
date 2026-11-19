@@ -1,0 +1,31 @@
+== <script> (locals: 0, globals: 2) ==
+0000  Constant(0)                          <fn #1 fib>
+0001  SetGlobal(g1)
+0002  Constant(1)                          ()
+0003  GetGlobal(g1)
+0004  Constant(2)                          30
+0005  Call(1)
+0006  Pop
+0007  Halt
+
+== #1 fib (locals: 1) ==
+0000  GetLocal(0)
+0001  Constant(0)                          2
+0002  Less
+0003  JumpIfFalse(3)                       -> 0007
+0004  Pop
+0005  GetLocal(0)
+0006  Jump(12)                             -> 0019
+0007  Pop
+0008  GetGlobal(g1)
+0009  GetLocal(0)
+0010  Constant(1)                          1
+0011  SubInt
+0012  Call(1)
+0013  GetGlobal(g1)
+0014  GetLocal(0)
+0015  Constant(2)                          2
+0016  SubInt
+0017  Call(1)
+0018  AddInt
+0019  Return

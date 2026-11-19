@@ -1,0 +1,6 @@
+// `f` captures itself before its value exists, so its slot in `outer` gets a
+// fresh cell (`NewCell`) before the closure is made, and the closure is written
+// into that cell. (At the top level `f` would be a global, which needs no
+// cell.) What it returns contains itself, which only an `Any` holds.
+// compile: analysed
+fn outer() { fn f() -> Any { f } }

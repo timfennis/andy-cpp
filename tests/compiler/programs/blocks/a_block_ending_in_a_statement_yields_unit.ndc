@@ -1,0 +1,4 @@
+// A block ending in a statement (a trailing semicolon) discards that
+// statement's value and yields `()`.
+// compile: parsed
+{ 5; }

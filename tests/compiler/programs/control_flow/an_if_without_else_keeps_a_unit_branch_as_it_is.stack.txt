@@ -1,0 +1,9 @@
+== <script> (locals: 0, globals: 0) ==
+0000  Constant(0)                          true
+0001  JumpIfFalse(3)                       -> 0005
+0002  Pop
+0003  MakeTuple(0)
+0004  Jump(2)                              -> 0007
+0005  Pop
+0006  Constant(1)                          ()
+0007  Halt

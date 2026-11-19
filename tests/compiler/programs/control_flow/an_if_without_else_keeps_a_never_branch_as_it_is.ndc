@@ -1,0 +1,5 @@
+// A branch that never finishes needs no extra ops: the inner `if`'s branch is a
+// `break`, which is `Never`, so nothing pops its value and pushes `()` after
+// it.
+// compile: analysed
+while true { if true { break } }
