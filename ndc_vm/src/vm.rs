@@ -31,7 +31,7 @@ pub struct Vm {
     pub(crate) globals: Vec<Value>,
     frames: Vec<CallFrame>,
     /// The register VM's running calls, empty for stack code.
-    pub(crate) register_frames: Vec<crate::register::Frame>,
+    pub(crate) register_frames: crate::register::Frames,
     /// What the program's last expression gave, once register code halts.
     pub(crate) result: Value,
     /// Output sink for `print`, `dbg`, and similar I/O built-ins.
@@ -125,7 +125,7 @@ impl Vm {
             stack: Vec::new(),
             globals,
             frames: Vec::new(),
-            register_frames: Vec::new(),
+            register_frames: crate::register::Frames::default(),
             result: Value::unit(),
             output: OutputSink::Stdout,
             input: InputSource::Stdin,
@@ -136,8 +136,7 @@ impl Vm {
         };
         if function.is_register_code() {
             vm.stack = vec![Value::None; crate::register::WINDOW];
-            vm.register_frames
-                .push(crate::register::Frame::top_level(Rc::new(function)));
+            vm.register_frames = crate::register::Frames::top_level(Rc::new(function));
             return vm;
         }
         vm.stack = Vec::with_capacity(256);
