@@ -5,8 +5,8 @@ use crate::hash_map::HashMap;
 use crate::native_op::NativeOp;
 use crate::value::{ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::vm::{
-    MAX_CALL_DEPTH, MemoCache, calls_too_deep, convert_returned, make_range, memo_key, not_a_bool,
-    refused_arguments,
+    MAX_CALL_DEPTH, MemoCache, calls_too_deep, convert_returned, iterator_of, make_range, memo_key,
+    not_a_bool, refused_arguments, unpack_into,
 };
 use crate::{Object, Value, Vm};
 use ndc_analysis::CaptureSource;
@@ -568,6 +568,32 @@ impl Vm {
                         match make_range(&regs[start.index()], None, false) {
                             Ok(range) => regs[dst.index()] = range,
                             Err(message) => break Exit::Error(VmError::native(message)),
+                        }
+                    }
+                    Instr::GetIterator { dst, src } => match iterator_of(&regs[src.index()]) {
+                        Ok(iterator) => regs[dst.index()] = iterator,
+                        Err(message) => break Exit::Error(VmError::native(message)),
+                    },
+                    Instr::IterNext { iter, dst, offset } => {
+                        let Value::Object(object) = &regs[iter.index()] else {
+                            unreachable!("internal error: IterNext's register holds an iterator");
+                        };
+                        let Object::Iterator(iterator) = object.as_ref() else {
+                            unreachable!("internal error: IterNext's register holds an iterator");
+                        };
+                        let next = iterator.borrow_mut().next();
+                        match next {
+                            Some(value) => regs[dst.index()] = value,
+                            None => ip = short_jump(ip, offset, far_jumps),
+                        }
+                    }
+                    Instr::Unpack { src, base, len } => {
+                        // The value may be in one of the registers it's
+                        // unpacked to.
+                        let value = regs[src.index()].clone();
+                        let out = &mut regs[base.index()..base.index() + usize::from(len)];
+                        if let Err(message) = unpack_into(&value, out) {
+                            break Exit::Error(VmError::native(message));
                         }
                     }
                     Instr::Return { src } => break Exit::Return { src },
@@ -1762,6 +1788,122 @@ mod tests {
                 Value::Int(expected)
             );
         }
+    }
+
+    /// Sums the elements of a tuple with `GetIterator` and `IterNext`, the
+    /// iterator made in the tuple's register and each element read into the
+    /// iterator's.
+    #[test]
+    fn iterating_in_the_registers_of_the_operands() {
+        let function = program(3, vec![], |b| {
+            let k = b.constant(tuple(&[1, 2, 3]));
+            emit(b, Instr::LoadK { dst: Reg(0), k });
+            emit(
+                b,
+                Instr::GetIterator {
+                    dst: Reg(0),
+                    src: Reg(0),
+                },
+            );
+            load_int(b, Reg(1), 0);
+            let start = b.label();
+            let end = b.label();
+            b.bind(start);
+            b.jump(
+                Instr::IterNext {
+                    iter: Reg(0),
+                    dst: Reg(2),
+                    offset: 0,
+                },
+                end,
+                Span::synthetic(),
+            );
+            emit(
+                b,
+                Instr::AddInt {
+                    dst: Reg(1),
+                    left: Reg(1),
+                    right: Reg(2),
+                },
+            );
+            b.jump(Instr::Jump { offset: 0 }, start, Span::synthetic());
+            b.bind(end);
+            // The last element read into the iterator's own register.
+            let k = b.constant(tuple(&[7]));
+            emit(b, Instr::LoadK { dst: Reg(2), k });
+            emit(
+                b,
+                Instr::GetIterator {
+                    dst: Reg(2),
+                    src: Reg(2),
+                },
+            );
+            b.jump(
+                Instr::IterNext {
+                    iter: Reg(2),
+                    dst: Reg(2),
+                    offset: 0,
+                },
+                start,
+                Span::synthetic(),
+            );
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(1),
+                    len: 2,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        assert_eq!(run(&Natives::default(), function).unwrap(), tuple(&[6, 7]));
+    }
+
+    #[test]
+    fn unpack_into_the_register_of_the_value() {
+        let function = program(3, vec![], |b| {
+            let k = b.constant(tuple(&[4, 5, 6]));
+            emit(b, Instr::LoadK { dst: Reg(1), k });
+            emit(
+                b,
+                Instr::Unpack {
+                    src: Reg(1),
+                    base: Reg(0),
+                    len: 3,
+                },
+            );
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    len: 3,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        assert_eq!(
+            run(&Natives::default(), function).unwrap(),
+            tuple(&[4, 5, 6])
+        );
+    }
+
+    #[test]
+    fn something_that_isnt_iterable() {
+        let function = program(1, vec![], |b| {
+            load_int(b, Reg(0), 3);
+            emit(
+                b,
+                Instr::GetIterator {
+                    dst: Reg(0),
+                    src: Reg(0),
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        let error = run(&Natives::default(), function).unwrap_err();
+        assert_eq!(error.message, "Int is not iterable");
     }
 
     #[test]

@@ -196,6 +196,17 @@ pub enum Instr {
     /// Puts `value` under `key` in the map in `map`, leaving `None` in both,
     /// which are other registers.
     MapInsert { map: Reg, key: Reg, value: Reg },
+    /// `dst` = an iterator over the value in `src`: the value itself if
+    /// it's an iterator, and one over its elements if it's a list, tuple,
+    /// deque, string, map or heap.
+    GetIterator { dst: Reg, src: Reg },
+    /// `dst` = the next value of the iterator in `iter`, or if it has none
+    /// left, goes `offset` instructions on. An offset of [`FAR`] is in the
+    /// chunk's far jumps.
+    IterNext { iter: Reg, dst: Reg, offset: i16 },
+    /// The `len` registers from `base` on = the elements of the value in
+    /// `src`, which has to have that many: `(a, b) = pair`.
+    Unpack { src: Reg, base: Reg, len: u16 },
     /// `dst` = the range `start..end` of the `Int`s in `start` and `end`.
     MakeRange { dst: Reg, start: Reg, end: Reg },
     /// `dst` = the range `start..=end`.
@@ -371,6 +382,9 @@ impl Instr {
             Self::MakeRange { .. } => "MakeRange",
             Self::MakeRangeInclusive { .. } => "MakeRangeInclusive",
             Self::MakeRangeFrom { .. } => "MakeRangeFrom",
+            Self::GetIterator { .. } => "GetIterator",
+            Self::IterNext { .. } => "IterNext",
+            Self::Unpack { .. } => "Unpack",
             Self::Return { .. } => "Return",
             Self::Halt { .. } => "Halt",
         }
@@ -395,7 +409,8 @@ impl Instr {
             | Self::JumpIfNotGreaterI { offset, .. }
             | Self::JumpIfNotGreaterEqualI { offset, .. }
             | Self::JumpIfNotEqualI { offset, .. }
-            | Self::JumpIfNotNotEqualI { offset, .. } => Some(i32::from(offset)),
+            | Self::JumpIfNotNotEqualI { offset, .. }
+            | Self::IterNext { offset, .. } => Some(i32::from(offset)),
             _ => None,
         }
     }
@@ -474,6 +489,7 @@ impl Instr {
             Self::JumpIfNotNotEqualI { left, imm, .. } => {
                 Self::JumpIfNotNotEqualI { left, imm, offset }
             }
+            Self::IterNext { iter, dst, .. } => Self::IterNext { iter, dst, offset },
             other => panic!("internal error: {} has no short jump offset", other.name()),
         }
     }
@@ -590,7 +606,13 @@ impl fmt::Display for Instr {
             Self::MakeRange { dst, start, end } | Self::MakeRangeInclusive { dst, start, end } => {
                 write!(f, "{dst}, {start}, {end}")
             }
-            Self::MakeRangeFrom { dst, start } => write!(f, "{dst}, {start}"),
+            Self::MakeRangeFrom { dst, start } | Self::GetIterator { dst, src: start } => {
+                write!(f, "{dst}, {start}")
+            }
+            Self::IterNext { iter, dst, offset } => {
+                write!(f, "{iter}, {dst}, {}", ShortOffset(offset))
+            }
+            Self::Unpack { src, base, len } => write!(f, "{src}, {base}, {len}"),
             Self::Return { src } | Self::Halt { src } => write!(f, "{src}"),
         }
     }

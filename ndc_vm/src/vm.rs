@@ -3,8 +3,8 @@ use crate::error::VmError;
 use crate::hash_map::{HashMap, hasher};
 use crate::io::{InputSource, OutputSink};
 use crate::iterator::{
-    HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
-    VmIterator,
+    HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, SharedIterator, StringIter,
+    UnboundedRangeIter, VmIterator,
 };
 use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
@@ -471,44 +471,9 @@ impl Vm {
                 }
                 OpCode::GetIterator => {
                     let val = self.stack.pop().expect("stack underflow");
-
-                    // Check if already an iterator
-                    if matches!(val, Value::Object(ref obj) if matches!(**obj, Object::Iterator(_)))
-                    {
-                        self.stack.push(val);
-                        continue;
-                    }
-
-                    let iter_val = match &val {
-                        Value::Object(rc) => match rc.as_ref() {
-                            Object::List(_) | Object::Tuple(_) | Object::Deque(_) => Some(
-                                Value::iterator(Rc::new(RefCell::new(SeqIter::new(Rc::clone(rc))))),
-                            ),
-                            Object::String(s) => Some(Value::iterator(Rc::new(RefCell::new(
-                                StringIter::new(Rc::clone(s)),
-                            )))),
-                            Object::Map { .. } => Some(Value::iterator(Rc::new(RefCell::new(
-                                MapIter::new(Rc::clone(rc)),
-                            )))),
-                            Object::MinHeap(h) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(HeapIter::new_min(h)))))
-                            }
-                            Object::MaxHeap(h) => {
-                                Some(Value::iterator(Rc::new(RefCell::new(HeapIter::new_max(h)))))
-                            }
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-
-                    match iter_val {
-                        Some(iter) => self.stack.push(iter),
-                        None => {
-                            return Err(VmError::new(
-                                format!("{} is not iterable", val.static_type()),
-                                span,
-                            ));
-                        }
+                    match iterator_of(&val) {
+                        Ok(iter) => self.stack.push(iter),
+                        Err(message) => return Err(VmError::new(message, span)),
                     }
                 }
                 OpCode::IterNext(offset) => {
@@ -975,100 +940,112 @@ impl Vm {
 
     fn exec_unpack(&mut self, size: usize, span: Span) -> Result<(), VmError> {
         let top = self.stack.pop().expect("stack underflow");
-        let Value::Object(obj) = top else {
-            return Err(VmError::new(
-                "cannot unpack: expected a list, tuple, or string",
-                span,
-            ));
-        };
-        match obj.as_ref() {
-            Object::List(_) | Object::Tuple(_) => {
-                let type_name = match obj.as_ref() {
-                    Object::List(_) => "list",
-                    Object::Tuple(_) => "tuple",
-                    _ => unreachable!(),
-                };
-                let len = match obj.as_ref() {
-                    Object::List(seq) => seq.borrow().len(),
-                    Object::Tuple(seq) => seq.len(),
-                    _ => unreachable!(),
-                };
-                if len != size {
-                    return Err(VmError::new(
-                        format!(
-                            "cannot unpack a {type_name} of length {len} into {size} variables",
-                        ),
-                        span,
-                    ));
-                }
-                // Elements are pushed in reverse order so that the first element
-                // ends up on top of the stack after all pushes complete.
-                match obj.as_ref() {
-                    Object::List(seq) => self.stack.extend(seq.borrow().iter().rev().cloned()),
-                    Object::Tuple(seq) => self.stack.extend(seq.iter().rev().cloned()),
-                    _ => unreachable!(),
-                }
-            }
-            Object::String(s) => {
-                let s = s.borrow();
-                let mut iter = s.chars();
-                let mut chars: Vec<Value> = Vec::with_capacity(size);
-                for _ in 0..size {
-                    match iter.next() {
-                        Some(c) => chars.push(Value::string(c.to_string())),
-                        None => {
-                            return Err(VmError::new(
-                                format!(
-                                    "cannot unpack a string of length {} into {} variables",
-                                    chars.len(),
-                                    size
-                                ),
-                                span,
-                            ));
-                        }
-                    }
-                }
-                if iter.next().is_some() {
-                    return Err(VmError::new(
-                        format!(
-                            "cannot unpack a string into {} variables: string is too long",
-                            size
-                        ),
-                        span,
-                    ));
-                }
-                chars.reverse();
-                self.stack.append(&mut chars);
-            }
-            // A deque, heap or iterator unpacks the elements it gives, one
-            // past the variables at most, as an iterator may not end.
-            _ => {
-                let Some(iter) = Value::Object(obj).try_into_iter() else {
-                    return Err(VmError::new(
-                        "cannot unpack: expected a list, tuple, string, deque, heap or iterator",
-                        span,
-                    ));
-                };
-                let mut elements: Vec<Value> = iter.take(size + 1).collect();
-                if elements.len() != size {
-                    return Err(VmError::new(
-                        if elements.len() > size {
-                            format!("cannot unpack more than {size} values into {size} variables")
-                        } else {
-                            format!(
-                                "cannot unpack {} values into {size} variables",
-                                elements.len()
-                            )
-                        },
-                        span,
-                    ));
-                }
-                elements.reverse();
-                self.stack.append(&mut elements);
-            }
-        }
+        let start = self.stack.len();
+        self.stack.resize(start + size, Value::None);
+        unpack_into(&top, &mut self.stack[start..])
+            .map_err(|message| VmError::new(message, span))?;
+        // The first element goes on top of the stack.
+        self.stack[start..].reverse();
         Ok(())
     }
+}
+
+/// Writes the `out.len()` elements of `value` to `out`, in order, or says
+/// why it can't: `(1, 2)` unpacks into two values, but not into three.
+pub(crate) fn unpack_into(value: &Value, out: &mut [Value]) -> Result<(), String> {
+    let size = out.len();
+    let Value::Object(obj) = value else {
+        return Err("cannot unpack: expected a list, tuple, or string".to_string());
+    };
+    match obj.as_ref() {
+        Object::List(_) | Object::Tuple(_) => {
+            let type_name = match obj.as_ref() {
+                Object::List(_) => "list",
+                Object::Tuple(_) => "tuple",
+                _ => unreachable!(),
+            };
+            let len = match obj.as_ref() {
+                Object::List(seq) => seq.borrow().len(),
+                Object::Tuple(seq) => seq.len(),
+                _ => unreachable!(),
+            };
+            if len != size {
+                return Err(format!(
+                    "cannot unpack a {type_name} of length {len} into {size} variables",
+                ));
+            }
+            match obj.as_ref() {
+                Object::List(seq) => out.clone_from_slice(&seq.borrow()),
+                Object::Tuple(seq) => out.clone_from_slice(seq),
+                _ => unreachable!(),
+            }
+        }
+        Object::String(s) => {
+            let s = s.borrow();
+            let mut iter = s.chars();
+            for (unpacked, slot) in out.iter_mut().enumerate() {
+                match iter.next() {
+                    Some(c) => *slot = Value::string(c.to_string()),
+                    None => {
+                        return Err(format!(
+                            "cannot unpack a string of length {unpacked} into {size} variables",
+                        ));
+                    }
+                }
+            }
+            if iter.next().is_some() {
+                return Err(format!(
+                    "cannot unpack a string into {size} variables: string is too long",
+                ));
+            }
+        }
+        // A deque, heap or iterator unpacks the elements it gives, one
+        // past the variables at most, as an iterator may not end.
+        _ => {
+            let Some(iter) = value.clone().try_into_iter() else {
+                return Err(
+                    "cannot unpack: expected a list, tuple, string, deque, heap or iterator"
+                        .to_string(),
+                );
+            };
+            let elements: Vec<Value> = iter.take(size + 1).collect();
+            if elements.len() != size {
+                return Err(if elements.len() > size {
+                    format!("cannot unpack more than {size} values into {size} variables")
+                } else {
+                    format!(
+                        "cannot unpack {} values into {size} variables",
+                        elements.len()
+                    )
+                });
+            }
+            for (slot, element) in out.iter_mut().zip(elements) {
+                *slot = element;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// An iterator over `value`: the value itself if it's an iterator, and one
+/// over its elements if it's a list, tuple, deque, string, map or heap.
+pub(crate) fn iterator_of(value: &Value) -> Result<Value, String> {
+    let not_iterable = || format!("{} is not iterable", value.static_type());
+    let Value::Object(rc) = value else {
+        return Err(not_iterable());
+    };
+    let iter: SharedIterator = match rc.as_ref() {
+        Object::Iterator(_) => return Ok(value.clone()),
+        Object::List(_) | Object::Tuple(_) | Object::Deque(_) => {
+            Rc::new(RefCell::new(SeqIter::new(Rc::clone(rc))))
+        }
+        Object::String(s) => Rc::new(RefCell::new(StringIter::new(Rc::clone(s)))),
+        Object::Map { .. } => Rc::new(RefCell::new(MapIter::new(Rc::clone(rc)))),
+        Object::MinHeap(h) => Rc::new(RefCell::new(HeapIter::new_min(h))),
+        Object::MaxHeap(h) => Rc::new(RefCell::new(HeapIter::new_max(h))),
+        _ => return Err(not_iterable()),
+    };
+    Ok(Value::iterator(iter))
 }
 
 /// The key a memoised function's result for `arguments` is cached under.
