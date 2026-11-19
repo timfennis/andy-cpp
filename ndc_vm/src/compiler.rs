@@ -1789,7 +1789,17 @@ impl CompileError {
         }
     }
 
-    fn unresolved_cast(span: Span) -> Self {
+    /// What the register compiler fails with for a tuple index written in
+    /// the code that doesn't fit its instruction, which no tuple type the
+    /// analyser accepts has.
+    pub(crate) fn index_too_large(span: Span) -> Self {
+        Self {
+            text: "this tuple index is larger than the register VM can say".to_string(),
+            span,
+        }
+    }
+
+    pub(crate) fn unresolved_cast(span: Span) -> Self {
         Self {
             text:
                 "encountered unresolved cast during compilation, this is probably an internal error"
@@ -1798,7 +1808,7 @@ impl CompileError {
         }
     }
 
-    fn unnamed_intrinsic(span: Span) -> Self {
+    pub(crate) fn unnamed_intrinsic(span: Span) -> Self {
         Self {
             text: "encountered an intrinsic used other than by name during compilation, this is probably an internal error".to_string(),
             span,

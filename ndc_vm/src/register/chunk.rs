@@ -2,6 +2,7 @@ use super::instr::{FAR, Instr};
 use crate::Value;
 use crate::value::CompiledFunction;
 use ndc_analysis::CaptureSource;
+use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::rc::Rc;
 
@@ -22,6 +23,8 @@ pub struct Chunk {
     constants: Vec<Value>,
     /// The functions `Closure` makes closures of, by index.
     closures: Vec<ClosureCode>,
+    /// The types casts check values against, by index.
+    types: Vec<StaticType>,
     spans: Vec<Span>,
     /// Where each jump whose offset is [`FAR`] goes, by the jump's index,
     /// in order: a loop whose condition is a fused comparison and whose body
@@ -53,6 +56,11 @@ impl Chunk {
     /// The functions `Closure` makes closures of, by index.
     pub fn closures(&self) -> &[ClosureCode] {
         &self.closures
+    }
+
+    /// The types casts check values against, by index.
+    pub fn types(&self) -> &[StaticType] {
+        &self.types
     }
 
     /// The span of the instruction at `ip`.
@@ -105,6 +113,7 @@ pub struct Builder {
     code: Vec<Instr>,
     constants: Vec<Value>,
     closures: Vec<ClosureCode>,
+    types: Vec<StaticType>,
     spans: Vec<Span>,
     /// Where each label is bound: the index of the instruction it marks.
     labels: Vec<Option<usize>>,
@@ -154,6 +163,13 @@ impl Builder {
             .expect("internal error: a function has fewer than 2^32 constants")
     }
 
+    /// The index of `typ` in the chunk's types.
+    pub fn static_type(&mut self, typ: StaticType) -> u32 {
+        self.types.push(typ);
+        u32::try_from(self.types.len() - 1)
+            .expect("internal error: a function has fewer than 2^32 casts")
+    }
+
     /// The index of a new closure of `function`, which captures `captures`.
     pub fn closure(&mut self, function: Rc<CompiledFunction>, captures: &[CaptureSource]) -> u32 {
         self.closures.push(ClosureCode {
@@ -184,6 +200,7 @@ impl Builder {
             code: self.code,
             constants: self.constants,
             closures: self.closures,
+            types: self.types,
             spans: self.spans,
             far_jumps,
         }

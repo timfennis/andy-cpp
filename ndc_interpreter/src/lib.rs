@@ -25,7 +25,8 @@ pub use timing::ExecutionTimings;
 mod timing;
 
 /// Which VM runs the code: the stack VM, or the register VM that is being
-/// built to replace it, which runs part of the language so far.
+/// built to replace it. A REPL line on the register VM can't make new
+/// instances of an earlier line's generic function yet.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Backend {
     #[default]

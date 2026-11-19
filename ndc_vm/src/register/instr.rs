@@ -207,6 +207,17 @@ pub enum Instr {
     /// The `len` registers from `base` on = the elements of the value in
     /// `src`, which has to have that many: `(a, b) = pair`.
     Unpack { src: Reg, base: Reg, len: u16 },
+    /// `dst` = the element at `index` of the tuple in `src`, counting a
+    /// negative index from the end: `t[1]`.
+    TupleIndex { dst: Reg, src: Reg, index: i16 },
+    /// Checks that the value in `reg` is a value of the chunk's type `typ`,
+    /// and makes it one, in place: a function whose return type isn't known
+    /// gets its calls checked. Fails if it isn't: `cast::<Int>(x)`.
+    CheckType { reg: Reg, typ: u32 },
+    /// Replaces the value in `reg` with `Some` of it made a value of the
+    /// chunk's type `typ`, as `CheckType` does, or with `None` if it isn't
+    /// one: `cast?::<Int>(x)`.
+    TryCast { reg: Reg, typ: u32 },
     /// `dst` = the range `start..end` of the `Int`s in `start` and `end`.
     MakeRange { dst: Reg, start: Reg, end: Reg },
     /// `dst` = the range `start..=end`.
@@ -383,6 +394,9 @@ impl Instr {
             Self::MakeRangeInclusive { .. } => "MakeRangeInclusive",
             Self::MakeRangeFrom { .. } => "MakeRangeFrom",
             Self::GetIterator { .. } => "GetIterator",
+            Self::TupleIndex { .. } => "TupleIndex",
+            Self::CheckType { .. } => "CheckType",
+            Self::TryCast { .. } => "TryCast",
             Self::IterNext { .. } => "IterNext",
             Self::Unpack { .. } => "Unpack",
             Self::Return { .. } => "Return",
@@ -502,8 +516,8 @@ pub const FAR: i16 = i16::MIN;
 /// The operands as the disassembler prints them, without the name:
 /// `r2, r0, r1` for `AddInt { dst: r2, left: r0, right: r1 }`. A
 /// constant is `k3`, a global `g12`, a native `n25`, one of the chunk's
-/// closures `c0`, a closure's captured variable `u1`, and a jump's offset is
-/// signed: `+4`.
+/// closures `c0` or types `t0`, a closure's captured variable `u1`, and a
+/// jump's offset is signed: `+4`.
 impl fmt::Display for Instr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
@@ -613,6 +627,8 @@ impl fmt::Display for Instr {
                 write!(f, "{iter}, {dst}, {}", ShortOffset(offset))
             }
             Self::Unpack { src, base, len } => write!(f, "{src}, {base}, {len}"),
+            Self::TupleIndex { dst, src, index } => write!(f, "{dst}, {src}, #{index}"),
+            Self::CheckType { reg, typ } | Self::TryCast { reg, typ } => write!(f, "{reg}, t{typ}"),
             Self::Return { src } | Self::Halt { src } => write!(f, "{src}"),
         }
     }
