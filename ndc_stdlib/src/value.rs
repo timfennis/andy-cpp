@@ -95,6 +95,10 @@ mod inner {
     }
 
     /// Returns a deep copy of the given value, duplicating all nested structures.
+    ///
+    /// Each nested value is copied once, so the copy has the original's shape:
+    /// `deepcopy([xs, xs])` holds one new copy of `xs` twice, and a value that
+    /// holds itself copies to a new value that holds itself.
     #[function(signature = "<T>(T) -> T")]
     pub fn deepcopy(value: Value) -> Value {
         value.deep_copy()

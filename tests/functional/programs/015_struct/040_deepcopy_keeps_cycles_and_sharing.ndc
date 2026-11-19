@@ -1,0 +1,38 @@
+// deepcopy copies each container once, so a value that holds itself copies to
+// a new value that holds itself, and a container held twice is held twice by
+// one copy.
+struct Node { value: Int, next: Any }
+let a = Node(1, ());
+a.next = a;
+let b = deepcopy(a);
+b.value = 2;
+print(a);
+print(b);
+
+let xs: [Any] = [];
+xs.push(xs);
+let ys = xs.deepcopy();
+ys.push(1);
+print(xs);
+print(ys);
+
+let m: %{String: Any} = %{};
+let n: %{String: Any} = %{};
+m["n"] = n;
+n["m"] = m;
+let m2 = deepcopy(m);
+n["x"] = 1;
+print(m2);
+
+let inner = [1];
+let pair = deepcopy([inner, inner]);
+pair[0].push(2);
+print(inner);
+print(pair);
+// expect-output: Node {value: 1, next: {...}}
+// expect-output: Node {value: 2, next: {...}}
+// expect-output: [[...]]
+// expect-output: [[...],1]
+// expect-output: %{"n": %{"m": %{...}}}
+// expect-output: [1]
+// expect-output: [[1,2],[1,2]]

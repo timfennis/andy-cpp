@@ -49,6 +49,17 @@ fn bounded_element_type<'a>(
     element_type.unwrap_or(StaticType::Any)
 }
 
+/// What [`Value::deep_copy`] has copied so far: each original container's
+/// address, with its copy.
+type DeepCopies = HashMap<*const Object, Rc<Object>>;
+
+fn deep_copy_all<'a, C: FromIterator<Value>>(
+    values: impl Iterator<Item = &'a Value>,
+    copies: &mut DeepCopies,
+) -> C {
+    values.map(|value| value.deep_copy_with(copies)).collect()
+}
+
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
 #[derive(Clone)]
@@ -244,9 +255,19 @@ impl Value {
 
     /// Creates a deep copy: all nested mutable containers are recursively
     /// duplicated so the result shares no mutable state with the original.
+    ///
+    /// Each container is copied once, so the copy has the same shape as the
+    /// original: `[a, a]` copies to `[b, b]` with one new `b`, and a list
+    /// that holds itself copies to a new list that holds itself.
     pub fn deep_copy(&self) -> Self {
+        self.deep_copy_with(&mut HashMap::default())
+    }
+
+    /// [`Self::deep_copy`], where `copies` maps each container copied so far
+    /// to its copy.
+    fn deep_copy_with(&self, copies: &mut DeepCopies) -> Self {
         match self {
-            Self::Object(obj) => Self::Object(Rc::new(obj.deep_copy())),
+            Self::Object(obj) => Self::Object(Object::deep_copy(obj, copies)),
             other => other.clone(),
         }
     }
@@ -669,45 +690,83 @@ impl Object {
         }
     }
 
-    /// Recursively deep-copies all mutable containers.
-    pub fn deep_copy(&self) -> Self {
-        match self {
-            Self::Some(v) => Self::Some(v.deep_copy()),
-            Self::String(rc) => Self::String(Rc::new(VmString::new(rc.borrow().clone()))),
-            Self::List(refcell) => Self::List(RefCell::new(
-                refcell.borrow().iter().map(Value::deep_copy).collect(),
-            )),
-            Self::Tuple(v) => Self::Tuple(v.iter().map(Value::deep_copy).collect()),
-            Self::Map { entries, default } => Self::Map {
-                entries: RefCell::new(
-                    entries
-                        .borrow()
-                        .iter()
-                        .map(|(k, v)| (k.deep_copy(), v.deep_copy()))
-                        .collect(),
-                ),
-                default: default.as_ref().map(Value::deep_copy),
-            },
-            Self::Deque(refcell) => Self::Deque(RefCell::new(
-                refcell.borrow().iter().map(Value::deep_copy).collect(),
-            )),
-            Self::MinHeap(refcell) => Self::MinHeap(RefCell::new(refcell.borrow().clone())),
-            Self::MaxHeap(refcell) => Self::MaxHeap(RefCell::new(refcell.borrow().clone())),
-            Self::Struct { info, fields } => Self::Struct {
-                info: Rc::clone(info),
-                fields: RefCell::new(fields.borrow().iter().map(Value::deep_copy).collect()),
-            },
-            // Iterator: deep_copy if supported, otherwise share the Rc.
-            Self::Iterator(shared) => {
-                if let Some(copy) = shared.borrow().deep_copy() {
-                    Self::Iterator(copy)
-                } else {
-                    Self::Iterator(Rc::clone(shared))
-                }
-            }
-            // A function is shared.
-            function @ Self::Function(_) => function.clone(),
+    /// The copy of `object` in a [`Value::deep_copy`], made the first time
+    /// it's reached. A mutable container is in `copies` before its contents
+    /// are copied, so the contents can lead back to it.
+    fn deep_copy(object: &Rc<Self>, copies: &mut DeepCopies) -> Rc<Self> {
+        let key = Rc::as_ptr(object);
+        if let Some(copy) = copies.get(&key) {
+            return Rc::clone(copy);
         }
+        let copy = match object.as_ref() {
+            Self::List(values) => {
+                let copy = Rc::new(Self::list(Vec::new()));
+                copies.insert(key, Rc::clone(&copy));
+                let values = deep_copy_all(values.borrow().iter(), copies);
+                if let Self::List(target) = copy.as_ref() {
+                    *target.borrow_mut() = values;
+                }
+                copy
+            }
+            Self::Deque(values) => {
+                let copy = Rc::new(Self::Deque(RefCell::default()));
+                copies.insert(key, Rc::clone(&copy));
+                let values = deep_copy_all(values.borrow().iter(), copies);
+                if let Self::Deque(target) = copy.as_ref() {
+                    *target.borrow_mut() = values;
+                }
+                copy
+            }
+            Self::Struct { info, fields } => {
+                let copy = Rc::new(Self::Struct {
+                    info: Rc::clone(info),
+                    fields: RefCell::default(),
+                });
+                copies.insert(key, Rc::clone(&copy));
+                let values = deep_copy_all(fields.borrow().iter(), copies);
+                if let Self::Struct { fields, .. } = copy.as_ref() {
+                    *fields.borrow_mut() = values;
+                }
+                copy
+            }
+            // The default can't change, so it's copied before the map. If it
+            // leads back to the map, the map was copied along the way.
+            Self::Map { entries, default } => {
+                let default = default.as_ref().map(|value| value.deep_copy_with(copies));
+                if let Some(copy) = copies.get(&key) {
+                    return Rc::clone(copy);
+                }
+                let copy = Rc::new(Self::map(HashMap::default(), default));
+                copies.insert(key, Rc::clone(&copy));
+                let pairs = entries
+                    .borrow()
+                    .iter()
+                    .map(|(k, v)| (k.deep_copy_with(copies), v.deep_copy_with(copies)))
+                    .collect();
+                if let Self::Map { entries, .. } = copy.as_ref() {
+                    *entries.borrow_mut() = pairs;
+                }
+                copy
+            }
+            // These can't hold themselves except through a mutable container,
+            // which is in `copies` by the time it's reached again.
+            Self::Some(value) => Rc::new(Self::Some(value.deep_copy_with(copies))),
+            Self::Tuple(values) => Rc::new(Self::Tuple(deep_copy_all(values.iter(), copies))),
+            Self::String(string) => Rc::new(Self::String(Rc::new(VmString::new(
+                string.borrow().clone(),
+            )))),
+            Self::MinHeap(heap) => Rc::new(Self::MinHeap(RefCell::new(heap.borrow().clone()))),
+            Self::MaxHeap(heap) => Rc::new(Self::MaxHeap(RefCell::new(heap.borrow().clone()))),
+            // Iterator: deep_copy if supported, otherwise share the Rc.
+            Self::Iterator(shared) => match shared.borrow().deep_copy() {
+                Some(iterator) => Rc::new(Self::Iterator(iterator)),
+                None => Rc::clone(object),
+            },
+            // A function is shared.
+            Self::Function(_) => Rc::clone(object),
+        };
+        copies.insert(key, Rc::clone(&copy));
+        copy
     }
 
     /// Returns the best static type descriptor for this runtime value.
