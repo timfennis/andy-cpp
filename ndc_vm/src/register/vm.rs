@@ -1,46 +1,64 @@
 use super::chunk::far_target;
 use super::instr::{FAR, Instr, Reg, WINDOW};
 use crate::error::VmError;
-use crate::io::{InputSource, OutputSink};
 use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function, NativeFunc, NativeFunction};
-use crate::vm::{MAX_CALL_DEPTH, calls_too_deep, fill_natives, not_a_bool};
-use crate::{Natives, Object, Value};
+use crate::vm::{
+    MAX_CALL_DEPTH, MemoCache, calls_too_deep, convert_returned, memo_key, not_a_bool,
+    refused_arguments,
+};
+use crate::{Object, Value, Vm};
+use ndc_core::StaticType;
+use ndc_lexer::Span;
 use std::rc::Rc;
 
-/// The register VM. Its stack is the registers of every running call, one
-/// frame above the other: a frame is `stack[base..base + frame_size]`, and
-/// nothing is pushed or popped while code runs. A call's frame starts at the
-/// register after the callee, so the caller's argument registers are the
-/// callee's parameters.
-pub struct Vm {
-    /// Every frame's registers, with [`WINDOW`] values past the top frame's
-    /// first register, so a frame's registers can be indexed by a [`Reg`]
-    /// without bounds checks. It only grows.
-    stack: Vec<Value>,
-    globals: Vec<Value>,
-    frames: Vec<Frame>,
-    /// The stack VM the natives that take a VM are given, which holds the
-    /// output `print` writes to and the input `read_stdin` reads.
-    host: crate::Vm,
-    /// What the program's last expression gave, once it halts.
-    result: Value,
-}
-
-/// A running call.
-struct Frame {
+/// A running call of register code. Its registers are
+/// `stack[base..base + frame_size]`, and nothing is pushed or popped while
+/// code runs. A call's frame starts at the register after the callee, so the
+/// caller's argument registers are the callee's parameters.
+pub(crate) struct Frame {
     function: Rc<CompiledFunction>,
     /// The next instruction to run, kept here only while another frame runs
     /// or the inner loop is left.
     ip: usize,
     /// The index in the stack of the frame's first register.
     base: usize,
+    /// What the call does with what it returns besides giving it to the
+    /// caller, for the few calls that do something: boxed, so that frames
+    /// stay small.
+    on_return: Option<Box<OnReturn>>,
 }
 
-/// Why the inner loop of [`Vm::run`] stopped: something it doesn't do itself
-/// because it changes frames or needs the whole VM.
+/// What a call does with what it returns before it gives it to its caller.
+#[derive(Default)]
+struct OnReturn {
+    /// For a call of a `pure fn`: store it in the function's cache.
+    memo: Option<MemoCache>,
+    /// For a call of a [`Function::Checked`]: check that it's a value of
+    /// this type, and make it one.
+    returns: Option<StaticType>,
+}
+
+impl Frame {
+    /// The frame of a program run at the top level, `function`.
+    pub(crate) fn top_level(function: Rc<CompiledFunction>) -> Self {
+        Self {
+            function,
+            ip: 0,
+            base: 0,
+            on_return: None,
+        }
+    }
+}
+
+/// Why the inner loop of [`Vm::run_registers`] stopped: something it doesn't
+/// do itself because it changes frames or needs the whole VM.
 enum Exit {
     Call {
+        base: Reg,
+        args: u16,
+    },
+    CallVec {
         base: Reg,
         args: u16,
     },
@@ -61,75 +79,18 @@ enum Exit {
 }
 
 impl Vm {
-    /// A VM that runs `function`, compiled by the register compiler, at the
-    /// top level with `globals`, as [`crate::Vm::new`] does.
-    pub fn new(function: CompiledFunction, mut globals: Vec<Value>, natives: &Natives) -> Self {
-        assert!(
-            function.is_register_code(),
-            "internal error: the register VM runs register code"
-        );
-        if globals.len() < function.num_globals {
-            globals.resize(function.num_globals, Value::unit());
-        }
-        fill_natives(&mut globals, natives, &function);
-        Self {
-            stack: vec![Value::None; WINDOW],
-            globals,
-            frames: vec![Frame {
-                function: Rc::new(function),
-                ip: 0,
-                base: 0,
-            }],
-            host: crate::Vm::host(),
-            result: Value::unit(),
-        }
-    }
-
-    /// Replace the output sink used by I/O built-ins (e.g. `print`, `dbg`).
-    #[must_use]
-    pub fn with_output(mut self, output: OutputSink) -> Self {
-        self.host = self.host.with_output(output);
-        self
-    }
-
-    /// Returns the captured output bytes, or `None` if this VM writes to stdout.
-    pub fn get_output(&self) -> Option<&[u8]> {
-        self.host.get_output()
-    }
-
-    /// Replace the input source used by `read_stdin`.
-    #[must_use]
-    pub fn with_input(mut self, input: InputSource) -> Self {
-        self.host = self.host.with_input(input);
-        self
-    }
-
-    /// The input source, with what is left of it to read.
-    pub fn take_input(&mut self) -> InputSource {
-        self.host.take_input()
-    }
-
-    /// What the program's last expression gave, unit until it halts.
-    pub fn last_value(&self) -> Value {
-        self.result.clone()
-    }
-
-    /// The globals as the program left them, and the stack.
-    pub fn into_globals_and_stack(self) -> (Vec<Value>, Vec<Value>) {
-        (self.globals, self.stack)
-    }
-
-    /// Runs the program until it halts or fails.
+    /// Runs register code until the program halts or fails, or until a call
+    /// returns to `target_depth` frames, which is how a callback runs.
     ///
     /// Two loops: the inner one runs the instructions of one frame with what
     /// it needs in locals, the frame's code, its instruction pointer and its
     /// registers, and leaves for anything that enters or leaves a frame; the
     /// outer one does that and enters the inner loop again for the frame on
     /// top.
-    pub fn run(&mut self) -> Result<(), VmError> {
+    pub(crate) fn run_registers(&mut self, target_depth: usize) -> Result<(), VmError> {
         loop {
             let frame = self
-                .frames
+                .register_frames
                 .last()
                 .expect("internal error: a running VM has a frame");
             let chunk = &frame.function.registers;
@@ -498,6 +459,7 @@ impl Vm {
                         value => break Exit::Error(VmError::native(not_a_bool(value))),
                     },
                     Instr::Call { base, args } => break Exit::Call { base, args },
+                    Instr::CallVec { base, args } => break Exit::CallVec { base, args },
                     Instr::CallNative {
                         dst,
                         base,
@@ -521,6 +483,11 @@ impl Vm {
                             Err(error) => break Exit::Error(error),
                         }
                     }
+                    Instr::MakeTuple { dst, base, len } => {
+                        let elements =
+                            take_all(&mut regs[base.index()..base.index() + usize::from(len)]);
+                        regs[dst.index()] = Value::Object(Rc::new(Object::Tuple(elements)));
+                    }
                     Instr::Return { src } => break Exit::Return { src },
                     Instr::Halt { src } => break Exit::Halt { src },
                 }
@@ -528,13 +495,19 @@ impl Vm {
 
             // The one place the instruction pointer is written back.
             let frame = self
-                .frames
+                .register_frames
                 .last_mut()
                 .expect("internal error: a running VM has a frame");
             frame.ip = ip;
             let base = frame.base;
             let result = match exit {
-                Exit::Call { base: callee, args } => self.call(base + callee.index(), args),
+                Exit::Call { base: callee, args } => {
+                    self.call_register(base + callee.index(), usize::from(args))
+                }
+                Exit::CallVec { base: callee, args } => {
+                    let span = frame.function.registers.span(ip - 1);
+                    self.call_vec_in_registers(base + callee.index(), usize::from(args), span)
+                }
                 Exit::CallNative {
                     dst,
                     base: first,
@@ -542,20 +515,15 @@ impl Vm {
                     args,
                 } => {
                     let native = Rc::clone(global_native(&self.globals, usize::from(slot)));
-                    self.run_native(&native, base + first.index(), usize::from(args))
+                    self.run_native_in_registers(&native, base + first.index(), usize::from(args))
                         .map(|value| self.stack[base + dst.index()] = value)
                 }
                 Exit::Return { src } => {
-                    let frame = self
-                        .frames
-                        .pop()
-                        .expect("internal error: a running VM has a frame");
-                    let value = std::mem::replace(&mut self.stack[base + src.index()], Value::None);
-                    self.stack[base..base + frame.function.frame_size].fill(Value::None);
-                    // The top level halts, so a frame that returns has a
-                    // caller, whose callee register is the one below it.
-                    self.stack[base - 1] = value;
-                    Ok(())
+                    let result = self.return_from_register_call(base, src);
+                    if result.is_ok() && self.register_frames.len() == target_depth {
+                        return Ok(());
+                    }
+                    result
                 }
                 Exit::Halt { src } => {
                     self.result =
@@ -566,7 +534,7 @@ impl Vm {
             };
             if let Err(mut error) = result {
                 let frame = self
-                    .frames
+                    .register_frames
                     .last()
                     .expect("internal error: a running VM has a frame");
                 error
@@ -577,61 +545,186 @@ impl Vm {
         }
     }
 
+    /// Ends the call whose frame is on top, which starts at `base`, giving
+    /// its caller the value in `src`: the caller's callee register, the one
+    /// below the frame, gets it. A checked call's result is checked here, so
+    /// that a wrong one fails at the call, the caller's instruction.
+    fn return_from_register_call(&mut self, base: usize, src: Reg) -> Result<(), VmError> {
+        let frame = self
+            .register_frames
+            .pop()
+            .expect("internal error: a running VM has a frame");
+        let mut value = std::mem::replace(&mut self.stack[base + src.index()], Value::None);
+        self.stack[base..base + frame.function.frame_size].fill(Value::None);
+        if let Some(on_return) = frame.on_return {
+            if let Some((cache, key)) = on_return.memo {
+                cache.borrow_mut().insert(key, value.clone());
+            }
+            if let Some(returns) = on_return.returns {
+                let result = convert_returned(&mut value, &returns);
+                self.stack[base - 1] = value;
+                return result.map_err(VmError::native);
+            }
+        }
+        // The top level halts, so a frame that returns has a caller, whose
+        // callee register is the one below it.
+        self.stack[base - 1] = value;
+        Ok(())
+    }
+
     /// Calls the function at `callee`, an index in the stack, with the `args`
-    /// values after it: pushes its frame, or for a native, runs it and puts
-    /// what it returns at `callee`.
-    fn call(&mut self, callee: usize, args: u16) -> Result<(), VmError> {
-        let args = usize::from(args);
+    /// values after it: pushes its frame, or for a function that runs no
+    /// register code of its own, as a native, runs it and puts what it
+    /// returns at `callee`.
+    fn call_register(&mut self, callee: usize, args: usize) -> Result<(), VmError> {
         let function = match &self.stack[callee] {
             Value::Object(object) => match object.as_ref() {
-                Object::Function(Function::Compiled(function)) => Rc::clone(function),
-                Object::Function(Function::Native(native)) => {
-                    let native = Rc::clone(native);
-                    let value = self.run_native(&native, callee + 1, args)?;
-                    self.stack[callee] = value;
+                // The usual call, of a function that captures nothing.
+                Object::Function(Function::Compiled(function)) => {
+                    let function = Rc::clone(function);
+                    return self.enter_register_frame(function, callee, None);
+                }
+                Object::Function(function) => function.clone(),
+                other => return Err(unable_to_invoke(&other.static_type())),
+            },
+            other => return Err(unable_to_invoke(&other.static_type())),
+        };
+        self.dispatch_register_call(function, callee, args, None)
+    }
+
+    /// Calls `function`, whose callee register is `callee`, an index in the
+    /// stack, with the `args` values after it. `memo` is where the result
+    /// goes too, for a call of a `pure fn` whose result isn't cached yet.
+    fn dispatch_register_call(
+        &mut self,
+        function: Function,
+        callee: usize,
+        args: usize,
+        memo: Option<MemoCache>,
+    ) -> Result<(), VmError> {
+        match function {
+            Function::Compiled(function) => self.enter_register_frame(function, callee, memo),
+            Function::Closure(_) => Err(VmError::native(
+                "not yet supported on the register VM: calling a closure",
+            )),
+            Function::Native(native) => {
+                let value = self.run_native_in_registers(&native, callee + 1, args)?;
+                if let Some((cache, key)) = memo {
+                    cache.borrow_mut().insert(key, value.clone());
+                }
+                self.stack[callee] = value;
+                Ok(())
+            }
+            Function::Memoized { cache, function } => {
+                let arguments = callee + 1..callee + 1 + args;
+                let key = memo_key(&self.stack[arguments.clone()]);
+                let cached = cache.borrow().get(&key).cloned();
+                if let Some(cached) = cached {
+                    self.stack[arguments].fill(Value::None);
+                    self.stack[callee] = cached;
                     return Ok(());
                 }
-                Object::Function(_) => {
-                    return Err(VmError::native(
-                        "not yet supported on the register VM: calling a closure, a pure function or a checked function",
-                    ));
-                }
-                other => {
-                    return Err(VmError::native(format!(
-                        "Unable to invoke {} as a function.",
-                        other.static_type()
-                    )));
-                }
-            },
-            other => {
-                return Err(VmError::native(format!(
-                    "Unable to invoke {} as a function.",
-                    other.static_type()
-                )));
+                self.dispatch_register_call(
+                    Rc::unwrap_or_clone(function),
+                    callee,
+                    args,
+                    Some((cache, key)),
+                )
             }
+            Function::Checked { function, typ } => {
+                self.call_checked_in_registers(function, *typ, callee, args)
+            }
+        }
+    }
+
+    /// Calls the function a [`Function::Checked`] checks, and checks that
+    /// what it returns is what `typ`, the function type it's used as, says:
+    /// right away when the call completes here, or when its frame returns.
+    #[cold]
+    fn call_checked_in_registers(
+        &mut self,
+        function: Rc<Function>,
+        typ: StaticType,
+        callee: usize,
+        args: usize,
+    ) -> Result<(), VmError> {
+        let StaticType::Function { return_type, .. } = typ else {
+            unreachable!("internal error: a checked function is used as a function type");
         };
+        // The function type it's used as may take more than the function
+        // does, as `fn(Any) -> Int` would of a function taking an Int.
+        let arguments = &self.stack[callee + 1..callee + 1 + args];
+        if !function.conforms_value_args(arguments) {
+            return Err(refused_arguments(arguments));
+        }
+        let depth = self.register_frames.len();
+        self.dispatch_register_call(Rc::unwrap_or_clone(function), callee, args, None)?;
+        if self.register_frames.len() > depth {
+            let frame = self
+                .register_frames
+                .last_mut()
+                .expect("internal error: a frame was pushed");
+            frame.on_return.get_or_insert_default().returns = Some(*return_type);
+            return Ok(());
+        }
+        convert_returned(&mut self.stack[callee], &return_type).map_err(VmError::native)
+    }
+
+    /// Pushes the frame of a call of `function`, whose callee register is
+    /// `callee`, an index in the stack: its parameters are the registers
+    /// after it.
+    fn enter_register_frame(
+        &mut self,
+        function: Rc<CompiledFunction>,
+        callee: usize,
+        memo: Option<MemoCache>,
+    ) -> Result<(), VmError> {
         debug_assert!(
             function.is_register_code(),
             "internal error: the register VM runs register code"
         );
-        if self.frames.len() >= MAX_CALL_DEPTH {
+        // The frames live on the heap, so without a limit a function that
+        // calls itself without end would take memory until the system stops
+        // the program.
+        if self.register_frames.len() >= MAX_CALL_DEPTH {
             return Err(calls_too_deep());
         }
         let base = callee + 1;
         if self.stack.len() < base + WINDOW {
             self.stack.resize(base + WINDOW, Value::None);
         }
-        self.frames.push(Frame {
+        self.register_frames.push(Frame {
             function,
             ip: 0,
             base,
+            on_return: memo.map(|memo| {
+                Box::new(OnReturn {
+                    memo: Some(memo),
+                    returns: None,
+                })
+            }),
         });
+        Ok(())
+    }
+
+    /// Calls `callee`'s function, an operator applied to each element of
+    /// tuples (see [`Vm::call_vec`]), with the `args` values after it, and
+    /// puts the tuple of the results at `callee`.
+    fn call_vec_in_registers(
+        &mut self,
+        callee: usize,
+        args: usize,
+        span: Span,
+    ) -> Result<(), VmError> {
+        let arguments = take_all(&mut self.stack[callee + 1..callee + 1 + args]);
+        let function = std::mem::replace(&mut self.stack[callee], Value::None);
+        self.stack[callee] = self.call_vec(&function, &arguments, span)?;
         Ok(())
     }
 
     /// Runs `native` with the `args` values from `first` on in the stack,
     /// which are `None` afterwards, and returns what it returns.
-    fn run_native(
+    fn run_native_in_registers(
         &mut self,
         native: &NativeFunction,
         first: usize,
@@ -645,14 +738,64 @@ impl Vm {
                 result
             }
             NativeFunc::WithVm(function) => {
-                let arguments: Vec<Value> = arguments
-                    .iter_mut()
-                    .map(|argument| std::mem::replace(argument, Value::None))
-                    .collect();
-                function(&arguments, &mut self.host)
+                let arguments = take_all(arguments);
+                function(&arguments, self)
             }
         }
     }
+
+    /// Calls `function` with `args` for a native that calls back into the
+    /// program, as `map` does, and returns what it returns. The call's
+    /// registers are above those of the frame on top, which is the one that
+    /// called the native: its callee register first, then the arguments.
+    pub(crate) fn register_callback(
+        &mut self,
+        function: Function,
+        args: &[Value],
+    ) -> Result<Value, VmError> {
+        let top = self
+            .register_frames
+            .last()
+            .expect("internal error: a native runs in a frame");
+        let callee = top.base + top.function.frame_size;
+        let end = callee + 1 + args.len();
+        if self.stack.len() < end {
+            self.stack.resize(end, Value::None);
+        }
+        self.stack[callee + 1..end].clone_from_slice(args);
+        let depth = self.register_frames.len();
+        let result = self
+            .dispatch_register_call(function, callee, args.len(), None)
+            .and_then(|()| {
+                if self.register_frames.len() > depth {
+                    self.run_registers(depth)
+                } else {
+                    Ok(())
+                }
+            });
+        if result.is_err() {
+            // A native may go on after a callback failed, from the frame
+            // that called it.
+            self.register_frames.truncate(depth);
+        }
+        result?;
+        Ok(std::mem::replace(&mut self.stack[callee], Value::None))
+    }
+}
+
+/// The values of `registers`, which are `None` afterwards.
+fn take_all(registers: &mut [Value]) -> Vec<Value> {
+    registers
+        .iter_mut()
+        .map(|register| std::mem::replace(register, Value::None))
+        .collect()
+}
+
+/// What a call of something that isn't a function, of type `typ`, fails
+/// with.
+#[cold]
+fn unable_to_invoke(typ: &StaticType) -> VmError {
+    VmError::native(format!("Unable to invoke {typ} as a function."))
 }
 
 /// The native in global slot `slot`, where the compiler only writes a
@@ -734,10 +877,9 @@ fn unary(regs: &mut [Value; WINDOW], op: NativeOp, dst: Reg, src: Reg) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NativeSpec;
     use crate::register::Builder;
-    use ndc_core::{FunctionRegistry, StaticType};
-    use ndc_lexer::Span;
+    use crate::{NativeSpec, Natives};
+    use ndc_core::FunctionRegistry;
 
     /// The top-level function `build` writes, using `frame_size` registers.
     fn program(
@@ -779,15 +921,324 @@ mod tests {
                 }))
             },
         ));
+        // `twice(f, x)`, which calls back into the program: `f(f(x))`.
+        registry.declare_global_fn(NativeSpec::with_signature(
+            "twice",
+            "Calls a function on what it returns.",
+            "(Any, Int) -> Int",
+            || {
+                NativeFunc::WithVm(Box::new(|args, vm| {
+                    let [Value::Object(function), x] = args else {
+                        unreachable!("twice takes a function and an Int");
+                    };
+                    let Object::Function(function) = function.as_ref() else {
+                        unreachable!("twice takes a function and an Int");
+                    };
+                    let once = vm.call_callback(function.clone(), std::slice::from_ref(x))?;
+                    vm.call_callback(function.clone(), &[once])
+                }))
+            },
+        ));
         let mut natives = Natives::default();
         natives.extend(registry);
         natives
     }
 
+    /// A function value of `function`, a body `program` wrote.
+    fn function_value(function: CompiledFunction) -> Value {
+        Value::function(Function::Compiled(Rc::new(function)))
+    }
+
+    /// `fn double(n) => n + n`.
+    fn double() -> CompiledFunction {
+        program(1, vec![], |b| {
+            emit(
+                b,
+                Instr::AddInt {
+                    dst: Reg(0),
+                    left: Reg(0),
+                    right: Reg(0),
+                },
+            );
+            emit(b, Instr::Return { src: Reg(0) });
+        })
+    }
+
+    /// The program that calls `function` with the `Int`s `args` and halts
+    /// with what it returns.
+    fn call_with(function: Value, args: &[i64]) -> CompiledFunction {
+        program(1 + args.len(), vec![], |b| {
+            let k = b.constant(function);
+            emit(b, Instr::LoadK { dst: Reg(0), k });
+            for (i, &arg) in args.iter().enumerate() {
+                load_int(b, Reg(1 + i as u16), arg);
+            }
+            emit(
+                b,
+                Instr::Call {
+                    base: Reg(0),
+                    args: args.len() as u16,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        })
+    }
+
+    fn tuple(values: &[i64]) -> Value {
+        Value::tuple(values.iter().map(|&n| Value::Int(n)).collect())
+    }
+
+    #[test]
+    fn a_tuple_made_in_its_first_element() {
+        let function = program(2, vec![], |b| {
+            load_int(b, Reg(0), 1);
+            load_int(b, Reg(1), 2);
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    len: 2,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        assert_eq!(run(&Natives::default(), function).unwrap(), tuple(&[1, 2]));
+    }
+
+    /// `(1, 2) + (10, 20)` with the native `sum` applied to each element.
+    #[test]
+    fn a_vectorised_call_puts_the_tuple_where_the_function_was() {
+        let natives = natives();
+        let function = program(3, vec![0], |b| {
+            emit(
+                b,
+                Instr::GetGlobal {
+                    dst: Reg(0),
+                    slot: 0,
+                },
+            );
+            let k = b.constant(tuple(&[1, 2]));
+            emit(b, Instr::LoadK { dst: Reg(1), k });
+            let k = b.constant(tuple(&[10, 20]));
+            emit(b, Instr::LoadK { dst: Reg(2), k });
+            emit(
+                b,
+                Instr::CallVec {
+                    base: Reg(0),
+                    args: 2,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        assert_eq!(run(&natives, function).unwrap(), tuple(&[11, 22]));
+    }
+
+    /// A native that calls back into the program runs the callback on the
+    /// VM it's given, above the frame that called the native.
+    #[test]
+    fn a_native_calls_back_into_the_program() {
+        let natives = natives();
+        let function = program(3, vec![1], |b| {
+            let k = b.constant(function_value(double()));
+            emit(b, Instr::LoadK { dst: Reg(0), k });
+            load_int(b, Reg(1), 5);
+            emit(
+                b,
+                Instr::CallNative {
+                    dst: Reg(2),
+                    base: Reg(0),
+                    slot: 1,
+                    args: 2,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(2) });
+        });
+        assert_eq!(run(&natives, function).unwrap(), Value::Int(20));
+    }
+
+    /// `fn quadruple(n) => twice(double, n)`, which a callback calls: a
+    /// callback that calls a native that calls back.
+    #[test]
+    fn a_callback_calls_a_native_that_calls_back() {
+        let natives = natives();
+        let double = function_value(double());
+        let quadruple = program(3, vec![], |b| {
+            emit(
+                b,
+                Instr::Copy {
+                    dst: Reg(2),
+                    src: Reg(0),
+                },
+            );
+            let k = b.constant(double.clone());
+            emit(b, Instr::LoadK { dst: Reg(1), k });
+            emit(
+                b,
+                Instr::CallNative {
+                    dst: Reg(0),
+                    base: Reg(1),
+                    slot: 1,
+                    args: 2,
+                },
+            );
+            emit(b, Instr::Return { src: Reg(0) });
+        });
+        let function = program(3, vec![1], |b| {
+            let k = b.constant(function_value(quadruple));
+            emit(b, Instr::LoadK { dst: Reg(0), k });
+            load_int(b, Reg(1), 3);
+            emit(
+                b,
+                Instr::CallNative {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    slot: 1,
+                    args: 2,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        // quadruple(quadruple(3))
+        assert_eq!(run(&natives, function).unwrap(), Value::Int(48));
+    }
+
+    /// A memoised function runs once for arguments it has a result for.
+    #[test]
+    fn a_memoised_function_runs_once_per_argument() {
+        // `fn f(n) { calls = calls + 1; n + n }`, `calls` in global 0.
+        let counted = program(2, vec![], |b| {
+            emit(
+                b,
+                Instr::GetGlobal {
+                    dst: Reg(1),
+                    slot: 0,
+                },
+            );
+            emit(
+                b,
+                Instr::AddIntI {
+                    dst: Reg(1),
+                    left: Reg(1),
+                    imm: 1,
+                },
+            );
+            emit(
+                b,
+                Instr::SetGlobal {
+                    slot: 0,
+                    src: Reg(1),
+                },
+            );
+            emit(
+                b,
+                Instr::AddInt {
+                    dst: Reg(0),
+                    left: Reg(0),
+                    right: Reg(0),
+                },
+            );
+            emit(b, Instr::Return { src: Reg(0) });
+        });
+        let memoised = Value::function(Function::Memoized {
+            cache: Rc::default(),
+            function: Rc::new(Function::Compiled(Rc::new(counted))),
+        });
+        let function = program(4, vec![], |b| {
+            load_int(b, Reg(3), 0);
+            emit(
+                b,
+                Instr::SetGlobal {
+                    slot: 0,
+                    src: Reg(3),
+                },
+            );
+            for n in [4, 4, 5] {
+                let k = b.constant(memoised.clone());
+                emit(b, Instr::LoadK { dst: Reg(0), k });
+                load_int(b, Reg(1), n);
+                emit(
+                    b,
+                    Instr::Call {
+                        base: Reg(0),
+                        args: 1,
+                    },
+                );
+            }
+            emit(
+                b,
+                Instr::GetGlobal {
+                    dst: Reg(2),
+                    slot: 0,
+                },
+            );
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    len: 3,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        let mut function = function;
+        function.num_globals = 1;
+        // f(5), what is left of the last call's argument, and two runs.
+        assert_eq!(
+            run(&Natives::default(), function).unwrap().to_string(),
+            "(10,None,2)"
+        );
+    }
+
+    /// A checked function that returns something else than the type it's
+    /// used as says fails at the call.
+    #[test]
+    fn a_checked_function_that_returns_the_wrong_type() {
+        let span = Span::new(ndc_lexer::SourceId::SYNTHETIC, 7, 2);
+        let mut double = double();
+        double.static_type = StaticType::Function {
+            parameters: Some(vec![StaticType::Int]),
+            return_type: Box::new(StaticType::Any),
+        };
+        let checked = Value::function(Function::Checked {
+            function: Rc::new(Function::Compiled(Rc::new(double))),
+            typ: Box::new(StaticType::Function {
+                parameters: Some(vec![StaticType::Int]),
+                return_type: Box::new(StaticType::String),
+            }),
+        });
+        let function = program(2, vec![], |b| {
+            let k = b.constant(checked);
+            emit(b, Instr::LoadK { dst: Reg(0), k });
+            load_int(b, Reg(1), 2);
+            b.emit(
+                Instr::Call {
+                    base: Reg(0),
+                    args: 1,
+                },
+                span,
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        let error = run(&Natives::default(), function).unwrap_err();
+        assert_eq!(
+            error.message,
+            "expected the function to return String but it returned Int"
+        );
+        assert_eq!(error.span, Some(span));
+    }
+
+    #[test]
+    fn calling_something_that_isnt_a_function() {
+        let error = run(&Natives::default(), call_with(Value::Int(3), &[1])).unwrap_err();
+        assert_eq!(error.message, "Unable to invoke Int as a function.");
+    }
+
     fn run(natives: &Natives, function: CompiledFunction) -> Result<Value, VmError> {
         let mut vm = Vm::new(function, crate::native_globals(natives), natives);
         vm.run()?;
-        Ok(vm.last_value())
+        Ok(vm.last_value(0))
     }
 
     fn emit(builder: &mut Builder, instr: Instr) {

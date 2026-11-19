@@ -9,7 +9,7 @@ use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
 pub use ndc_vm::InputSource;
 use ndc_vm::compiler::{Compiler, Session};
-use ndc_vm::register::{Compiler as RegisterCompiler, Vm as RegisterVm};
+use ndc_vm::register::Compiler as RegisterCompiler;
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
@@ -377,12 +377,11 @@ impl Interpreter {
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
-        if self.backend == Backend::Register {
-            return self.interpret_register_vm(expressions, analysis);
-        }
         let mut timings = ExecutionTimings::default();
         let code = measure(&mut timings, Phase::Compiling, || {
-            if self.resumable {
+            if self.backend == Backend::Register {
+                RegisterCompiler::compile(expressions, analysis, &self.natives)
+            } else if self.resumable {
                 Compiler::compile_line(expressions, analysis, &self.natives, &mut self.session)
             } else {
                 Compiler::compile(expressions, analysis, &self.natives)
@@ -414,37 +413,6 @@ impl Interpreter {
         }
         self.input = vm.take_input();
         let value = vm.last_value(num_locals);
-        (self.globals, self.stack) = vm.into_globals_and_stack();
-        run?;
-        Ok((value, timings))
-    }
-
-    /// [`Self::interpret_vm`] on the register VM.
-    fn interpret_register_vm(
-        &mut self,
-        expressions: impl Iterator<Item = ExpressionLocation>,
-        analysis: Analysis,
-    ) -> Result<(Value, ExecutionTimings), InterpreterError> {
-        let mut timings = ExecutionTimings::default();
-        let code = measure(&mut timings, Phase::Compiling, || {
-            RegisterCompiler::compile(expressions, analysis, &self.natives)
-        })?;
-        let output = if self.capturing {
-            OutputSink::Buffer(Vec::new())
-        } else {
-            OutputSink::Stdout
-        };
-        self.stack = Vec::new();
-        let stdin = std::mem::replace(&mut self.input, InputSource::None);
-        let mut vm = RegisterVm::new(code, std::mem::take(&mut self.globals), &self.natives)
-            .with_output(output)
-            .with_input(stdin);
-        let run = measure(&mut timings, Phase::Running, || vm.run());
-        if let Some(output) = vm.get_output() {
-            self.output.extend_from_slice(output);
-        }
-        self.input = vm.take_input();
-        let value = vm.last_value();
         (self.globals, self.stack) = vm.into_globals_and_stack();
         run?;
         Ok((value, timings))

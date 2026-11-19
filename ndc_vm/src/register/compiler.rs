@@ -328,21 +328,10 @@ impl Compiler {
                 self.emit(Instr::MakeString { dst, k }, span);
                 Ok(Self::placed(dest, dst))
             }
-            Expression::Identifier { .. } => match self.binding(id) {
-                Binding::Resolved(Candidate::Scalar(Callee::Var(var))) => {
-                    self.read_variable(var, dest, span)
-                }
-                Binding::None => Err(CompileError::unresolved_binding(span)),
-                Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(_))) => Err(
-                    CompileError::not_yet_supported("an intrinsic used as a value", span),
-                ),
-                Binding::Resolved(Candidate::Vec(_)) | Binding::PerPosition(_) => {
-                    Err(CompileError::not_yet_supported(
-                        "an operator applied to each element of tuples",
-                        span,
-                    ))
-                }
-            },
+            Expression::Identifier { .. } => {
+                let binding = self.binding(id);
+                self.compile_callee(&binding, dest, span)
+            }
             Expression::Statement(statement) => {
                 self.compile_expr(*statement, Dest::Discard)?;
                 self.unit(dest, span)
@@ -433,11 +422,19 @@ impl Compiler {
                 span,
             )),
             Expression::StructDeclaration { .. } => {
-                Err(CompileError::not_yet_supported("structs", span))
+                self.compile_struct_declaration(id, span)?;
+                self.unit(dest, span)
             }
             Expression::For { .. } => Err(CompileError::not_yet_supported("`for` loops", span)),
-            Expression::MemberAccess { .. } => {
-                Err(CompileError::not_yet_supported("member access", span))
+            Expression::MemberAccess {
+                receiver,
+                member_span,
+                ..
+            } => {
+                let getter = self
+                    .getter(id)
+                    .expect("internal error: every member access is analysed before it's compiled");
+                self.compile_binding_call(&getter, vec![*receiver], dest, member_span)
             }
             Expression::Tuple { .. } => Err(CompileError::not_yet_supported("tuples", span)),
             Expression::List { .. } => Err(CompileError::not_yet_supported("lists", span)),
@@ -722,9 +719,9 @@ impl Compiler {
             .expect("internal error: the analyser rejects break and continue outside of a loop")
     }
 
-    /// Compiles the call of `function` with `arguments`: the instruction of
-    /// the op it resolves to, as `SubInt` for `n - 1`, a `CallNative` of the
-    /// native it resolves to, or a `Call` of the function value.
+    /// Compiles the call of `function` with `arguments`: of what the name
+    /// refers to (see [`Self::compile_binding_call`]), or of the function
+    /// value any other expression gives, as `make()(1)`.
     fn compile_call(
         &mut self,
         function: ExpressionLocation,
@@ -732,40 +729,93 @@ impl Compiler {
         dest: Dest,
     ) -> Result<Operand, CompileError> {
         let span = function.span;
-        let binding = match &function.expression {
-            Expression::Identifier { .. } => Some(self.binding(function.id)),
-            _ => None,
-        };
-        match &binding {
-            Some(Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(_)))) => {
-                return Err(CompileError::not_yet_supported(
-                    "intrinsics, such as `cast`",
-                    span,
-                ));
-            }
-            Some(Binding::Resolved(Candidate::Vec(_)) | Binding::PerPosition(_)) => {
-                return Err(CompileError::not_yet_supported(
-                    "an operator applied to each element of tuples",
-                    span,
-                ));
-            }
-            _ => {}
+        if let Expression::Identifier { .. } = function.expression {
+            let binding = self.binding(function.id);
+            return self.compile_binding_call(&binding, arguments, dest, span);
         }
-        match binding
-            .as_ref()
-            .and_then(|binding| self.native_call(binding))
-        {
-            Some(NativeCall::Op(op)) => self.compile_op(op, arguments, dest, span),
+        let base = self.alloc_temp(span)?;
+        self.compile_expr(function, Dest::Reg(base))?;
+        self.finish_call(base, arguments, false, dest, span)
+    }
+
+    /// Compiles the call at `span` of what `binding` refers to with
+    /// `arguments`: the instruction of the op it resolves to, as `SubInt`
+    /// for `n - 1`, a `CallNative` of the native it resolves to, a `CallVec`
+    /// of an operator applied to each element of tuples, or a `Call` of the
+    /// function value.
+    fn compile_binding_call(
+        &mut self,
+        binding: &Binding,
+        arguments: Vec<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        if let Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(_))) = binding {
+            return Err(CompileError::not_yet_supported(
+                "intrinsics, such as `cast`",
+                span,
+            ));
+        }
+        match self.native_call(binding) {
+            Some(NativeCall::Op(op)) => return self.compile_op(op, arguments, dest, span),
             Some(NativeCall::Native(slot)) => {
-                match (u16::try_from(slot), u8::try_from(arguments.len())) {
-                    (Ok(slot), Ok(args)) => {
-                        self.compile_native_call(slot, args, arguments, dest, span)
-                    }
-                    // Too many to say in a `CallNative`: called as a value.
-                    _ => self.compile_value_call(function, arguments, dest, span),
+                // A call with too many to say in a `CallNative` calls the
+                // native as a value.
+                if let (Ok(slot), Ok(args)) = (u16::try_from(slot), u8::try_from(arguments.len())) {
+                    return self.compile_native_call(slot, args, arguments, dest, span);
                 }
             }
-            None => self.compile_value_call(function, arguments, dest, span),
+            None => {}
+        }
+        let vectorised = matches!(
+            binding,
+            Binding::Resolved(Candidate::Vec(_)) | Binding::PerPosition(_)
+        );
+        let base = self.alloc_temp(span)?;
+        self.compile_callee(binding, Dest::Reg(base), span)?;
+        self.finish_call(base, arguments, vectorised, dest, span)
+    }
+
+    /// Puts the value of what `binding` refers to where `dest` says: the
+    /// variable's value, or for an operator whose tuple positions take
+    /// different overloads, the tuple of them, which `CallVec` applies
+    /// position by position.
+    fn compile_callee(
+        &mut self,
+        binding: &Binding,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        match binding {
+            Binding::None => Err(CompileError::unresolved_binding(span)),
+            Binding::Resolved(candidate) => match candidate.var() {
+                Callee::Var(variable) => self.read_variable(variable, dest, span),
+                Callee::Intrinsic(_) => Err(CompileError::not_yet_supported(
+                    "an intrinsic used as a value",
+                    span,
+                )),
+            },
+            Binding::PerPosition(overloads) => {
+                let mark = self.next_temp;
+                let base = Self::register(mark, span)?;
+                for &overload in overloads {
+                    let reg = self.alloc_temp(span)?;
+                    let Callee::Var(variable) = overload else {
+                        return Err(CompileError::not_yet_supported(
+                            "an intrinsic used as a value",
+                            span,
+                        ));
+                    };
+                    self.read_variable(variable, Dest::Reg(reg), span)?;
+                }
+                let len = u16::try_from(overloads.len())
+                    .map_err(|_too_many| CompileError::too_many_registers(span))?;
+                // `MakeTuple` reads its elements before it writes `dst`.
+                self.next_temp = mark;
+                let dst = self.place(dest, span)?;
+                self.emit(Instr::MakeTuple { dst, base, len }, span);
+                Ok(Self::placed(dest, dst))
+            }
         }
     }
 
@@ -953,22 +1003,28 @@ impl Compiler {
         Ok(Self::placed(dest, dst))
     }
 
-    /// Compiles the call of the value of `function` with `arguments`: the
-    /// function goes in the first free temporary, the arguments after it,
-    /// and the result where the function was.
-    fn compile_value_call(
+    /// Compiles the rest of the call of the function in `base`, the first
+    /// free temporary but one, with `arguments`: they go in the registers
+    /// after it, and the result where the function was. A `vectorised` call
+    /// applies the function to each element of tuples, with `CallVec`.
+    fn finish_call(
         &mut self,
-        function: ExpressionLocation,
+        base: Reg,
         arguments: Vec<ExpressionLocation>,
+        vectorised: bool,
         dest: Dest,
         span: Span,
     ) -> Result<Operand, CompileError> {
+        debug_assert_eq!(base.index() + 1, self.next_temp);
         let args = u16::try_from(arguments.len())
             .map_err(|_too_many| CompileError::too_many_registers(span))?;
-        let base = self.alloc_temp(span)?;
-        self.compile_expr(function, Dest::Reg(base))?;
         self.compile_arguments(arguments, span)?;
-        self.emit(Instr::Call { base, args }, span);
+        let call = if vectorised {
+            Instr::CallVec { base, args }
+        } else {
+            Instr::Call { base, args }
+        };
+        self.emit(call, span);
         self.next_temp = base.index() + 1;
         match dest {
             Dest::Any => Ok(Operand::Temp(base)),
@@ -1031,20 +1087,78 @@ impl Compiler {
         slot: usize,
         span: Span,
     ) -> Result<(), CompileError> {
-        let k = self
-            .builder
-            .constant(Value::function(Function::Compiled(Rc::new(function))));
-        let mark = self.next_temp;
-        let src = self.alloc_temp(span)?;
-        self.emit(Instr::LoadK { dst: src, k }, span);
-        self.emit(
-            Instr::SetGlobal {
-                slot: global(slot),
-                src,
-            },
+        self.declare_value(
+            ResolvedVar::Global { slot },
+            Value::function(Function::Compiled(Rc::new(function))),
             span,
-        );
-        self.next_temp = mark;
+        )
+    }
+
+    /// Stores `value`, a constant, in `variable`, which a declaration at
+    /// `span` declares. A declaration replaces what a captured local's
+    /// register held, so a declaration that runs again, as in a loop, makes
+    /// a new variable rather than writing to the cell a closure kept.
+    fn declare_value(
+        &mut self,
+        variable: ResolvedVar,
+        value: Value,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let k = self.builder.constant(value);
+        match variable {
+            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
+                let dst = self.local(slot, span)?;
+                self.emit(Instr::LoadK { dst, k }, span);
+            }
+            ResolvedVar::Global { slot } => {
+                let mark = self.next_temp;
+                let src = self.alloc_temp(span)?;
+                self.emit(Instr::LoadK { dst: src, k }, span);
+                self.emit(
+                    Instr::SetGlobal {
+                        slot: global(slot),
+                        src,
+                    },
+                    span,
+                );
+                self.next_temp = mark;
+            }
+            ResolvedVar::Upvalue { .. } => {
+                unreachable!("internal error: the analyser never declares an upvalue")
+            }
+        }
+        Ok(())
+    }
+
+    /// Compiles the struct declaration at `id`: its constructor, and the
+    /// getter and setter of each field, made here and stored where the
+    /// analyser put them.
+    fn compile_struct_declaration(&mut self, id: NodeId, span: Span) -> Result<(), CompileError> {
+        let analysis = Rc::clone(&self.analysis);
+        let declared = analysis.declared_struct(id);
+        // The constructor and accessors share this one `Rc`: struct values
+        // and accessor checks compare their info by identity.
+        let info = Rc::new(declared.info.clone());
+        let constructor = analysis
+            .variable(id)
+            .expect("internal error: a struct declaration declares its constructor");
+        self.declare_value(
+            constructor,
+            Value::function(Function::struct_constructor(Rc::clone(&info))),
+            span,
+        )?;
+        for (index, field) in declared.fields.iter().enumerate() {
+            self.declare_value(
+                field.getter,
+                Value::function(Function::struct_getter(Rc::clone(&info), index)),
+                span,
+            )?;
+            self.declare_value(
+                field.setter,
+                Value::function(Function::struct_setter(Rc::clone(&info), index)),
+                span,
+            )?;
+        }
         Ok(())
     }
 
@@ -1081,11 +1195,27 @@ impl Compiler {
 
     /// What the identifier `id` refers to, in the instance being compiled.
     fn binding(&self, id: NodeId) -> Binding {
-        self.instance
-            .map(|at| &self.analysis.instances[&at.declaration][at.index])
-            .and_then(|instance| instance.bindings.get(&id))
+        self.instance_pick(|instance| instance.bindings.get(&id))
             .unwrap_or_else(|| self.analysis.binding(id))
             .clone()
+    }
+
+    /// The pick `pick` finds in the instance being compiled, if any.
+    fn instance_pick<'a, T>(
+        &'a self,
+        pick: impl FnOnce(&'a Instance) -> Option<&'a T>,
+    ) -> Option<&'a T> {
+        self.instance
+            .map(|at| &self.analysis.instances[&at.declaration][at.index])
+            .and_then(pick)
+    }
+
+    /// The function that reads through the target at `id`, if it reads, in
+    /// the instance being compiled: the getter of `p.x`.
+    fn getter(&self, id: NodeId) -> Option<Binding> {
+        self.instance_pick(|instance| instance.getters.get(&id))
+            .or_else(|| self.analysis.getter(id))
+            .cloned()
     }
 }
 

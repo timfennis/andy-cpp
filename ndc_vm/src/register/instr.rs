@@ -135,6 +135,11 @@ pub enum Instr {
     /// puts what it returns in `base`. The callee's frame starts at
     /// `base + 1`, so the arguments are its first registers.
     Call { base: Reg, args: u16 },
+    /// Calls the function in `base`, an operator, with the `args` values
+    /// after it element by element, and puts the tuple of the results in
+    /// `base`: `(1, 2) + (3, 4)` is `(1 + 3, 2 + 4)`. The function in `base`
+    /// is one for every position, or a tuple of one for each.
+    CallVec { base: Reg, args: u16 },
     /// Calls the native in global slot `slot` with the `args` values from
     /// `base` on, for a call the analyser resolved to that native, and puts
     /// what it returns in `dst`. The argument registers are `None` after.
@@ -144,6 +149,9 @@ pub enum Instr {
         slot: u16,
         args: u8,
     },
+    /// `dst` = the tuple of the `len` values from `base` on, which are
+    /// `None` afterwards.
+    MakeTuple { dst: Reg, base: Reg, len: u16 },
     /// Ends the call, giving the caller the value in `src`.
     Return { src: Reg },
     /// Ends the program, whose value is the one in `src`.
@@ -295,7 +303,9 @@ impl Instr {
             Self::JumpIfNotEqualI { .. } => "JumpIfNotEqualI",
             Self::JumpIfNotNotEqualI { .. } => "JumpIfNotNotEqualI",
             Self::Call { .. } => "Call",
+            Self::CallVec { .. } => "CallVec",
             Self::CallNative { .. } => "CallNative",
+            Self::MakeTuple { .. } => "MakeTuple",
             Self::Return { .. } => "Return",
             Self::Halt { .. } => "Halt",
         }
@@ -473,13 +483,16 @@ impl fmt::Display for Instr {
             | Self::JumpIfNotNotEqualI { left, imm, offset } => {
                 write!(f, "{left}, #{imm}, {}", ShortOffset(offset))
             }
-            Self::Call { base, args } => write!(f, "{base}, {args}"),
+            Self::Call { base, args } | Self::CallVec { base, args } => {
+                write!(f, "{base}, {args}")
+            }
             Self::CallNative {
                 dst,
                 base,
                 slot,
                 args,
             } => write!(f, "{dst}, n{slot}, {base}, {args}"),
+            Self::MakeTuple { dst, base, len } => write!(f, "{dst}, {base}, {len}"),
             Self::Return { src } | Self::Halt { src } => write!(f, "{src}"),
         }
     }

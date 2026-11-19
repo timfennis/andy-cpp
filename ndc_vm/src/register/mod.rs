@@ -1,7 +1,8 @@
 //! The register VM, which is to replace the stack VM (see
 //! `docs/register-vm/plan.md`). Both exist side by side while it's built:
 //! the stack VM stays the one programs run on unless a register VM is asked
-//! for.
+//! for. Both run on [`crate::Vm`], which runs register code when it's made
+//! for it, so the natives that take a VM get the same VM either way.
 //!
 //! A frame's values are registers, numbered from 0: the function's
 //! parameters, its other locals, then the temporaries its expressions need.
@@ -18,4 +19,4 @@ mod vm;
 pub use chunk::{Builder, Chunk, Label};
 pub use compiler::Compiler;
 pub use instr::{Instr, Reg, WINDOW};
-pub use vm::Vm;
+pub(crate) use vm::Frame;

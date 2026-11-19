@@ -290,6 +290,62 @@ fn an_error_in_a_native() {
 }
 
 #[test]
+fn natives_that_call_back_into_the_program() {
+    let outcome = same_on_both(
+        r#"fn twice(c) { c ++ c }
+        fn not_b(c) { c != "b" }
+        fn longer(a, b) { a ++ b }
+        print("ab".map(twice), "abcd".filter(not_b), "xyz".fold("", longer));
+        print("abc".map(twice).map(twice));"#,
+    );
+    assert_eq!(
+        outcome.output,
+        "[\"aa\",\"bb\"] [\"a\",\"c\",\"d\"] xyz\n[\"aaaa\",\"bbbb\",\"cccc\"]\n"
+    );
+}
+
+#[test]
+fn an_error_inside_a_callback() {
+    let outcome = same_on_both(
+        r#"fn bad(c) { if c == "b" { 5 % 0 } else { 1 } }
+        print("a".map(bad));
+        print("ab".map(bad));"#,
+    );
+    assert_eq!(outcome.output, "[1]\n");
+    assert!(outcome.result.is_err());
+}
+
+#[test]
+fn function_values() {
+    let outcome = same_on_both(
+        "fn double(x) { x * 2 }
+        fn pick() { double }
+        fn apply(f, x) { f(x) }
+        let f = double;
+        fn local() { let g = double; g(5) }
+        print(f(21), pick()(4), apply(double, 3), local());",
+    );
+    assert_eq!(outcome.output, "42 8 6 10\n");
+    same_on_both("let x = 3; x(1)");
+}
+
+#[test]
+fn struct_constructors_and_accessors() {
+    let outcome = same_on_both(
+        "struct Point { x: Int, y: Int }
+        fn norm(p) { p.x * p.x + p.y * p.y }
+        fn local() {
+            struct Pair { a: Int, b: Int }
+            let p = Pair(3, 4);
+            p.a + p.b
+        }
+        let p = Point(3, 4);
+        print(p, p.x, norm(p), local());",
+    );
+    assert_eq!(outcome.output, "Point {x: 3, y: 4} 3 25 7\n");
+}
+
+#[test]
 fn deep_recursion() {
     let outcome = same_on_both(
         "fn depth(n) { if n == 0 { 0 } else { 1 + depth(n - 1) } }
@@ -344,6 +400,13 @@ fn the_test_programs_it_compiles() {
         compiled += 1;
         let stack = run(Backend::Stack, &program);
         assert_eq!(stack, register, "the VMs differ on {}", path.display());
+    }
+    #[allow(
+        clippy::print_stdout,
+        reason = "reports how far the register VM has come"
+    )]
+    {
+        println!("compared {compiled} of {} programs", paths.len());
     }
     assert!(compiled > 0);
 }
