@@ -626,6 +626,75 @@ fn destructuring_declarations() {
 }
 
 #[test]
+fn assignment_to_every_kind_of_target() {
+    let outcome = same_on_both(
+        r#"struct Point { x: Int, y: Int }
+        let g = 1;
+        fn f() {
+            let xs = [1, 2, 3];
+            xs[0] = 10;
+            let p = Point(1, 2);
+            p.x = 5;
+            let m = %{"a": 1};
+            m["b"] = 2;
+            let (a, b) = (0, 0);
+            (a, b) = (b + 1, a + 2);
+            (xs[1], (a, g)) = (20, (30, 40));
+            print(xs, p, m["b"], a, b, g);
+            let n = 1;
+            let k = fn() { n = n * 10; n };
+            (n, b) = (k(), n);
+            print(n, b);
+        }
+        f();"#,
+    );
+    assert_eq!(
+        outcome.output,
+        "[10,20,3] Point {x: 5, y: 2} 2 30 2 40\n10 10\n"
+    );
+}
+
+/// An assignment with an operator works out an index or member target's
+/// parts once, and reads the target before its value.
+#[test]
+fn assignment_with_an_operator_to_every_kind_of_target() {
+    let outcome = same_on_both(
+        r#"struct Point { x: Int, y: Int }
+        let g = 1;
+        fn index() { print("index"); 1 }
+        fn f() {
+            let x = 1;
+            x += 2;
+            x *= x + 1;
+            let s = "a";
+            s ++= "b";
+            let xs = [1, 2, 3];
+            xs[index()] += 10;
+            xs[0] -= 1;
+            let p = Point(1, 2);
+            p.y *= 7;
+            let m = %{:0};
+            m["k"] += 5;
+            m["k"] += 5;
+            g += 1;
+            let c = 1;
+            let bump = fn() { c += 100; c };
+            c += bump();
+            let l = [1];
+            l ++= [2, 3];
+            let y = 3;
+            y += { y = 100; 1 };
+            print(x, s, xs, p, m["k"], g, c, l, y);
+        }
+        f();"#,
+    );
+    assert_eq!(
+        outcome.output,
+        "index\n12 ab [0,12,3] Point {x: 1, y: 14} 10 2 102 [1,2,3] 4\n"
+    );
+}
+
+#[test]
 fn deep_recursion() {
     let outcome = same_on_both(
         "fn depth(n) { if n == 0 { 0 } else { 1 + depth(n - 1) } }
@@ -694,12 +763,8 @@ fn the_test_programs_it_compiles() {
 #[test]
 fn constructs_it_cant_compile_yet_are_errors() {
     for (program, construct) in [
-        ("let x = 1; x += 1;", "an assignment with an operator"),
-        (
-            "let xs = [1]; xs[0] = 2;",
-            "assigning to anything but a variable",
-        ),
         ("let x: Any = 1; cast::<Int>(x)", "intrinsics"),
+        ("let t = (1, 2); t[0]", "intrinsics"),
     ] {
         let outcome = run(Backend::Register, program);
         let error = outcome.result.expect_err(program);

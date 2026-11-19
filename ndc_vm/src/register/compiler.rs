@@ -20,8 +20,8 @@ use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
-    AssignmentTarget, BindingPattern, BindingPatternLocation, Expression, ExpressionLocation,
-    ForBody, ForIteration, LogicalOperator,
+    AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
+    ExpressionLocation, ForBody, ForIteration, LogicalOperator,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -80,12 +80,84 @@ enum Right {
     Immediate(i16),
 }
 
+/// An argument of a call or an operand of an instruction, which is
+/// compiled in its turn among the others: an expression, or what an
+/// assignment with an operator has already worked out about its target, as
+/// `xs[i] += 1` reads `xs[i]` with a cached `xs` and `i`.
+enum Arg {
+    Expr(ExpressionLocation),
+    /// The value of a variable, read at `span`.
+    Var {
+        variable: ResolvedVar,
+        span: Span,
+    },
+    /// The value in a temporary that stays in use, which a call copies.
+    Copy(Reg),
+    /// What the call of `getter` with copies of the values in `args` gives,
+    /// at `span`: the read of `xs[i]` or `p.x`.
+    Read {
+        getter: Binding,
+        args: Vec<Reg>,
+        span: Span,
+    },
+}
+
+/// The target of an assignment with an operator, with the parts it's read
+/// and written through worked out: `xs[i] += 1` reads and writes `xs[i]`
+/// with `xs` and `i` in temporaries.
+enum PreparedTarget {
+    Variable {
+        variable: ResolvedVar,
+        span: Span,
+    },
+    Index {
+        container: Reg,
+        index: Reg,
+        /// The target's span, from the container to the index.
+        span: Span,
+        getter: Binding,
+        setter: Binding,
+    },
+    Member {
+        receiver: Reg,
+        /// The member's span.
+        span: Span,
+        getter: Binding,
+        setter: Binding,
+    },
+}
+
 /// The labels of the loop being compiled, which `break` and `continue` jump
 /// to.
 #[derive(Clone, Copy)]
 struct Loop {
     start: Label,
     end: Label,
+}
+
+impl Arg {
+    /// Where the argument is in the source.
+    fn span(&self) -> Span {
+        match self {
+            Self::Expr(expression) => expression.span,
+            Self::Var { span, .. } | Self::Read { span, .. } => *span,
+            Self::Copy(_) => Span::synthetic(),
+        }
+    }
+
+    /// Whether compiling the argument may write a local variable (see
+    /// [`may_assign`]).
+    fn may_assign(&self) -> bool {
+        match self {
+            Self::Expr(expression) => may_assign(expression),
+            Self::Var { .. } | Self::Copy(_) | Self::Read { .. } => false,
+        }
+    }
+}
+
+/// The arguments `expressions`, which are expressions.
+fn exprs(expressions: Vec<ExpressionLocation>) -> Vec<Arg> {
+    expressions.into_iter().map(Arg::Expr).collect()
 }
 
 /// Compiles one function to register code.
@@ -289,6 +361,12 @@ impl Compiler {
     ) -> Result<Operand, CompileError> {
         let mark = self.next_temp;
         let operand = self.compile_expr_inner(expression, dest)?;
+        Ok(self.settle(mark, operand, dest))
+    }
+
+    /// Frees the temporaries an expression compiled with `dest` from `mark`
+    /// on took, but for the one its value is in, which is the first.
+    fn settle(&mut self, mark: usize, operand: Operand, dest: Dest) -> Operand {
         match operand {
             Operand::Temp(reg) => {
                 debug_assert_eq!(dest, Dest::Any);
@@ -301,7 +379,33 @@ impl Compiler {
             }
             Operand::Local(_) | Operand::Placed => self.next_temp = mark,
         }
-        Ok(operand)
+        operand
+    }
+
+    /// Compiles `arg`, putting its value where `dest` says, as
+    /// [`Self::compile_expr`] does.
+    fn compile_arg(&mut self, arg: Arg, dest: Dest) -> Result<Operand, CompileError> {
+        let mark = self.next_temp;
+        let operand = match arg {
+            Arg::Expr(expression) => return self.compile_expr(expression, dest),
+            Arg::Var { variable, span } => self.read_variable(variable, dest, span)?,
+            // The register stays in use, so the value is read where it is.
+            Arg::Copy(reg) => match dest {
+                Dest::Any => Operand::Local(reg),
+                Dest::Reg(dst) => {
+                    if dst != reg {
+                        self.emit(Instr::Copy { dst, src: reg }, Span::synthetic());
+                    }
+                    Operand::Placed
+                }
+                Dest::Discard => Operand::Placed,
+            },
+            Arg::Read { getter, args, span } => {
+                let args = args.into_iter().map(Arg::Copy).collect();
+                self.compile_binding_call(&getter, args, dest, span)?
+            }
+        };
+        Ok(self.settle(mark, operand, dest))
     }
 
     fn compile_expr_inner(
@@ -379,17 +483,7 @@ impl Compiler {
                 self.unit(dest, span)
             }
             Expression::Assignment { l_value, r_value } => {
-                let AssignmentTarget::Identifier { .. } = l_value.target else {
-                    return Err(CompileError::not_yet_supported(
-                        "assigning to anything but a variable",
-                        span,
-                    ));
-                };
-                let variable = self.analysis.variable(l_value.id).expect(
-                    "internal error: every assignment target is analysed before it's compiled",
-                );
-                self.store(variable, *r_value, false, span)?;
-                self.unit(dest, span)
+                self.compile_assignment(l_value, *r_value, dest, span)
             }
             Expression::FunctionDeclaration {
                 name, body, pure, ..
@@ -444,10 +538,12 @@ impl Compiler {
                 operator,
                 right,
             } => self.compile_logical(*left, operator, *right, dest),
-            Expression::OpAssignment { .. } => Err(CompileError::not_yet_supported(
-                "an assignment with an operator, such as `+=`",
-                span,
-            )),
+            Expression::OpAssignment {
+                l_value, r_value, ..
+            } => {
+                self.compile_op_assignment(id, l_value, *r_value, span)?;
+                self.unit(dest, span)
+            }
             Expression::StructDeclaration { .. } => {
                 self.compile_struct_declaration(id, span)?;
                 self.unit(dest, span)
@@ -463,7 +559,7 @@ impl Compiler {
                 let getter = self
                     .getter(id)
                     .expect("internal error: every member access is analysed before it's compiled");
-                self.compile_binding_call(&getter, vec![*receiver], dest, member_span)
+                self.compile_binding_call(&getter, vec![Arg::Expr(*receiver)], dest, member_span)
             }
             Expression::Tuple { values } => self.compile_tuple(values, dest, span),
             Expression::List { values } => self.compile_list(values, dest, span),
@@ -743,7 +839,7 @@ impl Compiler {
                 function,
                 arguments,
             } if let Some(op) = self.comparison(&function, arguments.len()) => {
-                let jump = match self.compile_binary_operands(arguments, true)? {
+                let jump = match self.compile_binary_operands(exprs(arguments), true)? {
                     (left, Right::Reg(right)) => Instr::jump_unless(op, left, right),
                     (left, Right::Immediate(imm)) => Instr::jump_unless_immediate(op, left, imm),
                 }
@@ -802,11 +898,11 @@ impl Compiler {
         let span = function.span;
         if let Expression::Identifier { .. } = function.expression {
             let binding = self.binding(function.id);
-            return self.compile_binding_call(&binding, arguments, dest, span);
+            return self.compile_binding_call(&binding, exprs(arguments), dest, span);
         }
         let base = self.alloc_temp(span)?;
         self.compile_expr(function, Dest::Reg(base))?;
-        self.finish_call(base, arguments, false, dest, span)
+        self.finish_call(base, exprs(arguments), false, dest, span)
     }
 
     /// Compiles the call at `span` of what `binding` refers to with
@@ -817,7 +913,7 @@ impl Compiler {
     fn compile_binding_call(
         &mut self,
         binding: &Binding,
-        arguments: Vec<ExpressionLocation>,
+        arguments: Vec<Arg>,
         dest: Dest,
         span: Span,
     ) -> Result<Operand, CompileError> {
@@ -912,7 +1008,7 @@ impl Compiler {
     fn compile_op(
         &mut self,
         op: NativeOp,
-        arguments: Vec<ExpressionLocation>,
+        arguments: Vec<Arg>,
         dest: Dest,
         span: Span,
     ) -> Result<Operand, CompileError> {
@@ -951,13 +1047,17 @@ impl Compiler {
     /// number written in the code that fits an `i16`, as `2` in `i * 2`.
     fn compile_binary_operands(
         &mut self,
-        arguments: Vec<ExpressionLocation>,
+        arguments: Vec<Arg>,
         immediate: bool,
     ) -> Result<(Reg, Right), CompileError> {
-        if immediate && let Some(imm) = self.small_int(&arguments[1]) {
+        if immediate
+            && let Arg::Expr(right) = &arguments[1]
+            && let Some(imm) = self.small_int(right)
+        {
             let [left, _] = <[_; 2]>::try_from(arguments)
+                .ok()
                 .expect("internal error: a binary op takes two operands");
-            let left = match self.compile_expr(left, Dest::Any)? {
+            let left = match self.compile_arg(left, Dest::Any)? {
                 Operand::Local(reg) | Operand::Temp(reg) => reg,
                 Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
             };
@@ -989,24 +1089,21 @@ impl Compiler {
     /// read before an argument that may assign it is copied first, so the
     /// instruction sees it as it was: in `x + { x = 5; x }`, `x` before the
     /// block.
-    fn compile_operands(
-        &mut self,
-        arguments: Vec<ExpressionLocation>,
-    ) -> Result<Vec<Reg>, CompileError> {
+    fn compile_operands(&mut self, arguments: Vec<Arg>) -> Result<Vec<Reg>, CompileError> {
         let mut assigned_later = arguments
             .iter()
             .rev()
             .scan(false, |later, argument| {
                 let before = *later;
-                *later |= may_assign(argument);
+                *later |= argument.may_assign();
                 Some(before)
             })
             .collect::<Vec<_>>();
         assigned_later.reverse();
         let mut operands = Vec::with_capacity(arguments.len());
         for (argument, assigned_later) in arguments.into_iter().zip(assigned_later) {
-            let span = argument.span;
-            let reg = match self.compile_expr(argument, Dest::Any)? {
+            let span = argument.span();
+            let reg = match self.compile_arg(argument, Dest::Any)? {
                 Operand::Local(reg) if assigned_later => {
                     let temp = self.alloc_temp(span)?;
                     self.emit(
@@ -1041,7 +1138,7 @@ impl Compiler {
                 let variable = self.analysis.variable(pattern.id).expect(
                     "internal error: every binding pattern is analysed before it's compiled",
                 );
-                self.declare_from(variable, src, span)
+                self.store_from(variable, src, true, span)
             }
             BindingPattern::Sequence(patterns) => {
                 let len = u16::try_from(patterns.len())
@@ -1064,51 +1161,294 @@ impl Compiler {
         }
     }
 
-    /// Declares `variable` with the value in `src`, which it takes if `src`
-    /// is a temporary. A declaration replaces what a captured local's
-    /// register held, as [`Self::store`] does.
-    fn declare_from(
+    /// Stores the value in `src` in `variable`, which a declaration, when
+    /// `declaring`, or an assignment at `span` writes, as [`Self::store`]
+    /// does. The value is taken if `src` is a temporary, and copied if it's
+    /// a local's register.
+    fn store_from(
         &mut self,
         variable: ResolvedVar,
         src: Reg,
+        declaring: bool,
         span: Span,
     ) -> Result<(), CompileError> {
-        let owned = src.index() >= self.locals;
-        match variable {
-            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
-                let dst = self.local(slot, span)?;
-                if dst != src {
-                    let copy = if owned {
-                        Instr::Move { dst, src }
-                    } else {
-                        Instr::Copy { dst, src }
-                    };
-                    self.emit(copy, span);
-                }
-            }
-            ResolvedVar::Global { slot } => {
-                let mark = self.next_temp;
-                let src = if owned {
-                    src
+        if let ResolvedVar::Local { slot } = variable {
+            let dst = self.local(slot, span)?;
+            if dst != src {
+                let copy = if src.index() >= self.locals {
+                    Instr::Move { dst, src }
                 } else {
-                    let temp = self.alloc_temp(span)?;
-                    self.emit(Instr::Copy { dst: temp, src }, span);
-                    temp
+                    Instr::Copy { dst, src }
                 };
-                self.emit(
-                    Instr::SetGlobal {
-                        slot: global(slot),
-                        src,
-                    },
-                    span,
+                self.emit(copy, span);
+            }
+            return Ok(());
+        }
+        if let ResolvedVar::Cell { slot } = variable
+            && declaring
+        {
+            return self.store_from(ResolvedVar::Local { slot }, src, declaring, span);
+        }
+        // The rest take the value, which a local keeps.
+        let mark = self.next_temp;
+        let src = if src.index() >= self.locals {
+            src
+        } else {
+            let temp = self.alloc_temp(span)?;
+            self.emit(Instr::Copy { dst: temp, src }, span);
+            temp
+        };
+        let instr = match variable {
+            ResolvedVar::Cell { slot } => Instr::SetCell {
+                cell: self.local(slot, span)?,
+                src,
+            },
+            ResolvedVar::Upvalue { slot } => Instr::SetUpvalue {
+                index: upvalue(slot, span)?,
+                src,
+            },
+            ResolvedVar::Global { slot } => Instr::SetGlobal {
+                slot: global(slot),
+                src,
+            },
+            ResolvedVar::Local { .. } => unreachable!("internal error: a local is stored above"),
+        };
+        self.emit(instr, span);
+        self.next_temp = mark;
+        Ok(())
+    }
+
+    /// Compiles the assignment of `value` to `target`. Through an index or
+    /// a member, it's a call of the target's setter, whose result is the
+    /// assignment's value: `xs[i] = v` is `[]=(xs, i, v)`. Otherwise it's
+    /// unit.
+    fn compile_assignment(
+        &mut self,
+        target: AssignmentTargetLocation,
+        value: ExpressionLocation,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        match target.target {
+            AssignmentTarget::Identifier { .. } => {
+                let variable = self.analysis.variable(target.id).expect(
+                    "internal error: every assignment target is analysed before it's compiled",
                 );
+                self.store(variable, value, false, span)?;
+            }
+            AssignmentTarget::Index {
+                value: container,
+                index,
+            } => {
+                let setter = self.setter(target.id);
+                let args = vec![Arg::Expr(*container), Arg::Expr(*index), Arg::Expr(value)];
+                return self.compile_binding_call(&setter, args, dest, span);
+            }
+            AssignmentTarget::Member {
+                receiver,
+                member_span,
+                ..
+            } => {
+                let setter = self.setter(target.id);
+                let args = vec![Arg::Expr(*receiver), Arg::Expr(value)];
+                return self.compile_binding_call(&setter, args, dest, member_span);
+            }
+            AssignmentTarget::Sequence(targets) => {
+                // The whole value is read before any target is assigned.
+                let mark = self.next_temp;
+                let src = match self.compile_expr(value, Dest::Any)? {
+                    Operand::Local(reg) | Operand::Temp(reg) => reg,
+                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                };
+                self.assign_sequence(targets, src, span)?;
                 self.next_temp = mark;
             }
-            ResolvedVar::Upvalue { .. } => {
-                unreachable!("internal error: the analyser never declares an upvalue")
+        }
+        self.unit(dest, span)
+    }
+
+    /// Assigns the elements of the value in `src` to `targets`, from the
+    /// left, for the destructuring assignment at `span`.
+    fn assign_sequence(
+        &mut self,
+        targets: Vec<AssignmentTargetLocation>,
+        src: Reg,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let len = u16::try_from(targets.len())
+            .map_err(|_too_many| CompileError::too_many_registers(span))?;
+        let mark = self.next_temp;
+        let base = Self::register(mark, span)?;
+        for _ in 0..len {
+            self.alloc_temp(span)?;
+        }
+        self.emit(Instr::Unpack { src, base, len }, span);
+        for (index, target) in targets.into_iter().enumerate() {
+            let element = base
+                .offset(index)
+                .expect("internal error: the elements' registers exist");
+            match target.target {
+                AssignmentTarget::Identifier { .. } => {
+                    let variable = self.analysis.variable(target.id).expect(
+                        "internal error: every assignment target is analysed before it's compiled",
+                    );
+                    self.store_from(variable, element, false, span)?;
+                }
+                AssignmentTarget::Index { value, index } => {
+                    let setter = self.setter(target.id);
+                    let args = vec![Arg::Expr(*value), Arg::Expr(*index), Arg::Copy(element)];
+                    self.compile_binding_call(&setter, args, Dest::Discard, span)?;
+                }
+                AssignmentTarget::Sequence(targets) => {
+                    self.assign_sequence(targets, element, span)?;
+                }
+                AssignmentTarget::Member { .. } => unreachable!(
+                    "internal error: the parser rejects members inside destructuring patterns"
+                ),
             }
         }
+        self.next_temp = mark;
         Ok(())
+    }
+
+    /// Compiles the assignment with an operator at `span`, the one `id`
+    /// resolves, of `value` to `target`: `x += 1` is `x = x + 1`, with the
+    /// parts of an index or member target worked out once, so `xs[f()] += 1`
+    /// calls `f` once. The target is read first, then `value`.
+    fn compile_op_assignment(
+        &mut self,
+        id: NodeId,
+        target: AssignmentTargetLocation,
+        value: ExpressionLocation,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let mark = self.next_temp;
+        let target = self.prepare_target(target)?;
+        let Some(operator) = self.augmented_assignment(id) else {
+            return Err(CompileError::unresolved_binding(span));
+        };
+        let read = match &target {
+            PreparedTarget::Variable { variable, span } => Arg::Var {
+                variable: *variable,
+                span: *span,
+            },
+            PreparedTarget::Index {
+                container,
+                index,
+                span,
+                getter,
+                ..
+            } => Arg::Read {
+                getter: getter.clone(),
+                args: vec![*container, *index],
+                span: *span,
+            },
+            PreparedTarget::Member {
+                receiver,
+                span,
+                getter,
+                ..
+            } => Arg::Read {
+                getter: getter.clone(),
+                args: vec![*receiver],
+                span: *span,
+            },
+        };
+        let args = vec![read, Arg::Expr(value)];
+        // A local takes the result in its own register; any other target
+        // has it stored from a temporary.
+        if let PreparedTarget::Variable {
+            variable: ResolvedVar::Local { slot },
+            span: target_span,
+        } = target
+        {
+            let dst = self.local(slot, target_span)?;
+            self.compile_binding_call(&operator, args, Dest::Reg(dst), span)?;
+        } else {
+            let result = self.alloc_temp(span)?;
+            self.compile_binding_call(&operator, args, Dest::Reg(result), span)?;
+            self.store_target(target, result)?;
+        }
+        self.next_temp = mark;
+        Ok(())
+    }
+
+    /// Works out the parts of `target` that an assignment with an operator
+    /// reads and writes it through, each once, into temporaries that stay
+    /// taken until the assignment is done.
+    fn prepare_target(
+        &mut self,
+        target: AssignmentTargetLocation,
+    ) -> Result<PreparedTarget, CompileError> {
+        Ok(match target.target {
+            AssignmentTarget::Identifier { span, .. } => PreparedTarget::Variable {
+                variable: self.analysis.variable(target.id).expect(
+                    "internal error: every assignment target is analysed before it's compiled",
+                ),
+                span,
+            },
+            AssignmentTarget::Index { value, index } => {
+                let span = value.span.merge(index.span);
+                let container = self.alloc_temp(value.span)?;
+                self.compile_expr(*value, Dest::Reg(container))?;
+                let index_reg = self.alloc_temp(index.span)?;
+                self.compile_expr(*index, Dest::Reg(index_reg))?;
+                PreparedTarget::Index {
+                    container,
+                    index: index_reg,
+                    span,
+                    getter: self.target_getter(target.id),
+                    setter: self.setter(target.id),
+                }
+            }
+            AssignmentTarget::Member {
+                receiver,
+                member_span,
+                ..
+            } => {
+                let reg = self.alloc_temp(receiver.span)?;
+                self.compile_expr(*receiver, Dest::Reg(reg))?;
+                PreparedTarget::Member {
+                    receiver: reg,
+                    span: member_span,
+                    getter: self.target_getter(target.id),
+                    setter: self.setter(target.id),
+                }
+            }
+            AssignmentTarget::Sequence(_) => unreachable!(
+                "internal error: name resolution rejects a sequence as an augmented assignment target"
+            ),
+        })
+    }
+
+    /// Stores the value in `src`, a temporary, in `target`.
+    fn store_target(&mut self, target: PreparedTarget, src: Reg) -> Result<(), CompileError> {
+        match target {
+            PreparedTarget::Variable { variable, span } => {
+                self.store_from(variable, src, false, span)
+            }
+            PreparedTarget::Index {
+                container,
+                index,
+                span,
+                setter,
+                ..
+            } => {
+                let args = vec![Arg::Copy(container), Arg::Copy(index), Arg::Copy(src)];
+                self.compile_binding_call(&setter, args, Dest::Discard, span)
+                    .map(|_| ())
+            }
+            PreparedTarget::Member {
+                receiver,
+                span,
+                setter,
+                ..
+            } => {
+                let args = vec![Arg::Copy(receiver), Arg::Copy(src)];
+                self.compile_binding_call(&setter, args, Dest::Discard, span)
+                    .map(|_| ())
+            }
+        }
     }
 
     /// Compiles a `for` loop, whose value is unit, or a list or map
@@ -1290,7 +1630,7 @@ impl Compiler {
         let len = u16::try_from(values.len())
             .map_err(|_too_many| CompileError::too_many_registers(span))?;
         let mark = self.next_temp;
-        let base = self.compile_arguments(values, span)?;
+        let base = self.compile_arguments(exprs(values), span)?;
         // `MakeTuple` reads its elements before it writes `dst`.
         self.next_temp = mark;
         let dst = self.place(dest, span)?;
@@ -1311,7 +1651,7 @@ impl Compiler {
         let rest = values.split_off(values.len().min(LITERAL_CHUNK));
         let len = u16::try_from(values.len()).expect("internal error: a chunk fits a u16");
         let mark = self.next_temp;
-        let base = self.compile_arguments(values, span)?;
+        let base = self.compile_arguments(exprs(values), span)?;
         self.next_temp = mark;
         if rest.is_empty() {
             let dst = self.place(dest, span)?;
@@ -1423,7 +1763,7 @@ impl Compiler {
         let start = start.expect("internal error: the parser gives a range a start");
         let bounds = std::iter::once(*start).chain(end.map(|end| *end)).collect();
         let mark = self.next_temp;
-        let operands = self.compile_operands(bounds)?;
+        let operands = self.compile_operands(exprs(bounds))?;
         // The range reads its bounds before it writes `dst`.
         self.next_temp = mark;
         let dst = self.place(dest, span)?;
@@ -1449,18 +1789,14 @@ impl Compiler {
     /// other from the first free temporary, which is returned. A local is
     /// copied there: an argument register is the call's own copy, which the
     /// callee may take or change.
-    fn compile_arguments(
-        &mut self,
-        arguments: Vec<ExpressionLocation>,
-        span: Span,
-    ) -> Result<Reg, CompileError> {
+    fn compile_arguments(&mut self, arguments: Vec<Arg>, span: Span) -> Result<Reg, CompileError> {
         let first = Self::register(self.next_temp, span)?;
         let registers = arguments
             .iter()
-            .map(|argument| self.alloc_temp(argument.span))
+            .map(|argument| self.alloc_temp(argument.span()))
             .collect::<Result<Vec<_>, _>>()?;
         for (argument, reg) in arguments.into_iter().zip(registers) {
-            self.compile_expr(argument, Dest::Reg(reg))?;
+            self.compile_arg(argument, Dest::Reg(reg))?;
         }
         Ok(first)
     }
@@ -1471,7 +1807,7 @@ impl Compiler {
         &mut self,
         slot: u16,
         args: u8,
-        arguments: Vec<ExpressionLocation>,
+        arguments: Vec<Arg>,
         dest: Dest,
         span: Span,
     ) -> Result<Operand, CompileError> {
@@ -1500,7 +1836,7 @@ impl Compiler {
     fn finish_call(
         &mut self,
         base: Reg,
-        arguments: Vec<ExpressionLocation>,
+        arguments: Vec<Arg>,
         vectorised: bool,
         dest: Dest,
         span: Span,
@@ -1810,6 +2146,29 @@ impl Compiler {
             self.used_instance.set(true);
         }
         found
+    }
+
+    /// The function that writes through the target at `id`, in the
+    /// instance being compiled: the setter of `p.x`, `x=`.
+    fn setter(&self, id: NodeId) -> Binding {
+        self.instance_pick(|instance| instance.setters.get(&id))
+            .unwrap_or_else(|| self.analysis.setter(id))
+            .clone()
+    }
+
+    /// The function an assignment with an operator reads its target at
+    /// `target` with.
+    fn target_getter(&self, target: NodeId) -> Binding {
+        self.getter(target)
+            .expect("internal error: an augmented assignment's target has a getter")
+    }
+
+    /// The function the assignment with an operator `id` calls, in the
+    /// instance being compiled: `+` for `x += 1`.
+    fn augmented_assignment(&self, id: NodeId) -> Option<Binding> {
+        self.instance_pick(|instance| instance.augmented_assignments.get(&id))
+            .or_else(|| self.analysis.augmented_assignments.get(&id))
+            .cloned()
     }
 
     /// The function that reads through the target at `id`, if it reads, in
