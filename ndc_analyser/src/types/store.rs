@@ -406,14 +406,10 @@ impl TypeVars {
     }
 
     /// `typ` as the analysis hands it on, once every variable in it is
-    /// settled: [`Self::resolve`]d, and with each failed check's type shown
-    /// as `Any`, which is what's known about it.
+    /// settled: [`Self::resolve`]d. A failed check's type stays
+    /// [`StaticType::Error`], so the LSP can tell it from `Any`.
     pub(crate) fn finish(&self, typ: &StaticType) -> StaticType {
-        typ.replace(&|part| match part {
-            StaticType::Var(var) => self.solution(*var).map(|solution| self.finish(solution)),
-            StaticType::Error => Some(StaticType::Any),
-            _ => None,
-        })
+        self.resolve(typ)
     }
 
     /// [`Self::finish`], for a type that may hold variables a later REPL line

@@ -10,7 +10,9 @@ use crate::visitor::{AstVisitor, walk_ast};
 /// Collect inlay type hints from an analysed AST.
 ///
 /// Hints are derived on demand (not cached) so they always reflect the stored
-/// AST. Only unannotated declarations and inferred return types get a hint.
+/// AST. Only unannotated declarations and inferred return types get a hint, and
+/// only when their type has no error in it: the error is reported where it
+/// happened, and the type would only show its failed parts as `Any`.
 pub fn collect(
     expressions: &[ExpressionLocation],
     analysis: &Analysis,
@@ -44,6 +46,7 @@ impl AstVisitor for HintCollector<'_> {
     ) {
         if let Some(typ) = self.analysis.variable_types.get(&node)
             && !has_annotation
+            && !typ.has_errors()
         {
             self.hints.push(InlayHint {
                 position: self.line_index.position(self.text, span.end()),
@@ -68,6 +71,7 @@ impl AstVisitor for HintCollector<'_> {
         // return types of functions without one.
         if !has_return_annotation
             && let Some(rt) = self.analysis.inferred_return_types.get(&node_id)
+            && !rt.has_errors()
         {
             self.hints.push(InlayHint {
                 position: self.line_index.position(self.text, parameters_span.end()),
@@ -111,11 +115,15 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_check_is_shown_as_any() {
-        // `len(true)` fails, and what it gives is shown as `Any`.
-        let hints = collect_hints("let n = len(true);\nlet m = [n, n];");
-        assert!(has_label(&hints, |l| l == ": Any"), "{hints:?}");
-        assert!(has_label(&hints, |l| l == ": [Any]"), "{hints:?}");
+    fn a_type_with_a_failed_check_in_it_gets_no_inlay() {
+        // `len(true)` fails, so neither `n` nor the list holding it get a hint,
+        // and nor does `f`, whose two returns share no type.
+        let hints = collect_hints(
+            "let n = len(true);\nlet m = [n, n];\nfn f(c) { if c { return 1; } }\nlet ok = 1;",
+        );
+        assert!(!has_label(&hints, |l| l.contains("Any")), "{hints:?}");
+        assert!(!has_label(&hints, |l| l.contains("->")), "{hints:?}");
+        assert!(has_label(&hints, |l| l == ": Int"), "{hints:?}");
     }
 
     #[test]
