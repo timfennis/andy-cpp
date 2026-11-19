@@ -12,6 +12,8 @@
 pub mod chunk;
 pub mod disassemble;
 pub mod instr;
+mod vm;
 
 pub use chunk::{Builder, Chunk, Label};
 pub use instr::{Instr, Reg, WINDOW};
+pub use vm::Vm;

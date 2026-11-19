@@ -77,7 +77,7 @@ pub fn native_globals(natives: &Natives) -> Vec<Value> {
 
 /// Puts each native `code` reads in its global slot, making the ones that
 /// aren't made yet, before `code` runs at the top level.
-fn fill_natives(globals: &mut [Value], natives: &Natives, code: &CompiledFunction) {
+pub(crate) fn fill_natives(globals: &mut [Value], natives: &Natives, code: &CompiledFunction) {
     for &slot in &code.natives {
         // An intrinsic's slot is never read: see `native_globals`.
         if slot >= natives.len() {
@@ -130,6 +130,22 @@ impl Vm {
             vm.stack.push(Value::unit());
         }
         vm
+    }
+
+    /// A VM that runs no code, which the register VM gives the natives that
+    /// take a VM, for its output and input: `print` writes to its output.
+    pub(crate) fn host() -> Self {
+        Self {
+            stack: Vec::new(),
+            globals: Vec::new(),
+            frames: Vec::new(),
+            output: OutputSink::Stdout,
+            input: InputSource::Stdin,
+            #[cfg(feature = "trace")]
+            source: None,
+            #[cfg(feature = "trace")]
+            tracer: None,
+        }
     }
 
     /// Replace the output sink used by I/O built-ins (e.g. `print`, `dbg`).
@@ -797,9 +813,7 @@ impl Vm {
         // calls itself without end would take memory until the system stops
         // the program.
         if self.frames.len() >= MAX_CALL_DEPTH {
-            return Err(VmError::native(format!(
-                "calls go more than {MAX_CALL_DEPTH} deep, which usually means a function calls itself without end"
-            )));
+            return Err(calls_too_deep());
         }
         let num_locals = closure.prototype.num_locals;
         self.frames.push(CallFrame {
@@ -856,6 +870,16 @@ impl Vm {
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
     pub fn call_callback(&mut self, func: Function, args: &[Value]) -> Result<Value, VmError> {
+        // A native the register VM calls gets a VM that can't run the
+        // program's functions, which have no stack code.
+        if func
+            .prototype()
+            .is_some_and(|prototype| prototype.is_register_code())
+        {
+            return Err(VmError::native(
+                "not yet supported on the register VM: a native calling back into the program",
+            ));
+        }
         if let Function::Native(native) = func {
             match &native.func {
                 NativeFunc::Simple(f) => f(args),
@@ -1145,10 +1169,19 @@ impl VmCallable<'_> {
     }
 }
 
+/// What a call fails with when it would go more than [`MAX_CALL_DEPTH`]
+/// calls deep.
+#[cold]
+pub(crate) fn calls_too_deep() -> VmError {
+    VmError::native(format!(
+        "calls go more than {MAX_CALL_DEPTH} deep, which usually means a function calls itself without end"
+    ))
+}
+
 /// The analyser makes a condition a `Bool`; this is what a VM that's given
 /// something else says.
 #[cold]
-fn not_a_bool(value: &Value) -> String {
+pub(crate) fn not_a_bool(value: &Value) -> String {
     format!(
         "mismatched types: expected Bool, found {}",
         value.diagnostic_type()
