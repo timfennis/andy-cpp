@@ -1,9 +1,9 @@
 use factorial::Factorial;
 use ndc_core::{FunctionRegistry, StaticType};
-use ndc_vm::NativeSpec;
 use ndc_vm::error::VmError;
 use ndc_vm::value::{AdvancedNumber, BinaryOperatorError};
 use ndc_vm::value::{NativeFunc, NumericMode, NumericRef, Object, Value};
+use ndc_vm::{NativeOp, NativeSpec};
 use num::complex::Complex64;
 use num::{BigInt, BigUint, Integer, ToPrimitive};
 use std::borrow::Cow;
@@ -23,6 +23,21 @@ enum BinaryOperation {
 }
 
 impl BinaryOperation {
+    /// The operator the compiler writes as an instruction of its own for the
+    /// operation on operands of `left` and `right`, if there's one.
+    fn operator(self, left: NumericMode, right: NumericMode) -> Option<NativeOp> {
+        match (self, left, right) {
+            (Self::Add, NumericMode::Int, NumericMode::Int) => Some(NativeOp::AddInt),
+            (Self::Sub, NumericMode::Int, NumericMode::Int) => Some(NativeOp::SubInt),
+            (Self::Mul, NumericMode::Int, NumericMode::Int) => Some(NativeOp::MulInt),
+            (Self::Add, NumericMode::Float, NumericMode::Float) => Some(NativeOp::AddFloat),
+            (Self::Sub, NumericMode::Float, NumericMode::Float) => Some(NativeOp::SubFloat),
+            (Self::Mul, NumericMode::Float, NumericMode::Float) => Some(NativeOp::MulFloat),
+            (Self::Div, NumericMode::Float, NumericMode::Float) => Some(NativeOp::DivFloat),
+            _ => None,
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Self::Add => "+",
@@ -92,6 +107,28 @@ fn declare_signature(
         documentation,
         signature,
         || NativeFunc::Simple(Box::new(func)),
+    ));
+}
+
+/// Declares a native whose type is `signature` that does `operator`, which
+/// the compiler writes as an instruction of its own where a call resolves to
+/// it.
+fn declare_operator(
+    env: &mut FunctionRegistry<NativeSpec>,
+    name: &'static str,
+    signature: impl AsRef<str> + 'static,
+    documentation: &'static str,
+    operator: NativeOp,
+) {
+    env.declare_global_fn(NativeSpec::operator(
+        name,
+        documentation,
+        move || {
+            StaticType::signature(signature.as_ref()).unwrap_or_else(|error| {
+                panic!("internal error: invalid signature of {name}: {error}")
+            })
+        },
+        operator,
     ));
 }
 
@@ -208,6 +245,20 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
             // Choosing the evaluator per overload here, instead of letting one
             // shared closure rediscover the output mode on every call, is what
             // lets `1 + 2` read two `i64` slots and add them.
+            if let Some(operator) = operation.operator(left_mode, right_mode) {
+                env.declare_global_fn(NativeSpec::operator(
+                    name,
+                    documentation,
+                    move || {
+                        function_type(
+                            vec![left_mode.static_type(), right_mode.static_type()],
+                            output_mode.static_type(),
+                        )
+                    },
+                    operator,
+                ));
+                continue;
+            }
             match output_mode {
                 NumericMode::Int => declare(
                     env,
@@ -375,12 +426,7 @@ fn wrong_mode(mode: NumericMode, value: &Value) -> VmError {
 }
 
 fn eval_int_binary(operation: BinaryOperation, left: i64, right: i64) -> Result<i64, VmError> {
-    let failed = || {
-        VmError::native(format!(
-            "integer operation overflowed or is undefined: {left} {} {right}",
-            operation.name()
-        ))
-    };
+    let failed = || VmError::native(ndc_vm::integer_overflow(left, operation.name(), right));
 
     // Each operation carries its own precondition, so add, subtract and
     // multiply test nothing but their own overflow flag.
@@ -482,21 +528,19 @@ fn eval_number_binary(
 }
 
 fn register_unary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
-    declare_typed!(
+    declare_operator(
         env,
         "-",
-        (value: Int) -> Result<Int>,
+        "(Int) -> Int",
         "Negates an integer.",
-        value
-            .checked_neg()
-            .ok_or_else(|| VmError::native("integer negation overflowed".to_string()))
+        NativeOp::NegInt,
     );
-    declare_typed!(
+    declare_operator(
         env,
         "-",
-        (value: Float) -> Float,
+        "(Float) -> Float",
         "Negates a floating-point number.",
-        -value
+        NativeOp::NegFloat,
     );
     declare_typed!(
         env,
@@ -546,61 +590,53 @@ fn orderable_parameters() -> Vec<String> {
 }
 
 fn register_comparisons(env: &mut FunctionRegistry<NativeSpec>) {
-    for (name, predicate, docs) in [
+    for (name, operator, docs) in [
         (
             ">",
-            (|ordering| ordering == Ordering::Greater) as fn(Ordering) -> bool,
+            NativeOp::Greater,
             "Returns whether the left value is greater than the right.",
         ),
         (
             ">=",
-            |ordering| matches!(ordering, Ordering::Greater | Ordering::Equal),
+            NativeOp::GreaterEqual,
             "Returns whether the left value is greater than or equal to the right.",
         ),
         (
             "<",
-            |ordering| ordering == Ordering::Less,
+            NativeOp::Less,
             "Returns whether the left value is less than the right.",
         ),
         (
             "<=",
-            |ordering| matches!(ordering, Ordering::Less | Ordering::Equal),
+            NativeOp::LessEqual,
             "Returns whether the left value is less than or equal to the right.",
         ),
     ] {
-        let compare = move |args: &[Value]| Ok(Value::Bool(predicate(compare_operands(args)?)));
         for parameters in orderable_parameters() {
-            declare_signature(env, name, format!("{parameters} -> Bool"), docs, compare);
+            declare_operator(env, name, format!("{parameters} -> Bool"), docs, operator);
         }
         let unit = StaticType::unit();
-        declare(
-            env,
+        env.declare_global_fn(NativeSpec::operator(
             name,
             docs,
             move || function_type(vec![unit.clone(), unit], StaticType::Bool),
-            compare,
-        );
+            operator,
+        ));
     }
 
-    declare_signature(
+    declare_operator(
         env,
         "==",
         "<A, B>(A, B) -> Bool",
         "Returns whether two values are equal.",
-        |args| {
-            arity(args, 2)?;
-            Ok(Value::Bool(args[0] == args[1]))
-        },
+        NativeOp::Equal,
     );
-    declare_signature(
+    declare_operator(
         env,
         "!=",
         "<A, B>(A, B) -> Bool",
         "Returns whether two values are not equal.",
-        |args| {
-            arity(args, 2)?;
-            Ok(Value::Bool(args[0] != args[1]))
-        },
+        NativeOp::NotEqual,
     );
 
     for (name, reverse, docs) in [
@@ -691,12 +727,12 @@ fn register_bitwise(env: &mut FunctionRegistry<NativeSpec>) {
     );
 
     for name in ["!", "not"] {
-        declare_typed!(
+        declare_operator(
             env,
             name,
-            (value: Bool) -> Bool,
+            "(Bool) -> Bool",
             "Computes logical negation.",
-            !value
+            NativeOp::Not,
         );
     }
 

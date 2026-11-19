@@ -1,6 +1,7 @@
-use crate::Value;
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
+use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function};
+use crate::{Natives, Value};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_core::collections::{HashMap, HashSet};
@@ -73,6 +74,9 @@ pub struct Compiler {
     /// global is the only way code reaches a native, so this lists every
     /// native the program can call.
     natives: Rc<RefCell<HashSet<usize>>>,
+    /// The op each native does, if it's one, in global slot order: a call
+    /// resolved to one is written as the op's instruction.
+    native_ops: Rc<[Option<NativeOp>]>,
 }
 
 impl Compiler {
@@ -91,6 +95,7 @@ impl Compiler {
             prototypes: Rc::default(),
             functions: None,
             natives: Rc::default(),
+            native_ops: Rc::new([]),
         }
     }
 
@@ -109,6 +114,7 @@ impl Compiler {
             prototypes: Rc::default(),
             functions: None,
             natives: Rc::default(),
+            native_ops: Rc::new([]),
         }
     }
     /// Compiles a program, or one REPL line, into a function the VM runs at
@@ -117,9 +123,11 @@ impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self {
             analysis: Rc::new(analysis),
+            native_ops: natives.ops(),
             ..Self::new()
         };
         compiler.compile_batch(expressions)?;
@@ -133,11 +141,13 @@ impl Compiler {
     pub fn compile_line(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
         session: &mut Session,
     ) -> Result<CompiledFunction, CompileError> {
         Rc::make_mut(&mut session.analysis).extend(analysis);
         let mut compiler = Self {
             analysis: Rc::clone(&session.analysis),
+            native_ops: natives.ops(),
             prototypes: Rc::clone(&session.prototypes),
             functions: Some(std::mem::take(&mut session.functions)),
             ..Self::new()
@@ -203,9 +213,11 @@ impl Compiler {
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self {
             analysis: Rc::new(analysis),
+            native_ops: natives.ops(),
             ..Self::new_without_optimization()
         };
         compiler.compile_batch(expressions)?;
@@ -431,11 +443,17 @@ impl Compiler {
                     return Err(CompileError::unresolved_binding(span));
                 };
 
-                let opcode = Self::call_opcode_for(&binding, 2);
-                self.compile_binding(&binding, span)?;
-                target.emit_read(self)?;
-                self.compile_expr(*r_value)?;
-                self.ir.write(opcode, span);
+                if let Some(call) = self.native_call(&binding, 2) {
+                    target.emit_read(self)?;
+                    self.compile_expr(*r_value)?;
+                    self.ir.write(call, span);
+                } else {
+                    let opcode = Self::call_opcode_for(&binding, 2);
+                    self.compile_binding(&binding, span)?;
+                    target.emit_read(self)?;
+                    self.compile_expr(*r_value)?;
+                    self.ir.write(opcode, span);
+                }
                 target.emit_store(self)?;
 
                 self.emit_unit();
@@ -529,7 +547,8 @@ impl Compiler {
                     _ => None,
                 };
                 // An intrinsic called by name is written in place of the
-                // call, after its arguments.
+                // call, after its arguments, and a native needs no callee
+                // under them.
                 if let Some(Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(intrinsic)))) =
                     binding
                 {
@@ -537,6 +556,14 @@ impl Compiler {
                         self.compile_expr(argument)?;
                     }
                     self.emit_intrinsic(intrinsic, function.id, function_span)?;
+                } else if let Some(call) = binding
+                    .as_ref()
+                    .and_then(|binding| self.native_call(binding, arguments.len()))
+                {
+                    for argument in arguments {
+                        self.compile_expr(argument)?;
+                    }
+                    self.ir.write(call, function_span);
                 } else {
                     let opcode = match &binding {
                         Some(binding) => Self::call_opcode_for(binding, arguments.len()),
@@ -914,6 +941,31 @@ impl Compiler {
         Ok(())
     }
 
+    /// The instruction that calls the native `binding` picks with the
+    /// `args` arguments on top of the stack, if it picks one native and
+    /// applies it to the arguments as they are: the native's own instruction
+    /// if the VM has one, as `SubInt` for `-(Int, Int)` in `n - 1`, and
+    /// otherwise `CallNative`, as for `len` in `len(xs)`. Not for `+` in
+    /// `(1, 2) + (3, 4)`, which applies it to each pair of elements, nor for
+    /// a function a program declares, even one named like a native.
+    fn native_call(&self, binding: &Binding, args: usize) -> Option<OpCode> {
+        let Binding::Resolved(Candidate::Scalar(Callee::Var(ResolvedVar::Global { slot }))) =
+            *binding
+        else {
+            return None;
+        };
+        if slot >= self.analysis.builtin_count {
+            return None;
+        }
+        match self.native_ops.get(slot).copied().flatten() {
+            Some(op) if op.arity() == args => Some(OpCode::native(op)),
+            _ => {
+                self.natives.borrow_mut().insert(slot);
+                Some(OpCode::CallNative { slot, args })
+            }
+        }
+    }
+
     /// `CallVec(args)` for an operator applied to each element of tuple
     /// arguments, `Call(args)` for any other call.
     fn call_opcode_for(binding: &Binding, args: usize) -> OpCode {
@@ -1276,6 +1328,7 @@ impl Compiler {
             prototypes: Rc::clone(&self.prototypes),
             functions: None,
             natives: Rc::clone(&self.natives),
+            native_ops: Rc::clone(&self.native_ops),
         }
     }
 

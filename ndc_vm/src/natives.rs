@@ -1,6 +1,7 @@
 //! The natives a program can call, each built the first time something asks
 //! for it: a program that only prints builds `print` and none of the others.
 
+use crate::native_op::NativeOp;
 use crate::value::{NativeFunc, NativeFunction};
 use ndc_core::{Builtins, FunctionRegistry, Intrinsic, IntrinsicFunction, StaticType};
 use std::borrow::Cow;
@@ -17,6 +18,10 @@ pub struct NativeSpec {
     pub documentation: Option<Cow<'static, str>>,
     pub static_type: MakeType,
     pub func: MakeFunc,
+    /// The instruction the compiler writes in place of a call it resolved
+    /// to this native, which does what `func` does: a native made with
+    /// [`NativeSpec::operator`] runs the op's own code as its function.
+    pub op: Option<NativeOp>,
 }
 
 impl NativeSpec {
@@ -33,6 +38,24 @@ impl NativeSpec {
             documentation: Some(documentation.into()),
             static_type: Box::new(static_type),
             func: Box::new(func),
+            op: None,
+        }
+    }
+
+    /// A native whose type `static_type` makes that does `op`: the compiler
+    /// writes the instruction where a call resolves to it, and called as a
+    /// value it runs the same code.
+    pub fn operator(
+        name: &'static str,
+        documentation: impl Into<Cow<'static, str>>,
+        static_type: impl FnOnce() -> StaticType + 'static,
+        op: NativeOp,
+    ) -> Self {
+        Self {
+            op: Some(op),
+            ..Self::new(name, documentation, static_type, move || {
+                NativeFunc::Simple(Box::new(move |args| op.apply(args)))
+            })
         }
     }
 
@@ -75,6 +98,9 @@ struct Native {
 pub struct Natives {
     natives: Vec<Native>,
     intrinsics: Vec<IntrinsicFunction>,
+    /// The op each native does, if it's one, in global slot order: the
+    /// compiler writes a call resolved to one as the op's instruction.
+    ops: Rc<[Option<NativeOp>]>,
 }
 
 impl Default for Natives {
@@ -83,6 +109,7 @@ impl Default for Natives {
         Self {
             natives: Vec::new(),
             intrinsics: IntrinsicFunction::all(),
+            ops: Rc::new([]),
         }
     }
 }
@@ -90,16 +117,22 @@ impl Default for Natives {
 impl Natives {
     /// Adds the natives of `registry` after the ones already here.
     pub fn extend(&mut self, registry: FunctionRegistry<NativeSpec>) {
-        self.natives
-            .extend(registry.into_vec().into_iter().map(|spec| Native {
-                name: spec.name,
-                documentation: spec.documentation,
-                make_type: Cell::new(Some(spec.static_type)),
-                make_func: Cell::new(Some(spec.func)),
-                static_type: OnceCell::new(),
-                type_parameters: OnceCell::new(),
-                function: OnceCell::new(),
-            }));
+        let specs = registry.into_vec();
+        self.ops = self
+            .ops
+            .iter()
+            .copied()
+            .chain(specs.iter().map(|spec| spec.op))
+            .collect();
+        self.natives.extend(specs.into_iter().map(|spec| Native {
+            name: spec.name,
+            documentation: spec.documentation,
+            make_type: Cell::new(Some(spec.static_type)),
+            make_func: Cell::new(Some(spec.func)),
+            static_type: OnceCell::new(),
+            type_parameters: OnceCell::new(),
+            function: OnceCell::new(),
+        }));
     }
 
     /// How many natives there are, not counting the intrinsics.
@@ -134,6 +167,12 @@ impl Natives {
                 func: make(),
             })
         })
+    }
+
+    /// The op each native does, if it's one, in global slot order.
+    #[must_use]
+    pub fn ops(&self) -> Rc<[Option<NativeOp>]> {
+        Rc::clone(&self.ops)
     }
 
     /// The language's intrinsics, whose global slots follow the natives'.

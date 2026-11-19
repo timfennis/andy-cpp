@@ -1,5 +1,6 @@
 use crate::Value;
 use crate::hash_map::HashMap;
+use crate::native_op::NativeOp;
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
 use ndc_core::collections::HashSet;
@@ -58,6 +59,7 @@ impl std::fmt::Debug for JumpTarget {
 /// | `SetUpvalue`  | `[… value → …]`                        | −1 (pops, writes to upvalue cell)          |
 /// | `Call`        | `[… callee a1…an → … result]`          | −n (pops callee + args, pushes result)     |
 /// | `CallVec`     | `[… callee a1…an → … tuple]`           | −n (pops callee + args, pushes result)     |
+/// | `CallNative`  | `[… a1…an → … result]`                 | −(n−1) (pops args, pushes result)          |
 /// | `Return`      | `[… retval → …]`                       | pops retval, truncates frame, pushes retval|
 /// | `Halt`        | `[…]`                                   | terminates execution                       |
 /// | `Jump`        | `[…]`                                   | 0 (unconditional jump)                     |
@@ -75,6 +77,8 @@ impl std::fmt::Debug for JumpTarget {
 /// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
 /// | `NewCell`     | `[…]`                                   | 0 (puts a fresh cell in a slot)            |
 /// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
+/// | `AddInt`, …   | `[… left right → … result]`            | −1 (a binary [`NativeOp`])                 |
+/// | `NegInt`, …   | `[… value → … result]`                 | 0 (a unary [`NativeOp`])                   |
 // NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
 // The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
 // every iteration; see Vm::run_to_depth.
@@ -87,6 +91,10 @@ pub enum OpCode {
     /// for each. `[… callee a1…an → … tuple]` where each `ai` is either a
     /// tuple of the shared axis length or a scalar used at every position.
     CallVec(usize),
+    /// Calls the native in global slot `slot` with the `args` values on top
+    /// of the stack, for a call the analyser resolved to that native, which
+    /// needs no callee on the stack. `[… a1…an → … result]`
+    CallNative { slot: usize, args: usize },
     /// Pops top of stack. `[… value → …]`
     Pop,
     /// Unconditional jump. `[…] → […]`
@@ -162,14 +170,93 @@ pub enum OpCode {
     /// Pops a value, pushes `Some(value)` if it conforms to the type and
     /// `None` if it doesn't. `[… value → … option]`
     TryCast(Rc<StaticType>),
+    /// [`NativeOp::AddInt`] of the two values on top. `[… left right → … result]`
+    AddInt,
+    /// [`NativeOp::SubInt`] of the two values on top. `[… left right → … result]`
+    SubInt,
+    /// [`NativeOp::MulInt`] of the two values on top. `[… left right → … result]`
+    MulInt,
+    /// [`NativeOp::AddFloat`] of the two values on top. `[… left right → … result]`
+    AddFloat,
+    /// [`NativeOp::SubFloat`] of the two values on top. `[… left right → … result]`
+    SubFloat,
+    /// [`NativeOp::MulFloat`] of the two values on top. `[… left right → … result]`
+    MulFloat,
+    /// [`NativeOp::DivFloat`] of the two values on top. `[… left right → … result]`
+    DivFloat,
+    /// [`NativeOp::Less`] of the two values on top. `[… left right → … result]`
+    Less,
+    /// [`NativeOp::LessEqual`] of the two values on top. `[… left right → … result]`
+    LessEqual,
+    /// [`NativeOp::Greater`] of the two values on top. `[… left right → … result]`
+    Greater,
+    /// [`NativeOp::GreaterEqual`] of the two values on top. `[… left right → … result]`
+    GreaterEqual,
+    /// [`NativeOp::Equal`] of the two values on top. `[… left right → … result]`
+    Equal,
+    /// [`NativeOp::NotEqual`] of the two values on top. `[… left right → … result]`
+    NotEqual,
+    /// [`NativeOp::NegInt`] of the value on top. `[… value → … result]`
+    NegInt,
+    /// [`NativeOp::NegFloat`] of the value on top. `[… value → … result]`
+    NegFloat,
+    /// [`NativeOp::Not`] of the value on top. `[… value → … result]`
+    Not,
 }
 
 impl OpCode {
+    /// The instruction that does `op` to the operands on top of the stack.
+    pub fn native(op: NativeOp) -> Self {
+        match op {
+            NativeOp::AddInt => Self::AddInt,
+            NativeOp::SubInt => Self::SubInt,
+            NativeOp::MulInt => Self::MulInt,
+            NativeOp::AddFloat => Self::AddFloat,
+            NativeOp::SubFloat => Self::SubFloat,
+            NativeOp::MulFloat => Self::MulFloat,
+            NativeOp::DivFloat => Self::DivFloat,
+            NativeOp::Less => Self::Less,
+            NativeOp::LessEqual => Self::LessEqual,
+            NativeOp::Greater => Self::Greater,
+            NativeOp::GreaterEqual => Self::GreaterEqual,
+            NativeOp::Equal => Self::Equal,
+            NativeOp::NotEqual => Self::NotEqual,
+            NativeOp::NegInt => Self::NegInt,
+            NativeOp::NegFloat => Self::NegFloat,
+            NativeOp::Not => Self::Not,
+        }
+    }
+
+    /// The op this instruction does, if it's one: `AddInt` does
+    /// [`NativeOp::AddInt`].
+    pub fn native_op(&self) -> Option<NativeOp> {
+        Some(match self {
+            Self::AddInt => NativeOp::AddInt,
+            Self::SubInt => NativeOp::SubInt,
+            Self::MulInt => NativeOp::MulInt,
+            Self::AddFloat => NativeOp::AddFloat,
+            Self::SubFloat => NativeOp::SubFloat,
+            Self::MulFloat => NativeOp::MulFloat,
+            Self::DivFloat => NativeOp::DivFloat,
+            Self::Less => NativeOp::Less,
+            Self::LessEqual => NativeOp::LessEqual,
+            Self::Greater => NativeOp::Greater,
+            Self::GreaterEqual => NativeOp::GreaterEqual,
+            Self::Equal => NativeOp::Equal,
+            Self::NotEqual => NativeOp::NotEqual,
+            Self::NegInt => NativeOp::NegInt,
+            Self::NegFloat => NativeOp::NegFloat,
+            Self::Not => NativeOp::Not,
+            _ => return None,
+        })
+    }
+
     /// The variant's name, e.g. `"GetLocal"` for `GetLocal(0)`.
     pub fn name(&self) -> &'static str {
         match self {
             Self::Call(_) => "Call",
             Self::CallVec(_) => "CallVec",
+            Self::CallNative { .. } => "CallNative",
             Self::Pop => "Pop",
             Self::Jump(_) => "Jump",
             Self::JumpIfTrue(_) => "JumpIfTrue",
@@ -201,6 +288,22 @@ impl OpCode {
             Self::CheckType(_) => "CheckType",
             Self::CheckUnshared(_) => "CheckUnshared",
             Self::TryCast(_) => "TryCast",
+            Self::AddInt => "AddInt",
+            Self::SubInt => "SubInt",
+            Self::MulInt => "MulInt",
+            Self::AddFloat => "AddFloat",
+            Self::SubFloat => "SubFloat",
+            Self::MulFloat => "MulFloat",
+            Self::DivFloat => "DivFloat",
+            Self::Less => "Less",
+            Self::LessEqual => "LessEqual",
+            Self::Greater => "Greater",
+            Self::GreaterEqual => "GreaterEqual",
+            Self::Equal => "Equal",
+            Self::NotEqual => "NotEqual",
+            Self::NegInt => "NegInt",
+            Self::NegFloat => "NegFloat",
+            Self::Not => "Not",
         }
     }
 
@@ -217,6 +320,8 @@ impl OpCode {
         match self {
             // Pops the callee and `n` arguments, pushes one result: -(n+1)+1.
             Self::Call(n) | Self::CallVec(n) => -(*n as isize),
+            // Pops `n` arguments, pushes one result: -n+1.
+            Self::CallNative { args, .. } => 1 - *args as isize,
             Self::Pop => -1,
             // The conditional jumps peek at the condition without popping it;
             // the branch they land in pops it instead.
@@ -260,6 +365,22 @@ impl OpCode {
             Self::CheckType(_) | Self::CheckUnshared(_) => 0,
             // Replaces the value with the option holding it.
             Self::TryCast(_) => 0,
+            // Pops two operands, pushes the result.
+            Self::AddInt
+            | Self::SubInt
+            | Self::MulInt
+            | Self::AddFloat
+            | Self::SubFloat
+            | Self::MulFloat
+            | Self::DivFloat
+            | Self::Less
+            | Self::LessEqual
+            | Self::Greater
+            | Self::GreaterEqual
+            | Self::Equal
+            | Self::NotEqual => -1,
+            // Replaces the operand with the result.
+            Self::NegInt | Self::NegFloat | Self::Not => 0,
         }
     }
 }
@@ -269,6 +390,7 @@ impl std::fmt::Debug for OpCode {
         match self {
             Self::Call(n) => write!(f, "Call({n})"),
             Self::CallVec(n) => write!(f, "CallVec({n})"),
+            Self::CallNative { slot, args } => write!(f, "CallNative({slot}, {args})"),
             Self::Pop => write!(f, "Pop"),
             Self::Jump(n) => write!(f, "Jump({n:?})"),
             Self::JumpIfTrue(n) => write!(f, "JumpIfTrue({n:?})"),
@@ -316,6 +438,22 @@ impl std::fmt::Debug for OpCode {
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
             Self::CheckUnshared(typ) => write!(f, "CheckUnshared({typ})"),
             Self::TryCast(typ) => write!(f, "TryCast({typ})"),
+            Self::AddInt => write!(f, "AddInt"),
+            Self::SubInt => write!(f, "SubInt"),
+            Self::MulInt => write!(f, "MulInt"),
+            Self::AddFloat => write!(f, "AddFloat"),
+            Self::SubFloat => write!(f, "SubFloat"),
+            Self::MulFloat => write!(f, "MulFloat"),
+            Self::DivFloat => write!(f, "DivFloat"),
+            Self::Less => write!(f, "Less"),
+            Self::LessEqual => write!(f, "LessEqual"),
+            Self::Greater => write!(f, "Greater"),
+            Self::GreaterEqual => write!(f, "GreaterEqual"),
+            Self::Equal => write!(f, "Equal"),
+            Self::NotEqual => write!(f, "NotEqual"),
+            Self::NegInt => write!(f, "NegInt"),
+            Self::NegFloat => write!(f, "NegFloat"),
+            Self::Not => write!(f, "Not"),
         }
     }
 }

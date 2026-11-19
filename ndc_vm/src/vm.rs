@@ -6,6 +6,7 @@ use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
+use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Natives, Object, Value};
 use ndc_analysis::CaptureSource;
@@ -288,6 +289,93 @@ impl Vm {
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
+                OpCode::AddInt => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::AddInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::SubInt => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::SubInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::MulInt => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::MulInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::AddFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::AddFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::SubFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::SubFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::MulFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::MulFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::DivFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::DivFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Less => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::Less) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::LessEqual => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::LessEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Greater => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::Greater) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::GreaterEqual => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::GreaterEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Equal => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::Equal) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NotEqual => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::NotEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NegInt => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::NegInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NegFloat => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::NegFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Not => {
+                    if let Err(error) = run_native_op(&mut self.stack, NativeOp::Not) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::CallNative { slot, args } => {
+                    let (slot, args) = (*slot, *args);
+                    if let Err(mut e) = self.call_native(slot, args) {
+                        e.span.get_or_insert(span);
+                        return Err(e);
+                    }
+                }
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());
@@ -801,6 +889,38 @@ impl Vm {
         Ok(Dispatch::FramePushed)
     }
 
+    /// Calls the native in global slot `slot` with the `args` values on top
+    /// of the stack, and puts its result in their place.
+    fn call_native(&mut self, slot: usize, args: usize) -> Result<(), VmError> {
+        let native = match &self.globals[slot] {
+            Value::Object(object) => match object.as_ref() {
+                Object::Function(Function::Native(native)) => native,
+                _ => unreachable!("internal error: global slot {slot} holds no native"),
+            },
+            _ => unreachable!("internal error: global slot {slot} holds no native"),
+        };
+        let start = self.stack.len() - args;
+        let result = match &native.func {
+            NativeFunc::Simple(f) => {
+                let result = f(&self.stack[start..])?;
+                self.stack.truncate(start);
+                result
+            }
+            NativeFunc::WithVm(_) => {
+                // The native takes the VM, so it can't be borrowed from the
+                // VM's globals while it runs.
+                let native = Rc::clone(native);
+                let NativeFunc::WithVm(f) = &native.func else {
+                    unreachable!()
+                };
+                let call_args: Vec<Value> = self.stack.drain(start..).collect();
+                f(&call_args, self)?
+            }
+        };
+        self.stack.push(result);
+        Ok(())
+    }
+
     /// Call a function inline on this VM, without spawning a child VM.
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
@@ -1119,4 +1239,19 @@ fn convert_result(stack: &mut [Value], returns: &StaticType) -> Result<(), Strin
         "expected the function to return {returns} but it returned {}",
         returned.diagnostic_type()
     ))
+}
+
+/// Replaces the operands of `op` on top of `stack` with what it makes of
+/// them.
+#[inline(always)]
+fn run_native_op(stack: &mut Vec<Value>, op: NativeOp) -> Result<(), VmError> {
+    if op.arity() == 1 {
+        let value = stack.last_mut().expect("stack underflow");
+        *value = op.unary(value)?;
+    } else {
+        let right = stack.pop().expect("stack underflow");
+        let left = stack.last_mut().expect("stack underflow");
+        *left = op.binary(left, &right)?;
+    }
+    Ok(())
 }

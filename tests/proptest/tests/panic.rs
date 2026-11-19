@@ -250,7 +250,7 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
     }
 
     let analysis = result.analysis;
-    let compiled = match Compiler::compile(expressions.into_iter(), analysis) {
+    let compiled = match Compiler::compile(expressions.into_iter(), analysis, &natives) {
         Ok(c) => c,
         Err(_) => return,
     };

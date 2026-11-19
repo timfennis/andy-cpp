@@ -1,0 +1,5 @@
+// An augmented assignment overflows as the operation it applies does.
+// expect-error: integer operation overflowed or is undefined: 9223372036854775807 + 1
+let max = 9223372036854775807;
+max += 1;
+print(max);

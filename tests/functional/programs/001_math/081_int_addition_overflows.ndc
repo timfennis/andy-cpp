@@ -1,0 +1,5 @@
+// `n + 1` in the Int instance of `inc` is an instruction, not a call, and
+// overflows as the `+(Int, Int)` native does.
+// expect-error: integer operation overflowed or is undefined: 9223372036854775807 + 1
+fn inc(n) => n + 1;
+print(inc(9223372036854775807));

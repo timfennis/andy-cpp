@@ -1,0 +1,3 @@
+// expect-error: integer operation overflowed or is undefined: 4611686018427387904 * 2
+let half = 4611686018427387904;
+print(half * 2);
