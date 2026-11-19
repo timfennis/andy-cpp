@@ -276,26 +276,17 @@ fn main() -> anyhow::Result<()> {
         }
         Action::Docs { query, no_color } => return docs(query.as_deref(), no_color),
         Action::StartRepl => {
-            repl::run()?;
+            repl::run(backend()?)?;
         }
         Action::RunLsp => start_lsp(),
     }
     Ok(())
 }
 
-/// The VM the environment variable `NDC_VM` asks for: `register` for the
-/// register VM, and the stack VM when it's `stack` or isn't set.
+/// The VM the environment variable `NDC_VM` asks for, as
+/// [`Backend::from_env`] reads it.
 fn backend() -> anyhow::Result<Backend> {
-    match std::env::var("NDC_VM").as_deref() {
-        Err(std::env::VarError::NotPresent) | Ok("stack") => Ok(Backend::Stack),
-        Ok("register") => Ok(Backend::Register),
-        Ok(other) => Err(anyhow!(
-            "NDC_VM must be `stack` or `register`, not `{other}`"
-        )),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            Err(anyhow!("NDC_VM must be `stack` or `register`"))
-        }
-    }
+    Backend::from_env().map_err(|message| anyhow!(message))
 }
 
 fn start_lsp() {

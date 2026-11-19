@@ -1,13 +1,23 @@
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{Backend, Interpreter};
+
+/// The VM the tests run on: the one the environment variable `NDC_VM`
+/// names, the stack VM if it names none.
+fn backend() -> Backend {
+    Backend::from_env().expect("NDC_VM names a VM")
+}
+
+/// An interpreter that runs lines as the REPL does.
+fn repl_interpreter() -> Interpreter {
+    let mut interpreter = Interpreter::capturing().line_by_line();
+    interpreter.configure(ndc_stdlib::register);
+    interpreter.set_backend(backend());
+    interpreter
+}
 
 /// Run a sequence of REPL lines against a shared interpreter and return the
 /// collected stdout output after all lines have been executed.
 fn repl_output(lines: &[&str]) -> String {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     for line in lines {
         interp.eval(line).expect("line should not error");
     }
@@ -18,11 +28,7 @@ fn repl_output(lines: &[&str]) -> String {
 /// Run a sequence of REPL lines and expect the last one to produce an error
 /// containing the given substring.
 fn repl_error(lines: &[&str], expected_error: &str) {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     let n = lines.len();
     for line in &lines[..n - 1] {
         interp.eval(line).expect("line should not error");
@@ -71,33 +77,21 @@ fn error_on_undefined_variable() {
 
 #[test]
 fn expression_result_is_returned() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     let result = interp.eval("2 + 3").unwrap();
     assert_eq!(result.to_string(), "5");
 }
 
 #[test]
 fn statement_returns_unit() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     let result = interp.eval("2 + 3;").unwrap();
     assert!(result.is_unit());
 }
 
 #[test]
 fn let_returns_unit() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     let result = interp.eval("let x = 5;").unwrap();
     assert!(result.is_unit());
 }
@@ -108,11 +102,7 @@ fn let_returns_unit() {
 // resumable interpreter starts over after one.
 #[test]
 fn a_failed_evaluation_starts_the_session_over() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     interp.eval("let x = 1;").unwrap();
     assert!(interp.eval("struct Foo { y: Int }\nx = 2; [1][5]").is_err());
     let err = interp.eval("x").expect_err("x should be forgotten");
@@ -137,11 +127,7 @@ fn a_failed_evaluation_starts_the_session_over() {
 // Code that doesn't parse is never analysed or run, so the session stays.
 #[test]
 fn a_syntax_error_keeps_the_session() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     interp.eval("let x = 1;").unwrap();
     assert!(interp.eval("let = ;").is_err());
     interp.eval("print(x)").unwrap();
@@ -151,11 +137,7 @@ fn a_syntax_error_keeps_the_session() {
 
 #[test]
 fn output_of_a_failed_evaluation_is_kept() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     assert!(interp.eval("print(\"before\"); [1][5]").is_err());
     interp.eval("print(\"after\")").unwrap();
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
@@ -212,6 +194,7 @@ fn closures_keep_the_loop_variables_of_a_finished_line() {
 #[test]
 fn configure_after_a_line_ran_updates_the_globals() {
     let mut interp = Interpreter::capturing();
+    interp.set_backend(backend());
     interp.eval("1;").unwrap();
     interp.configure(ndc_stdlib::register);
     interp.eval("print(1)").unwrap();
@@ -318,6 +301,7 @@ fn a_function_value_from_an_earlier_lines_generic_body_cast_from_any_is_checked(
 fn a_failed_line_takes_the_instances_it_made_with_it() {
     let mut interp = Interpreter::capturing();
     interp.configure(ndc_stdlib::register);
+    interp.set_backend(backend());
     interp.eval("fn inc(x) => x + 1;").unwrap();
     assert!(interp.eval("print(inc(2.5)); [1][5]").is_err());
     interp.eval("fn inc(x) => x + 1;").unwrap();

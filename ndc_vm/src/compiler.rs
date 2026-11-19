@@ -26,23 +26,25 @@ struct InstanceAt {
 /// after them, which can call the functions those declared with new types.
 /// After `fn inc(x) => x + 1`, the line `inc(2.5)` compiles the instance
 /// `inc<Float>` from `inc`'s body and what the analyser worked out about it.
+/// The register compiler keeps the same in it; a session's lines are all
+/// compiled by one of the two.
 #[derive(Default)]
 pub struct Session {
     /// What the analyser worked out about every line so far.
-    analysis: Rc<Analysis>,
+    pub(crate) analysis: Rc<Analysis>,
     /// The functions the lines declared in globals, by declaration.
-    functions: HashMap<NodeId, DeclaredFunction>,
+    pub(crate) functions: HashMap<NodeId, DeclaredFunction>,
     /// As [`Compiler::prototypes`], for every line so far.
-    prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
+    pub(crate) prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
 }
 
 /// A function declaration, as [`Compiler::compile_function_decl`] takes it.
 #[derive(Clone)]
-struct DeclaredFunction {
-    name: Option<String>,
-    body: ExpressionLocation,
-    pure: bool,
-    span: Span,
+pub(crate) struct DeclaredFunction {
+    pub(crate) name: Option<String>,
+    pub(crate) body: ExpressionLocation,
+    pub(crate) pure: bool,
+    pub(crate) span: Span,
 }
 
 pub struct Compiler {
@@ -1761,12 +1763,12 @@ pub struct CompileError {
 }
 
 impl CompileError {
-    /// What the register compiler fails with for `construct`, which it
-    /// can't compile yet: `not yet supported on the register VM: lists`.
-    pub(crate) fn not_yet_supported(construct: &str, span: Span) -> Self {
+    /// What the register compiler fails with for code that makes instances
+    /// of a function declared before it, outside of a REPL line.
+    pub(crate) fn uncompiled_instances() -> Self {
         Self {
-            text: format!("not yet supported on the register VM: {construct}"),
-            span,
+            text: "encountered instances of a function compiled earlier outside of a REPL line, this is probably an internal error".to_string(),
+            span: Span::synthetic(),
         }
     }
 

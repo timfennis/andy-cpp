@@ -25,13 +25,29 @@ pub use timing::ExecutionTimings;
 mod timing;
 
 /// Which VM runs the code: the stack VM, or the register VM that is being
-/// built to replace it. A REPL line on the register VM can't make new
-/// instances of an earlier line's generic function yet.
+/// built to replace it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Backend {
     #[default]
     Stack,
     Register,
+}
+
+impl Backend {
+    /// The VM the environment variable `NDC_VM` names: `register` for the
+    /// register VM, and the stack VM when it's `stack` or isn't set.
+    pub fn from_env() -> Result<Self, String> {
+        match std::env::var("NDC_VM").as_deref() {
+            Err(std::env::VarError::NotPresent) | Ok("stack") => Ok(Self::Stack),
+            Ok("register") => Ok(Self::Register),
+            Ok(other) => Err(format!(
+                "NDC_VM must be `stack` or `register`, not `{other}`"
+            )),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err("NDC_VM must be `stack` or `register`".to_string())
+            }
+        }
+    }
 }
 
 pub struct Interpreter {
@@ -119,9 +135,7 @@ impl Interpreter {
         }
     }
 
-    /// Runs the code from now on with `backend`. A REPL line on the
-    /// register VM can't call a generic function an earlier line declared
-    /// with new types yet.
+    /// Runs the code from now on with `backend`.
     ///
     /// Changing the backend forgets everything evaluated so far: a function
     /// an earlier evaluation declared is compiled for the VM it ran on, and
@@ -380,12 +394,20 @@ impl Interpreter {
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let mut timings = ExecutionTimings::default();
         let code = measure(&mut timings, Phase::Compiling, || {
-            if self.backend == Backend::Register {
-                RegisterCompiler::compile(expressions, analysis, &self.natives)
-            } else if self.resumable {
-                Compiler::compile_line(expressions, analysis, &self.natives, &mut self.session)
-            } else {
-                Compiler::compile(expressions, analysis, &self.natives)
+            match (self.backend, self.resumable) {
+                (Backend::Stack, true) => {
+                    Compiler::compile_line(expressions, analysis, &self.natives, &mut self.session)
+                }
+                (Backend::Stack, false) => Compiler::compile(expressions, analysis, &self.natives),
+                (Backend::Register, true) => RegisterCompiler::compile_line(
+                    expressions,
+                    analysis,
+                    &self.natives,
+                    &mut self.session,
+                ),
+                (Backend::Register, false) => {
+                    RegisterCompiler::compile(expressions, analysis, &self.natives)
+                }
             }
         })?;
         let num_locals = code.num_locals();
