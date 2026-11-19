@@ -124,7 +124,7 @@ impl NumberLexer for Lexer<'_> {
                     self.source.next();
                     buf.push(c);
                 }
-                // A `_` inside a number is ignored unless it's after a `.`
+                // A `_` anywhere after the first digit is ignored, also after the `.`
                 '_' => {
                     self.source.next();
                     // ignore underscore for nice number formatting
@@ -343,5 +343,56 @@ mod tests {
                 "unexpected diagnostic for {literal}"
             );
         }
+    }
+
+    #[test]
+    fn underscores_separate_digits_anywhere_after_the_first_digit() {
+        for (source, expected) in [
+            ("1.0_0", NumericLiteral::Float64(1.0)),
+            ("1.234_567", NumericLiteral::Float64(1.234_567)),
+            ("1.0_", NumericLiteral::Float64(1.0)),
+            ("1_", NumericLiteral::Int64(1)),
+            ("1__000", NumericLiteral::Int64(1000)),
+            ("1_.5", NumericLiteral::Float64(1.5)),
+            ("1_000_n", NumericLiteral::NumberInt(1000.into())),
+            ("1.5_n", NumericLiteral::NumberFloat(1.5)),
+            ("0.5_i", NumericLiteral::Complex(Complex::new(0.0, 0.5))),
+            ("0x_FF", NumericLiteral::Int64(255)),
+            ("0xFF_", NumericLiteral::Int64(255)),
+            ("0b_1_0", NumericLiteral::Int64(2)),
+            ("2r_101", NumericLiteral::Int64(5)),
+            ("36rZ_Z", NumericLiteral::Int64(35 * 36 + 35)),
+        ] {
+            let token = lex_one(source).expect("literal should be valid");
+
+            assert_eq!(
+                token.token,
+                Token::NumericLiteral(expected),
+                "unexpected token for {source}"
+            );
+            assert_eq!(
+                token.span.range(),
+                0..source.len(),
+                "unexpected span for {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_literal_of_only_underscores_after_a_prefix_has_no_digits() {
+        let error = lex_one("0x_").expect_err("literal should be invalid");
+
+        assert_eq!(error.to_string(), "invalid base 16 number");
+    }
+
+    #[test]
+    fn an_underscore_right_after_the_dot_is_not_a_float() {
+        let tokens = Lexer::new("1._5", SourceId::SYNTHETIC)
+            .map(|token| token.expect("should lex").token)
+            .collect::<Vec<_>>();
+
+        assert_eq!(tokens[0], Token::NumericLiteral(NumericLiteral::Int64(1)));
+        assert_eq!(tokens[1], Token::Dot);
+        assert_eq!(tokens.len(), 3, "unexpected tokens {tokens:?}");
     }
 }

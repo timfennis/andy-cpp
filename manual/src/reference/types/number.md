@@ -33,6 +33,12 @@ print(decimal);                     // 1.25
 print(binary, octal, hexadecimal);  // 42 42 42
 ```
 
+An `_` between digits is ignored, so you can use it to group them:
+
+```ndc
+print(1_000_000, 3.141_592, 0xFF_FF);  // 1000000 3.141592 65535
+```
+
 An integer literal without `n` must fit in `i64`. The lexer reports an error and suggests the suffixed form when it does not fit.
 
 A whole number like `7` is an `Int`, but where a `Float` is expected, such as after a `Float` annotation or in a list of Floats, it is a `Float`:
