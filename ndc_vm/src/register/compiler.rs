@@ -1113,23 +1113,18 @@ impl Compiler {
     }
 
     /// Compiles a map literal, each key before its value, and its default
-    /// after them: the first [`LITERAL_CHUNK`] pairs in registers of their
-    /// own, which `MakeMap` makes the map of, and each one after them
-    /// inserted into it. A map with a default is made at once, as its
-    /// default comes last.
+    /// after them, all in registers of their own, which `MakeMap` makes the
+    /// map of. Unlike a list's elements they aren't added in chunks: a key
+    /// is hashed by what it holds when it goes into the map, so a map made
+    /// before its last expression ran would hash a key that expression
+    /// changes, as the list `k` in `%{k: 1, …, other: k.push(0)}`, too early.
     fn compile_map(
         &mut self,
-        mut values: Vec<(ExpressionLocation, Option<ExpressionLocation>)>,
+        values: Vec<(ExpressionLocation, Option<ExpressionLocation>)>,
         default: Option<ExpressionLocation>,
         dest: Dest,
         span: Span,
     ) -> Result<Operand, CompileError> {
-        let chunk = if default.is_some() {
-            values.len()
-        } else {
-            values.len().min(LITERAL_CHUNK)
-        };
-        let rest = values.split_off(chunk);
         let pairs = u16::try_from(values.len())
             .map_err(|_too_many| CompileError::too_many_registers(span))?;
         let mark = self.next_temp;
@@ -1142,26 +1137,19 @@ impl Compiler {
             let reg = self.alloc_temp(default.span)?;
             self.compile_expr(default, Dest::Reg(reg))?;
         }
+        // `MakeMap` reads its pairs before it writes `dst`.
         self.next_temp = mark;
-        let make = |dst| Instr::MakeMap {
-            dst,
-            base,
-            pairs,
-            default: has_default,
-        };
-        if rest.is_empty() {
-            let dst = self.place(dest, span)?;
-            self.emit(make(dst), span);
-            return Ok(Self::placed(dest, dst));
-        }
-        let map = self.alloc_temp(span)?;
-        self.emit(make(map), span);
-        for (key, value) in rest {
-            let (key, value) = self.compile_pair(key, value, span)?;
-            self.emit(Instr::MapInsert { map, key, value }, span);
-            self.next_temp = key.index();
-        }
-        Ok(self.built(map, dest, span))
+        let dst = self.place(dest, span)?;
+        self.emit(
+            Instr::MakeMap {
+                dst,
+                base,
+                pairs,
+                default: has_default,
+            },
+            span,
+        );
+        Ok(Self::placed(dest, dst))
     }
 
     /// Compiles a key of a map literal and its value, which is unit when

@@ -609,3 +609,19 @@ fn constructs_it_cant_compile_yet_are_errors() {
         );
     }
 }
+
+/// A map hashes a key by what it holds when the key goes in, and every key
+/// and value of a map literal is evaluated before any goes in. Here the last
+/// value changes the first key, a list, so the map has to find it by what it
+/// holds afterwards, however long the literal is.
+#[test]
+fn a_long_map_literal_hashes_its_keys_after_its_last_expression() {
+    let pairs: String = (1..=80).map(|n| format!("[{n}]: {n}, ")).collect();
+    let outcome = same_on_both(&format!(
+        "let k = [0];
+        let m = %{{k: -1, {pairs}[100]: {{ k.push(9); 0 }}}};
+        print(m[[0, 9]]);
+        print(m.len());"
+    ));
+    assert_eq!(outcome.output, "-1\n82\n");
+}
