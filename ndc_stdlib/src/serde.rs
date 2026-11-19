@@ -1,11 +1,11 @@
 use anyhow::{Context, bail};
+use ndc_core::collections::HashSet;
 use ndc_macros::export_module;
 use ndc_vm::hash_map::HashMap;
 use ndc_vm::value::AdvancedNumber;
 use ndc_vm::value::{Object, Value};
 use num::ToPrimitive;
 use serde_json::{Map, Number, Value as JsonValue, json};
-use std::collections::HashSet;
 use std::rc::Rc;
 use std::str::FromStr;
 
@@ -229,7 +229,7 @@ mod inner {
     /// those anyway.
     #[function(signature = "<A>(A) -> String")]
     pub fn json_encode(input: Value) -> anyhow::Result<String> {
-        let v = value_to_json(&input, false, &mut HashSet::new())?;
+        let v = value_to_json(&input, false, &mut HashSet::default())?;
         Ok(v.to_string())
     }
 
@@ -245,7 +245,7 @@ mod inner {
     /// reversed. Functions and values that contain themselves are still errors.
     #[function(signature = "<A>(A) -> String")]
     pub fn json_encode_lossy(input: Value) -> anyhow::Result<String> {
-        let v = value_to_json(&input, true, &mut HashSet::new())?;
+        let v = value_to_json(&input, true, &mut HashSet::default())?;
         Ok(v.to_string())
     }
 }

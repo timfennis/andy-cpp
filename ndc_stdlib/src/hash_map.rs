@@ -50,7 +50,7 @@ mod inner {
     /// Removes all keys from the `left` map/set that are present in the `right` map/set.
     #[function(name = "remove", signature = "<K, V, W>(%{K: V}, %{K: W})")]
     pub fn remove_map(left: &mut HashMap<Value, Value>, right: &HashMap<Value, Value>) {
-        for (key, _) in right {
+        for key in right.keys() {
             left.remove(key);
         }
     }

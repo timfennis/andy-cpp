@@ -1,8 +1,8 @@
 use crate::Value;
 use crate::hash_map::HashMap;
-use ahash::AHashSet;
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
+use ndc_core::collections::HashSet;
 use ndc_lexer::Span;
 use std::rc::Rc;
 
@@ -383,7 +383,7 @@ impl OptimizerIr {
     }
 
     pub(crate) fn peephole(&mut self) {
-        let targets: AHashSet<LabelId> = self
+        let targets: HashSet<LabelId> = self
             .code
             .iter()
             .filter_map(|(_, op, _)| match op {

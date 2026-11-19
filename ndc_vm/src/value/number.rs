@@ -778,11 +778,10 @@ fn rational_to_complex(r: &BigRational) -> Complex<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
     fn hash(value: &AdvancedNumber) -> u64 {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = ndc_core::collections::hasher();
         value.hash(&mut hasher);
         hasher.finish()
     }

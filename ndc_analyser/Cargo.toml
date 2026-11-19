@@ -12,4 +12,3 @@ ndc_parser.workspace = true
 ndc_resolver.workspace = true
 ndc_layout.workspace = true
 thiserror.workspace = true
-ahash.workspace = true

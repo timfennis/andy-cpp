@@ -2,7 +2,7 @@
 
 use super::TypeVars;
 use super::bounds::{Bound, Bounds, takes_a_number};
-use ahash::AHashSet;
+use ndc_core::collections::HashSet;
 use ndc_core::{StaticType, TypeVar};
 
 /// A change to the variables, other than settling one, with what it
@@ -469,7 +469,7 @@ impl TypeVars {
 
     /// Settles every variable made since `first` that nothing settled with
     /// its fallback, but for those in `except`.
-    pub(crate) fn settle_from(&mut self, first: usize, except: &AHashSet<TypeVar>) {
+    pub(crate) fn settle_from(&mut self, first: usize, except: &HashSet<TypeVar>) {
         let contents = self
             .unsettled_contents(first)
             .into_iter()

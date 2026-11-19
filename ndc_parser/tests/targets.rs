@@ -2,7 +2,7 @@
 
 use ndc_core::NodeId;
 
-use std::collections::HashSet;
+use ndc_core::collections::HashSet;
 
 use ndc_lexer::{Lexer, SourceId, Span};
 use ndc_parser::{
@@ -102,7 +102,7 @@ fn an_assignment_target_keeps_the_ids_and_spans_it_was_parsed_with() {
     assert_eq!(text(source, value.span), "values");
     assert_eq!(text(source, index.span), "next()");
     assert_eq!(
-        HashSet::from([id, a_id, index_id, receiver_id, subscript_id]).len(),
+        HashSet::from_iter([id, a_id, index_id, receiver_id, subscript_id]).len(),
         5
     );
 }

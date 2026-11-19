@@ -1,7 +1,7 @@
 use crate::chunk::OpCode;
 use crate::duration::format_duration;
+use ndc_core::collections::HashMap;
 use ndc_lexer::Span;
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// Context passed to a tracer on every dispatched instruction.
@@ -58,7 +58,7 @@ impl HistogramTracer {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            counts: HashMap::new(),
+            counts: HashMap::default(),
         }
     }
 }
@@ -106,7 +106,7 @@ impl TimingTracer {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            times: HashMap::new(),
+            times: HashMap::default(),
             last: None,
         }
     }

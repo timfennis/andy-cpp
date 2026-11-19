@@ -8,7 +8,7 @@ pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFlo
 pub use numeric::{NumericMode, NumericRef};
 pub use string::VmString;
 
-use crate::hash_map::{DefaultHasher, HashMap};
+use crate::hash_map::{HashMap, hasher};
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
 use ndc_core::r#struct::StructInfo;
@@ -1190,7 +1190,7 @@ impl Hash for Object {
                 let mut acc = 0u64;
                 let mut cube_acc = 0u64;
                 for (key, value) in entries.iter() {
-                    let mut hasher = DefaultHasher::default();
+                    let mut hasher = hasher();
                     key.hash(&mut hasher);
                     value.hash(&mut hasher);
 
@@ -1261,7 +1261,7 @@ mod tests {
     use super::*;
 
     fn value_hash(value: &Value) -> u64 {
-        let mut hasher = DefaultHasher::default();
+        let mut hasher = hasher();
         value.hash(&mut hasher);
         hasher.finish()
     }

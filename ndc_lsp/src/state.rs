@@ -1,4 +1,4 @@
-use ahash::AHashMap;
+use ndc_core::collections::HashMap;
 
 use ndc_analysis::Analysis;
 use ndc_core::{NodeId, StaticType};
@@ -34,10 +34,10 @@ pub struct DocumentState {
     /// so that simple `ident.` dot-completion keeps working while the user is
     /// mid-edit and the buffer doesn't parse (the AST is stale then, but the
     /// variable's name and type are not).
-    pub variable_types: AHashMap<String, StaticType>,
+    pub variable_types: HashMap<String, StaticType>,
     /// Expression end offset -> inferred type, for dot-completion on arbitrary
     /// receiver expressions (e.g. `read_file("foo").`). Same resilience rationale.
-    pub expression_types: AHashMap<usize, StaticType>,
+    pub expression_types: HashMap<usize, StaticType>,
 }
 
 impl DocumentState {
@@ -50,8 +50,8 @@ impl DocumentState {
             analysis_matches_source: false,
             ast: Vec::new(),
             analysis: Analysis::default(),
-            variable_types: AHashMap::new(),
-            expression_types: AHashMap::new(),
+            variable_types: HashMap::default(),
+            expression_types: HashMap::default(),
         }
     }
 
@@ -83,8 +83,8 @@ impl DocumentState {
     pub fn set_analysis(&mut self, ast: Vec<ExpressionLocation>, analysis: Analysis) {
         let mut collector = MapCollector {
             analysis: &analysis,
-            variable_types: AHashMap::new(),
-            expression_types: AHashMap::new(),
+            variable_types: HashMap::default(),
+            expression_types: HashMap::default(),
         };
         walk_ast(&mut collector, &ast);
         self.variable_types = collector.variable_types;
@@ -98,8 +98,8 @@ impl DocumentState {
 /// Collects the flat lookup maps used by dot-completion from an analysed AST.
 struct MapCollector<'a> {
     analysis: &'a Analysis,
-    variable_types: AHashMap<String, StaticType>,
-    expression_types: AHashMap<usize, StaticType>,
+    variable_types: HashMap<String, StaticType>,
+    expression_types: HashMap<usize, StaticType>,
 }
 
 impl AstVisitor for MapCollector<'_> {

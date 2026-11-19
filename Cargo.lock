@@ -1022,7 +1022,6 @@ dependencies = [
 name = "ndc_analyser"
 version = "0.4.0"
 dependencies = [
- "ahash",
  "itertools 0.15.0",
  "ndc_analysis",
  "ndc_core",
@@ -1037,7 +1036,6 @@ dependencies = [
 name = "ndc_analysis"
 version = "0.4.0"
 dependencies = [
- "ahash",
  "ndc_core",
 ]
 
@@ -1068,6 +1066,7 @@ dependencies = [
 name = "ndc_core"
 version = "0.4.0"
 dependencies = [
+ "ahash",
  "itertools 0.15.0",
 ]
 
@@ -1093,7 +1092,7 @@ dependencies = [
 name = "ndc_highlight"
 version = "0.4.0"
 dependencies = [
- "ahash",
+ "ndc_core",
  "ndc_lexer",
  "ndc_parser",
 ]
@@ -1116,7 +1115,6 @@ dependencies = [
 name = "ndc_layout"
 version = "0.4.0"
 dependencies = [
- "ahash",
  "ndc_analysis",
  "ndc_core",
  "ndc_lexer",
@@ -1137,7 +1135,6 @@ dependencies = [
 name = "ndc_lsp"
 version = "0.4.0"
 dependencies = [
- "ahash",
  "ls-types",
  "ndc_analysis",
  "ndc_core",
@@ -1173,7 +1170,6 @@ dependencies = [
 name = "ndc_resolver"
 version = "0.4.0"
 dependencies = [
- "ahash",
  "itertools 0.15.0",
  "ndc_core",
  "ndc_lexer",
@@ -1206,7 +1202,6 @@ dependencies = [
 name = "ndc_vm"
 version = "0.4.0"
 dependencies = [
- "ahash",
  "char_index",
  "ndc_analysis",
  "ndc_core",

@@ -1,8 +1,8 @@
 use crate::error::AnalysisError;
 use crate::overloads::CallKind;
 use crate::types::{TypeTable, TypeVars};
-use ahash::{AHashMap, AHashSet};
 use ndc_analysis::Analysis;
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::r#struct::{StructInfo, StructRegistry};
 use ndc_core::{Builtins, Intrinsic, NodeId, StaticType, TypeVar};
 use ndc_layout::{Layout, Picks};
@@ -56,18 +56,18 @@ pub struct Analyser {
     /// The constraints of each generic function declared in the program,
     /// such as `+(A, Int) -> B` for `fn inc(x) => x + 1`, which a call of it
     /// copies with the types it's called with.
-    schemes: AHashMap<SymbolId, Scheme>,
+    schemes: HashMap<SymbolId, Scheme>,
     /// The type parameters each generic function takes type arguments for,
     /// in order: `f::<Int, String>` binds the first to `Int`. A native's are
     /// its signature's, as `T` and `A` in `<T, A>(Iterable<T>, A, …)`; a
     /// function's are those it declares, as `T` in `fn f<T>(x: T)`, which
     /// are variables while its body is analysed. Absent for a function
     /// that takes none.
-    explicit_type_parameters: AHashMap<SymbolId, Vec<StaticType>>,
+    explicit_type_parameters: HashMap<SymbolId, Vec<StaticType>>,
     /// What each type parameter a function declares stands for in its
     /// declaration: a variable, which ends up a type parameter of the
     /// function's type. Keyed by the type parameter's symbol.
-    type_parameter_vars: AHashMap<SymbolId, StaticType>,
+    type_parameter_vars: HashMap<SymbolId, StaticType>,
     /// What a call just copied from a generic function, until the call is
     /// known to commit to it.
     pending: Pending,
@@ -76,15 +76,15 @@ pub struct Analyser {
     uses: Vec<GenericUse>,
     /// The instance of each generic function for each set of types of its
     /// key that a call gave it.
-    instances: AHashMap<(SymbolId, Vec<StaticType>), SymbolId>,
+    instances: HashMap<(SymbolId, Vec<StaticType>), SymbolId>,
     /// What each of those instances is for, by the instance.
-    made_instances: AHashMap<SymbolId, instances::MadeInstance>,
+    made_instances: HashMap<SymbolId, instances::MadeInstance>,
     /// The instance whose constraints are being solved, which gets the
     /// picks they make.
     recording: Option<SymbolId>,
     /// The generic functions the batch declares, whose own picks the
     /// batch's analysis takes with it.
-    declared_in_batch: AHashSet<SymbolId>,
+    declared_in_batch: HashSet<SymbolId>,
     /// The generic function whose body is being analysed.
     declaring: Option<SymbolId>,
     /// The calls its body makes of itself.
@@ -97,7 +97,7 @@ pub struct Analyser {
     casts: Vec<Cast>,
     /// Every `pure fn` declared so far, by its declaration, see
     /// [`Self::check_pure_functions`].
-    pure_functions: AHashMap<NodeId, declarations::PureFunction>,
+    pure_functions: HashMap<NodeId, declarations::PureFunction>,
     /// The `pure fn`s the batch declares.
     pure_in_batch: Vec<NodeId>,
     /// The named functions the batch declares, with their names and where
@@ -109,18 +109,18 @@ pub struct Analyser {
     any_index: Option<SymbolId>,
     /// The nodes of overloaded function values that waited for the type
     /// expected of them, as `abs` in `[len, abs]` does.
-    waiting_function_values: AHashSet<NodeId>,
+    waiting_function_values: HashSet<NodeId>,
     /// The types an anonymous function's unannotated parameters get from
     /// the call it's passed to, by the function's node: in
     /// `players.map(fn(p) => p.score)`, `p` is a `Player`.
-    expected_parameters: AHashMap<NodeId, Vec<Option<StaticType>>>,
+    expected_parameters: HashMap<NodeId, Vec<Option<StaticType>>>,
     /// The calls the constraint being solved was copied through, when it's
     /// a copy of a generic function's constraint.
     copied_through: Option<Origin>,
     /// The instance and the calls each literal made while solving a copy of
     /// a generic function's constraints was made in, keyed by its element
     /// type, so an error in its values is reported as one made there.
-    literal_origins: AHashMap<TypeVar, (Option<SymbolId>, Option<Origin>)>,
+    literal_origins: HashMap<TypeVar, (Option<SymbolId>, Option<Origin>)>,
     /// The writes of values that share no type, which are checked again
     /// once those are settled.
     deferred_writes: Vec<DeferredWrite>,
@@ -128,7 +128,7 @@ pub struct Analyser {
     next_serial: u64,
     /// The waiting constraints that each unsettled variable would let make
     /// progress once settled.
-    watchers: AHashMap<TypeVar, Vec<u64>>,
+    watchers: HashMap<TypeVar, Vec<u64>>,
     /// [`TypeVars::settled_count`] when the waiting constraints were last
     /// woken, so the ones watching a variable settled since are woken next.
     watched_settlings: usize,
@@ -137,10 +137,10 @@ pub struct Analyser {
     early_picks: Vec<EarlyPick>,
     /// The nodes of `xs[i] op= v` whose read of `xs[i]` failed, so the
     /// write, which fails the same way, isn't reported again.
-    failed_reads: AHashSet<NodeId>,
+    failed_reads: HashSet<NodeId>,
     /// What each struct's type symbol stands for, so `p: Point` lowers to
     /// `Point`'s struct type. Every other type name is built in.
-    struct_types: AHashMap<SymbolId, Rc<StructInfo>>,
+    struct_types: HashMap<SymbolId, Rc<StructInfo>>,
     /// What each enclosing function returns with `return`, innermost last.
     /// Pushed on function entry, popped on exit.
     return_type_stack: Vec<Returns>,
@@ -221,34 +221,34 @@ impl Analyser {
             types,
             vars: TypeVars::default(),
             waiting: BTreeMap::new(),
-            schemes: AHashMap::new(),
-            explicit_type_parameters: AHashMap::new(),
-            type_parameter_vars: AHashMap::new(),
+            schemes: HashMap::default(),
+            explicit_type_parameters: HashMap::default(),
+            type_parameter_vars: HashMap::default(),
             pending: Pending::default(),
             uses: Vec::new(),
-            instances: AHashMap::new(),
-            made_instances: AHashMap::new(),
+            instances: HashMap::default(),
+            made_instances: HashMap::default(),
             recording: None,
-            declared_in_batch: AHashSet::new(),
+            declared_in_batch: HashSet::default(),
             declaring: None,
             recursive_calls: Vec::new(),
-            waiting_function_values: AHashSet::new(),
+            waiting_function_values: HashSet::default(),
             declared_functions: Vec::new(),
             casts: Vec::new(),
-            pure_functions: AHashMap::new(),
+            pure_functions: HashMap::default(),
             pure_in_batch: Vec::new(),
             declared_overloads: Vec::new(),
-            expected_parameters: AHashMap::new(),
+            expected_parameters: HashMap::default(),
             copied_through: None,
-            literal_origins: AHashMap::new(),
+            literal_origins: HashMap::default(),
             deferred_writes: Vec::new(),
             next_serial: 0,
-            watchers: AHashMap::new(),
+            watchers: HashMap::default(),
             watched_settlings: 0,
-            failed_reads: AHashSet::new(),
+            failed_reads: HashSet::default(),
             early_picks: Vec::new(),
             struct_registry: StructRegistry::default(),
-            struct_types: AHashMap::new(),
+            struct_types: HashMap::default(),
             return_type_stack: Vec::new(),
             loops: Vec::new(),
             result: AnalysisResult::default(),
@@ -281,7 +281,7 @@ impl Analyser {
         let open = if more_may_follow {
             self.not_needed_now()
         } else {
-            AHashSet::new()
+            HashSet::default()
         };
         self.settle_waiting_keeping(0, &open);
         self.vars.forget_literals();

@@ -2,7 +2,7 @@
 
 use ndc_core::NodeId;
 
-use std::collections::HashSet;
+use ndc_core::collections::HashSet;
 
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::{Expression, ExpressionLocation, Parser, TypeExpr};

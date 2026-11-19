@@ -1,5 +1,5 @@
 use crate::symbols::{BindingKind, SymbolId, SymbolTable};
-use ahash::{AHashMap, AHashSet};
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{Intrinsic, NodeId};
 use ndc_lexer::Span;
 use ndc_parser::{
@@ -28,9 +28,9 @@ pub(crate) struct ScopeTree {
     current: ScopeId,
     scopes: Vec<Scope>,
     /// The scope that binds each value, and its position among that scope's bindings.
-    bound_in: AHashMap<SymbolId, (ScopeId, usize)>,
+    bound_in: HashMap<SymbolId, (ScopeId, usize)>,
     /// The parameter scope of each function, keyed by its declaration node.
-    function_scopes: AHashMap<NodeId, ScopeId>,
+    function_scopes: HashMap<NodeId, ScopeId>,
 }
 
 #[derive(Debug)]
@@ -41,48 +41,48 @@ pub struct NameResolver {
     /// introduces. In `let (a, b) = ...`, keyed by the `a` and `b` pattern
     /// nodes. In `fn a(x) { }`, keyed by the function declaration's node,
     /// since the name has no node of its own.
-    declarations: AHashMap<NodeId, SymbolId>,
+    declarations: HashMap<NodeId, SymbolId>,
     /// Every symbol an identifier use could mean, keyed by the identifier's
     /// node. The type pass picks between them.
-    references: AHashMap<NodeId, Candidates>,
+    references: HashMap<NodeId, Candidates>,
     /// The symbol each identifier assignment target writes to, keyed by the
     /// target's node. In `x = 1`, the `x` node.
-    assignments: AHashMap<NodeId, SymbolId>,
+    assignments: HashMap<NodeId, SymbolId>,
     /// The outer symbols each function captures, keyed by its declaration node, in order of first use.
     /// In `fn outer() { let x = 1; fn inner() { x } }`, `inner` captures `[x]`.
-    captures: AHashMap<NodeId, Vec<SymbolId>>,
+    captures: HashMap<NodeId, Vec<SymbolId>>,
     /// Symbols some closure captures. They must outlive their scope (see #227).
-    captured: AHashSet<SymbolId>,
+    captured: HashSet<SymbolId>,
     /// The operations each augmented assignment can use, keyed by its node.
     /// In `x += 1`, the candidates for `+=` and `+`.
-    augmented: AHashMap<NodeId, AugmentedCandidates>,
+    augmented: HashMap<NodeId, AugmentedCandidates>,
     /// Getter candidates for reads through an accessor, keyed by the reading node.
     /// For `p.x`, the member access node's `x`. For `xs[i] += 1`, the target node's `[]`.
     /// Member targets always get one, as their type is what the getter returns:
     /// for `p.x = 1`, the target node's `x`.
-    getters: AHashMap<NodeId, Candidates>,
+    getters: HashMap<NodeId, Candidates>,
     /// Setter candidates for writes through an accessor, keyed by the target node.
     /// In `p.x = 1`, `x=`. In `xs[i] = 1`, `[]=`.
-    setters: AHashMap<NodeId, Candidates>,
+    setters: HashMap<NodeId, Candidates>,
     /// The function each recorded use sits in, keyed like the tables above:
     /// the reference, assignment target, accessor use or augmented assignment.
     /// Absent at the program's top level. In `fn f() { x }`, the `x` node maps
     /// to `f`'s declaration.
-    use_sites: AHashMap<NodeId, NodeId>,
+    use_sites: HashMap<NodeId, NodeId>,
     /// The type each name in an annotation refers to, keyed by the name's node.
     /// In `let m: %{String: P}`, the `Map`, `String` and `P` nodes.
-    type_names: AHashMap<NodeId, SymbolId>,
+    type_names: HashMap<NodeId, SymbolId>,
     /// What each struct declaration binds, keyed by the declaration's node.
-    structs: AHashMap<NodeId, StructSymbols>,
+    structs: HashMap<NodeId, StructSymbols>,
     /// The type each type parameter a function declares binds, keyed by the
     /// type parameter's node. In `fn f<T>(x: T)`, the `T` node.
-    type_parameters: AHashMap<NodeId, SymbolId>,
+    type_parameters: HashMap<NodeId, SymbolId>,
     /// Each native's position in the function registry, which is also its
     /// global slot in the VM. With `new(["len", "+"])`, `len` is 0 and `+` is 1.
-    native_slots: AHashMap<SymbolId, usize>,
+    native_slots: HashMap<SymbolId, usize>,
     /// The natives the compiler writes as bytecode where they're used, as
     /// `cast`. Each still has its registry position in [`Self::native_slots`].
-    intrinsics: AHashMap<SymbolId, Intrinsic>,
+    intrinsics: HashMap<SymbolId, Intrinsic>,
     /// Errors from statements that failed to resolve. Resolution carries on with
     /// the next statement, so `a; b;` reports both unknown names.
     errors: Vec<NameResolutionError>,
@@ -467,8 +467,8 @@ impl NameResolver {
         let mut scopes = ScopeTree::new();
         let mut symbols = SymbolTable::default();
 
-        let mut native_slots = AHashMap::default();
-        let mut intrinsics = AHashMap::default();
+        let mut native_slots = HashMap::default();
+        let mut intrinsics = HashMap::default();
         for (slot, (builtin, intrinsic)) in builtins.into_iter().enumerate() {
             let symbol = symbols.declare(builtin.to_string(), BindingKind::Function);
             scopes.bind(symbol);
