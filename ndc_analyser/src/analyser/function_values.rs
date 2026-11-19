@@ -395,12 +395,10 @@ impl Analyser {
         type_arguments: &[StaticType],
         expected: &StaticType,
     ) -> bool {
-        let snapshot = self.vars.snapshot();
-        let fits = self
-            .instantiated_type(symbol, type_arguments)
-            .is_some_and(|typ| self.vars.bind_argument(expected, &typ));
-        self.vars.rollback(snapshot);
-        fits
+        self.probe(|this| {
+            this.instantiated_type(symbol, type_arguments)
+                .is_some_and(|typ| this.vars.bind_argument(expected, &typ))
+        })
     }
 
     /// Picks the overload `value` means if what's known of the type expected

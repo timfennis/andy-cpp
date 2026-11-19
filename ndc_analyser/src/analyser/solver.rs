@@ -288,6 +288,18 @@ impl CallConstraint {
 }
 
 impl Analyser {
+    /// Runs `try_it`, keeping what it settled only if it returns `Some`: see
+    /// [`TypeVars::attempt_in`].
+    pub(super) fn attempt<T>(&mut self, try_it: impl FnOnce(&mut Self) -> Option<T>) -> Option<T> {
+        TypeVars::attempt_in(self, |analyser| &mut analyser.vars, try_it)
+    }
+
+    /// Runs `look`, then takes back what it settled: see
+    /// [`TypeVars::probe_in`].
+    pub(super) fn probe<R>(&mut self, look: impl FnOnce(&mut Self) -> R) -> R {
+        TypeVars::probe_in(self, |analyser| &mut analyser.vars, look)
+    }
+
     /// Picks the overload a call means and returns the call's type. When the
     /// arguments aren't known well enough to pick one, the call waits, and
     /// its type is a variable that the pick settles later.
@@ -490,11 +502,9 @@ impl Analyser {
     /// [`Self::join`] of two types that aren't wholly unknown: the type
     /// they are once made the same, or a literal's type holding both.
     fn join_known(&mut self, a: &StaticType, b: &StaticType, span: Span) -> StaticType {
-        let snapshot = self.vars.snapshot();
-        if self.vars.unify(a, b) {
+        if self.vars.attempt(|vars| vars.unify(a, b)) {
             return self.vars.resolve(a);
         }
-        self.vars.rollback(snapshot);
         self.fresh_holding(vec![(a.clone(), span), (b.clone(), span)], span)
     }
 
@@ -932,16 +942,18 @@ impl Analyser {
                     .copied()
                     .filter(|&holder| self.vars.is_literal(holder))
                     .collect::<Vec<_>>();
-                let snapshot = self.vars.snapshot();
                 // Values that share no type are an error, which its fellows
                 // aren't part of.
-                if *default == StaticType::Error {
-                    self.vars.settle_default(var, default);
-                } else if self
-                    .settle_with_fellows(var, default, &holders_of_var)
-                    .is_none()
-                {
-                    self.vars.rollback(snapshot);
+                let settled = self.attempt(|this| {
+                    if *default == StaticType::Error {
+                        this.vars.settle_default(var, default);
+                        Some(())
+                    } else {
+                        this.settle_with_fellows(var, default, &holders_of_var)
+                            .map(|_| ())
+                    }
+                });
+                if settled.is_none() {
                     if self.vars.holds_several_literals(var) {
                         self.report_literals_that_differ(var, default);
                     } else {
@@ -984,9 +996,7 @@ impl Analyser {
     /// ["s"]; v = [1]`, `1` isn't a String.
     fn report_literals_that_differ(&mut self, var: TypeVar, default: &StaticType) {
         for (held, span) in self.vars.held(var) {
-            let snapshot = self.vars.snapshot();
-            let fits = self.vars.bind_argument(default, &held);
-            self.vars.rollback(snapshot);
+            let fits = self.vars.probe(|vars| vars.bind_argument(default, &held));
             if !fits {
                 let error = AnalysisError::mismatched_types(&self.vars.shown(&held), default, span);
                 self.emit(error);
@@ -1011,11 +1021,11 @@ impl Analyser {
         let mut settled = vec![var];
         for &holder in holders {
             for other in self.vars.held_literals(holder) {
-                let snapshot = self.vars.snapshot();
-                if self.vars.settle_literal(other, default) {
+                if self
+                    .vars
+                    .attempt(|vars| vars.settle_literal(other, default))
+                {
                     settled.push(other);
-                } else {
-                    self.vars.rollback(snapshot);
                 }
             }
         }
@@ -1135,10 +1145,7 @@ impl Analyser {
                 if !matches!(self.vars.resolve(&result), StaticType::Var(_)) {
                     for side in [&a, &b] {
                         if self.vars.resolve(side).has_vars() {
-                            let snapshot = self.vars.snapshot();
-                            if !self.vars.bind_argument(&result, side) {
-                                self.vars.rollback(snapshot);
-                            }
+                            self.vars.attempt(|vars| vars.bind_argument(&result, side));
                         }
                     }
                 }
@@ -1357,11 +1364,9 @@ impl Analyser {
             // An overload picked through a type parameter that the `Any`
             // fits, as `push([T], T)` with a Float for `[1, "a"]`, may
             // not take the literal itself, which then isn't an `Any`.
-            let snapshot = self.vars.snapshot();
-            if let Some(typ) = self.commit_early(call, &arguments, picked) {
+            if let Some(typ) = self.attempt(|this| this.commit_early(call, &arguments, picked)) {
                 return Some(typ);
             }
-            self.vars.rollback(snapshot);
         }
 
         match self.early_overload(
@@ -1446,20 +1451,18 @@ impl Analyser {
             };
             let function = self.vars.resolve(self.types.get_type(symbol));
             let first = self.vars.count();
-            let snapshot = self.vars.snapshot();
-            let parameters =
-                self.vars
-                    .instantiate_parameters(&function, &mut made)
+            let parameters = self.vars.probe(|vars| {
+                vars.instantiate_parameters(&function, &mut made)
                     .map(|parameters| {
                         parameters
                             .iter()
                             .map(|parameter| {
-                                Some(self.vars.resolve(parameter))
+                                Some(vars.resolve(parameter))
                                     .filter(|parameter| is_known_before(parameter, first))
                             })
                             .collect::<Vec<_>>()
-                    });
-            self.vars.rollback(snapshot);
+                    })
+            });
             let Some(parameters) = parameters else {
                 return false;
             };
@@ -1482,13 +1485,11 @@ impl Analyser {
             {
                 // Only what settles part of the argument counts, so the call
                 // isn't tried again for nothing.
-                let snapshot = self.vars.snapshot();
-                if self.vars.bind_argument(&parameter, argument)
-                    && self.vars.unsettled(argument).len() < unknowns
-                {
+                if self.vars.attempt(|vars| {
+                    vars.bind_argument(&parameter, argument)
+                        && vars.unsettled(argument).len() < unknowns
+                }) {
                     typed = true;
-                } else {
-                    self.vars.rollback(snapshot);
                 }
             }
         }
@@ -1643,42 +1644,41 @@ impl Analyser {
         let Some(mut made) = self.type_argument_bindings(symbol, type_arguments) else {
             return false;
         };
-        let snapshot = self.vars.snapshot();
-        let takes = match self.vars.instantiate_with(&declared, &mut made) {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } => {
-                self.vars.bind_arguments(&parameters, arguments) && {
-                    // The overload's own unknowns, as a parameter of a
-                    // function being checked has, may be settled later.
-                    let resolved = arguments
-                        .iter()
-                        .chain(std::iter::once(&declared))
-                        .map(|typ| self.vars.unsettled(typ))
-                        .collect::<Vec<_>>();
-                    arguments.iter().all(|argument| match argument {
-                        StaticType::Var(var) if !self.vars.is_number_literal(*var) => {
-                            match self.vars.resolve(argument) {
-                                StaticType::Var(now) => {
-                                    !self.vars.is_literal(now)
-                                        && resolved
-                                            .iter()
-                                            .filter(|vars| vars.contains(&now))
-                                            .count()
-                                            == 1
+        self.vars.probe(|vars| {
+            match vars.instantiate_with(&declared, &mut made) {
+                StaticType::Function {
+                    parameters: Some(parameters),
+                    ..
+                } => {
+                    vars.bind_arguments(&parameters, arguments) && {
+                        // The overload's own unknowns, as a parameter of a
+                        // function being checked has, may be settled later.
+                        let resolved = arguments
+                            .iter()
+                            .chain(std::iter::once(&declared))
+                            .map(|typ| vars.unsettled(typ))
+                            .collect::<Vec<_>>();
+                        arguments.iter().all(|argument| match argument {
+                            StaticType::Var(var) if !vars.is_number_literal(*var) => {
+                                match vars.resolve(argument) {
+                                    StaticType::Var(now) => {
+                                        !vars.is_literal(now)
+                                            && resolved
+                                                .iter()
+                                                .filter(|vars| vars.contains(&now))
+                                                .count()
+                                                == 1
+                                    }
+                                    _ => false,
                                 }
-                                _ => false,
                             }
-                        }
-                        _ => true,
-                    })
+                            _ => true,
+                        })
+                    }
                 }
+                _ => false,
             }
-            _ => false,
-        };
-        self.vars.rollback(snapshot);
-        takes
+        })
     }
 
     /// The overload a call of `candidates` with arguments of these types
@@ -1791,26 +1791,26 @@ impl Analyser {
             .unique()
             .collect::<Vec<_>>();
         let mut made = self.type_argument_bindings(narrowest, type_arguments)?;
-        let snapshot = self.vars.snapshot();
-        let free = match self.vars.instantiate_with(&declared, &mut made) {
-            StaticType::Function {
-                parameters: Some(parameters),
-                ..
-            } => {
-                self.vars.bind_arguments(&parameters, arguments)
-                    && unknowns
-                        .iter()
-                        .filter_map(|&var| match self.vars.resolve(&StaticType::Var(var)) {
-                            StaticType::Var(now) if !self.vars.is_literal(var) => Some(now),
-                            _ => None,
-                        })
-                        .unique()
-                        .count()
-                        == unknowns.len()
-            }
-            _ => false,
-        };
-        self.vars.rollback(snapshot);
+        let free = self
+            .vars
+            .probe(|vars| match vars.instantiate_with(&declared, &mut made) {
+                StaticType::Function {
+                    parameters: Some(parameters),
+                    ..
+                } => {
+                    vars.bind_arguments(&parameters, arguments)
+                        && unknowns
+                            .iter()
+                            .filter_map(|&var| match vars.resolve(&StaticType::Var(var)) {
+                                StaticType::Var(now) if !vars.is_literal(var) => Some(now),
+                                _ => None,
+                            })
+                            .unique()
+                            .count()
+                            == unknowns.len()
+                }
+                _ => false,
+            });
         free.then_some(narrowest)
     }
 
@@ -2279,9 +2279,10 @@ impl Analyser {
         else {
             unreachable!("only a function with known parameters has a signature to bind");
         };
-        let snapshot = self.vars.snapshot();
-        if !self.vars.bind_arguments(parameters, arguments) {
-            self.vars.rollback(snapshot);
+        if !self
+            .vars
+            .attempt(|vars| vars.bind_arguments(parameters, arguments))
+        {
             return None;
         }
         let iterations = self.iterations_waited_for(parameters, arguments);
@@ -2357,17 +2358,22 @@ impl Analyser {
 
     /// Whether some overload of `call` accepts arguments of these types.
     fn call_fits(&mut self, call: &CallConstraint, arguments: &[StaticType]) -> bool {
-        let snapshot = self.vars.snapshot();
-        let ResolvedCall {
-            binding,
-            return_type,
-            ..
-        } = self.resolve_overloads(&call.candidates, &call.type_arguments, arguments, call.kind);
-        let fits = !matches!(binding, Binding::None)
-            && self
-                .commit_call(&binding, &call.type_arguments, arguments, return_type)
-                .is_some();
-        self.vars.rollback(snapshot);
+        let fits = self.probe(|this| {
+            let ResolvedCall {
+                binding,
+                return_type,
+                ..
+            } = this.resolve_overloads(
+                &call.candidates,
+                &call.type_arguments,
+                arguments,
+                call.kind,
+            );
+            !matches!(binding, Binding::None)
+                && this
+                    .commit_call(&binding, &call.type_arguments, arguments, return_type)
+                    .is_some()
+        });
         self.pending.clear();
         fits
     }
@@ -2401,20 +2407,18 @@ impl Analyser {
         let Some(mut made) = self.type_argument_bindings(symbol, type_arguments) else {
             return false;
         };
-        let snapshot = self.vars.snapshot();
-        let Some(parameters) = self.vars.instantiate_parameters(&function, &mut made) else {
-            self.vars.rollback(snapshot);
-            return matches!(
-                function,
-                StaticType::Function { .. }
-                    | StaticType::Var(_)
-                    | StaticType::Generic(_)
-                    | StaticType::Error
-            );
-        };
-        let fits = self.vars.bind_arguments(&parameters, arguments);
-        self.vars.rollback(snapshot);
-        fits
+        self.vars.probe(|vars| {
+            let Some(parameters) = vars.instantiate_parameters(&function, &mut made) else {
+                return matches!(
+                    function,
+                    StaticType::Function { .. }
+                        | StaticType::Var(_)
+                        | StaticType::Generic(_)
+                        | StaticType::Error
+                );
+            };
+            vars.bind_arguments(&parameters, arguments)
+        })
     }
 
     /// The type parameters `symbol` takes type arguments for, in order:
