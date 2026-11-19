@@ -59,6 +59,7 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<WrappedFunction> {
         }
     }
 
+    let mut signature_types = Vec::with_capacity(signatures.len());
     for signature in &signatures {
         if return_type.is_some() {
             return Err(syn::Error::new_spanned(
@@ -66,7 +67,8 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<WrappedFunction> {
                 "a signature already has a return type: drop `return_type`",
             ));
         }
-        check_signature(signature, function.sig.inputs.len())?;
+        let parsed = check_signature(signature, function.sig.inputs.len())?;
+        signature_types.push(static_type_tokens(&parsed, signature)?);
     }
 
     let return_type = match return_type {
@@ -90,10 +92,10 @@ pub fn wrap_function(function: &syn::ItemFn) -> syn::Result<WrappedFunction> {
         inner
     };
 
-    let signatures: Vec<Option<&syn::LitStr>> = if signatures.is_empty() {
+    let signatures: Vec<Option<&TokenStream>> = if signature_types.is_empty() {
         vec![None]
     } else {
-        signatures.iter().map(Some).collect()
+        signature_types.iter().map(Some).collect()
     };
     let function_registrations = function_names
         .iter()
@@ -311,15 +313,15 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
     }
 }
 
-/// Checks that a signature such as `<T>([T], T)` parses, and that it
-/// declares as many parameters as the Rust function takes.
-fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<()> {
+/// Parses a signature such as `<T>([T], T)`, checking that it declares as
+/// many parameters as the Rust function takes.
+fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<ndc_core::StaticType> {
     let parsed = ndc_core::StaticType::signature(&signature.value())
         .map_err(|error| syn::Error::new_spanned(signature, error))?;
     let ndc_core::StaticType::Function {
         parameters: Some(parameters),
         ..
-    } = parsed
+    } = &parsed
     else {
         return Err(syn::Error::new_spanned(
             signature,
@@ -327,7 +329,7 @@ fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<()> 
         ));
     };
     if parameters.len() == expected {
-        Ok(())
+        Ok(parsed)
     } else {
         Err(syn::Error::new_spanned(
             signature,
@@ -339,13 +341,113 @@ fn check_signature(signature: &syn::LitStr, expected: usize) -> syn::Result<()> 
     }
 }
 
+/// The Rust expression that builds `typ`, so a signature is parsed while the
+/// macro expands rather than every time the interpreter starts:
+/// `[Int]` becomes `StaticType::List(Box::new(StaticType::Int))`.
+fn static_type_tokens(
+    typ: &ndc_core::StaticType,
+    signature: &syn::LitStr,
+) -> syn::Result<TokenStream> {
+    use ndc_core::StaticType;
+    let boxed = |inner: &StaticType| -> syn::Result<TokenStream> {
+        let inner = static_type_tokens(inner, signature)?;
+        Ok(quote! { Box::new(#inner) })
+    };
+    let list = |types: &[StaticType]| -> syn::Result<TokenStream> {
+        let types = types
+            .iter()
+            .map(|typ| static_type_tokens(typ, signature))
+            .collect::<syn::Result<Vec<_>>>()?;
+        Ok(quote! { vec![#(#types),*] })
+    };
+    Ok(match typ {
+        StaticType::Any => quote! { ndc_core::StaticType::Any },
+        StaticType::Never => quote! { ndc_core::StaticType::Never },
+        StaticType::Bool => quote! { ndc_core::StaticType::Bool },
+        StaticType::Number => quote! { ndc_core::StaticType::Number },
+        StaticType::Float => quote! { ndc_core::StaticType::Float },
+        StaticType::Int => quote! { ndc_core::StaticType::Int },
+        StaticType::String => quote! { ndc_core::StaticType::String },
+        StaticType::Generic(name) => {
+            let name = name.as_ref();
+            quote! { ndc_core::StaticType::Generic(Box::from(#name)) }
+        }
+        StaticType::Function {
+            parameters,
+            return_type,
+        } => {
+            let parameters = match parameters {
+                Some(parameters) => {
+                    let parameters = list(parameters)?;
+                    quote! { Some(#parameters) }
+                }
+                None => quote! { None },
+            };
+            let return_type = boxed(return_type)?;
+            quote! {
+                ndc_core::StaticType::Function {
+                    parameters: #parameters,
+                    return_type: #return_type,
+                }
+            }
+        }
+        StaticType::Tuple(elements) => {
+            let elements = list(elements)?;
+            quote! { ndc_core::StaticType::Tuple(#elements) }
+        }
+        StaticType::Map { key, value } => {
+            let key = boxed(key)?;
+            let value = boxed(value)?;
+            quote! { ndc_core::StaticType::Map { key: #key, value: #value } }
+        }
+        StaticType::Option(inner) => {
+            let inner = boxed(inner)?;
+            quote! { ndc_core::StaticType::Option(#inner) }
+        }
+        StaticType::Iterable(inner) => {
+            let inner = boxed(inner)?;
+            quote! { ndc_core::StaticType::Iterable(#inner) }
+        }
+        StaticType::List(inner) => {
+            let inner = boxed(inner)?;
+            quote! { ndc_core::StaticType::List(#inner) }
+        }
+        StaticType::Iterator(inner) => {
+            let inner = boxed(inner)?;
+            quote! { ndc_core::StaticType::Iterator(#inner) }
+        }
+        StaticType::MinHeap(inner) => {
+            let inner = boxed(inner)?;
+            quote! { ndc_core::StaticType::MinHeap(#inner) }
+        }
+        StaticType::MaxHeap(inner) => {
+            let inner = boxed(inner)?;
+            quote! { ndc_core::StaticType::MaxHeap(#inner) }
+        }
+        StaticType::Deque(inner) => {
+            let inner = boxed(inner)?;
+            quote! { ndc_core::StaticType::Deque(#inner) }
+        }
+        // Only the analyser makes these, so no signature holds one.
+        StaticType::Var(_)
+        | StaticType::Error
+        | StaticType::Unknown
+        | StaticType::Struct { .. } => {
+            return Err(syn::Error::new_spanned(
+                signature,
+                format!("a signature can't hold the type {typ:?}"),
+            ));
+        }
+    })
+}
+
 /// Registers the native `inner_ident` as `register_as_function_name`.
 fn register(
     function: &syn::ItemFn,
     inner_ident: &syn::Ident,
     register_as_function_name: &proc_macro2::Literal,
     return_type: &TokenStream,
-    signature: Option<&syn::LitStr>,
+    signature: Option<&TokenStream>,
     docs: &str,
 ) -> syn::Result<TokenStream> {
     let native_let = try_generate_vm_native(
@@ -376,7 +478,7 @@ fn try_generate_vm_native(
     fn_name: &proc_macro2::Literal,
     docs: &str,
     return_type_override: &TokenStream,
-    signature: Option<&syn::LitStr>,
+    signature: Option<&TokenStream>,
 ) -> Option<TokenStream> {
     use crate::vm_convert::{Borrow, try_vm_input, try_vm_return};
 
@@ -499,11 +601,7 @@ fn try_generate_vm_native(
     };
     // A signature replaces the types read off the Rust parameters.
     let static_type = if let Some(signature) = signature {
-        quote! {
-            ndc_core::StaticType::signature(#signature).unwrap_or_else(|error| {
-                panic!("invalid signature of {}: {error}", #fn_name)
-            })
-        }
+        signature.clone()
     } else {
         quote! {
             ndc_core::StaticType::Function {
