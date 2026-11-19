@@ -119,6 +119,10 @@ pub fn run() -> anyhow::Result<()> {
         }
     }
 
+    // The process ends here, which frees the session's values all at once;
+    // dropping them one by one first would only slow down exiting.
+    #[expect(clippy::mem_forget, reason = "the process is about to exit")]
+    std::mem::forget(interpreter);
     #[cfg(unix)]
     session.end();
     Ok(())
