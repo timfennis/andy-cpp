@@ -121,7 +121,14 @@ impl Interpreter {
     /// Runs the code from now on with `backend`. A REPL line on the
     /// register VM can't call a generic function an earlier line declared
     /// with new types yet.
+    ///
+    /// Changing the backend forgets everything evaluated so far: a function
+    /// an earlier evaluation declared is compiled for the VM it ran on, and
+    /// the other one can't run it.
     pub fn set_backend(&mut self, backend: Backend) {
+        if self.backend != backend {
+            self.start_over();
+        }
         self.backend = backend;
     }
 

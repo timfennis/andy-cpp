@@ -43,6 +43,33 @@ fn same_on_both(program: &str) -> Outcome {
     register
 }
 
+/// A function compiled for one VM can't run on the other, so changing the
+/// backend forgets what was declared before, where calling the function
+/// would run code the new VM doesn't have.
+#[test]
+fn changing_the_backend_forgets_earlier_declarations() {
+    let mut interpreter = Interpreter::capturing();
+    interpreter.configure(ndc_stdlib::register);
+    interpreter
+        .eval("fn f() -> Int { 1 }")
+        .expect("a declaration");
+    assert_eq!(interpreter.eval("f()").expect("a call").to_string(), "1");
+
+    interpreter.set_backend(Backend::Register);
+    assert!(
+        interpreter.eval("f()").is_err(),
+        "`f` was declared on the stack VM"
+    );
+    interpreter
+        .eval("fn f() -> Int { 2 }")
+        .expect("a declaration");
+    assert_eq!(interpreter.eval("f()").expect("a call").to_string(), "2");
+
+    // Setting the backend it already has keeps what was declared.
+    interpreter.set_backend(Backend::Register);
+    assert_eq!(interpreter.eval("f()").expect("a call").to_string(), "2");
+}
+
 #[test]
 fn int_loop() {
     let outcome = same_on_both(
