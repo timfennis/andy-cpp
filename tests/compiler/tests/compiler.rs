@@ -21,8 +21,12 @@ fn compile_function(input: &str) -> CompiledFunction {
         .collect::<Result<Vec<_>, _>>()
         .expect("lex failed");
     let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-    Compiler::compile_unoptimized(expressions.into_iter(), Analysis::default())
-        .expect("compile failed")
+    Compiler::compile_unoptimized(
+        expressions.into_iter(),
+        Analysis::default(),
+        &ndc_vm::Natives::default(),
+    )
+    .expect("compile failed")
 }
 
 fn compile_with_analysis(input: &str) -> Vec<OpCode> {
@@ -576,15 +580,15 @@ fn member_assignment_calls_the_setter_with_the_receiver_and_the_value() {
     );
 }
 
-// fn add(a: Int, b: Int) -> Int { a + b } while true { print(add(1, break)); }
+// fn add(a: Int, b: Int, c: Int) -> Int { a + b + c } while true { add(1, 2, break); }
 //
-// The break sits inside a partially compiled call (`print` and `add` callees
-// and the constant `1` are already on the stack), so it pops those three
+// The break sits inside a partially compiled call (the `add` callee and the
+// constants `1` and `2` are already on the stack), so it pops those three
 // pending operands before jumping out of the loop.
 #[test]
 fn break_pops_the_operands_pending_in_its_expression() {
     let ops = compile_with_stdlib_unoptimized(
-        "fn add(a: Int, b: Int) -> Int { a + b } while true { print(add(1, break)); }",
+        "fn add(a: Int, b: Int, c: Int) -> Int { a + b + c } while true { add(1, 2, break); }",
     );
     assert!(
         ops.windows(4)
@@ -929,5 +933,60 @@ fn a_program_lists_the_natives_its_functions_read() {
             .all(|slot| print.contains(slot) || len.contains(slot)),
         "only print and len are read: {:?}",
         program.natives()
+    );
+}
+
+// let xs = [1, 2]; len(xs)
+//
+// A call the analyser resolves to one native names it by its global slot:
+// the arguments go on the stack with no callee under them, and `CallNative`
+// calls the native there.
+#[test]
+fn a_call_resolved_to_a_native_calls_it_by_its_slot() {
+    let ops = compile_with_stdlib("let xs = [1, 2]; len(xs)");
+    let len = native_slots("len");
+    assert!(
+        ops.windows(2).any(|pair| matches!(
+            pair,
+            [GetGlobal(_), CallNative { slot, args: 1 }] if len.contains(slot)
+        )),
+        "expected xs then CallNative(len, 1), got: {ops:?}",
+    );
+}
+
+// fn f(a: Int, b: Int, x: Float, y: Float, p: Bool) {
+//     (a + b, a - b, a * b, x + y, x - y, x * y, x / y, -a, -x, !p, a < b, x >= y, a == b)
+// }
+//
+// An operator the analyser resolves to a native that does it is an
+// instruction of its own, with no call.
+#[test]
+fn an_operator_resolved_to_a_native_is_its_own_instruction() {
+    let ops = compile_nested_function_with_stdlib(
+        "fn f(a: Int, b: Int, x: Float, y: Float, p: Bool) { \
+         (a + b, a - b, a * b, x + y, x - y, x * y, x / y, -a, -x, !p, a < b, x >= y, a == b) }",
+        &[0],
+    );
+    for expected in [
+        AddInt,
+        SubInt,
+        MulInt,
+        AddFloat,
+        SubFloat,
+        MulFloat,
+        DivFloat,
+        NegInt,
+        NegFloat,
+        Not,
+        Less,
+        GreaterEqual,
+        Equal,
+    ] {
+        assert!(ops.contains(&expected), "expected {expected:?} in {ops:?}");
+    }
+    assert!(
+        ops.iter()
+            .all(|op| !matches!(op, Call(_) | CallNative { .. })),
+        "no operator should be a call: {ops:?}",
     );
 }

@@ -7,6 +7,7 @@ pub mod hash_map;
 mod io;
 pub mod iterator;
 mod natives;
+mod operator;
 #[cfg(feature = "trace")]
 #[allow(clippy::print_stderr)]
 pub mod tracer;
@@ -15,6 +16,7 @@ mod vm;
 
 pub use io::{InputSource, OutputSink};
 pub use natives::{NativeSpec, Natives};
+pub use operator::Operator;
 pub use vm::*;
 
 pub use compiler::CompileError;

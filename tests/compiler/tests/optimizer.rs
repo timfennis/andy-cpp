@@ -16,17 +16,25 @@ fn parse(input: &str) -> Vec<ndc_parser::ExpressionLocation> {
 }
 
 fn unoptimized(input: &str) -> Vec<OpCode> {
-    Compiler::compile_unoptimized(parse(input).into_iter(), Analysis::default())
-        .expect("compile failed")
-        .opcodes()
-        .to_vec()
+    Compiler::compile_unoptimized(
+        parse(input).into_iter(),
+        Analysis::default(),
+        &ndc_vm::Natives::default(),
+    )
+    .expect("compile failed")
+    .opcodes()
+    .to_vec()
 }
 
 fn optimized(input: &str) -> Vec<OpCode> {
-    Compiler::compile(parse(input).into_iter(), Analysis::default())
-        .expect("compile failed")
-        .opcodes()
-        .to_vec()
+    Compiler::compile(
+        parse(input).into_iter(),
+        Analysis::default(),
+        &ndc_vm::Natives::default(),
+    )
+    .expect("compile failed")
+    .opcodes()
+    .to_vec()
 }
 
 // `5;` — a discarded constant. The peephole eliminates the `Constant; Pop`

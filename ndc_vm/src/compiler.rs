@@ -1,6 +1,7 @@
-use crate::Value;
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
+use crate::operator::Operator;
 use crate::value::{CompiledFunction, Function};
+use crate::{Natives, Value};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_core::collections::{HashMap, HashSet};
@@ -73,6 +74,9 @@ pub struct Compiler {
     /// global is the only way code reaches a native, so this lists every
     /// native the program can call.
     natives: Rc<RefCell<HashSet<usize>>>,
+    /// The operator each native does, if it's one, in global slot order: a
+    /// call that resolves to one is written as the operator's instruction.
+    operators: Rc<[Option<Operator>]>,
 }
 
 impl Compiler {
@@ -91,6 +95,7 @@ impl Compiler {
             prototypes: Rc::default(),
             functions: None,
             natives: Rc::default(),
+            operators: Rc::new([]),
         }
     }
 
@@ -109,6 +114,7 @@ impl Compiler {
             prototypes: Rc::default(),
             functions: None,
             natives: Rc::default(),
+            operators: Rc::new([]),
         }
     }
     /// Compiles a program, or one REPL line, into a function the VM runs at
@@ -117,9 +123,11 @@ impl Compiler {
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self {
             analysis: Rc::new(analysis),
+            operators: natives.operators(),
             ..Self::new()
         };
         compiler.compile_batch(expressions)?;
@@ -133,11 +141,13 @@ impl Compiler {
     pub fn compile_line(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
         session: &mut Session,
     ) -> Result<CompiledFunction, CompileError> {
         Rc::make_mut(&mut session.analysis).extend(analysis);
         let mut compiler = Self {
             analysis: Rc::clone(&session.analysis),
+            operators: natives.operators(),
             prototypes: Rc::clone(&session.prototypes),
             functions: Some(std::mem::take(&mut session.functions)),
             ..Self::new()
@@ -203,9 +213,11 @@ impl Compiler {
     pub fn compile_unoptimized(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
+        natives: &Natives,
     ) -> Result<CompiledFunction, CompileError> {
         let mut compiler = Self {
             analysis: Rc::new(analysis),
+            operators: natives.operators(),
             ..Self::new_without_optimization()
         };
         compiler.compile_batch(expressions)?;
@@ -537,6 +549,21 @@ impl Compiler {
                         self.compile_expr(argument)?;
                     }
                     self.emit_intrinsic(intrinsic, function.id, function_span)?;
+                } else if let Some(slot) = binding.as_ref().and_then(|b| self.native_slot(b)) {
+                    let args = arguments.len();
+                    for argument in arguments {
+                        self.compile_expr(argument)?;
+                    }
+                    match self.operators.get(slot).copied().flatten() {
+                        Some(operator) if operator.arity() == args => {
+                            self.ir.write(operator.opcode(), function_span);
+                        }
+                        _ => {
+                            self.natives.borrow_mut().insert(slot);
+                            self.ir
+                                .write(OpCode::CallNative { slot, args }, function_span);
+                        }
+                    }
                 } else {
                     let opcode = match &binding {
                         Some(binding) => Self::call_opcode_for(binding, arguments.len()),
@@ -914,6 +941,21 @@ impl Compiler {
         Ok(())
     }
 
+    /// The global slot of the native `binding` calls, if it calls one native
+    /// on its arguments as they are: `len` in `len(xs)`, but not `+` in
+    /// `(1, 2) + (3, 4)`, which applies it to each pair of elements, nor a
+    /// function a program declares, even one named like a native.
+    fn native_slot(&self, binding: &Binding) -> Option<usize> {
+        match binding {
+            Binding::Resolved(Candidate::Scalar(Callee::Var(ResolvedVar::Global { slot })))
+                if *slot < self.analysis.builtin_count =>
+            {
+                Some(*slot)
+            }
+            _ => None,
+        }
+    }
+
     /// `CallVec(args)` for an operator applied to each element of tuple
     /// arguments, `Call(args)` for any other call.
     fn call_opcode_for(binding: &Binding, args: usize) -> OpCode {
@@ -1276,6 +1318,7 @@ impl Compiler {
             prototypes: Rc::clone(&self.prototypes),
             functions: None,
             natives: Rc::clone(&self.natives),
+            operators: Rc::clone(&self.operators),
         }
     }
 

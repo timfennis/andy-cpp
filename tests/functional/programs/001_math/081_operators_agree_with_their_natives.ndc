@@ -1,0 +1,8 @@
+// An operator written between two values gives what the same native gives
+// when it's called as a value, as `+` applied to each pair of elements of
+// two tuples is.
+// expect-output: (4,6) (1.5,-0.5) (-1,-2.5) true true false true true false 2.5 -3
+assert_eq((1, 2) + (3, 4), (1 + 3, 2 + 4));
+assert_eq((1.0, 0.5) * (1.5, -1.0), (1.0 * 1.5, 0.5 * -1.0));
+assert_eq((1, 2.5) - (2, 5.0), (1 - 2, 2.5 - 5.0));
+print((1, 2) + (3, 4), (1.0, 0.5) * (1.5, -1.0), (1, 2.5) - (2, 5.0), 1 == 1.0, 2 != 2.5, 3 < 2, (1, 2) <= (1, 3), "b" >= "a", 0.0 / 0.0 < 1.0, 5.0 / 2.0, -(1 + 2));

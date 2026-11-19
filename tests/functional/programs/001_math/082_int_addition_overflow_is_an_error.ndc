@@ -1,0 +1,4 @@
+// Adding two Ints whose sum doesn't fit in an Int is an error, not a wrap.
+// expect-error: integer operation overflowed or is undefined: 9223372036854775807 + 1
+let big = 9223372036854775807;
+print(big + 1);

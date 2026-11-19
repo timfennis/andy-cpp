@@ -6,6 +6,7 @@ use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
+use crate::operator::Operator;
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Natives, Object, Value};
 use ndc_analysis::CaptureSource;
@@ -288,6 +289,86 @@ impl Vm {
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
+                OpCode::Less => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::Less) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::LessEqual => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::LessEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Greater => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::Greater) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::GreaterEqual => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::GreaterEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Equal => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::Equal) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NotEqual => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::NotEqual) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::AddInt => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::AddInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::SubInt => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::SubInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::MulInt => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::MulInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::AddFloat => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::AddFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::SubFloat => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::SubFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::MulFloat => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::MulFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::DivFloat => {
+                    if let Err(error) = binary_operator(&mut self.stack, Operator::DivFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NegInt => {
+                    if let Err(error) = unary_operator(&mut self.stack, Operator::NegInt) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::NegFloat => {
+                    if let Err(error) = unary_operator(&mut self.stack, Operator::NegFloat) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
+                OpCode::Not => {
+                    if let Err(error) = unary_operator(&mut self.stack, Operator::Not) {
+                        return Err(VmError::new(error.message, span));
+                    }
+                }
                 OpCode::GetLocal(slot) => {
                     let slot = *slot;
                     self.stack.push(self.stack[frame.slot(slot)].clone());
@@ -369,6 +450,13 @@ impl Vm {
                         .resolve_callee(args)
                         .map_err(|msg| VmError::new(msg, span))?;
                     if let Err(mut e) = self.dispatch_call(func, args) {
+                        e.span.get_or_insert(span);
+                        return Err(e);
+                    }
+                }
+                OpCode::CallNative { slot, args } => {
+                    let (slot, args) = (*slot, *args);
+                    if let Err(mut e) = self.call_native(slot, args) {
                         e.span.get_or_insert(span);
                         return Err(e);
                     }
@@ -801,6 +889,38 @@ impl Vm {
         Ok(Dispatch::FramePushed)
     }
 
+    /// Calls the native in global slot `slot` with the `args` values on top
+    /// of the stack, and puts its result in their place.
+    fn call_native(&mut self, slot: usize, args: usize) -> Result<(), VmError> {
+        let native = match &self.globals[slot] {
+            Value::Object(object) => match object.as_ref() {
+                Object::Function(Function::Native(native)) => native,
+                _ => unreachable!("internal error: global slot {slot} holds no native"),
+            },
+            _ => unreachable!("internal error: global slot {slot} holds no native"),
+        };
+        let start = self.stack.len() - args;
+        let result = match &native.func {
+            NativeFunc::Simple(f) => {
+                let result = f(&self.stack[start..])?;
+                self.stack.truncate(start);
+                result
+            }
+            NativeFunc::WithVm(_) => {
+                // The native takes the VM, so it can't be borrowed from the
+                // VM's globals while it runs.
+                let native = Rc::clone(native);
+                let NativeFunc::WithVm(f) = &native.func else {
+                    unreachable!()
+                };
+                let call_args: Vec<Value> = self.stack.drain(start..).collect();
+                f(&call_args, self)?
+            }
+        };
+        self.stack.push(result);
+        Ok(())
+    }
+
     /// Call a function inline on this VM, without spawning a child VM.
     /// Used by `VmCallable::call` so stdlib HOFs run their predicates/mappers
     /// directly on the parent stack — zero allocation per callback invocation.
@@ -1086,6 +1206,24 @@ fn bad_range_bound(value: &Value) -> String {
 fn try_cast(stack: &mut [Value], target: &StaticType) {
     let value = stack.last_mut().expect("stack underflow");
     *value = Value::option(value.converted_to(target));
+}
+
+/// Replaces the two operands on top of `stack` with what `operator` makes
+/// of them.
+#[inline(always)]
+fn binary_operator(stack: &mut Vec<Value>, operator: Operator) -> Result<(), VmError> {
+    let right = stack.pop().expect("stack underflow");
+    let left = stack.last_mut().expect("stack underflow");
+    *left = operator.binary(left, &right)?;
+    Ok(())
+}
+
+/// Replaces the operand on top of `stack` with what `operator` makes of it.
+#[inline(always)]
+fn unary_operator(stack: &mut [Value], operator: Operator) -> Result<(), VmError> {
+    let value = stack.last_mut().expect("stack underflow");
+    *value = operator.unary(value)?;
+    Ok(())
 }
 
 /// Checks that the value on top of `stack` is a `target`, and makes it one:

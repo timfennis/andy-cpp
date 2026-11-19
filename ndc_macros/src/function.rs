@@ -519,6 +519,7 @@ fn try_generate_vm_native(
             documentation: #documentation_tokens,
             static_type: Box::new(|| #static_type),
             func: Box::new(|| #func_variant),
+            operator: None,
         };
     })
 }
