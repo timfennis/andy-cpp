@@ -2,6 +2,7 @@
 """Compares two `ndc` binaries on whole programs.
 
     benches/compare.py BASELINE CANDIDATE [--runs 5] [--aob DIR] [--filter TEXT]
+                       [--baseline-env NAME=VALUE] [--candidate-env NAME=VALUE]
 
 Runs every program in `benches/programs` and, when the directory is there,
 every Advent of Code solution in an Advent of Brian checkout (a copy of it, so
@@ -21,7 +22,11 @@ more than 5% longer (and more than two milliseconds longer, which is noise), and
 none behaves differently.
 
 Build both binaries the same way (same toolchain, same profile) and don't build
-anything else while this runs.
+anything else while this runs. To compare two settings of one binary, give it
+twice with `--baseline-env` and `--candidate-env`, as in
+`compare.py ndc ndc --candidate-env NDC_VM=register`, and not through a wrapper
+script on one side: starting a shell costs about a millisecond, which a short
+program would be charged for.
 """
 
 import argparse
@@ -81,12 +86,21 @@ class Result:
         return self.candidate_ms > self.baseline_ms * GATE_LONGEST_SLOWDOWN and longer > NOISE_MS
 
 
-def run(binary: Path, program: Path) -> Run:
+@dataclass(frozen=True)
+class Binary:
+    """An `ndc` to measure: the executable and what its environment adds."""
+
+    path: Path
+    env: tuple[tuple[str, str], ...]
+
+
+def run(binary: Binary, program: Path) -> Run:
     """Runs `program` from its own directory, where it finds its input files."""
     with tempfile.TemporaryFile() as out:
         process = subprocess.Popen(
-            [str(binary), program.name],
+            [str(binary.path), program.name],
             cwd=program.parent,
+            env={**os.environ, **dict(binary.env)},
             stdin=subprocess.DEVNULL,
             stdout=out,
             stderr=subprocess.DEVNULL,
@@ -162,7 +176,7 @@ def wait_with_timeout(process: subprocess.Popen):
     return process.returncode, usage
 
 
-def measure(name: str, program: Path, baseline: Path, candidate: Path, runs: int):
+def measure(name: str, program: Path, baseline: Binary, candidate: Binary, runs: int):
     """The fastest of `runs` runs on each binary, or why the program doesn't count.
 
     A reason starting with "skipped" is a program neither binary runs; any
@@ -257,12 +271,23 @@ def main() -> int:
         help="an Advent of Brian checkout; skipped when it isn't there",
     )
     parser.add_argument("--filter", default="", help="only programs whose name contains this")
+    parser.add_argument(
+        "--baseline-env", action="append", default=[], metavar="NAME=VALUE", help="set for the baseline's runs"
+    )
+    parser.add_argument(
+        "--candidate-env", action="append", default=[], metavar="NAME=VALUE", help="set for the candidate's runs"
+    )
     args = parser.parse_args()
     if args.runs < 2:
         parser.error("--runs must be at least 2")
 
-    baseline = args.baseline.resolve()
-    candidate = args.candidate.resolve()
+    def binary(path: Path, settings: list[str]) -> Binary:
+        if any("=" not in setting for setting in settings):
+            parser.error("an environment setting is written NAME=VALUE")
+        return Binary(path.resolve(), tuple(tuple(setting.split("=", 1)) for setting in settings))
+
+    baseline = binary(args.baseline, args.baseline_env)
+    candidate = binary(args.candidate, args.candidate_env)
     repo = Path(__file__).resolve().parent.parent
     # The programs inherit the limit.
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
