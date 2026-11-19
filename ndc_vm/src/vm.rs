@@ -289,9 +289,11 @@ impl Vm {
                     }
                 }
                 OpCode::TryCast(target) => try_cast(&mut self.stack, target),
-                OpCode::TupleIndex => {
-                    if let Err(message) = tuple_index(&mut self.stack) {
-                        return Err(VmError::new(message, span));
+                OpCode::TupleIndex(index) => {
+                    let tuple = self.stack.last_mut().expect("stack underflow");
+                    match tuple_element(tuple, *index) {
+                        Ok(element) => *tuple = element,
+                        Err(message) => return Err(VmError::new(message, span)),
                     }
                 }
                 OpCode::AddInt => run_native_op(&mut self.stack, NativeOp::AddInt, span)?,
@@ -1144,37 +1146,23 @@ fn try_cast(stack: &mut [Value], target: &StaticType) {
     *value = Value::option(value.converted_to(target));
 }
 
-/// Replaces the tuple and the index on top of `stack` with the tuple's
-/// element at the index, counting a negative index from the end: `-1` is the
-/// last element.
-fn tuple_index(stack: &mut Vec<Value>) -> Result<(), String> {
-    let index = stack.pop().expect("stack underflow");
-    let tuple = stack.last_mut().expect("stack underflow");
-    let element = match (&*tuple, index) {
-        (Value::Object(object), Value::Int(index)) => match object.as_ref() {
-            Object::Tuple(elements) => {
-                let position = if index < 0 {
-                    elements.len().checked_sub(index.unsigned_abs() as usize)
-                } else {
-                    usize::try_from(index).ok()
-                };
-                match position.and_then(|position| elements.get(position)) {
-                    Some(element) => element.clone(),
-                    None => return Err(tuple_index_out_of_bounds(index, elements.len())),
-                }
-            }
-            _ => return Err(format!("cannot index into {}", tuple.static_type())),
-        },
-        (Value::Object(_), index) => {
-            return Err(format!(
-                "a tuple's index must be an Int, got {}",
-                index.static_type()
-            ));
-        }
-        _ => return Err(format!("cannot index into {}", tuple.static_type())),
-    };
-    *tuple = element;
-    Ok(())
+/// The element of `tuple` at `index`, counting a negative index from the
+/// end: `-1` is the last element.
+fn tuple_element(tuple: &Value, index: i64) -> Result<Value, String> {
+    if let Value::Object(object) = tuple
+        && let Object::Tuple(elements) = object.as_ref()
+    {
+        let position = if index < 0 {
+            elements.len().checked_sub(index.unsigned_abs() as usize)
+        } else {
+            usize::try_from(index).ok()
+        };
+        return match position.and_then(|position| elements.get(position)) {
+            Some(element) => Ok(element.clone()),
+            None => Err(tuple_index_out_of_bounds(index, elements.len())),
+        };
+    }
+    Err(format!("cannot index into {}", tuple.static_type()))
 }
 
 /// The analyser rejects an index written in the code that's outside the

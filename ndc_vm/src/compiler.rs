@@ -552,10 +552,7 @@ impl Compiler {
                 if let Some(Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(intrinsic)))) =
                     binding
                 {
-                    for argument in arguments {
-                        self.compile_expr(argument)?;
-                    }
-                    self.emit_intrinsic(intrinsic, function.id, function_span)?;
+                    self.compile_intrinsic_call(intrinsic, function.id, arguments, function_span)?;
                 } else if let Some(call) = binding
                     .as_ref()
                     .and_then(|binding| self.native_call(binding, arguments.len()))
@@ -888,6 +885,33 @@ impl Compiler {
         Ok(compiled)
     }
 
+    /// Emit the call of `intrinsic` named at `site` with `arguments`, in
+    /// place of the call. The tuple index takes its index, a number written
+    /// in the code, as the instruction's operand: `t[1]` is `t`, then
+    /// `TupleIndex(1)`.
+    fn compile_intrinsic_call(
+        &mut self,
+        intrinsic: Intrinsic,
+        site: NodeId,
+        arguments: Vec<ExpressionLocation>,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        if intrinsic == Intrinsic::TupleIndex {
+            let [tuple, index] = <[_; 2]>::try_from(arguments)
+                .expect("internal error: the tuple index takes a tuple and an index");
+            let index = index
+                .integer_literal()
+                .expect("internal error: the analyser picks the tuple index for a number written in the code");
+            self.compile_expr(tuple)?;
+            self.ir.write(OpCode::TupleIndex(index), span);
+            return Ok(());
+        }
+        for argument in arguments {
+            self.compile_expr(argument)?;
+        }
+        self.emit_intrinsic(intrinsic, site, span)
+    }
+
     /// Emit `intrinsic` used at `site`, its arguments on top of the stack,
     /// leaving its result in their place.
     fn emit_intrinsic(
@@ -899,10 +923,9 @@ impl Compiler {
         match intrinsic {
             Intrinsic::Cast => self.emit_cast(site, false, span),
             Intrinsic::TryCast => self.emit_cast(site, true, span),
-            Intrinsic::TupleIndex => {
-                self.ir.write(OpCode::TupleIndex, span);
-                Ok(())
-            }
+            // Only a read of `[]` with a number written in the code calls
+            // it, which `Self::compile_intrinsic_call` writes.
+            Intrinsic::TupleIndex => Err(CompileError::unnamed_intrinsic(span)),
         }
     }
 
