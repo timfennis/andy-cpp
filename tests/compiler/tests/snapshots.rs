@@ -1,22 +1,26 @@
-//! Checks what the compiler writes for each program under `programs` against
-//! the listing expected of it, kept next to the program: for the stack
-//! backend, `programs/blocks/a_block_yields_its_last_expression.ndc` is
-//! expected to compile to `a_block_yields_its_last_expression.stack.txt`.
+//! Checks what each compiler writes for each program under `programs`
+//! against the listing expected of it, kept next to the program: for the
+//! stack backend, `programs/blocks/a_block_yields_its_last_expression.ndc` is
+//! expected to compile to `a_block_yields_its_last_expression.stack.txt`, and
+//! for the register backend to `a_block_yields_its_last_expression.register.txt`.
 //!
 //! A program says how to compile it in a directive, one line such as
 //! `// compile: stdlib optimized`, which may list several modes separated by
-//! commas; the listing then has a section per mode.
+//! commas; the listing then has a section per mode. The register compiler
+//! has no peephole optimizer, so its listing has one section for a setup
+//! with and without `optimized`, titled without it.
 //!
 //! `BLESS=1 cargo test -p compiler_tests` writes what the compiler gives into
 //! the expected files instead of comparing.
 
 use ndc_analysis::Analysis;
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{Backend as Vm, Interpreter};
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_vm::Natives;
 use ndc_vm::compiler::Compiler;
 use ndc_vm::disassemble::disassemble;
+use ndc_vm::register::Compiler as RegisterCompiler;
 use std::fmt::{self, Write};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,16 +34,26 @@ struct Backend {
     name: &'static str,
     /// The listing of a program's code compiled in a mode.
     listing: fn(&str, Mode) -> String,
+    /// Whether the backend has a peephole optimizer, which `optimized` runs.
+    optimizes: bool,
 }
 
 /// Every backend, each of which has an expected listing for every program.
-const BACKENDS: &[Backend] = &[Backend {
-    name: "stack",
-    listing: stack_listing,
-}];
+const BACKENDS: &[Backend] = &[
+    Backend {
+        name: "stack",
+        listing: stack_listing,
+        optimizes: true,
+    },
+    Backend {
+        name: "register",
+        listing: register_listing,
+        optimizes: false,
+    },
+];
 
 /// How a program is compiled: `analysed`, or `stdlib optimized`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Mode {
     setup: Setup,
     /// Whether the peephole optimizer runs.
@@ -47,7 +61,7 @@ struct Mode {
 }
 
 /// What the compiler knows about a program.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Setup {
     /// `parsed`: nothing, as nothing analysed it and there are no natives.
     Parsed,
@@ -135,6 +149,36 @@ fn stack_listing(source: &str, mode: Mode) -> String {
     }
 }
 
+/// The register VM's code for `source`, as `ndc disassemble` lists it with
+/// `NDC_VM=register`, without the source excerpts. The register compiler has
+/// no peephole optimizer, so `mode` is never `optimized`.
+fn register_listing(source: &str, mode: Mode) -> String {
+    match mode.setup {
+        Setup::Parsed => {
+            let tokens = Lexer::new(source, SourceId::SYNTHETIC)
+                .collect::<Result<Vec<_>, _>>()
+                .expect("lex failed");
+            let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
+            let natives = Natives::default();
+            let function =
+                RegisterCompiler::compile(expressions.into_iter(), Analysis::default(), &natives)
+                    .expect("compile failed");
+            disassemble(&function, &natives, None)
+        }
+        Setup::Analysed | Setup::Stdlib => {
+            let mut interpreter = Interpreter::capturing();
+            if matches!(mode.setup, Setup::Stdlib) {
+                interpreter.configure(ndc_stdlib::register);
+            }
+            interpreter.set_backend(Vm::Register);
+            let function = interpreter
+                .compile_str(source)
+                .unwrap_or_else(|error| panic!("compile failed: {error:?}"));
+            disassemble(&function, interpreter.natives(), None)
+        }
+    }
+}
+
 fn programs_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("programs")
 }
@@ -158,8 +202,21 @@ fn modes(source: &str) -> Vec<Mode> {
 }
 
 /// What `backend` gives for `source` in each of `modes`: the listing alone
-/// for one mode, and a section titled with each mode for more.
+/// for one mode, and a section titled with each mode for more. For a backend
+/// that doesn't optimize, `optimized` is left out of each mode, and a mode
+/// that is then the same as an earlier one is left out.
 fn snapshot(backend: &Backend, source: &str, modes: &[Mode]) -> String {
+    let mut own_modes = Vec::new();
+    for &mode in modes {
+        let mode = Mode {
+            optimized: mode.optimized && backend.optimizes,
+            ..mode
+        };
+        if !own_modes.contains(&mode) {
+            own_modes.push(mode);
+        }
+    }
+    let modes = own_modes.as_slice();
     if let [mode] = modes {
         return (backend.listing)(source, *mode);
     }

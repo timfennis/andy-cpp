@@ -1,0 +1,14 @@
+== <script> (registers: 6, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 id>
+0001  SetGlobal g0, r1
+0002  GetGlobal r1, g0
+0003  LoadK r3, k1                         1
+0004  LoadK r4, k2                         2
+0005  LoadK r5, k3                         3
+0006  MakeTuple r2, r3, 3
+0007  Call r1, 1
+0008  Move r0, r1
+0009  Halt r0
+
+== #1 id (registers: 1) ==
+0000  Return r0

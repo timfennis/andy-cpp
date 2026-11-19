@@ -1,0 +1,13 @@
+== <script> (registers: 2, globals: 2) ==
+0000  LoadK r1, k0                         1
+0001  SetGlobal g0, r1
+0002  LoadK r1, k1                         <fn #1 f>
+0003  SetGlobal g1, r1
+0004  LoadUnit r0
+0005  Halt r0
+
+== #1 f (registers: 1) ==
+0000  LoadK r0, k0                         2
+0001  SetGlobal g0, r0
+0002  GetGlobal r0, g0
+0003  Return r0

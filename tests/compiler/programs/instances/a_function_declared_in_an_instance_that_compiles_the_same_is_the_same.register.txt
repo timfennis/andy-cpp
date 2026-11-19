@@ -1,0 +1,29 @@
+== <script> (registers: 3, globals: 3, natives: +) ==
+0000  LoadK r1, k0                         <fn #1 make>
+0001  SetGlobal g1, r1
+0002  LoadK r1, k1                         <fn #2 make>
+0003  SetGlobal g2, r1
+0004  LoadUnit r0
+0005  GetGlobal r1, g1
+0006  LoadK r2, k2                         1
+0007  Call r1, 1
+0008  GetGlobal r1, g2
+0009  LoadK r2, k3                         1.5
+0010  Call r1, 1
+0011  Halt r0
+
+== #1 make (registers: 3) ==
+0000  AddIntI r2, r0, #1
+0001  LoadK r1, k0                         <fn #3 f>
+0002  Return r1
+
+== #2 make (registers: 4) ==
+0000  Copy r2, r0
+0001  LoadK r3, k0                         1
+0002  CallNative r2, +, r2, 2
+0003  LoadK r1, k1                         <fn #3 f>
+0004  Return r1
+
+== #3 f (registers: 1) ==
+0000  LoadK r0, k0                         42
+0001  Return r0

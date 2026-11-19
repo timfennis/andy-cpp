@@ -1,0 +1,12 @@
+== <script> (registers: 4, globals: 1) ==
+0000  LoadK r3, k0                         1
+0001  SetGlobal g0, r3
+0002  LoadK r0, k1                         2
+0003  LoadK r1, k2                         3
+0004  Closure r3, c0                       <fn #1 <lambda>> captures r1
+0005  LoadUnit r2
+0006  Halt r2
+
+== #1 <lambda> (registers: 1) ==
+0000  GetUpvalue r0, u0
+0001  Return r0

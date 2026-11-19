@@ -1,0 +1,5 @@
+== <script> (registers: 3, globals: 0) ==
+0000  LoadK r0, k0                         1
+0001  LoadK r1, k1                         2
+0002  Copy r2, r0
+0003  Halt r2

@@ -1,0 +1,7 @@
+== <script> (registers: 2, globals: 1) ==
+0000  LoadK r1, k0                         1
+0001  MakeList r1, r1, 1
+0002  SetGlobal g0, r1
+0003  GetGlobal r0, g0
+0004  CheckType r0, t0                     [Int]
+0005  Halt r0
