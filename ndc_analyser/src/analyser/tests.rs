@@ -1,6 +1,6 @@
 use super::*;
 use itertools::Itertools;
-use ndc_analysis::{Binding, Callee, Candidate};
+use ndc_analysis::{Binding, Callee, Candidate, ResolvedVar};
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 
@@ -948,7 +948,7 @@ fn an_op_assignment_waits_for_its_operands_like_any_call() {
             .values()
             .collect::<Vec<_>>(),
         vec![&Binding::Resolved(Candidate::Scalar(Callee::Var(
-            ndc_analysis::ResolvedVar::Global { slot: 2 }
+            ResolvedVar::Global { slot: 2 }
         )))]
     );
 }
@@ -2001,5 +2001,26 @@ fn an_if_whose_other_branch_is_what_it_returns_is_its_first_branch() {
             .collect::<Vec<_>>();
         shown.sort();
         assert_eq!(shown, returns, "{source}");
+    }
+}
+
+#[test]
+fn a_function_lists_its_instances_in_the_order_they_were_made() {
+    // The compiler gives each instance its slot in the order they're listed,
+    // which mustn't depend on how a hash map orders them.
+    let source = (0..12)
+        .map(|n| format!("fn f{n}(x) => x + 1; f{n}(1); f{n}(2.5);"))
+        .join(" ");
+    let (_, result) = analyse_with_globals(&source, ambiguous_plus());
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    for instances in result.analysis.instances.values() {
+        let slots = instances
+            .iter()
+            .map(|instance| match instance.variable {
+                ResolvedVar::Global { slot } => slot,
+                ref other => panic!("an instance is a global, not {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert!(slots.is_sorted(), "{slots:?}");
     }
 }

@@ -161,7 +161,11 @@ impl<'a> Layout<'a> {
             });
             (node, binding)
         };
-        for (symbol, picks) in picks.instances {
+        // In the order the instances were made, as the compiler gives them
+        // their slots in the order they're listed.
+        let mut instances = picks.instances.into_iter().collect::<Vec<_>>();
+        instances.sort_unstable_by_key(|(symbol, _)| *symbol);
+        for (symbol, picks) in instances {
             let instance = Instance {
                 variable: self.location(symbol, None),
                 bindings: picks.bindings.into_iter().map(locate_binding).collect(),
