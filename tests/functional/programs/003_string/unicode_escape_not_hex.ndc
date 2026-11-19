@@ -1,0 +1,2 @@
+// expect-error: Unterminated or invalid Unicode escape
+let s = "\u{12g}";

@@ -16,6 +16,16 @@ The advantage is that it's a bit easier to guess that `A` is at index 4 in the e
 depending on which heart you're using there might be an invisible [Variation Selector](https://en.wikipedia.org/wiki/Variation_Selectors_(Unicode_block))
 after the heart which messes everything up. This specific behavior will probably change in the future.
 
+# Escape sequences
+
+Inside a string, a backslash starts an escape: `\n` is a newline, `\t` a tab, `\r` a carriage return, `\0` a null
+character, `\\` a backslash and `\"` a double quote. `\u{...}` is the Unicode character with the hexadecimal code point
+between the braces:
+
+```ndc
+print("caf\u{e9} \u{1F600}");  // café 😀
+```
+
 # Raw strings
 
 You may also define raw strings using this syntax borrowed from rust.

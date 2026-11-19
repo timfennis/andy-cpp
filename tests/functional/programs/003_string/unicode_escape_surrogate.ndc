@@ -1,0 +1,2 @@
+// expect-error: U+D800 is not a Unicode character
+let s = "\u{D800}";

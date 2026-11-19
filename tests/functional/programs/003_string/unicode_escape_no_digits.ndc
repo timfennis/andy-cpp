@@ -1,0 +1,2 @@
+// expect-error: Unicode escape without digits
+let s = "\u{}";

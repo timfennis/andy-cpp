@@ -1,0 +1,2 @@
+// expect-error: U+110000 is not a Unicode character
+let s = "\u{110000}";
