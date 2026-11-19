@@ -255,9 +255,8 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         Err(_) => return,
     };
 
-    let mut globals = ndc_vm::native_globals(&natives);
-    ndc_vm::fill_natives(&mut globals, &natives, &compiled);
-    let mut vm = Vm::new(compiled, globals).with_output(OutputSink::Buffer(Vec::new()));
+    let globals = ndc_vm::native_globals(&natives);
+    let mut vm = Vm::new(compiled, globals, &natives).with_output(OutputSink::Buffer(Vec::new()));
     let _ = vm.run();
 }
 

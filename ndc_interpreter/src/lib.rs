@@ -347,8 +347,7 @@ impl Interpreter {
             OutputSink::Stdout
         };
         let stdin = std::mem::replace(&mut self.input, InputSource::None);
-        ndc_vm::fill_natives(&mut self.globals, &self.natives, &code);
-        let mut vm = Vm::new(code, std::mem::take(&mut self.globals))
+        let mut vm = Vm::new(code, std::mem::take(&mut self.globals), &self.natives)
             .with_output(output)
             .with_input(stdin);
         #[cfg(feature = "trace")]

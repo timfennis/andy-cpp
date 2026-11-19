@@ -97,7 +97,7 @@ impl CompiledFunction {
 
     /// For a program run at the top level, the global slots of the natives
     /// its code reads, each of which must hold its native before it runs, as
-    /// [`crate::fill_natives`] puts them there.
+    /// [`crate::Vm::new`] puts them there.
     #[must_use]
     pub fn natives(&self) -> &[usize] {
         &self.natives

@@ -929,7 +929,7 @@ impl Compiler {
             ResolvedVar::Cell { slot } => self.ir.write(OpCode::GetCell(slot), span),
             ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::GetUpvalue(slot), span),
             ResolvedVar::Global { slot } => {
-                if slot < self.analysis.native_count {
+                if slot < self.analysis.builtin_count {
                     self.natives.borrow_mut().insert(slot);
                 }
                 self.ir.write(OpCode::GetGlobal(slot), span)

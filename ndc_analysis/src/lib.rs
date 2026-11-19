@@ -74,7 +74,7 @@ pub struct Analysis {
     pub instances: AHashMap<NodeId, Vec<Instance>>,
     /// How many of the global slots are the built-ins': the natives, then
     /// the intrinsics. The program's own globals follow them.
-    pub native_count: usize,
+    pub builtin_count: usize,
 }
 
 /// One instance of a generic function: where it's stored, and the picks in
@@ -102,7 +102,7 @@ pub struct Instance {
 impl Analysis {
     /// Adds what the analyser worked out about a later batch, such as the
     /// next REPL line. Node ids are unique across batches, so its tables join
-    /// these. Its instances, top-level frame size, global count and native
+    /// these. Its instances, top-level frame size, global count and built-in
     /// count replace
     /// these: they're what compiling the later batch takes, which for
     /// [`Self::instances`] means the instances it made, of its own functions
@@ -125,7 +125,7 @@ impl Analysis {
             top_level_frame_size,
             global_count,
             instances,
-            native_count,
+            builtin_count,
         } = later;
         self.expr_types.extend(expr_types);
         self.inferred_return_types.extend(inferred_return_types);
@@ -143,7 +143,7 @@ impl Analysis {
         self.top_level_frame_size = top_level_frame_size;
         self.global_count = global_count;
         self.instances = instances;
-        self.native_count = native_count;
+        self.builtin_count = builtin_count;
     }
 
     /// What the identifier expression `identifier` refers to; `Binding::None`
