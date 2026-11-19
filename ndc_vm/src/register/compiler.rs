@@ -6,8 +6,8 @@
 //! register; temporaries take the registers after the locals, a watermark
 //! that goes up while an expression needs them and back down when it's done.
 //!
-//! It compiles part of the language so far; anything else fails with a
-//! "not yet supported on the register VM" error that names it.
+//! It compiles all of the language but a REPL line that makes new instances
+//! of a generic function an earlier line declared.
 
 use super::chunk::{Builder, Label};
 use super::instr::{Instr, Reg, WINDOW};
@@ -17,7 +17,7 @@ use crate::value::{CompiledFunction, Function};
 use crate::{Natives, Value};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, CaptureSource, Instance, ResolvedVar};
 use ndc_core::collections::{HashMap, HashSet};
-use ndc_core::{NodeId, StaticType};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -454,7 +454,7 @@ impl Compiler {
             }
             Expression::Identifier { .. } => {
                 let binding = self.binding(id);
-                self.compile_callee(&binding, dest, span)
+                self.compile_callee(&binding, Some(id), dest, span)
             }
             Expression::Statement(statement) => {
                 self.compile_expr(*statement, Dest::Discard)?;
@@ -898,6 +898,15 @@ impl Compiler {
         let span = function.span;
         if let Expression::Identifier { .. } = function.expression {
             let binding = self.binding(function.id);
+            if let Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(intrinsic))) = binding {
+                return self.compile_intrinsic_call(
+                    intrinsic,
+                    function.id,
+                    exprs(arguments),
+                    dest,
+                    span,
+                );
+            }
             return self.compile_binding_call(&binding, exprs(arguments), dest, span);
         }
         let base = self.alloc_temp(span)?;
@@ -917,11 +926,9 @@ impl Compiler {
         dest: Dest,
         span: Span,
     ) -> Result<Operand, CompileError> {
+        // A binding no name refers to, as a getter's, isn't an intrinsic.
         if let Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(_))) = binding {
-            return Err(CompileError::not_yet_supported(
-                "intrinsics, such as `cast`",
-                span,
-            ));
+            return Err(CompileError::unnamed_intrinsic(span));
         }
         match self.native_call(binding) {
             Some(NativeCall::Op(op)) => return self.compile_op(op, arguments, dest, span),
@@ -939,41 +946,30 @@ impl Compiler {
             Binding::Resolved(Candidate::Vec(_)) | Binding::PerPosition(_)
         );
         let base = self.alloc_temp(span)?;
-        self.compile_callee(binding, Dest::Reg(base), span)?;
+        self.compile_callee(binding, None, Dest::Reg(base), span)?;
         self.finish_call(base, arguments, vectorised, dest, span)
     }
 
-    /// Puts the value of what `binding` refers to where `dest` says: the
-    /// variable's value, or for an operator whose tuple positions take
-    /// different overloads, the tuple of them, which `CallVec` applies
-    /// position by position.
+    /// Puts the value of what `binding`, named at `site` if a name refers
+    /// to it, refers to where `dest` says: the variable's value, or for an
+    /// operator whose tuple positions take different overloads, the tuple
+    /// of them, which `CallVec` applies position by position.
     fn compile_callee(
         &mut self,
         binding: &Binding,
+        site: Option<NodeId>,
         dest: Dest,
         span: Span,
     ) -> Result<Operand, CompileError> {
         match binding {
             Binding::None => Err(CompileError::unresolved_binding(span)),
-            Binding::Resolved(candidate) => match candidate.var() {
-                Callee::Var(variable) => self.read_variable(variable, dest, span),
-                Callee::Intrinsic(_) => Err(CompileError::not_yet_supported(
-                    "an intrinsic used as a value",
-                    span,
-                )),
-            },
+            Binding::Resolved(candidate) => self.callee_value(candidate.var(), site, dest, span),
             Binding::PerPosition(overloads) => {
                 let mark = self.next_temp;
                 let base = Self::register(mark, span)?;
                 for &overload in overloads {
                     let reg = self.alloc_temp(span)?;
-                    let Callee::Var(variable) = overload else {
-                        return Err(CompileError::not_yet_supported(
-                            "an intrinsic used as a value",
-                            span,
-                        ));
-                    };
-                    self.read_variable(variable, Dest::Reg(reg), span)?;
+                    self.callee_value(overload, site, Dest::Reg(reg), span)?;
                 }
                 let len = u16::try_from(overloads.len())
                     .map_err(|_too_many| CompileError::too_many_registers(span))?;
@@ -984,6 +980,152 @@ impl Compiler {
                 Ok(Self::placed(dest, dst))
             }
         }
+    }
+
+    /// Puts `callee`, named at `site`, where `dest` says as a function
+    /// value. An intrinsic is stored nowhere, so it becomes a small function
+    /// around its instruction: `cast::<Int>` in `xs.map(cast::<Int>)` is
+    /// `fn(x) => cast::<Int>(x)`.
+    fn callee_value(
+        &mut self,
+        callee: Callee,
+        site: Option<NodeId>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        match (callee, site) {
+            (Callee::Var(variable), _) => self.read_variable(variable, dest, span),
+            (Callee::Intrinsic(intrinsic), Some(site)) => {
+                let function = self.intrinsic_function(intrinsic, site, span)?;
+                let value = Value::function(Function::Compiled(Rc::new(function)));
+                self.load_constant(value, dest, span)
+            }
+            (Callee::Intrinsic(_), None) => Err(CompileError::unnamed_intrinsic(span)),
+        }
+    }
+
+    /// The function value of `intrinsic` named at `site`: the intrinsic's
+    /// instruction on its parameter, and a return. It's compiled in the
+    /// instance being compiled, so what it reads of the instance's picks is
+    /// that instance's.
+    fn intrinsic_function(
+        &self,
+        intrinsic: Intrinsic,
+        site: NodeId,
+        span: Span,
+    ) -> Result<CompiledFunction, CompileError> {
+        let arity = intrinsic.arity();
+        let static_type = self
+            .analysis
+            .expr_types
+            .get(&site)
+            .cloned()
+            .unwrap_or_else(|| StaticType::Function {
+                parameters: Some(vec![StaticType::Any; arity]),
+                return_type: Box::new(StaticType::Any),
+            });
+        let mut compiler = self.nested(arity, self.instance);
+        let src = Reg(0);
+        match intrinsic {
+            Intrinsic::Cast | Intrinsic::TryCast => {
+                compiler.emit_cast(site, intrinsic == Intrinsic::TryCast, src, span)?;
+            }
+            // Only a read of `[]` with a number written in the code calls
+            // it, which `Self::compile_intrinsic_call` writes.
+            Intrinsic::TupleIndex => return Err(CompileError::unnamed_intrinsic(span)),
+        }
+        compiler.emit(Instr::Return { src }, Span::synthetic());
+        if compiler.used_instance.get() {
+            self.used_instance.set(true);
+        }
+        Ok(compiler.finish(None, static_type, 0, Vec::new()))
+    }
+
+    /// Compiles the call at `span` of `intrinsic`, named at `site`, with
+    /// `arguments`. The tuple index takes its index, a number written in the
+    /// code, as the instruction's operand: `t[1]` is `TupleIndex` of `t`'s
+    /// register and 1. A cast checks its argument in the register it's put
+    /// in, which is the call's own.
+    fn compile_intrinsic_call(
+        &mut self,
+        intrinsic: Intrinsic,
+        site: NodeId,
+        arguments: Vec<Arg>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        if intrinsic == Intrinsic::TupleIndex {
+            let [tuple, Arg::Expr(index)] = <[_; 2]>::try_from(arguments)
+                .ok()
+                .expect("internal error: the tuple index takes a tuple and an index")
+            else {
+                unreachable!("internal error: the tuple index's index is an expression");
+            };
+            let index = index.integer_literal().expect(
+                "internal error: the analyser picks the tuple index for a number written in the code",
+            );
+            let index =
+                i16::try_from(index).map_err(|_too_large| CompileError::index_too_large(span))?;
+            let mark = self.next_temp;
+            let src = match self.compile_arg(tuple, Dest::Any)? {
+                Operand::Local(reg) | Operand::Temp(reg) => reg,
+                Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+            };
+            // `TupleIndex` reads the tuple before it writes `dst`.
+            self.next_temp = mark;
+            let dst = self.place(dest, span)?;
+            self.emit(Instr::TupleIndex { dst, src, index }, span);
+            return Ok(Self::placed(dest, dst));
+        }
+        let [value] = <[_; 1]>::try_from(arguments)
+            .ok()
+            .expect("internal error: a cast takes one value");
+        let dst = match dest {
+            Dest::Reg(reg) => reg,
+            Dest::Any | Dest::Discard => self.alloc_temp(span)?,
+        };
+        self.compile_arg(value, Dest::Reg(dst))?;
+        self.emit_cast(site, intrinsic == Intrinsic::TryCast, dst, span)?;
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// Writes the cast at `site` of the value in `reg`, in place: a check
+    /// that it has the type the analyser picked for the instance being
+    /// compiled, or for `optional`, `Some` of the value if it has it and
+    /// `None` if not.
+    fn emit_cast(
+        &mut self,
+        site: NodeId,
+        optional: bool,
+        reg: Reg,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let check = match self
+            .instance_pick(|instance| instance.cast_checks.get(&site))
+            .or_else(|| self.analysis.cast_checks.get(&site))
+        {
+            None => return Err(CompileError::unresolved_cast(span)),
+            Some(check) => check.clone(),
+        };
+        let instr = match (check, optional) {
+            (None, false) => return Ok(()),
+            (Some(target), false) => Instr::CheckType {
+                reg,
+                typ: self.builder.static_type(target),
+            },
+            // A value proven to be the type is always `Some`, as every
+            // value is an `Any`.
+            (None, true) => Instr::TryCast {
+                reg,
+                typ: self.builder.static_type(StaticType::Any),
+            },
+            (Some(target), true) => Instr::TryCast {
+                reg,
+                typ: self.builder.static_type(target),
+            },
+        };
+        self.emit(instr, span);
+        Ok(())
     }
 
     /// What a call `binding` resolves to compiles to, if it picks one

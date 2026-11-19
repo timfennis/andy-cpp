@@ -1,7 +1,6 @@
 //! Runs programs on the stack VM and on the register VM, which must print
 //! the same, give the same value, and fail with the same error at the same
-//! place. The programs use the part of the language the register VM
-//! compiles so far.
+//! place.
 
 use ndc_interpreter::{Backend, Interpreter, InterpreterError};
 use std::fs;
@@ -695,6 +694,46 @@ fn assignment_with_an_operator_to_every_kind_of_target() {
 }
 
 #[test]
+fn casts() {
+    let outcome = same_on_both(
+        r#"fn f() {
+            let a: Any = 3;
+            let n = cast::<Int>(a);
+            let s = cast?::<String>(a);
+            let i = cast?::<Int>(a);
+            print(n + 1, s, i, a);
+            let anything: Any = fn(x: Int) => x * 2;
+            let g = cast::<fn(Int) -> Int>(anything);
+            print(g(4), [a, a].map(cast::<Int>), [a].map(cast?::<String>));
+            let text: Any = "x";
+            cast::<Int>(text)
+        }
+        f();"#,
+    );
+    assert_eq!(outcome.output, "4 None Some(3) 3\n8 [3,3] [None]\n");
+    assert!(
+        outcome
+            .result
+            .as_ref()
+            .is_err_and(|error| error.contains("cannot cast String to Int")),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn tuple_indexes() {
+    let outcome = same_on_both(
+        "fn f() {
+            let t = (1, \"two\", 3.0);
+            fn make() { (4, 5) }
+            print(t[0], t[1], t[-1], make()[1], (6, 7)[-2]);
+        }
+        f();",
+    );
+    assert_eq!(outcome.output, "1 two 3.0 5 6\n");
+}
+
+#[test]
 fn deep_recursion() {
     let outcome = same_on_both(
         "fn depth(n) { if n == 0 { 0 } else { 1 + depth(n - 1) } }
@@ -760,19 +799,28 @@ fn the_test_programs_it_compiles() {
     assert!(compiled > 0);
 }
 
+/// A REPL line can't make new instances of a generic function an earlier
+/// line declared yet.
 #[test]
-fn constructs_it_cant_compile_yet_are_errors() {
-    for (program, construct) in [
-        ("let x: Any = 1; cast::<Int>(x)", "intrinsics"),
-        ("let t = (1, 2); t[0]", "intrinsics"),
-    ] {
-        let outcome = run(Backend::Register, program);
-        let error = outcome.result.expect_err(program);
-        assert!(
-            error.contains("not yet supported on the register VM") && error.contains(construct),
-            "{program}: {error}"
-        );
-    }
+fn instances_of_an_earlier_lines_function_are_errors() {
+    let mut interpreter = Interpreter::capturing();
+    interpreter.configure(ndc_stdlib::register);
+    interpreter.set_backend(Backend::Register);
+    interpreter
+        .eval("fn inc(x) { x + 1 }")
+        .expect("a declaration");
+    let error = interpreter
+        .eval("inc(1)")
+        .expect_err("an instance of `inc`");
+    let InterpreterError::Compiler { cause } = error else {
+        panic!("a compile error: {error:?}");
+    };
+    assert!(
+        cause.to_string().contains(
+            "not yet supported on the register VM: a generic function declared by an earlier REPL line"
+        ),
+        "{cause}"
+    );
 }
 
 /// A map hashes a key by what it holds when the key goes in, and every key

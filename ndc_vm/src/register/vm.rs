@@ -5,8 +5,9 @@ use crate::hash_map::HashMap;
 use crate::native_op::NativeOp;
 use crate::value::{ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::vm::{
-    MAX_CALL_DEPTH, MemoCache, calls_too_deep, convert_returned, iterator_of, make_range, memo_key,
-    not_a_bool, refused_arguments, unpack_into,
+    MAX_CALL_DEPTH, MemoCache, calls_too_deep, cannot_cast, convert, convert_returned, iterator_of,
+    make_range, memo_key, not_a_bool, refused_arguments, try_cast_value, tuple_element,
+    unpack_into,
 };
 use crate::{Object, Value, Vm};
 use ndc_analysis::CaptureSource;
@@ -569,6 +570,22 @@ impl Vm {
                             Ok(range) => regs[dst.index()] = range,
                             Err(message) => break Exit::Error(VmError::native(message)),
                         }
+                    }
+                    Instr::TupleIndex { dst, src, index } => {
+                        match tuple_element(&regs[src.index()], i64::from(index)) {
+                            Ok(element) => regs[dst.index()] = element,
+                            Err(message) => break Exit::Error(VmError::native(message)),
+                        }
+                    }
+                    Instr::CheckType { reg, typ } => {
+                        let target = &chunk.types()[typ as usize];
+                        if !convert(&mut regs[reg.index()], target) {
+                            let message = cannot_cast(&regs[reg.index()], target);
+                            break Exit::Error(VmError::native(message));
+                        }
+                    }
+                    Instr::TryCast { reg, typ } => {
+                        try_cast_value(&mut regs[reg.index()], &chunk.types()[typ as usize]);
                     }
                     Instr::GetIterator { dst, src } => match iterator_of(&regs[src.index()]) {
                         Ok(iterator) => regs[dst.index()] = iterator,
@@ -1904,6 +1921,102 @@ mod tests {
         });
         let error = run(&Natives::default(), function).unwrap_err();
         assert_eq!(error.message, "Int is not iterable");
+    }
+
+    #[test]
+    fn a_tuple_element_read_into_the_tuples_register() {
+        let function = program(2, vec![], |b| {
+            let k = b.constant(tuple(&[4, 5, 6]));
+            emit(b, Instr::LoadK { dst: Reg(0), k });
+            emit(
+                b,
+                Instr::Copy {
+                    dst: Reg(1),
+                    src: Reg(0),
+                },
+            );
+            emit(
+                b,
+                Instr::TupleIndex {
+                    dst: Reg(0),
+                    src: Reg(0),
+                    index: -1,
+                },
+            );
+            emit(
+                b,
+                Instr::TupleIndex {
+                    dst: Reg(1),
+                    src: Reg(1),
+                    index: 0,
+                },
+            );
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    len: 2,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        assert_eq!(run(&Natives::default(), function).unwrap(), tuple(&[6, 4]));
+    }
+
+    /// A cast checks the value in its register, and an optional one makes
+    /// it `Some` of the value or `None` there.
+    #[test]
+    fn casts_in_place() {
+        let function = program(3, vec![], |b| {
+            load_int(b, Reg(0), 1);
+            let int = b.static_type(StaticType::Int);
+            let string = b.static_type(StaticType::String);
+            emit(
+                b,
+                Instr::CheckType {
+                    reg: Reg(0),
+                    typ: int,
+                },
+            );
+            load_int(b, Reg(1), 2);
+            emit(
+                b,
+                Instr::TryCast {
+                    reg: Reg(1),
+                    typ: int,
+                },
+            );
+            load_int(b, Reg(2), 3);
+            emit(
+                b,
+                Instr::TryCast {
+                    reg: Reg(2),
+                    typ: string,
+                },
+            );
+            emit(
+                b,
+                Instr::MakeTuple {
+                    dst: Reg(0),
+                    base: Reg(0),
+                    len: 3,
+                },
+            );
+            emit(
+                b,
+                Instr::CheckType {
+                    reg: Reg(0),
+                    typ: string,
+                },
+            );
+            emit(b, Instr::Halt { src: Reg(0) });
+        });
+        let error = run(&Natives::default(), function).unwrap_err();
+        assert_eq!(
+            error.message,
+            "cannot cast (Int, Option<Int>, Option<Any>) to String"
+        );
     }
 
     #[test]
