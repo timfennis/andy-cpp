@@ -77,7 +77,8 @@ impl std::fmt::Debug for JumpTarget {
 /// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
 /// | `NewCell`     | `[…]`                                   | 0 (puts a fresh cell in a slot)            |
 /// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
-/// | `TupleIndex`  | `[… tuple index → … element]`          | −1                                         |
+/// | `TupleIndex`  | `[… tuple → … element]`                | 0 (the index is the operand)               |
+/// | `GetLocalTupleIndex` | `[… → … element]`               | +1 (reads the element in the slot's tuple) |
 /// | `AddInt`, …   | `[… left right → … result]`            | −1 (a binary [`NativeOp`])                 |
 /// | `NegInt`, …   | `[… value → … result]`                 | 0 (a unary [`NativeOp`])                   |
 // NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
@@ -171,9 +172,13 @@ pub enum OpCode {
     /// Pops a value, pushes `Some(value)` if it conforms to the type and
     /// `None` if it doesn't. `[… value → … option]`
     TryCast(Rc<StaticType>),
-    /// Pops an index and a tuple, pushes the tuple's element at the index,
-    /// counting a negative index from the end. `[… tuple index → … element]`
-    TupleIndex,
+    /// Replaces the tuple on top with its element at the index, counting a
+    /// negative index from the end. `[… tuple → … element]`
+    TupleIndex(i64),
+    /// Pushes the element at `index` of the tuple in local slot `slot`, as
+    /// `GetLocal(slot)` then `TupleIndex(index)` would, without copying the
+    /// tuple. `[… → … element]`
+    GetLocalTupleIndex { slot: usize, index: i64 },
     /// [`NativeOp::AddInt`] of the two values on top. `[… left right → … result]`
     AddInt,
     /// [`NativeOp::SubInt`] of the two values on top. `[… left right → … result]`
@@ -268,7 +273,8 @@ impl OpCode {
             Self::CheckType(_) => "CheckType",
             Self::CheckUnshared(_) => "CheckUnshared",
             Self::TryCast(_) => "TryCast",
-            Self::TupleIndex => "TupleIndex",
+            Self::TupleIndex(_) => "TupleIndex",
+            Self::GetLocalTupleIndex { .. } => "GetLocalTupleIndex",
             Self::AddInt => "AddInt",
             Self::SubInt => "SubInt",
             Self::MulInt => "MulInt",
@@ -346,8 +352,9 @@ impl OpCode {
             Self::CheckType(_) | Self::CheckUnshared(_) => 0,
             // Replaces the value with the option holding it.
             Self::TryCast(_) => 0,
-            // Pops the index and the tuple, pushes the element.
-            Self::TupleIndex => -1,
+            // Replaces the tuple with its element.
+            Self::TupleIndex(_) => 0,
+            Self::GetLocalTupleIndex { .. } => 1,
             // Pops two operands, pushes the result.
             Self::AddInt
             | Self::SubInt
@@ -421,7 +428,10 @@ impl std::fmt::Debug for OpCode {
             Self::CheckType(typ) => write!(f, "CheckType({typ})"),
             Self::CheckUnshared(typ) => write!(f, "CheckUnshared({typ})"),
             Self::TryCast(typ) => write!(f, "TryCast({typ})"),
-            Self::TupleIndex => write!(f, "TupleIndex"),
+            Self::TupleIndex(index) => write!(f, "TupleIndex({index})"),
+            Self::GetLocalTupleIndex { slot, index } => {
+                write!(f, "GetLocalTupleIndex({slot}, {index})")
+            }
             Self::AddInt => write!(f, "AddInt"),
             Self::SubInt => write!(f, "SubInt"),
             Self::MulInt => write!(f, "MulInt"),

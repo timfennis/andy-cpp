@@ -5,7 +5,7 @@ use crate::overloads::{CallKind, Overloads};
 use itertools::Itertools;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::{Intrinsic, NodeId, StaticType};
-use ndc_lexer::{NumericLiteral, Span};
+use ndc_lexer::Span;
 use ndc_parser::{Expression, ExpressionLocation};
 use ndc_resolver::{Candidates, SymbolId};
 
@@ -333,7 +333,7 @@ impl Analyser {
             kind,
             "[]",
             span,
-            literal_index(index),
+            index.integer_literal(),
         )
     }
 
@@ -491,26 +491,4 @@ pub(super) fn is_known_before(typ: &StaticType, first: usize) -> bool {
         StaticType::Any | StaticType::Generic(_) => true,
         _ => false,
     })
-}
-
-/// The value of an index that's an integer written in the code, as in
-/// `t[1]` or `t[-1]`.
-fn literal_index(index: &ExpressionLocation) -> Option<i64> {
-    match &index.expression {
-        Expression::NumericLiteral(NumericLiteral::Int64(value)) => Some(*value),
-        Expression::Call {
-            function,
-            arguments,
-        }
-        | Expression::OperatorCall {
-            function,
-            arguments,
-        } => match (&function.expression, &arguments[..]) {
-            (Expression::Identifier { name, .. }, [operand]) if name == "-" => {
-                literal_index(operand).and_then(i64::checked_neg)
-            }
-            _ => None,
-        },
-        _ => None,
-    }
 }

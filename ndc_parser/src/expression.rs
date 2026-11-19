@@ -379,6 +379,29 @@ impl ExpressionLocation {
             tuple @ Self { .. } => tuple,
         }
     }
+
+    /// The value of this expression if it's an integer written in the code,
+    /// as the index in `t[1]` or `t[-1]` is.
+    #[must_use]
+    pub fn integer_literal(&self) -> Option<i64> {
+        match &self.expression {
+            Expression::NumericLiteral(NumericLiteral::Int64(value)) => Some(*value),
+            Expression::Call {
+                function,
+                arguments,
+            }
+            | Expression::OperatorCall {
+                function,
+                arguments,
+            } => match (&function.expression, &arguments[..]) {
+                (Expression::Identifier { name, .. }, [operand]) if name == "-" => {
+                    operand.integer_literal().and_then(i64::checked_neg)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl AssignmentTarget {

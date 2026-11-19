@@ -1097,18 +1097,47 @@ fn float_division_and_unary_operators_are_instructions() {
 // let t = (1, "a"); t[1]
 //
 // A tuple indexed by a number written in the code reads the element in
-// place: the tuple and the index, then `TupleIndex`.
+// place: the tuple, then `TupleIndex` with the index as its operand.
 #[test]
 fn a_literal_index_of_a_tuple_is_read_in_place() {
     let ops = compile_with_stdlib("let t = (1, \"a\"); t[1]");
     assert!(
-        ops.windows(3)
-            .any(|ops| matches!(ops, [GetGlobal(_), Constant(_), TupleIndex])),
-        "expected t, 1, TupleIndex, got: {ops:?}",
+        ops.windows(2)
+            .any(|ops| matches!(ops, [GetGlobal(_), TupleIndex(1)])),
+        "expected t, TupleIndex(1), got: {ops:?}",
     );
     assert!(
         ops.iter()
             .all(|op| !matches!(op, Call(_) | CallNative { .. })),
         "the index should be no call: {ops:?}",
+    );
+}
+
+// fn f(t: (Int, Int)) { t[1] }
+//
+// A local tuple's element is read straight from its slot, in one
+// instruction.
+#[test]
+fn a_literal_index_of_a_local_tuple_is_one_instruction() {
+    assert_eq!(
+        compile_nested_function_with_stdlib("fn f(t: (Int, Int)) { t[-1] }", &[0]),
+        [GetLocalTupleIndex { slot: 0, index: -1 }, Return],
+    );
+}
+
+// let t = (1, "a"); t[-1]
+//
+// A negative index is the operand too, counted from the end when it runs.
+#[test]
+fn a_negative_literal_index_of_a_tuple_is_the_operand() {
+    let ops = compile_with_stdlib("let t = (1, \"a\"); t[-1]");
+    assert!(
+        ops.windows(2)
+            .any(|ops| matches!(ops, [GetGlobal(_), TupleIndex(-1)])),
+        "expected t, TupleIndex(-1), got: {ops:?}",
+    );
+    assert!(
+        ops.iter().all(|op| !matches!(op, NegInt)),
+        "the index should be no negation: {ops:?}",
     );
 }
