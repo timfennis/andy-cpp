@@ -276,7 +276,7 @@ While the branch is open, avoid new stack-VM instructions on master: each one ha
 
 ### Step 0: groundwork, first on the branch
 
-- **0.1 Benchmark script.** One script that builds a binary, runs Advent of Brian 2025 (on a copy, see memory `reference-advent-of-brian`), `benches/programs/*.ndc` and the two programs in the appendix, five interleaved runs against a baseline binary, `perf stat -e task-clock`, and prints per-program times, ratios and totals. Record the baseline at the branch point in the branch's first PR.
+- **0.1 Benchmark script.** `benches/compare.py BASELINE CANDIDATE` runs `benches/programs/*.ndc` and Advent of Brian 2025 (on a copy) on two binaries: one run of each to check they print the same, then five interleaved runs, the fastest counting. It reports CPU time and peak memory per program, the totals and the merge gate.
 - **0.2 Characterisation tests.** `.ndc` tests under `tests/functional/programs` that pin what the migration could change, written and passing on the stack VM first:
   - evaluation order when an operand assigns a variable an earlier operand read (binary ops, call arguments, list, tuple and map literals, index and member targets, op-assignment);
   - `a ++ b` leaves `a` alone; `a ++ b ++ c` and `xs ++= make()` still work;

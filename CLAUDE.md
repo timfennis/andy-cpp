@@ -23,6 +23,10 @@ cargo test test_001_math_001_addition
 # Run benchmarks
 cargo bench -p benches
 
+# Compare two ndc binaries on whole programs (benches/programs and, when it's
+# checked out, Advent of Brian): CPU time and peak memory per program, totals
+python3 benches/compare.py path/to/baseline/ndc path/to/candidate/ndc
+
 # Start REPL
 cargo run --bin ndc
 
