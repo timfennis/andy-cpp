@@ -79,6 +79,12 @@ pub struct CompiledFunction {
     /// its code reads, in the functions it declares too, each of which must
     /// hold its native before it runs; empty for any other function.
     pub(crate) natives: Vec<usize>,
+    /// The function's code for the register VM, empty for a function the
+    /// stack compiler compiled: a function is compiled for one of the two.
+    pub(crate) registers: crate::register::Chunk,
+    /// How many registers the function uses on the register VM: its
+    /// locals, then the most temporaries its code needs at once.
+    pub(crate) frame_size: usize,
 }
 
 #[derive(Clone)]
@@ -109,6 +115,13 @@ impl CompiledFunction {
 
     pub fn body(&self) -> &Chunk {
         &self.body
+    }
+
+    /// Whether the register compiler compiled the function, so it runs only
+    /// on the register VM.
+    #[must_use]
+    pub fn is_register_code(&self) -> bool {
+        !self.registers.is_empty()
     }
 }
 impl Function {
