@@ -1,10 +1,10 @@
 use ndc_analyser::Analyser;
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
-pub use ndc_core::IntrinsicFunction;
 /// The type of a value as the analyser sees it, which each of
-/// [`Interpreter::functions`] has as its `static_type`.
+/// [`Interpreter::natives`] has, as [`Builtins::static_type`] gives it.
 pub use ndc_core::StaticType;
+pub use ndc_core::{Builtins, IntrinsicFunction};
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
 pub use ndc_vm::InputSource;
@@ -18,13 +18,15 @@ pub use ndc_analyser::{AnalysisError, AnalysisResult};
 pub use ndc_vm::duration::format_duration;
 #[cfg(feature = "trace")]
 pub use ndc_vm::tracer;
-pub use ndc_vm::{NativeFunction, Value};
+pub use ndc_vm::{NativeFunction, NativeSpec, Natives, Value};
 pub use timing::ExecutionTimings;
 
 mod timing;
 
 pub struct Interpreter {
-    function_registry: FunctionRegistry<Rc<NativeFunction>>,
+    /// Shared with the analyser, which asks for a native's type when a
+    /// program uses it.
+    natives: Rc<Natives>,
     /// The VM's globals: the registered functions, numbered the way the
     /// analyser numbers them, then the values of the program's top-level
     /// declarations. A resumable interpreter keeps them from one evaluation to
@@ -73,13 +75,13 @@ impl Interpreter {
     }
 
     fn from_capturing(capturing: bool) -> Self {
-        // The registry starts with the language's intrinsics, which the
-        // analyser and the globals know from it.
+        // No natives yet, and the language's intrinsics, which the analyser
+        // and the globals know from the natives.
         Self {
             // Made with the natives before the first evaluation.
             analyser: Analyser::with_natives(Vec::new()),
             globals: Vec::new(),
-            function_registry: FunctionRegistry::default(),
+            natives: Rc::new(Natives::default()),
             capturing,
             session: Session::default(),
             source_db: SourceDb::new(),
@@ -126,24 +128,23 @@ impl Interpreter {
         Self { input, ..self }
     }
 
-    pub fn configure<F: FnOnce(&mut FunctionRegistry<Rc<NativeFunction>>)>(&mut self, f: F) {
-        f(&mut self.function_registry);
+    /// Registers the natives `f` declares, after the ones already registered.
+    pub fn configure<F: FnOnce(&mut FunctionRegistry<NativeSpec>)>(&mut self, f: F) {
+        let mut registry = FunctionRegistry::default();
+        f(&mut registry);
+        // `new_analyser` is the only place that shares the natives, so with
+        // the analyser replaced this holds the only reference. The analyser
+        // is made again before the next evaluation.
+        self.analyser = Analyser::with_natives(Vec::new());
+        Rc::get_mut(&mut self.natives)
+            .expect("internal error: only the analyser shares the natives")
+            .extend(registry);
         self.start_over();
     }
 
-    /// An analyser that knows the functions in `registry` and nothing else.
-    fn new_analyser(registry: &FunctionRegistry<Rc<NativeFunction>>) -> Analyser {
-        let natives = registry
-            .iter()
-            .map(|fun| (fun.name.clone(), fun.static_type.clone(), None));
-        let intrinsics = registry.intrinsics().map(|fun| {
-            (
-                fun.name.clone(),
-                fun.static_type.clone(),
-                Some(fun.intrinsic),
-            )
-        });
-        Analyser::with_natives(natives.chain(intrinsics).collect())
+    /// An analyser that knows `natives` and nothing else.
+    fn new_analyser(natives: &Rc<Natives>) -> Analyser {
+        Analyser::with_builtins(Rc::clone(natives) as Rc<dyn Builtins>)
     }
 
     /// Forgets everything evaluated so far, keeping only what was printed,
@@ -156,9 +157,9 @@ impl Interpreter {
     /// started over since the last evaluation.
     fn refresh(&mut self) {
         if std::mem::take(&mut self.stale) {
-            self.analyser = Self::new_analyser(&self.function_registry);
+            self.analyser = Self::new_analyser(&self.natives);
             self.session = Session::default();
-            self.globals = ndc_vm::native_globals(&self.function_registry);
+            self.globals = ndc_vm::native_globals(&self.natives);
         }
     }
 
@@ -167,14 +168,10 @@ impl Interpreter {
         self.tracer = Some(tracer);
     }
 
-    /// The registered natives, in global slot order.
-    pub fn functions(&self) -> impl Iterator<Item = &Rc<NativeFunction>> {
-        self.function_registry.iter()
-    }
-
-    /// The registered intrinsics, in global slot order, after the natives.
-    pub fn intrinsics(&self) -> impl Iterator<Item = &IntrinsicFunction> {
-        self.function_registry.intrinsics()
+    /// The registered natives, in global slot order, followed by the
+    /// intrinsics.
+    pub fn natives(&self) -> &Natives {
+        &self.natives
     }
 
     /// Returns the captured output, or `None` if this interpreter writes to stdout.
@@ -350,6 +347,7 @@ impl Interpreter {
             OutputSink::Stdout
         };
         let stdin = std::mem::replace(&mut self.input, InputSource::None);
+        ndc_vm::fill_natives(&mut self.globals, &self.natives, &code);
         let mut vm = Vm::new(code, std::mem::take(&mut self.globals))
             .with_output(output)
             .with_input(stdin);
@@ -405,6 +403,33 @@ pub enum InterpreterError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A native that returns `value`, as `name()`.
+    fn constant(name: &'static str, value: i64) -> FunctionRegistry<NativeSpec> {
+        let mut registry = FunctionRegistry::default();
+        registry.declare_global_fn(NativeSpec::with_signature(
+            name,
+            "Returns a constant.",
+            "() -> Int",
+            move || ndc_vm::value::NativeFunc::Simple(Box::new(move |_| Ok(Value::Int(value)))),
+        ));
+        registry
+    }
+
+    #[test]
+    fn natives_can_be_added_after_an_evaluation() {
+        let mut interpreter = Interpreter::capturing();
+        interpreter.configure(|env| *env = constant("one", 1));
+        assert_eq!(interpreter.eval("one()").expect("one").to_string(), "1");
+        interpreter.configure(|env| *env = constant("two", 2));
+        assert_eq!(
+            interpreter
+                .eval("(one(), two())")
+                .expect("both")
+                .to_string(),
+            "(1,2)"
+        );
+    }
 
     #[test]
     fn a_one_shot_interpreter_forgets_earlier_declarations() {

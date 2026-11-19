@@ -1,0 +1,13 @@
+// A program's globals only hold the natives its code reads: called, held as a
+// value, in a nested function, picked while it runs, or behind an index.
+let size = len;
+fn nested() {
+    fn inner(xs) => xs.sum;
+    inner([1, 2, 3])
+}
+let pair = (1, "abc");
+let xs = [1, 2];
+xs[0] = 5;
+xs[1] += 1;
+print(size([1, 2]), nested(), pair[1], xs[0], xs[1]);
+// expect-output: 2 6 abc 5 3

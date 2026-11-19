@@ -283,18 +283,9 @@ fn analyse(program: &Program) {
     };
     let mut registry = FunctionRegistry::default();
     ndc_stdlib::register(&mut registry);
-    let natives = registry
-        .iter()
-        .map(|function| (function.name.clone(), function.static_type.clone(), None))
-        .chain(registry.intrinsics().map(|function| {
-            (
-                function.name.clone(),
-                function.static_type.clone(),
-                Some(function.intrinsic),
-            )
-        }))
-        .collect();
-    let mut analyser = Analyser::with_natives(natives);
+    let mut natives = ndc_vm::Natives::default();
+    natives.extend(registry);
+    let mut analyser = Analyser::with_builtins(std::rc::Rc::new(natives));
     for expression in &expressions {
         analyser.analyse(expression);
     }

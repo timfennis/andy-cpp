@@ -901,3 +901,33 @@ fn a_function_declared_in_an_instance_that_compiles_the_same_is_the_same() {
     let second = nested_functions(&function_constant(&program, 1))[0].clone();
     assert!(Rc::ptr_eq(&first, &second));
 }
+
+/// The global slots of the natives called `name`.
+fn native_slots(name: &str) -> Vec<usize> {
+    use ndc_interpreter::Builtins;
+    let mut interp = ndc_interpreter::Interpreter::capturing();
+    interp.configure(ndc_stdlib::register);
+    let natives = interp.natives();
+    (0..natives.len())
+        .filter(|&slot| natives.name(slot) == name)
+        .collect()
+}
+
+// The program lists every native its code reads, in the functions it
+// declares too, whether or not they're called, so the VM's globals hold them.
+#[test]
+fn a_program_lists_the_natives_its_functions_read() {
+    let program = compile_program_with_stdlib("fn f() { fn g() => len([1]); g } let h = print;");
+    let print = native_slots("print");
+    let len = native_slots("len");
+    assert!(program.natives().iter().any(|slot| print.contains(slot)));
+    assert!(program.natives().iter().any(|slot| len.contains(slot)));
+    assert!(
+        program
+            .natives()
+            .iter()
+            .all(|slot| print.contains(slot) || len.contains(slot)),
+        "only print and len are read: {:?}",
+        program.natives()
+    );
+}

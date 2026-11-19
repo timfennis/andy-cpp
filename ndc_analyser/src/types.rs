@@ -1,16 +1,68 @@
 use ahash::{AHashMap, AHashSet};
-use ndc_core::{StaticType, TypeVar};
+use ndc_core::{Builtins, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::SymbolId;
+use std::rc::Rc;
 
-/// The type of every value the name resolver declared, natives included,
-/// keyed by its symbol. A value keeps its type: an assignment must fit it.
-#[derive(Debug, Default)]
+/// The type of every value the name resolver declared, keyed by its symbol.
+/// A value keeps its type: an assignment must fit it. A built-in's type is
+/// the one [`Builtins`] gives for its slot, which may only be worked out when
+/// it's first asked for.
 pub(crate) struct TypeTable {
     types: AHashMap<SymbolId, StaticType>,
+    builtins: Rc<dyn Builtins>,
+    /// The global slot of each built-in's symbol.
+    builtin_slots: AHashMap<SymbolId, usize>,
+}
+
+impl Default for TypeTable {
+    /// A table of no built-ins.
+    fn default() -> Self {
+        Self::with_builtins(
+            Rc::new(Vec::<(String, StaticType, Option<ndc_core::Intrinsic>)>::new()),
+            AHashMap::new(),
+        )
+    }
+}
+
+impl std::fmt::Debug for TypeTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TypeTable")
+            .field("types", &self.types)
+            .field("builtin_slots", &self.builtin_slots)
+            .finish_non_exhaustive()
+    }
 }
 
 impl TypeTable {
+    /// A table whose built-ins are `builtins`, each under the symbol
+    /// `builtin_slots` gives its slot.
+    pub(crate) fn with_builtins(
+        builtins: Rc<dyn Builtins>,
+        builtin_slots: AHashMap<SymbolId, usize>,
+    ) -> Self {
+        Self {
+            types: AHashMap::new(),
+            builtins,
+            builtin_slots,
+        }
+    }
+
+    /// The global slot of `symbol`, if it's a built-in's.
+    pub(crate) fn builtin_slot(&self, symbol: SymbolId) -> Option<usize> {
+        self.builtin_slots.get(&symbol).copied()
+    }
+
+    /// The type parameters `symbol`'s signature declares, if it's a
+    /// built-in's, in the order `f::<…>` binds them in.
+    pub(crate) fn builtin_type_parameters(
+        &self,
+        symbol: SymbolId,
+    ) -> Option<std::borrow::Cow<'_, [StaticType]>> {
+        let slot = self.builtin_slot(symbol)?;
+        Some(self.builtins.type_parameters(slot))
+    }
+
     /// Records the type of a value the resolver declared. A function's
     /// placeholder type is replaced this way once its body is analysed.
     pub(crate) fn declare(&mut self, symbol: SymbolId, typ: StaticType) {
@@ -18,14 +70,18 @@ impl TypeTable {
     }
 
     pub(crate) fn get_type(&self, symbol: SymbolId) -> &StaticType {
-        self.types
-            .get(&symbol)
-            .expect("internal error: a value is analysed after its declaration")
+        if let Some(typ) = self.types.get(&symbol) {
+            return typ;
+        }
+        let slot = self
+            .builtin_slot(symbol)
+            .expect("internal error: a value is analysed after its declaration");
+        self.builtins.static_type(slot)
     }
 
     /// Replaces the settled type variables in every value's type with what
     /// they stand for. Unless `open` allows it, as after a REPL line, none
-    /// is left unsettled.
+    /// is left unsettled. A built-in's type holds no type variables.
     pub(crate) fn resolve_all(&mut self, vars: &TypeVars, open: bool) {
         for typ in self.types.values_mut() {
             *typ = vars.resolve(typ);

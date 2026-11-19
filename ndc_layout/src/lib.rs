@@ -249,6 +249,7 @@ impl<'a> Layout<'a> {
             }
         }
         analysis.global_count = self.global_count();
+        analysis.native_count = self.resolver.native_count();
     }
 
     /// Where each upvalue of the function declared at `function` comes from,

@@ -15,6 +15,7 @@ use ndc_analysis::{Binding, Candidate};
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
 use ndc_resolver::{Candidates, SymbolId};
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -2418,10 +2419,13 @@ impl Analyser {
 
     /// The type parameters `symbol` takes type arguments for, in order:
     /// see [`Analyser::explicit_type_parameters`].
-    pub(super) fn explicit_type_parameters(&self, symbol: SymbolId) -> &[StaticType] {
-        self.explicit_type_parameters
-            .get(&symbol)
-            .map_or(&[], Vec::as_slice)
+    pub(super) fn explicit_type_parameters(&self, symbol: SymbolId) -> Cow<'_, [StaticType]> {
+        if let Some(declared) = self.explicit_type_parameters.get(&symbol) {
+            return Cow::Borrowed(declared);
+        }
+        self.types
+            .builtin_type_parameters(symbol)
+            .unwrap_or(Cow::Borrowed(&[]))
     }
 
     /// What `type_arguments` bind `symbol`'s type parameters to, in order,

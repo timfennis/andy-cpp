@@ -1,7 +1,7 @@
 use crate::Value;
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
 use crate::value::{CompiledFunction, Function};
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_core::{Intrinsic, NodeId};
@@ -68,6 +68,11 @@ pub struct Compiler {
     /// The functions the code compiled so far declared in globals, kept when
     /// compiling a REPL line, whose later lines may need instances of them.
     functions: Option<AHashMap<NodeId, DeclaredFunction>>,
+    /// The global slots of the natives the code compiled so far reads,
+    /// shared with the compilers of the functions it declares. Reading a
+    /// global is the only way code reaches a native, so this lists every
+    /// native the program can call.
+    natives: Rc<RefCell<AHashSet<usize>>>,
 }
 
 impl Compiler {
@@ -85,6 +90,7 @@ impl Compiler {
             used_instance: Cell::new(false),
             prototypes: Rc::default(),
             functions: None,
+            natives: Rc::default(),
         }
     }
 
@@ -102,6 +108,7 @@ impl Compiler {
             used_instance: Cell::new(false),
             prototypes: Rc::default(),
             functions: None,
+            natives: Rc::default(),
         }
     }
     /// Compiles a program, or one REPL line, into a function the VM runs at
@@ -272,6 +279,8 @@ impl Compiler {
         }
 
         let num_locals = self.num_locals();
+        let mut natives = self.natives.take().into_iter().collect::<Vec<_>>();
+        natives.sort_unstable();
         CompiledFunction {
             name: None,
             static_type: StaticType::Function {
@@ -281,6 +290,7 @@ impl Compiler {
             body: self.ir.into_chunk(),
             num_locals,
             num_globals: self.analysis.global_count,
+            natives,
         }
     }
 
@@ -918,7 +928,12 @@ impl Compiler {
             ResolvedVar::Local { slot } => self.ir.write(OpCode::GetLocal(slot), span),
             ResolvedVar::Cell { slot } => self.ir.write(OpCode::GetCell(slot), span),
             ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::GetUpvalue(slot), span),
-            ResolvedVar::Global { slot } => self.ir.write(OpCode::GetGlobal(slot), span),
+            ResolvedVar::Global { slot } => {
+                if slot < self.analysis.native_count {
+                    self.natives.borrow_mut().insert(slot);
+                }
+                self.ir.write(OpCode::GetGlobal(slot), span)
+            }
         };
     }
 
@@ -1260,6 +1275,7 @@ impl Compiler {
             used_instance: Cell::new(false),
             prototypes: Rc::clone(&self.prototypes),
             functions: None,
+            natives: Rc::clone(&self.natives),
         }
     }
 
@@ -1286,6 +1302,7 @@ impl Compiler {
                 body: self.ir.into_chunk(),
                 num_locals,
                 num_globals: 0,
+                natives: Vec::new(),
             },
             used_instance,
         )

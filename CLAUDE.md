@@ -102,7 +102,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_layout` | Storage layout: each resolver symbol's global or local slot, each function's captures and frame size; `Layout::lay_out` fills the location tables of `Analysis` from the analyser's `Picks` |
 | `ndc_analyser` | Semantic analyser (types, overload bindings by symbol), runs the resolver first and the layout pass last |
 | `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |
-| `ndc_vm` | Bytecode `Compiler`, stack-based `Vm`, and the runtime `Value` (including `Number`) |
+| `ndc_vm` | Bytecode `Compiler`, stack-based `Vm`, the runtime `Value` (including `Number`), and `Natives`, which makes each native on first use |
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |
 | `ndc_lsp` | Language features (completion, hover, diagnostics, inlay hints, symbols, go-to-definition) over a `Document`; with the default `server` feature, the LSP server that serves them over stdio |
 | `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
@@ -121,7 +121,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 
 **Semantic analyser** — `ndc_analyser/src/analyser/` infers `StaticType` and resolves function bindings: `mod.rs` holds the expression match, with calls, assignments and declarations in their own modules. `StaticType::Unknown` is what nothing settles the type of; only a type parameter or `Any` takes it.
 
-**`FunctionRegistry`** — Lives in `ndc_core`. Holds all registered built-in functions as `Rc<NativeFunction>`. Replaces the old `Environment`-based function registry. At runtime, natives are passed to the VM as global slots.
+**Natives are made on first use** — The stdlib registers each native as a `NativeSpec` in a `FunctionRegistry` (`ndc_core`): its name, documentation, and closures that make its type and its function. `ndc_vm::Natives` keeps them, with the intrinsics, and makes a native's type or function the first time something asks, so a program pays only for the natives it uses. The analyser reads native types through the `Builtins` trait. Native `i` is global slot `i`; the compiler lists the native slots its code reads on the top-level `CompiledFunction`, and `ndc_vm::fill_natives` puts those natives in the globals before the code runs.
 
 **Top-level declarations are globals** — Natives take the first global slots, then every declaration in the program scope (`let`, `fn`, `struct` constructors and accessors) gets the next one, in order, via `ndc_layout::Layout::global_slot`. Functions reach them with `GetGlobal`/`SetGlobal` and never capture them; only locals of functions and of top-level blocks and loops are captured, through cells.
 

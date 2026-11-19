@@ -1023,11 +1023,12 @@ fn scan_into(
 
 pub mod extra {
     use ndc_core::{FunctionRegistry, StaticType};
+    use ndc_vm::NativeSpec;
     use ndc_vm::error::VmError;
-    use ndc_vm::value::{NativeFunc, NativeFunction, Object, Value};
+    use ndc_vm::value::{NativeFunc, Object, Value};
     use std::rc::Rc;
 
-    pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+    pub fn register(env: &mut FunctionRegistry<NativeSpec>) {
         // A tuple's elements have their own types, and a signature can't say
         // "a tuple of any length", so each length up to twelve, as far as
         // Rust's standard library goes for tuples, gets one that says which.
@@ -1043,15 +1044,15 @@ pub mod extra {
             },
             _ => Err(VmError::native("len of a tuple takes a tuple")),
         };
-        env.declare_global_fn(Rc::new(NativeFunction {
-            name: "len".to_string(),
-            documentation: Some("Returns the number of elements of a tuple.".to_string()),
-            static_type: StaticType::Function {
+        env.declare_global_fn(NativeSpec::new(
+            "len",
+            "Returns the number of elements of a tuple.",
+            move || StaticType::Function {
                 parameters: Some(vec![StaticType::unit()]),
                 return_type: Box::new(StaticType::Int),
             },
-            func: NativeFunc::Simple(Box::new(tuple_len)),
-        }));
+            move || NativeFunc::Simple(Box::new(tuple_len)),
+        ));
         for length in 1..=LONGEST {
             let names = names(length);
             let parameters = names.join(", ");
@@ -1060,13 +1061,12 @@ pub mod extra {
             } else {
                 format!("({parameters})")
             };
-            env.declare_global_fn(Rc::new(NativeFunction {
-                name: "len".to_string(),
-                documentation: Some("Returns the number of elements of a tuple.".to_string()),
-                static_type: StaticType::signature(&format!("<{parameters}>({tuple}) -> Int"))
-                    .expect("valid signature"),
-                func: NativeFunc::Simple(Box::new(tuple_len)),
-            }));
+            env.declare_global_fn(NativeSpec::with_signature(
+                "len",
+                "Returns the number of elements of a tuple.",
+                format!("<{parameters}>({tuple}) -> Int"),
+                move || NativeFunc::Simple(Box::new(tuple_len)),
+            ));
             for (name, returns, documentation) in [
                 ("first", names[0], "Returns the first element of a tuple."),
                 (
@@ -1075,17 +1075,14 @@ pub mod extra {
                     "Returns the last element of a tuple.",
                 ),
             ] {
-                env.declare_global_fn(Rc::new(NativeFunction {
-                    name: name.to_string(),
-                    documentation: Some(documentation.to_string()),
-                    static_type: StaticType::signature(&format!(
-                        "<{parameters}>({tuple}) -> {returns}"
-                    ))
-                    .expect("valid signature"),
-                    func: NativeFunc::Simple(Box::new(move |args| {
-                        tuple_end(args, name == "first")
-                    })),
-                }));
+                env.declare_global_fn(NativeSpec::with_signature(
+                    name,
+                    documentation,
+                    format!("<{parameters}>({tuple}) -> {returns}"),
+                    move || {
+                        NativeFunc::Simple(Box::new(move |args| tuple_end(args, name == "first")))
+                    },
+                ));
             }
         }
         // Two or more sequences zip into tuples of their elements.
@@ -1096,17 +1093,16 @@ pub mod extra {
                 .map(|name| format!("Iterable<{name}>"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            env.declare_global_fn(Rc::new(NativeFunction {
-                name: "zip".to_string(),
-                documentation: Some(ZIP_DOCUMENTATION.to_string()),
-                static_type: StaticType::signature(&format!(
+            env.declare_global_fn(NativeSpec::with_signature(
+                "zip",
+                ZIP_DOCUMENTATION,
+                format!(
                     "<{}>({sequences}) -> [({})]",
                     names.join(", "),
                     names.join(", ")
-                ))
-                .expect("valid signature"),
-                func: NativeFunc::Simple(Box::new(zip)),
-            }));
+                ),
+                move || NativeFunc::Simple(Box::new(zip)),
+            ));
         }
     }
 

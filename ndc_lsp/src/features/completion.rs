@@ -4,7 +4,7 @@ use ls_types::{
     Documentation, MarkupContent, MarkupKind, Position,
 };
 use ndc_core::{Intrinsic, StaticType};
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{Builtins, Interpreter};
 
 use crate::scope_resolve::{collect_declarations, file_scope, is_visible};
 use crate::state::DocumentState;
@@ -24,17 +24,18 @@ impl FunctionInfo {
     /// Snapshot every function registered in an interpreter, in global
     /// slot order: the natives, then the intrinsics.
     pub fn collect(interpreter: &Interpreter) -> Vec<Self> {
-        let natives = interpreter.functions().map(|fun| Self {
-            name: fun.name.clone(),
-            static_type: fun.static_type.clone(),
-            documentation: fun.documentation.clone(),
-            intrinsic: None,
-        });
-        let intrinsics = interpreter.intrinsics().map(|fun| Self {
+        let natives = interpreter.natives();
+        let intrinsics = natives.intrinsics().iter().map(|fun| Self {
             name: fun.name.clone(),
             static_type: fun.static_type.clone(),
             documentation: fun.documentation.clone(),
             intrinsic: Some(fun.intrinsic),
+        });
+        let natives = (0..natives.len()).map(|slot| Self {
+            name: natives.name(slot).to_string(),
+            static_type: natives.static_type(slot).clone(),
+            documentation: natives.documentation(slot).map(str::to_string),
+            intrinsic: None,
         });
         natives.chain(intrinsics).collect()
     }

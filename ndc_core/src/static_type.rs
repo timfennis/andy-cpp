@@ -467,6 +467,17 @@ impl StaticType {
         names.into_inner()
     }
 
+    /// The type parameters a built-in's signature declares, as the types
+    /// that stand for them: a signature declares them in the order they're
+    /// first used in, which is the order of [`Self::type_parameters`].
+    #[must_use]
+    pub fn declared_type_parameters(&self) -> Vec<Self> {
+        self.type_parameters()
+            .into_iter()
+            .map(Self::Generic)
+            .collect()
+    }
+
     /// Whether any type variable is left in this type.
     pub fn has_vars(&self) -> bool {
         self.contains(&|t| matches!(t, Self::Var(_)))

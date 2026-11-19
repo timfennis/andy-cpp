@@ -1,5 +1,5 @@
 use ndc_core::StaticType;
-use ndc_interpreter::Interpreter;
+use ndc_interpreter::{Builtins, Interpreter};
 use std::cmp::Ordering;
 use std::fmt::Write;
 use strsim::normalized_damerau_levenshtein;
@@ -56,12 +56,13 @@ pub fn docs(query: Option<&str>, no_color: bool) -> anyhow::Result<()> {
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
 
-    let natives = interpreter.functions().map(|func| Documented {
-        name: &func.name,
-        static_type: &func.static_type,
-        documentation: func.documentation.as_deref(),
+    let table = interpreter.natives();
+    let natives = (0..table.len()).map(|slot| Documented {
+        name: table.name(slot),
+        static_type: table.static_type(slot),
+        documentation: table.documentation(slot),
     });
-    let intrinsics = interpreter.intrinsics().map(|func| Documented {
+    let intrinsics = table.intrinsics().iter().map(|func| Documented {
         name: &func.name,
         static_type: &func.static_type,
         documentation: func.documentation.as_deref(),

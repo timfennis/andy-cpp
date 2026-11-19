@@ -1,13 +1,14 @@
 use factorial::Factorial;
 use ndc_core::{FunctionRegistry, StaticType};
+use ndc_vm::NativeSpec;
 use ndc_vm::error::VmError;
 use ndc_vm::value::{AdvancedNumber, BinaryOperatorError};
-use ndc_vm::value::{NativeFunc, NativeFunction, NumericMode, NumericRef, Object, Value};
+use ndc_vm::value::{NativeFunc, NumericMode, NumericRef, Object, Value};
 use num::complex::Complex64;
 use num::{BigInt, BigUint, Integer, ToPrimitive};
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::ops::{Add, Div, Mul, Neg, Not, Rem, Sub};
-use std::rc::Rc;
 
 #[derive(Clone, Copy)]
 enum BinaryOperation {
@@ -51,7 +52,7 @@ impl BinaryOperation {
     }
 }
 
-pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+pub fn register(env: &mut FunctionRegistry<NativeSpec>) {
     register_binary_arithmetic(env);
     register_unary_arithmetic(env);
     register_comparisons(env);
@@ -64,40 +65,42 @@ pub fn register(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     register_transcendentals(env);
 }
 
+/// Declares a native whose type `static_type` makes when it's first used.
 fn declare(
-    env: &mut FunctionRegistry<Rc<NativeFunction>>,
-    name: &str,
-    parameters: Vec<StaticType>,
-    return_type: StaticType,
-    documentation: impl Into<String>,
+    env: &mut FunctionRegistry<NativeSpec>,
+    name: &'static str,
+    documentation: impl Into<Cow<'static, str>>,
+    static_type: impl FnOnce() -> StaticType + 'static,
     func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
 ) {
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: name.to_string(),
-        documentation: Some(documentation.into()),
-        static_type: StaticType::Function {
-            parameters: Some(parameters),
-            return_type: Box::new(return_type),
-        },
-        func: NativeFunc::Simple(Box::new(func)),
+    env.declare_global_fn(NativeSpec::new(name, documentation, static_type, || {
+        NativeFunc::Simple(Box::new(func))
     }));
 }
 
 /// Declares a native whose type is a generic signature such as
 /// `<A, B>(A, B) -> Bool`, see [`StaticType::signature`].
 fn declare_signature(
-    env: &mut FunctionRegistry<Rc<NativeFunction>>,
-    name: &str,
-    signature: &str,
-    documentation: impl Into<String>,
+    env: &mut FunctionRegistry<NativeSpec>,
+    name: &'static str,
+    signature: impl AsRef<str> + 'static,
+    documentation: &'static str,
     func: impl Fn(&[Value]) -> Result<Value, VmError> + 'static,
 ) {
-    env.declare_global_fn(Rc::new(NativeFunction {
-        name: name.to_string(),
-        documentation: Some(documentation.into()),
-        static_type: StaticType::signature(signature).expect("valid signature"),
-        func: NativeFunc::Simple(Box::new(func)),
-    }));
+    env.declare_global_fn(NativeSpec::with_signature(
+        name,
+        documentation,
+        signature,
+        || NativeFunc::Simple(Box::new(func)),
+    ));
+}
+
+/// The type of a function that takes `parameters` and returns `return_type`.
+fn function_type(parameters: Vec<StaticType>, return_type: StaticType) -> StaticType {
+    StaticType::Function {
+        parameters: Some(parameters),
+        return_type: Box::new(return_type),
+    }
 }
 
 /// Declares a native whose operands and result have fixed types.
@@ -122,9 +125,8 @@ macro_rules! declare_typed {
         declare(
             $env,
             $name,
-            vec![$(StaticType::$operand_type),+],
-            StaticType::$result,
             $documentation,
+            move || function_type(vec![$(StaticType::$operand_type),+], StaticType::$result),
             move |args| {
                 let [$(Value::$operand_type($operand)),+] = args else {
                     return Err(wrong_operands(&[$(StaticType::$operand_type),+], args));
@@ -183,7 +185,7 @@ fn native_error(error: impl std::fmt::Display) -> VmError {
     VmError::native(error.to_string())
 }
 
-fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
     const OPERATIONS: [BinaryOperation; 8] = [
         BinaryOperation::Add,
         BinaryOperation::Sub,
@@ -201,7 +203,6 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             .flat_map(|left| NumericMode::ALL.map(|right| (left, right)))
         {
             let output_mode = left_mode.promote(right_mode);
-            let parameters = vec![left_mode.static_type(), right_mode.static_type()];
             let (name, documentation) = (operation.name(), operation.documentation());
 
             // Choosing the evaluator per overload here, instead of letting one
@@ -211,9 +212,13 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                 NumericMode::Int => declare(
                     env,
                     name,
-                    parameters,
-                    StaticType::Int,
                     documentation,
+                    move || {
+                        function_type(
+                            vec![left_mode.static_type(), right_mode.static_type()],
+                            StaticType::Int,
+                        )
+                    },
                     move |args| {
                         let [left, right] = args else {
                             return Err(wrong_arity(args));
@@ -224,9 +229,13 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                 NumericMode::Float => declare(
                     env,
                     name,
-                    parameters,
-                    StaticType::Float,
                     documentation,
+                    move || {
+                        function_type(
+                            vec![left_mode.static_type(), right_mode.static_type()],
+                            StaticType::Float,
+                        )
+                    },
                     move |args| {
                         let [left, right] = args else {
                             return Err(wrong_arity(args));
@@ -237,9 +246,13 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
                 NumericMode::Number => declare(
                     env,
                     name,
-                    parameters,
-                    StaticType::Number,
                     documentation,
+                    move || {
+                        function_type(
+                            vec![left_mode.static_type(), right_mode.static_type()],
+                            StaticType::Number,
+                        )
+                    },
                     move |args| {
                         let [left, right] = args else {
                             return Err(wrong_arity(args));
@@ -468,7 +481,7 @@ fn eval_number_binary(
     }
 }
 
-fn register_unary_arithmetic(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_unary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
     declare_typed!(
         env,
         "-",
@@ -532,7 +545,7 @@ fn orderable_parameters() -> Vec<String> {
     parameters
 }
 
-fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_comparisons(env: &mut FunctionRegistry<NativeSpec>) {
     for (name, predicate, docs) in [
         (
             ">",
@@ -557,15 +570,14 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     ] {
         let compare = move |args: &[Value]| Ok(Value::Bool(predicate(compare_operands(args)?)));
         for parameters in orderable_parameters() {
-            declare_signature(env, name, &format!("{parameters} -> Bool"), docs, compare);
+            declare_signature(env, name, format!("{parameters} -> Bool"), docs, compare);
         }
         let unit = StaticType::unit();
         declare(
             env,
             name,
-            vec![unit.clone(), unit],
-            StaticType::Bool,
             docs,
+            move || function_type(vec![unit.clone(), unit], StaticType::Bool),
             compare,
         );
     }
@@ -604,21 +616,20 @@ fn register_comparisons(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             Ok(Value::Int(if reverse { -result } else { result }))
         };
         for parameters in orderable_parameters() {
-            declare_signature(env, name, &format!("{parameters} -> Int"), docs, compare);
+            declare_signature(env, name, format!("{parameters} -> Int"), docs, compare);
         }
         let unit = StaticType::unit();
         declare(
             env,
             name,
-            vec![unit.clone(), unit],
-            StaticType::Int,
             docs,
+            move || function_type(vec![unit.clone(), unit], StaticType::Int),
             compare,
         );
     }
 }
 
-fn register_bitwise(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_bitwise(env: &mut FunctionRegistry<NativeSpec>) {
     for (name, operation, docs) in [
         (
             "&",
@@ -721,14 +732,13 @@ fn register_bitwise(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     }
 }
 
-fn register_constructors(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_constructors(env: &mut FunctionRegistry<NativeSpec>) {
     for mode in NumericMode::ALL {
         declare(
             env,
             "Number",
-            vec![mode.static_type()],
-            StaticType::Number,
             "Wraps a primitive numeric value as a Number.",
+            move || function_type(vec![mode.static_type()], StaticType::Number),
             move |args| {
                 arity(args, 1)?;
                 Ok(Value::number(
@@ -739,18 +749,22 @@ fn register_constructors(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     }
 }
 
-fn register_aggregates(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_aggregates(env: &mut FunctionRegistry<NativeSpec>) {
     for mode in NumericMode::ALL {
         for (name, product) in [("sum", false), ("product", true)] {
             declare(
                 env,
                 name,
-                vec![StaticType::Iterable(Box::new(mode.static_type()))],
-                mode.static_type(),
                 if product {
                     "Returns the product of a numeric sequence."
                 } else {
                     "Returns the sum of a numeric sequence."
+                },
+                move || {
+                    function_type(
+                        vec![StaticType::Iterable(Box::new(mode.static_type()))],
+                        mode.static_type(),
+                    )
                 },
                 move |args| aggregate(args, mode, product),
             );
@@ -848,7 +862,7 @@ enum PreservingUnary {
     Abs,
 }
 
-fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_number_helpers(env: &mut FunctionRegistry<NativeSpec>) {
     // Reversed for the same reason as `register_binary_arithmetic`: runtime
     // candidates are inspected in reverse registration order, so registering
     // `Int` last puts it first where dynamic dispatch looks.
@@ -856,9 +870,8 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         declare(
             env,
             "signum",
-            vec![mode.static_type()],
-            mode.static_type(),
             "Returns -1 if the number is negative, 0 if it is zero, and 1 if it is positive.",
+            move || function_type(vec![mode.static_type()], mode.static_type()),
             move |args| unary_preserving(args, mode, PreservingUnary::Signum),
         );
         for (name, operation, documentation) in [
@@ -886,9 +899,8 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             declare(
                 env,
                 name,
-                vec![mode.static_type()],
-                mode.static_type(),
                 documentation,
+                move || function_type(vec![mode.static_type()], mode.static_type()),
                 move |args| unary_preserving(args, mode, operation),
             );
         }
@@ -900,9 +912,13 @@ fn register_number_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             declare(
                 env,
                 "abs_diff",
-                vec![left.static_type(), right.static_type()],
-                output.static_type(),
                 "Returns the absolute difference between two numbers.",
+                move || {
+                    function_type(
+                        vec![left.static_type(), right.static_type()],
+                        output.static_type(),
+                    )
+                },
                 move |args| {
                     arity(args, 2)?;
                     let difference = eval_binary(
@@ -1020,7 +1036,7 @@ fn unary_preserving(
     }
 }
 
-fn register_integer_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_integer_helpers(env: &mut FunctionRegistry<NativeSpec>) {
     declare_typed!(
         env,
         "factorial",
@@ -1040,9 +1056,8 @@ fn register_integer_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
     declare(
         env,
         "factorial",
-        vec![StaticType::Number],
-        StaticType::Number,
         "Returns the arbitrary-precision factorial of an exact non-negative Number.",
+        move || function_type(vec![StaticType::Number], StaticType::Number),
         |args| {
             let value = exact_number_integer(args)?;
             let value = BigUint::try_from(value).map_err(|_error| {
@@ -1076,9 +1091,13 @@ fn register_integer_helpers(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         declare(
             env,
             name,
-            vec![StaticType::Number, StaticType::Number],
-            StaticType::Number,
             "Computes an arbitrary-precision exact integer divisor operation.",
+            move || {
+                function_type(
+                    vec![StaticType::Number, StaticType::Number],
+                    StaticType::Number,
+                )
+            },
             move |args| {
                 arity(args, 2)?;
                 let left = exact_integer(&args[0])?;
@@ -1113,14 +1132,14 @@ fn bigint_number(value: BigInt) -> Value {
     Value::number(AdvancedNumber::Int(value))
 }
 
-fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_conversions(env: &mut FunctionRegistry<NativeSpec>) {
     // What `int` and `float` convert: numbers, booleans, and strings that
     // spell a number.
     for from in ["Int", "Float", "Number", "Bool", "String"] {
         declare_signature(
             env,
             "int",
-            &format!("({from}) -> Int"),
+            format!("({from}) -> Int"),
             "Converts a value to a checked i64 Int.",
             |args| {
                 arity(args, 1)?;
@@ -1130,7 +1149,7 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
         declare_signature(
             env,
             "float",
-            &format!("({from}) -> Float"),
+            format!("({from}) -> Float"),
             "Converts a value to a Float.",
             |args| {
                 arity(args, 1)?;
@@ -1150,9 +1169,13 @@ fn register_conversions(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
             declare(
                 env,
                 "atan2",
-                vec![left_mode.static_type(), right_mode.static_type()],
-                output.static_type(),
                 "Computes the four-quadrant arctangent of y and x.",
+                move || {
+                    function_type(
+                        vec![left_mode.static_type(), right_mode.static_type()],
+                        output.static_type(),
+                    )
+                },
                 move |args| {
                     arity(args, 2)?;
                     let left = numeric_ref(left_mode, &args[0])?;
@@ -1405,7 +1428,7 @@ impl Transcendental {
     }
 }
 
-fn register_transcendentals(env: &mut FunctionRegistry<Rc<NativeFunction>>) {
+fn register_transcendentals(env: &mut FunctionRegistry<NativeSpec>) {
     for function in Transcendental::ALL {
         declare_typed!(
             env,
@@ -1450,8 +1473,7 @@ mod tests {
 
     #[test]
     fn every_arithmetic_operator_has_a_three_by_three_numeric_matrix() {
-        let mut registry = FunctionRegistry::default();
-        register(&mut registry);
+        let registry = crate::built(register);
 
         let kinds = [StaticType::Int, StaticType::Float, StaticType::Number];
         for operator in ["+", "-", "*", "/", "\\", "%", "%%", "^"] {
@@ -1484,8 +1506,7 @@ mod tests {
 
     #[test]
     fn transcendental_overloads_have_function_specific_documentation() {
-        let mut registry = FunctionRegistry::default();
-        register(&mut registry);
+        let registry = crate::built(register);
 
         for transcendental in Transcendental::ALL {
             for mode in NumericMode::ALL {
