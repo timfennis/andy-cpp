@@ -6,11 +6,11 @@ use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, StringIter, UnboundedRangeIter,
     VmIterator,
 };
-use crate::native_op;
+use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function, NativeFunc};
 use crate::{ClosureFunction, Natives, Object, Value};
 use ndc_analysis::CaptureSource;
-use ndc_core::{NativeOp, StaticType};
+use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
@@ -1247,11 +1247,11 @@ fn convert_result(stack: &mut [Value], returns: &StaticType) -> Result<(), Strin
 fn run_native_op(stack: &mut Vec<Value>, op: NativeOp) -> Result<(), VmError> {
     if op.arity() == 1 {
         let value = stack.last_mut().expect("stack underflow");
-        *value = native_op::unary(op, value)?;
+        *value = op.unary(value)?;
     } else {
         let right = stack.pop().expect("stack underflow");
         let left = stack.last_mut().expect("stack underflow");
-        *left = native_op::binary(op, left, &right)?;
+        *left = op.binary(left, &right)?;
     }
     Ok(())
 }

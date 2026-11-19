@@ -1,8 +1,9 @@
 //! The natives a program can call, each built the first time something asks
 //! for it: a program that only prints builds `print` and none of the others.
 
+use crate::native_op::NativeOp;
 use crate::value::{NativeFunc, NativeFunction};
-use ndc_core::{Builtins, FunctionRegistry, Intrinsic, IntrinsicFunction, NativeOp, StaticType};
+use ndc_core::{Builtins, FunctionRegistry, Intrinsic, IntrinsicFunction, StaticType};
 use std::borrow::Cow;
 use std::cell::{Cell, OnceCell};
 use std::rc::Rc;
@@ -53,7 +54,7 @@ impl NativeSpec {
         Self {
             op: Some(op),
             ..Self::new(name, documentation, static_type, move || {
-                NativeFunc::Simple(Box::new(move |args| crate::native_op::apply(op, args)))
+                NativeFunc::Simple(Box::new(move |args| op.apply(args)))
             })
         }
     }

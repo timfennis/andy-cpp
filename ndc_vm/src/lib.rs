@@ -15,7 +15,7 @@ pub mod value;
 mod vm;
 
 pub use io::{InputSource, OutputSink};
-pub use native_op::integer_overflow;
+pub use native_op::{NativeOp, integer_overflow};
 pub use natives::{NativeSpec, Natives};
 pub use vm::*;
 

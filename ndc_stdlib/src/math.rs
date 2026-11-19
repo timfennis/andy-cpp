@@ -1,9 +1,9 @@
 use factorial::Factorial;
-use ndc_core::{FunctionRegistry, NativeOp, StaticType};
-use ndc_vm::NativeSpec;
+use ndc_core::{FunctionRegistry, StaticType};
 use ndc_vm::error::VmError;
 use ndc_vm::value::{AdvancedNumber, BinaryOperatorError};
 use ndc_vm::value::{NativeFunc, NumericMode, NumericRef, Object, Value};
+use ndc_vm::{NativeOp, NativeSpec};
 use num::complex::Complex64;
 use num::{BigInt, BigUint, Integer, ToPrimitive};
 use std::borrow::Cow;

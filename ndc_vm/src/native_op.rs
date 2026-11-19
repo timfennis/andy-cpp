@@ -1,74 +1,127 @@
-//! What each [`NativeOp`] does: the VM runs it as an instruction where a
-//! call resolves to a native that does it, and the native runs the same code
-//! when it's called as a value, as tuple vectorisation does.
+//! The natives the VM has instructions for: it runs a [`NativeOp`] as an
+//! instruction where a call resolves to a native that does it, and the
+//! native runs the same code when it's called as a value, as tuple
+//! vectorisation does.
 
 use crate::error::VmError;
 use crate::value::Value;
-use ndc_core::NativeOp;
 use std::cmp::Ordering;
 
-/// What `op` returns for `args`, as its native returns it.
-pub fn apply(op: NativeOp, args: &[Value]) -> Result<Value, VmError> {
-    match args {
-        [value] if op.arity() == 1 => unary(op, value),
-        [left, right] if op.arity() == 2 => binary(op, left, right),
-        _ => Err(VmError::native(format!(
-            "expected {} arguments, got {}",
-            op.arity(),
-            args.len()
-        ))),
-    }
+/// What a native does, when the VM has an instruction that does the same:
+/// the compiler writes the instruction in place of a call the analyser
+/// resolved to that native, as `n - 1` where `n` is an `Int`. Unlike an
+/// [`ndc_core::Intrinsic`], the native is still there, typed by its
+/// signature, for calls the compiler can't resolve and for using it as a
+/// value, and the analyser doesn't know about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NativeOp {
+    /// `+(Int, Int)`, an error if it overflows.
+    AddInt,
+    /// `-(Int, Int)`, an error if it overflows.
+    SubInt,
+    /// `*(Int, Int)`, an error if it overflows.
+    MulInt,
+    /// `+(Float, Float)`.
+    AddFloat,
+    /// `-(Float, Float)`.
+    SubFloat,
+    /// `*(Float, Float)`.
+    MulFloat,
+    /// `/(Float, Float)`.
+    DivFloat,
+    /// `-(Int)`, an error if it overflows.
+    NegInt,
+    /// `-(Float)`.
+    NegFloat,
+    /// `!(Bool)`.
+    Not,
+    /// `<` of two values that have an order.
+    Less,
+    /// `<=` of two values that have an order.
+    LessEqual,
+    /// `>` of two values that have an order.
+    Greater,
+    /// `>=` of two values that have an order.
+    GreaterEqual,
+    /// `==` of any two values.
+    Equal,
+    /// `!=` of any two values.
+    NotEqual,
 }
 
-/// What the binary `op` returns for `left` and `right`: `3 - 1` is `2`,
-/// and an `Int` operation that overflows fails.
-#[inline(always)]
-pub(crate) fn binary(op: NativeOp, left: &Value, right: &Value) -> Result<Value, VmError> {
-    match op {
-        NativeOp::AddInt => int_operation(left, right, "+", i64::checked_add),
-        NativeOp::SubInt => int_operation(left, right, "-", i64::checked_sub),
-        NativeOp::MulInt => int_operation(left, right, "*", i64::checked_mul),
-        NativeOp::AddFloat => float_operation(left, right, |left, right| left + right),
-        NativeOp::SubFloat => float_operation(left, right, |left, right| left - right),
-        NativeOp::MulFloat => float_operation(left, right, |left, right| left * right),
-        NativeOp::DivFloat => float_operation(left, right, |left, right| left / right),
-        NativeOp::Less => compare(left, right).map(|ordering| Value::Bool(ordering.is_lt())),
-        NativeOp::LessEqual => compare(left, right).map(|ordering| Value::Bool(ordering.is_le())),
-        NativeOp::Greater => compare(left, right).map(|ordering| Value::Bool(ordering.is_gt())),
-        NativeOp::GreaterEqual => {
-            compare(left, right).map(|ordering| Value::Bool(ordering.is_ge()))
-        }
-        NativeOp::Equal => Ok(Value::Bool(equal(left, right))),
-        NativeOp::NotEqual => Ok(Value::Bool(!equal(left, right))),
-        NativeOp::NegInt | NativeOp::NegFloat | NativeOp::Not => {
-            unreachable!("internal error: {op:?} takes one operand")
+impl NativeOp {
+    /// How many operands it takes.
+    #[must_use]
+    pub fn arity(self) -> usize {
+        match self {
+            Self::NegInt | Self::NegFloat | Self::Not => 1,
+            _ => 2,
         }
     }
-}
 
-/// What the unary `op` returns for `value`.
-#[inline(always)]
-pub(crate) fn unary(op: NativeOp, value: &Value) -> Result<Value, VmError> {
-    match (op, value) {
-        (NativeOp::NegInt, Value::Int(value)) => value
-            .checked_neg()
-            .map(Value::Int)
-            .ok_or_else(|| VmError::native("integer negation overflowed")),
-        (NativeOp::NegFloat, Value::Float(value)) => Ok(Value::Float(-value)),
-        (NativeOp::Not, Value::Bool(value)) => Ok(Value::Bool(!value)),
-        (NativeOp::NegInt, value) => Err(wrong_operand(
-            "(Int)",
-            &format!("({})", value.diagnostic_type()),
-        )),
-        (NativeOp::NegFloat, value) => Err(wrong_operand(
-            "(Float)",
-            &format!("({})", value.diagnostic_type()),
-        )),
-        (NativeOp::Not, value) => Err(wrong_operand(
-            "(Bool)",
-            &format!("({})", value.diagnostic_type()),
-        )),
-        _ => unreachable!("internal error: {op:?} takes two operands"),
+    /// What it returns for `args`, as its native returns it.
+    pub fn apply(self, args: &[Value]) -> Result<Value, VmError> {
+        match args {
+            [value] if self.arity() == 1 => self.unary(value),
+            [left, right] if self.arity() == 2 => self.binary(left, right),
+            _ => Err(VmError::native(format!(
+                "expected {} arguments, got {}",
+                self.arity(),
+                args.len()
+            ))),
+        }
+    }
+
+    /// What a binary op returns for `left` and `right`: `3 - 1` is `2`, and
+    /// an `Int` operation that overflows fails.
+    #[inline(always)]
+    pub(crate) fn binary(self, left: &Value, right: &Value) -> Result<Value, VmError> {
+        match self {
+            Self::AddInt => int_operation(left, right, "+", i64::checked_add),
+            Self::SubInt => int_operation(left, right, "-", i64::checked_sub),
+            Self::MulInt => int_operation(left, right, "*", i64::checked_mul),
+            Self::AddFloat => float_operation(left, right, |left, right| left + right),
+            Self::SubFloat => float_operation(left, right, |left, right| left - right),
+            Self::MulFloat => float_operation(left, right, |left, right| left * right),
+            Self::DivFloat => float_operation(left, right, |left, right| left / right),
+            Self::Less => compare(left, right).map(|ordering| Value::Bool(ordering.is_lt())),
+            Self::LessEqual => compare(left, right).map(|ordering| Value::Bool(ordering.is_le())),
+            Self::Greater => compare(left, right).map(|ordering| Value::Bool(ordering.is_gt())),
+            Self::GreaterEqual => {
+                compare(left, right).map(|ordering| Value::Bool(ordering.is_ge()))
+            }
+            Self::Equal => Ok(Value::Bool(equal(left, right))),
+            Self::NotEqual => Ok(Value::Bool(!equal(left, right))),
+            Self::NegInt | Self::NegFloat | Self::Not => {
+                unreachable!("internal error: {self:?} takes one operand")
+            }
+        }
+    }
+
+    /// What a unary op returns for `value`.
+    #[inline(always)]
+    pub(crate) fn unary(self, value: &Value) -> Result<Value, VmError> {
+        match (self, value) {
+            (Self::NegInt, Value::Int(value)) => value
+                .checked_neg()
+                .map(Value::Int)
+                .ok_or_else(|| VmError::native("integer negation overflowed")),
+            (Self::NegFloat, Value::Float(value)) => Ok(Value::Float(-value)),
+            (Self::Not, Value::Bool(value)) => Ok(Value::Bool(!value)),
+            (Self::NegInt, value) => Err(wrong_operand(
+                "(Int)",
+                &format!("({})", value.diagnostic_type()),
+            )),
+            (Self::NegFloat, value) => Err(wrong_operand(
+                "(Float)",
+                &format!("({})", value.diagnostic_type()),
+            )),
+            (Self::Not, value) => Err(wrong_operand(
+                "(Bool)",
+                &format!("({})", value.diagnostic_type()),
+            )),
+            _ => unreachable!("internal error: {self:?} takes two operands"),
+        }
     }
 }
 

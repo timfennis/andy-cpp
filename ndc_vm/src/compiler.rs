@@ -1,10 +1,11 @@
 use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
+use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function};
 use crate::{Natives, Value};
 use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
 use ndc_core::StaticType;
 use ndc_core::collections::{HashMap, HashSet};
-use ndc_core::{Intrinsic, NativeOp, NodeId};
+use ndc_core::{Intrinsic, NodeId};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,

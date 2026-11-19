@@ -7,7 +7,7 @@ pub mod static_type;
 pub mod r#struct;
 
 pub use builtins::Builtins;
-pub use intrinsic::{Intrinsic, IntrinsicFunction, NativeOp};
+pub use intrinsic::{Intrinsic, IntrinsicFunction};
 pub use node_id::NodeId;
 pub use static_type::{StaticType, TypeVar};
 use std::slice::Iter;
