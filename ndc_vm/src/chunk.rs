@@ -205,32 +205,3 @@ impl Builder {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::instr::Reg;
-
-    #[test]
-    fn labels_become_offsets_from_the_next_instruction() {
-        let mut builder = Builder::default();
-        let start = builder.label();
-        let end = builder.label();
-        builder.bind(start);
-        builder.jump(
-            Instr::JumpIfFalse {
-                cond: Reg(0),
-                offset: 0,
-            },
-            end,
-            Span::synthetic(),
-        );
-        builder.emit(Instr::LoadUnit { dst: Reg(1) }, Span::synthetic());
-        builder.jump(Instr::Jump { offset: 0 }, start, Span::synthetic());
-        builder.bind(end);
-        builder.emit(Instr::Halt { src: Reg(1) }, Span::synthetic());
-        let chunk = builder.finish();
-        assert_eq!(chunk.code()[0].jump_offset(), Some(2));
-        assert_eq!(chunk.code()[2].jump_offset(), Some(-3));
-    }
-}

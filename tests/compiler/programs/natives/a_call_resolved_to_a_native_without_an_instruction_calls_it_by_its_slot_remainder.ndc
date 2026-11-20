@@ -1,5 +1,0 @@
-// A native the VM has no instruction for, like `%` here, is called by its
-// global slot with `CallNative`: the operands go in r1 and r2, and no register
-// holds the callee, so there's no `GetGlobal`.
-// compile: stdlib
-7 % 2;

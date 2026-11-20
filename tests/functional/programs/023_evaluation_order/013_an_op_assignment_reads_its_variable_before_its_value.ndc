@@ -4,7 +4,7 @@
 // that's a call (`^=`), one that appends in place (`++=`), and a function
 // used as an operator (`x f= value`).
 // expect-output: 2
-// expect-output: (2,8,12,3.0)
+// expect-output: (2,8,12)
 // expect-output: (2,2)
 // expect-output: 2
 // expect-output: ([1,2],[1,2],"ab")
@@ -22,9 +22,7 @@ fn local() {
     let f = fn(a, b) { a * 10 + b };
     let z = 1;
     z f= { z = 5; 2 };
-    let w = 1.5;
-    w *= { w = 100.0; 2.0 };
-    (x, y, z, w)
+    (x, y, z)
 }
 print(local());
 

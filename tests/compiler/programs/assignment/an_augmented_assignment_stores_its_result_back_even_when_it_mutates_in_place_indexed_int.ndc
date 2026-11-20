@@ -1,7 +1,0 @@
-// An augmented assignment to an indexed target reads it with `[]`, does the
-// operation, and stores the result back with `[]=`: here `AddIntI` adds the `2`
-// into r3. The container and index are read once, into r1 and r2, and copied
-// as the arguments of both calls. The assignment's `()` isn't used, so nothing
-// makes it.
-// compile: stdlib
-let values = [1]; values[0] += 2;

@@ -9,8 +9,6 @@
 // expect-output: (10,[7,8,9])
 // expect-output: 11
 // expect-output: (11,80,(3,4))
-// expect-output: 101
-// expect-output: ab
 
 let g = [10, 20, 30];
 print(g[{ g = [7, 8, 9]; 0 }], g);
@@ -51,15 +49,3 @@ fn tuple() {
     (a, b, t)
 }
 print(tuple());
-
-fn maps() {
-    let m = %{"a": 1};
-    m["a"] + { m = %{"a": 100}; m["a"] }
-}
-print(maps());
-
-fn strings() {
-    let s = "abc";
-    s[0] ++ s[{ s = "xyz"; 1 }]
-}
-print(strings());

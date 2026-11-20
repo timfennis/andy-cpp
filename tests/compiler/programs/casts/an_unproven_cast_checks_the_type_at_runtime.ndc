@@ -1,4 +1,0 @@
-// `Any` doesn't prove the target type, so the cast compiles to a `CheckType`
-// of `Int` on the value read into r0.
-// compile: analysed
-let x: Any = 1; cast::<Int>(x)

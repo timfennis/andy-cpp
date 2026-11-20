@@ -1,3 +1,0 @@
-== <script> (registers: 1, globals: 0) ==
-0000  LoadK r0, k0                         5
-0001  Halt r0

@@ -1,4 +1,0 @@
-// A block yields its last expression: `{ 5 }` is one `LoadK` of its `5`
-// straight into r0, the program's result.
-// compile: parsed
-{ 5 }

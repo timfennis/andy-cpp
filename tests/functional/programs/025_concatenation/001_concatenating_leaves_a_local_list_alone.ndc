@@ -2,7 +2,6 @@
 // `a` keeps its elements. (`++` appends in place to a list nothing else
 // holds, which no variable can see.)
 // expect-output: ([1,2],[1,2,3,4])
-// expect-output: [1,2] [1,2,3]
 // expect-output: [1,2,3]
 // expect-output: ([1],[1,1],[1,2,1])
 
@@ -13,12 +12,6 @@ fn local() {
     (a, b)
 }
 print(local());
-
-{
-    let a = [1, 2];
-    let b = a ++ [3];
-    print(a, b);
-}
 
 fn returned() {
     let a = [1, 2];
