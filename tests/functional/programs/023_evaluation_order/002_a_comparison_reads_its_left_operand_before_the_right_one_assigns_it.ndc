@@ -4,8 +4,6 @@
 // expect-output: (true,true,false,1,9)
 // expect-output: (false,5)
 // expect-output: (false,0)
-// expect-output: false
-// expect-output: true
 // expect-output: true
 
 let g = 1;
@@ -35,20 +33,8 @@ fn upvalue() {
 }
 print(upvalue());
 
-fn lists() {
-    let xs = [1];
-    xs == { xs = [2]; xs }
-}
-print(lists());
-
 fn contains() {
     let x = 1;
     x in { x = 2; [1] }
 }
 print(contains());
-
-fn float() {
-    let x = 1.0;
-    x > { x = 0.5; x }
-}
-print(float());

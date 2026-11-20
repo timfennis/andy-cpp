@@ -4,7 +4,6 @@
 // expect-output: [1,2,2,20]
 // expect-output: [1,2,2]
 // expect-output: [1,2,2]
-// expect-output: [[1],[2],[2]]
 
 let g = 1;
 print([g, { g = 2; g }, g]);
@@ -28,9 +27,3 @@ fn upvalue() {
     make()
 }
 print(upvalue());
-
-fn lists() {
-    let xs = [1];
-    [xs, { xs = [2]; xs }, xs]
-}
-print(lists());

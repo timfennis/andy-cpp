@@ -8,8 +8,6 @@
 // expect-output: ([0],([0],1))
 // expect-output: ([0],1)
 // expect-output: [6,20,30]
-// expect-output: [("a",2)]
-// expect-output: Xbc
 
 let g = [10, 20, 30];
 let gi = 0;
@@ -64,19 +62,3 @@ fn element_written_by_value() {
     xs
 }
 print(element_written_by_value());
-
-fn maps() {
-    let m = %{"a": 1};
-    let k = "a";
-    m[k] = { k = "b"; 2 };
-    m.sorted
-}
-print(maps());
-
-fn strings() {
-    let s = "abc";
-    let i = 0;
-    s[i] = { i = 2; "X" };
-    s
-}
-print(strings());

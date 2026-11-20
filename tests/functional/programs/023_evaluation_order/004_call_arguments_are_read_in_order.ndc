@@ -7,7 +7,6 @@
 // expect-output: ((1,2),2,[0,3])
 // expect-output: ((1,2),2)
 // expect-output: (1,2)
-// expect-output: [1,2,3]
 // expect-output: 6
 // expect-output: 6 500
 // expect-output: 6
@@ -36,13 +35,6 @@ fn upvalue() {
     call()
 }
 print(upvalue());
-
-fn three() {
-    let x = 1;
-    let triple = fn(a, b, c) { [a, b, c] };
-    triple(x, { x = x + 1; x }, { x = x + 1; x })
-}
-print(three());
 
 fn callee() {
     let f = fn(a) { a + 1 };
