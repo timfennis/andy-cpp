@@ -20,7 +20,7 @@ use std::rc::Rc;
 /// `stack[base..base + frame_size]`, and nothing is pushed or popped while
 /// code runs. A call's frame starts at the register after the callee, so the
 /// caller's argument registers are the callee's parameters.
-pub(crate) struct Frame {
+struct Frame {
     function: Rc<CompiledFunction>,
     /// The closure called, if the function is one, whose upvalues are the
     /// cells of the variables it captures. The closure itself rather than a
@@ -38,6 +38,19 @@ pub(crate) struct Frame {
     on_return: Option<Box<OnReturn>>,
 }
 
+/// The register VM's running calls, the one on top last. A call's frame is
+/// written field by field into a slot kept from an earlier call that went
+/// as deep, rather than made and moved in: moving a new frame in reads it
+/// back from where it was made before its fields are stored, which stalls,
+/// and took a quarter of the time of a call. A slot past the running calls
+/// holds nothing but the function its call ran.
+#[derive(Default)]
+pub(crate) struct Frames {
+    slots: Vec<Frame>,
+    /// How many of the slots are running calls.
+    depth: usize,
+}
+
 /// What a call does with what it returns before it gives it to its caller.
 #[derive(Default)]
 struct OnReturn {
@@ -50,7 +63,7 @@ struct OnReturn {
 
 impl Frame {
     /// The frame of a program run at the top level, `function`.
-    pub(crate) fn top_level(function: Rc<CompiledFunction>) -> Self {
+    fn top_level(function: Rc<CompiledFunction>) -> Self {
         Self {
             function,
             closure: None,
@@ -66,6 +79,81 @@ impl Frame {
         match self.closure.as_deref() {
             Some(Object::Function(Function::Closure(closure))) => &closure.upvalues,
             _ => &[],
+        }
+    }
+}
+
+impl Frames {
+    /// The call of a program run at the top level, `function`.
+    pub(crate) fn top_level(function: Rc<CompiledFunction>) -> Self {
+        Self {
+            slots: vec![Frame::top_level(function)],
+            depth: 1,
+        }
+    }
+
+    /// How many calls are running.
+    pub(crate) fn len(&self) -> usize {
+        self.depth
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.depth == 0
+    }
+
+    /// The call on top.
+    fn last(&self) -> Option<&Frame> {
+        self.slots[..self.depth].last()
+    }
+
+    fn last_mut(&mut self) -> Option<&mut Frame> {
+        self.slots[..self.depth].last_mut()
+    }
+
+    /// Starts a call of `function`, a closure's if `closure` is one, whose
+    /// first register is `base`, at its first instruction.
+    fn push(
+        &mut self,
+        function: Rc<CompiledFunction>,
+        closure: Option<Rc<Object>>,
+        base: u32,
+        on_return: Option<Box<OnReturn>>,
+    ) {
+        if let Some(slot) = self.slots.get_mut(self.depth) {
+            slot.function = function;
+            slot.closure = closure;
+            slot.ip = 0;
+            slot.base = base;
+            slot.on_return = on_return;
+        } else {
+            self.slots.push(Frame {
+                function,
+                closure,
+                ip: 0,
+                base,
+                on_return,
+            });
+        }
+        self.depth += 1;
+    }
+
+    /// Ends the call on top, and returns how many registers its function
+    /// takes and what it does with what it returns. Its closure is let go of
+    /// now, as a popped frame would be.
+    fn pop(&mut self) -> (usize, Option<Box<OnReturn>>) {
+        self.depth = self
+            .depth
+            .checked_sub(1)
+            .expect("internal error: a running VM has a frame");
+        let slot = &mut self.slots[self.depth];
+        slot.closure = None;
+        (slot.function.frame_size, slot.on_return.take())
+    }
+
+    /// Ends the calls above the first `depth`.
+    fn truncate(&mut self, depth: usize) {
+        while self.depth > depth {
+            self.pop();
         }
     }
 }
@@ -682,13 +770,10 @@ impl Vm {
     /// below the frame, gets it. A checked call's result is checked here, so
     /// that a wrong one fails at the call, the caller's instruction.
     fn return_from_register_call(&mut self, base: usize, src: Reg) -> Result<(), VmError> {
-        let frame = self
-            .register_frames
-            .pop()
-            .expect("internal error: a running VM has a frame");
+        let (frame_size, on_return) = self.register_frames.pop();
         let mut value = std::mem::replace(&mut self.stack[base + src.index()], Value::None);
-        clear(&mut self.stack[base..base + frame.function.frame_size]);
-        if let Some(on_return) = frame.on_return {
+        clear(&mut self.stack[base..base + frame_size]);
+        if let Some(on_return) = on_return {
             if let Some((cache, key)) = on_return.memo {
                 cache.borrow_mut().insert(key, value.clone());
             }
@@ -839,18 +924,14 @@ impl Vm {
         if self.stack.len() < base + WINDOW {
             self.stack.resize(base + WINDOW, Value::None);
         }
-        self.register_frames.push(Frame {
-            function,
-            closure,
-            ip: 0,
-            base: first,
-            on_return: memo.map(|memo| {
-                Box::new(OnReturn {
-                    memo: Some(memo),
-                    returns: None,
-                })
-            }),
+        let on_return = memo.map(|memo| {
+            Box::new(OnReturn {
+                memo: Some(memo),
+                returns: None,
+            })
         });
+        self.register_frames
+            .push(function, closure, first, on_return);
         Ok(())
     }
 

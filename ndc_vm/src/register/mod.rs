@@ -19,4 +19,4 @@ mod vm;
 pub use chunk::{Builder, Chunk, Label};
 pub use compiler::Compiler;
 pub use instr::{Instr, Reg, WINDOW};
-pub(crate) use vm::Frame;
+pub(crate) use vm::Frames;
