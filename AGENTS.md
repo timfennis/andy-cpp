@@ -10,7 +10,7 @@ The manual introduces people to the language and teaches the most common ways to
 Use workspace commands from the repository root:
 
 - `cargo build --workspace` builds all Rust crates.
-- `cargo test --workspace` runs the main test suites on the stack VM, and `NDC_VM=register cargo test --workspace` runs them on the register VM; CI runs both.
+- `cargo test --workspace` runs the main test suites.
 - `cargo build --no-default-features` checks the reduced feature set used in CI.
 - `cargo install --path ndc_bin` installs the `ndc` CLI locally.
 - `cargo run -p ndc_bin -- run script.ndc` runs a script without installing.
@@ -25,7 +25,7 @@ For the VS Code extension:
 Follow standard Rust formatting and run `cargo fmt --all` before submitting changes. Use 4-space indentation, `snake_case` for functions/modules/files, `PascalCase` for types, and keep crate names prefixed with `ndc_` for language components. Prefer small, focused modules over large multi-purpose files. In the extension, keep TypeScript files under `src/` and rely on the existing `eslint` setup.
 
 ## Testing Guidelines
-Add language behavior tests as `.ndc` programs under `tests/programs/<category>/` using the existing numeric prefixes such as `001_addition.ndc`. Encode expectations inline with `// expect-output:` or `// expect-error:` comments. For VM-level changes, add a program under `tests/compiler/programs/<topic>/` with a `// compile:` directive; its expected disassembly is the `.stack.txt` and `.register.txt` files next to it, one per VM, which `BLESS=1 cargo test -p compiler_tests` writes (review the diff). Run `cargo test --workspace` before opening a PR.
+Add language behavior tests as `.ndc` programs under `tests/programs/<category>/` using the existing numeric prefixes such as `001_addition.ndc`. Encode expectations inline with `// expect-output:` or `// expect-error:` comments. For VM-level changes, add a program under `tests/compiler/programs/<topic>/` with a `// compile:` directive; its expected disassembly is the `.txt` file next to it, which `BLESS=1 cargo test -p compiler_tests` writes (review the diff). Run `cargo test --workspace` before opening a PR.
 
 ## Commit & Pull Request Guidelines
 Use Conventional Commit subjects for commits and pull request titles: `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, and `chore`. Scopes are optional. When a scope helps, prefer a crate or subsystem such as `lexer`, `parser`, `vm`, `compiler`, or `lsp`, for example `fix(parser): handle trailing commas`.

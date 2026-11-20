@@ -71,8 +71,8 @@ pub enum Value {
     None,
     Object(Rc<Object>),
     /// A captured local, shared by the frame that declares it and the
-    /// closures that capture it. It lives in a stack slot or a closure's
-    /// upvalues and is never a value a program can see.
+    /// closures that capture it. It lives in the local's register or a
+    /// closure's upvalues and is never a value a program can see.
     Cell(Rc<RefCell<Self>>),
 }
 

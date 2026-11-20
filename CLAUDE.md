@@ -14,9 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build
 cargo build
 
-# Run all tests (on the stack VM; NDC_VM=register runs them on the register VM)
+# Run all tests
 cargo test
-NDC_VM=register cargo test
 
 # Run a single test by name (substring match on the filename)
 cargo test test_001_math_001_addition
@@ -27,8 +26,6 @@ cargo bench -p benches
 # Compare two ndc binaries on whole programs (benches/programs and, when it's
 # checked out, Advent of Brian): CPU time and peak memory per program, totals
 python3 benches/compare.py path/to/baseline/ndc path/to/candidate/ndc
-# ...or the two VMs of one binary
-python3 benches/compare.py target/release/ndc target/release/ndc --candidate-env NDC_VM=register
 
 # Start REPL
 cargo run --bin ndc
@@ -36,7 +33,7 @@ cargo run --bin ndc
 # Run a .ndc script
 cargo run --bin ndc -- script.ndc
 
-# Disassemble bytecode (NDC_VM=register lists the register VM's code)
+# Disassemble bytecode
 cargo run --bin ndc -- disassemble script.ndc
 
 # Build the interpreter for the browser into manual/src/playground/pkg (needs the
@@ -78,7 +75,7 @@ The published manual highlights ` ```ndc ` code blocks and gives them a Run butt
 
 ## Architecture
 
-This is a custom language interpreter ("Andy C++") with a bytecode VM backend:
+This is a custom language interpreter ("Andy C++") with a register-based bytecode VM:
 
 ```
 Source → [Lexer] → Tokens → [Parser] → AST → [Analyser] → Analysis
@@ -109,7 +106,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 | `ndc_layout` | Storage layout: each resolver symbol's global or local slot, each function's captures and frame size; `Layout::lay_out` fills the location tables of `Analysis` from the analyser's `Picks` |
 | `ndc_analyser` | Semantic analyser (types, overload bindings by symbol), runs the resolver first and the layout pass last |
 | `ndc_interpreter` | `Interpreter` facade (analyse + compile + run via VM) |
-| `ndc_vm` | Bytecode `Compiler`, stack-based `Vm`, the runtime `Value` (including `Number`), and `Natives`, which makes each native on first use |
+| `ndc_vm` | The bytecode `Compiler` (`compiler.rs`), its `Instr`s (`instr.rs`) and `Chunk`s (`chunk.rs`), the register-based `Vm` (`vm.rs`), the disassembler, the runtime `Value` (including `Number`), and `Natives`, which makes each native on first use |
 | `ndc_stdlib` | Built-in functions registered via `FunctionRegistry` |
 | `ndc_lsp` | Language features (completion, hover, diagnostics, inlay hints, symbols, go-to-definition) over a `Document`; with the default `server` feature, the LSP server that serves them over stdio |
 | `ndc_diagnostics` | Renders `InterpreterError`s as codespan reports, for the CLI (coloured, `color` feature) and the browser (plain text) |
@@ -120,7 +117,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 
 ### Key Concepts
 
-**Single execution path** — The bytecode VM in `ndc_vm` is the only execution path. `ndc_interpreter` acts as a facade: it runs the semantic analyser, compiles to bytecode via `ndc_vm::Compiler`, and executes via `ndc_vm::Vm`.
+**Single execution path** — The bytecode VM in `ndc_vm` is the only execution path. `ndc_interpreter` acts as a facade: it runs the semantic analyser, compiles to bytecode via `ndc_vm::compiler::Compiler`, and executes via `ndc_vm::Vm`.
 
 **Value type** — `ndc_vm/src/value/mod.rs` defines the one runtime `Value`. It is constrained to 16 bytes: `Int(i64)`, `Float(f64)`, `Number(Rc<AdvancedNumber>)` (BigInt/Rational/Complex), `Bool`, `None`, `Object(Rc<Object>)`, and `Cell` for captured locals.
 
@@ -130,13 +127,21 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 
 **Natives are made on first use** — The stdlib registers each native as a `NativeSpec` in a `FunctionRegistry` (`ndc_core`): its name, documentation, and closures that make its type and its function. `ndc_vm::Natives` keeps them, with the intrinsics, and makes a native's type or function the first time something asks, so a program pays only for the natives it uses. The analyser reads native types through the `Builtins` trait. Native `i` is global slot `i`; the compiler lists the native slots its code reads on the top-level `CompiledFunction`, and `Vm::new` puts those natives in the globals before the code runs.
 
-**Calls of natives skip the callee** — The compiler writes a call the analyser resolved to one native as its arguments and `CallNative { slot, args }`, with no function value on the stack. A native registered with `NativeSpec::operator` does an `ndc_vm::NativeOp` (Int and Float `+ - *`, Float `/`, comparisons, `==`, unary `-`, `!`); `Natives::ops` lists them by slot for the compiler, and a call or augmented assignment resolved to one is the op's own instruction (`AddInt`, `Less`, …). The native, called as a value, runs the same `ndc_vm` code as the instruction.
+**A register VM** — `ndc_vm::Vm` runs `Instr`s (`ndc_vm/src/instr.rs`), 8-byte instructions that name the registers they read and write: `i = i + 1` is one instruction, `AddIntI r0, r0, #1`. A function's locals are its registers, parameters first (`ResolvedVar::Local { slot }` is register `slot`), then the temporaries its expressions need, which the compiler allocates above the locals and frees when the expression is done; `CompiledFunction::frame_size` is how many registers a call takes. A frame is a window of the one value stack, `stack[base..base + frame_size]`, and nothing is pushed or popped while code runs. A register nothing lives in holds `Value::None`, and `Return` sets its frame's registers back to `None`; a temporary that's no longer needed may keep its last value until its register is used again or the function returns.
 
-**Tuple indexes are read in place** — The analyser resolves a tuple indexed by a number written in the code (`t[1]`) to the intrinsic `Intrinsic::TupleIndex` instead of the `[any]` native, and the compiler writes it as the `TupleIndex` instruction.
+**Calls** — `Call { base, args }` calls the function in register `base` with the `args` registers after it, which become the callee's first registers: its frame starts at `base + 1`, so the arguments are its parameters without a copy, and `Return` puts the result in `base`. A native's arguments are a slice of the registers (`NativeFunc::Simple`), or are moved out into a `Vec` for a native that takes the VM (`NativeFunc::WithVm`), which may call back into the program (`Vm::call_callback`) in a frame above the running one. A call of a `pure fn` (`Function::Memoized`) or of a `Function::Checked`, and the limit on how deep calls go, are handled in `Vm::dispatch_call` and `Vm::enter_frame`.
 
-**Top-level declarations are globals** — Natives take the first global slots, then every declaration in the program scope (`let`, `fn`, `struct` constructors and accessors) gets the next one, in order, via `ndc_layout::Layout::global_slot`. Functions reach them with `GetGlobal`/`SetGlobal` and never capture them; only locals of functions and of top-level blocks and loops are captured, through cells.
+**An argument register is the call's own copy** — The compiler never hands a variable's own register to a call: a local passed as an argument is copied into the argument register, and a temporary is computed there. This matters because natives look at reference counts: `a ++ b` appends to `a`'s list in place when nothing else holds it, so passing `a`'s register itself would change `a`. Instructions either borrow their operands (the native ops, jumps, `TupleIndex`, `IterNext`) or take them, leaving `None` behind (everything that stores a value somewhere else: `MakeList`, `SetGlobal`, `SetCell`, `ListPush`, `Return`, calls); the compiler gives an instruction that takes a value only a temporary, copying a local into one first.
 
-**Persistent REPL** — Each evaluation compiles into its own top-level function and runs on a fresh VM. A resumable `Interpreter` keeps the analyser and the globals vector between evaluations, which is how a REPL line sees what earlier lines declared. A resumable `Interpreter` starts the session over after an evaluation that fails past parsing, as the failed code may have done only part of its work; there is no in-process rollback. On Unix, `ndc_bin/src/isolation.rs` instead runs each REPL line in a forked copy of the REPL process, so a line that fails (error, panic, stack overflow, Ctrl-C) leaves the session exactly as it was. `ndc_bin/tests/repl.rs` drives the built binary to test this.
+**Two loops** — `Vm::run_to_depth` is two nested loops. The inner one runs the instructions of one frame with what it needs in locals: the code, the instruction pointer and the frame's registers, borrowed as `&mut [Value; WINDOW]` so a `Reg` (a `u16`) indexes them without a bounds check. It never calls a `&mut self` method; anything that enters or leaves a frame or needs the whole VM (a call, a native that takes the VM, `Return`, `Halt`, an error) breaks out with an `Exit`, and the outer loop writes the instruction pointer back to the frame, does it, and enters the inner loop again for the frame on top. The inner loop never reads a span; the outer one reads the span of the instruction that failed. The loop's generated code is sensitive to small changes (a new arm, a helper that gets inlined), so measure `benches/compare.py` and the integer loop and `fibonacci` with pinned `perf stat` after changing it.
+
+**Calls of natives skip the callee** — The compiler writes a call the analyser resolved to one native as `CallNative { dst, slot, base, args }`, with no function value in a register. A native registered with `NativeSpec::operator` does an `ndc_vm::NativeOp` (Int and Float `+ - *`, Float `/`, comparisons, `==`, unary `-`, `!`); `Natives::ops` lists them by slot for the compiler, and a call or augmented assignment resolved to one is the op's own instruction (`AddInt r2, r0, r1`, `Less`, …), with an immediate form when the right operand is a small `Int` written in the code (`AddIntI r0, r0, #1`) and a fused compare-and-branch when it's the condition of an `if` or `while` (`JumpIfNotLess r0, r2, +5`). The native, called as a value, runs the same `ndc_vm` code as the instruction.
+
+**Tuple indexes are read in place** — The analyser resolves a tuple indexed by a number written in the code (`t[1]`) to the intrinsic `Intrinsic::TupleIndex` instead of the `[any]` native, and the compiler writes it as `TupleIndex { dst, src, index }`, which reads the element straight from the tuple's register.
+
+**Top-level declarations are globals** — Natives take the first global slots, then every declaration in the program scope (`let`, `fn`, `struct` constructors and accessors) gets the next one, in order, via `ndc_layout::Layout::global_slot`. Functions reach them with `GetGlobal`/`SetGlobal` and never capture them; only locals of functions and of top-level blocks and loops are captured, through cells: the first capture moves the local's value into a `Value::Cell` in its register, which `GetCell`/`SetCell` read and write through, and a closure reaches it as an upvalue (`GetUpvalue`/`SetUpvalue`).
+
+**Persistent REPL** — Each evaluation compiles into its own top-level function and runs on a fresh VM; the value of its last expression goes to a register that `Halt` names. A resumable `Interpreter` keeps the analyser and the globals vector between evaluations, which is how a REPL line sees what earlier lines declared. A resumable `Interpreter` starts the session over after an evaluation that fails past parsing, as the failed code may have done only part of its work; there is no in-process rollback. On Unix, `ndc_bin/src/isolation.rs` instead runs each REPL line in a forked copy of the REPL process, so a line that fails (error, panic, stack overflow, Ctrl-C) leaves the session exactly as it was. `ndc_bin/tests/repl.rs` drives the built binary to test this.
 
 ### Test Infrastructure
 
@@ -148,7 +153,8 @@ Test crates live under `tests/`:
   // expect-error: divide   ← assert error message contains this substring
   ```
   It also generates one test per ` ```ndc ` block in the manual (`manual_<page>_<line>`), run by `tests/manual.rs`; see [Manual](#manual).
+  `tests/vm.rs` runs programs that take the VM through each kind of instruction and call (locals read late, natives and callbacks, closures and cells, long literals, every assignment target, casts, errors and their spans) and checks what each prints, gives or fails with.
   `tests/stdlib_signatures.rs` calls every native with sample values of the types its signature takes and fails on a runtime error about types, as the type checker trusts the signatures: a native whose signature promises more than it handles fails it.
-- `tests/compiler/` (`compiler_tests`) — disassembly snapshots of the bytecode compiler. Each `.ndc` program under `tests/compiler/programs/` starts with a comment saying what it shows and a `// compile:` directive (`parsed`, `analysed` or `stdlib`, optionally followed by `optimized`; several modes separated by commas give a section each), and its expected listings sit next to it, one per VM: `<name>.stack.txt` and `<name>.register.txt`, in the format `ndc disassemble` prints without source excerpts. The register compiler has no peephole optimizer, so its listing ignores `optimized` and has one section per setup. `build.rs` generates one `#[test]` per program. When a compiler change alters a listing on purpose, re-bless with `BLESS=1 cargo test -p compiler_tests` and review the diff of the `.txt` files. Add a program when adding a VM instruction or changing what the compiler emits.
+- `tests/compiler/` (`compiler_tests`) — disassembly snapshots of the bytecode compiler. Each `.ndc` program under `tests/compiler/programs/` starts with a comment saying what it shows and a `// compile:` directive (`parsed`, `analysed` or `stdlib`; several setups separated by commas give a section each), and its expected listing sits next to it as `<name>.txt`, in the format `ndc disassemble` prints without source excerpts. `build.rs` generates one `#[test]` per program. When a compiler change alters a listing on purpose, re-bless with `BLESS=1 cargo test -p compiler_tests` and review the diff of the `.txt` files. Add a program when adding a VM instruction or changing what the compiler emits.
 - `ndc_bin/tests/repl.rs` — feeds lines to the built `ndc` binary's REPL (Unix only) and checks what it prints, e.g. that a failed line leaves no trace.
-- `tests/proptest/` (`proptest_tests`) — property-based fuzzers. `panic.rs` runs random token streams on both VMs and fails on a panic or a difference; its fresh-fuzz test is `#[ignore]`d, and regression replay (from `panic.regressions`) runs by default. `differential.rs` generates programs that run (bounded loops, functions, closures, lists, …) and requires the same output, value and error with its span on both VMs: a short run of a few hundred programs runs by default, the long run is `#[ignore]`d. See [CONTRIBUTING.md](CONTRIBUTING.md) for run commands.
+- `tests/proptest/` (`proptest_tests`) — property-based fuzzers. `panic.rs` runs random token streams through the whole pipeline and fails on a panic or a hang; its fresh-fuzz test is `#[ignore]`d, and regression replay (from `panic.regressions`) runs by default. `generated_programs.rs` generates programs that run (bounded loops, functions, closures, lists, …), runs each at the top level, where its variables are globals, and inside a function `main`, where they are registers, and requires the same output, value and error with its span from both: a short run of a few hundred programs runs by default, the long run is `#[ignore]`d. `overloads.rs` stresses the analyser's overload choices. See [CONTRIBUTING.md](CONTRIBUTING.md) for run commands.

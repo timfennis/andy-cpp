@@ -1,3 +1,18 @@
+//! The VM, which runs what [`crate::compiler`] compiles.
+//!
+//! Every running call has a frame: a window of the VM's one value stack,
+//! `stack[base..base + frame_size]`, whose values are the function's
+//! registers. A call's frame starts at the register after the one its
+//! function is in, so the caller's argument registers are the callee's
+//! parameters, and `Return` puts the result where the function was.
+//! Nothing is pushed or popped while code runs; [`WINDOW`] values past the
+//! top frame's first register are always there, so an instruction's
+//! registers are indexed without a bounds check.
+//!
+//! An instruction either borrows its operands, as `AddInt` and the jumps
+//! do, or takes them and leaves `None` behind, as everything that stores a
+//! value somewhere else does (`MakeList`, `SetGlobal`, `Return`, calls).
+
 use crate::chunk::{ClosureCode, far_target};
 use crate::error::VmError;
 use crate::hash_map::{HashMap, hasher};
@@ -1160,8 +1175,8 @@ impl Vm {
     }
 
     /// The globals as the program left them, for the next REPL line, and
-    /// what is left on the stack: the locals of the top-level function, and
-    /// of every function and block the program was in if it failed.
+    /// what is left on the stack: the registers of the top-level function,
+    /// and of every function the program was in if it failed.
     pub fn into_globals_and_stack(self) -> (Vec<Value>, Vec<Value>) {
         (self.globals, self.stack)
     }
