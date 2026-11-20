@@ -13,7 +13,7 @@ use std::ops::Range;
 pub enum Kind {
     /// `"text"`, `r#"text"#`
     String,
-    /// `42`, `1.5`, `0xff`, `true`, `False`, `None`
+    /// `42`, `1.5`, `0xff`, `true`, `false`, `None`
     Literal,
     /// `let`, `fn`, `if`, `and`, …
     Keyword,

@@ -1,6 +1,6 @@
 /// Microbenchmark comparing three candidate designs for the VM output sink.
 ///
-/// - `enum`: static dispatch via a two-variant enum (current implementation)
+/// - `enum`: static dispatch via an enum, as the VM's `OutputSink` does (current implementation)
 /// - `dyn`:  heap-allocated trait object (`Box<dyn OutputTrait>`)
 /// - `rc`:   `Rc<RefCell<Vec<u8>>>` shared-ownership buffer
 ///

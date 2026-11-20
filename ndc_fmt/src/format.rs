@@ -494,8 +494,6 @@ impl<'a> Formatter<'a> {
         }
     }
 
-    /// Items between brackets, on one line if they fit and otherwise each on
-    /// its own line with a comma after every one
     /// The type arguments `::<Int, String>` after a name, nothing if it has
     /// none, with the comments between them, broken over lines like a call's
     /// arguments when they don't fit. `close_at` is the offset of the `>`.
@@ -510,6 +508,8 @@ impl<'a> Formatter<'a> {
         )
     }
 
+    /// Items between brackets, on one line if they fit and otherwise each on
+    /// its own line with a comma after every one
     fn delimited<T>(
         &mut self,
         brackets: Brackets,
