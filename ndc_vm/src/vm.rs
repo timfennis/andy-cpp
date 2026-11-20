@@ -12,6 +12,14 @@
 //! An instruction either borrows its operands, as `AddInt` and the jumps
 //! do, or takes them and leaves `None` behind, as everything that stores a
 //! value somewhere else does (`MakeList`, `SetGlobal`, `Return`, calls).
+//!
+//! A temporary that an instruction only borrowed, as both sides of
+//! `f(x) == g(y)`, stays in its register until the register is written
+//! again or the call returns, which empties its frame. Nothing clears it
+//! sooner: an instruction to do so costs more than the memory it would
+//! free earlier. So a reference count can read one higher than the values
+//! a program can still reach, which may only ever cost a copy that wasn't
+//! needed, as it does for `++` and for casts.
 
 use crate::chunk::{ClosureCode, far_target};
 use crate::error::VmError;
