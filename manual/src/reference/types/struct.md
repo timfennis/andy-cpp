@@ -60,7 +60,7 @@ error before the program runs:
 
 ```ndc,fails
 struct Point { x: Int, y: Int }
-Point("x", 2); // ERROR: no 'Point' matches the arguments 'String, Int'
+Point("x", 2); // ERROR: No function called 'Point' found that matches the arguments 'String, Int'
 ```
 
 ## Field access

@@ -50,10 +50,10 @@ Measures cumulative wall-clock time spent per instruction type and prints a summ
 
 ```
 ------------------------------------------------------------
-Instruction timing (total: 198µs)
+Instruction timing (total: 198us)
 ------------------------------------------------------------
-  Call                       125µs  ( 63.1%)
-  CallNative                  30µs  ( 15.3%)
+  Call                      125us  ( 63.1%)
+  CallNative                 30us  ( 15.3%)
   ...
 ```
 
