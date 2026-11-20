@@ -253,14 +253,12 @@ mod inner {
         try_sort_by(list, |a, b| a.try_cmp(b).map_err(|e| anyhow!(e)))
     }
 
-    /// Sorts the given sequence using a comparing function in place.
+    /// Sorts the given list using a comparing function in place.
     ///
     /// The comparing function returns an Int, a Float or a Number, which is compared to `0` to determine the relative ordering such that:
     /// - for values lower than `0` the first argument is smaller than the second argument
     /// - for values higher than `0` the first argument is greater than the second argument
     /// - for values equal to `0` the first argument is equal to the second argument
-    ///
-    /// This function only works for strings and lists and will throw errors otherwise.
     #[function(signature = "<T>([T], fn(T, T) -> Int)")]
     #[function(signature = "<T>([T], fn(T, T) -> Float)")]
     #[function(signature = "<T>([T], fn(T, T) -> Number)")]
@@ -383,8 +381,8 @@ mod inner {
     }
 
     /// Returns the number of elements of a collection whose size is known: a list, deque, map or
-    /// heap, or a string, for which it's the number of UTF-8 characters. A tuple's is declared
-    /// with `first` and `last`. An iterator's length isn't known without reading it.
+    /// heap, or a string, for which it's the number of UTF-8 characters. A tuple has a `len` of its
+    /// own. An iterator's length isn't known without reading it.
     #[function(signature = "<T>([T]) -> Int")]
     #[function(signature = "(String) -> Int")]
     #[function(signature = "<K, V>(%{K: V}) -> Int")]
