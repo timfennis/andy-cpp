@@ -5,9 +5,6 @@ disallowed-types = [
     { path = "std::collections::HashSet", reason = "use ndc_core::collections::HashSet, whose order is the same on every run" },
     { path = "std::hash::RandomState", reason = "it seeds hashes at random; use ndc_core::collections::FixedState" },
     { path = "std::collections::hash_map::DefaultHasher", reason = "it seeds hashes at random; use ndc_core::collections::hasher" },
-    { path = "ahash::AHashMap", reason = "it seeds hashes at random; use ndc_core::collections::HashMap" },
-    { path = "ahash::AHashSet", reason = "it seeds hashes at random; use ndc_core::collections::HashSet" },
-    { path = "ahash::RandomState", reason = "it seeds hashes at random unless given seeds; use ndc_core::collections::FixedState" },
 ]
 
 # A map value can hold a list as a key, which the program can still change.

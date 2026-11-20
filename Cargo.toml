@@ -21,7 +21,6 @@ version = "0.4.1"
 license = "MIT"
 
 [workspace.dependencies]
-ahash = { version = "0.8.12" }
 char_index = "0.1.6"
 anyhow = "1.0.104"
 clap = { version = "4.6.8", features = ["derive"] }
@@ -53,6 +52,7 @@ yansi = { version = "1.0.1", features = ["detect-tty", "detect-env"] }
 rand = "0.10.4"
 rand_chacha = "0.10.0"
 regex = "1.13.1"
+rustc-hash = "2.1.3"
 rustyline = { version = "19.0.0", features = ["derive"] }
 ryu = "1.0.23"
 serde_json = { version = "1.0.154", features = ["arbitrary_precision"] }

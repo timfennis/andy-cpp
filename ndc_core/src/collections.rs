@@ -5,40 +5,38 @@
 //! against keys chosen to collide, which a script run on your own machine
 //! doesn't need.
 //!
-//! They hash as fast as `ahash`'s own maps, which they're built on. Which
-//! hash a key gets can differ between kinds of machine, as `ahash` uses the
-//! processor's AES instructions where it has them. A map's order is still
-//! the order of its hashes: code that needs another order sorts, or uses an
-//! ordered collection.
+//! They hash with `rustc-hash`'s `FxHasher`, which has no seed at all and is
+//! the fastest of the hashers measured on Advent of Code solutions. It mixes
+//! less than a hasher built to resist attacks: its hash is a sum of what it
+//! was given, each times a power of one constant, so distinct keys that hash
+//! alike are easy to find. A map compares the keys it finds under a hash, so
+//! that only costs time, but nothing may treat two values as equal because
+//! their `FxHasher` hashes are. Which hash a key gets differs
+//! between 32- and 64-bit machines. A map's order is still the order of its
+//! hashes: code that needs another order sorts, or uses an ordered
+//! collection.
 //!
 //! Where a hash has to stand for the value it came from, with nothing to
 //! compare against, as a `pure fn`'s cache keys its results, [`WideHasher`]
-//! hashes to 128 bits with two `foldhash` hashers of the quality kind.
+//! hashes to 128 bits with two `foldhash` hashers of the quality kind, whose
+//! folded multiplies leave no pattern of values that hash alike.
 
 // The one place that names the hashers the rest of the code may not.
 #![allow(clippy::disallowed_types)]
 
-use ahash::{AHasher, RandomState};
 use foldhash::quality::{FixedState as QualityState, FoldHasher};
+use rustc_hash::FxHasher;
 use std::hash::{BuildHasher, Hasher};
 
-/// The fixed seeds every map and hasher here starts from.
-const SEEDED: RandomState = RandomState::with_seeds(
-    0x243f_6a88_85a3_08d3,
-    0x1319_8a2e_0370_7344,
-    0xa409_3822_299f_31d0,
-    0x082e_fa98_ec4e_6c89,
-);
-
-/// Builds hashers that all start from the same fixed seeds.
+/// Builds hashers that all start the same way.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FixedState;
 
 impl BuildHasher for FixedState {
-    type Hasher = AHasher;
+    type Hasher = FxHasher;
 
-    fn build_hasher(&self) -> AHasher {
-        SEEDED.build_hasher()
+    fn build_hasher(&self) -> FxHasher {
+        FxHasher::default()
     }
 }
 
@@ -49,12 +47,13 @@ pub type HashMap<K, V> = std::collections::HashMap<K, V, FixedState>;
 pub type HashSet<T> = std::collections::HashSet<T, FixedState>;
 
 /// A hasher that hashes a value the same way on every run.
-pub fn hasher() -> AHasher {
+pub fn hasher() -> FxHasher {
     FixedState.build_hasher()
 }
 
-/// A hasher with no pattern of distinct values that hash alike, for a hash
-/// that's summed with others or kept in place of the value.
+/// A hasher with no pattern of distinct values that hash alike, unlike
+/// [`hasher`]'s, for a hash that's summed with others or kept in place of
+/// the value.
 pub fn quality_hasher() -> FoldHasher<'static> {
     QualityState::with_seed(0x243f_6a88_85a3_08d3).build_hasher()
 }

@@ -5,5 +5,5 @@ version.workspace = true
 
 [dependencies]
 itertools.workspace = true
-ahash.workspace = true
 foldhash.workspace = true
+rustc-hash.workspace = true
