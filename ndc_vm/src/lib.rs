@@ -1,13 +1,14 @@
+pub mod chunk;
 pub mod compiler;
 pub mod disassemble;
 pub mod duration;
 pub mod error;
 pub mod hash_map;
+pub mod instr;
 mod io;
 pub mod iterator;
 mod native_op;
 mod natives;
-pub mod register;
 #[cfg(feature = "trace")]
 #[allow(clippy::print_stderr)]
 pub mod tracer;

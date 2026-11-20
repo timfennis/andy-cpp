@@ -32,7 +32,7 @@ impl fmt::Display for Reg {
     }
 }
 
-/// One instruction of the register VM. Each names the registers it reads
+/// One instruction of the VM. Each names the registers it reads
 /// and the one it writes: `AddInt { dst: r2, left: r0, right: r1 }` is
 /// `r2 = r0 + r1`. An instruction reads all its operands before it writes
 /// its destination, so the destination may be one of them.
@@ -405,7 +405,7 @@ impl Instr {
     }
 
     /// The jump's offset as it's written, for an instruction that jumps.
-    /// For one whose offset is [`FAR`], [`super::Chunk::jump_target`] says
+    /// For one whose offset is [`FAR`], [`crate::chunk::Chunk::jump_target`] says
     /// where it goes.
     pub fn jump_offset(self) -> Option<i32> {
         match self {
@@ -510,7 +510,7 @@ impl Instr {
 }
 
 /// The offset of a jump whose offset is an `i16` that goes further than one
-/// can say: where it goes is in [`super::Chunk`]'s far jumps instead.
+/// can say: where it goes is in [`crate::chunk::Chunk`]'s far jumps instead.
 pub const FAR: i16 = i16::MIN;
 
 /// The instruction's name and its operands, as a trace prints them:

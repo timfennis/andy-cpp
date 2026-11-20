@@ -18,8 +18,8 @@ use ndc_interpreter::Interpreter;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_vm::Natives;
+use ndc_vm::compiler::Compiler;
 use ndc_vm::disassemble::disassemble;
-use ndc_vm::register::Compiler as RegisterCompiler;
 use std::fmt::{self, Write};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -115,7 +115,7 @@ fn register_listing(source: &str, mode: Mode) -> String {
             let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
             let natives = Natives::default();
             let function =
-                RegisterCompiler::compile(expressions.into_iter(), Analysis::default(), &natives)
+                Compiler::compile(expressions.into_iter(), Analysis::default(), &natives)
                     .expect("compile failed");
             disassemble(&function, &natives, None)
         }

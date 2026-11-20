@@ -1,5 +1,5 @@
-use super::instr::{FAR, Instr};
 use crate::Value;
+use crate::instr::{FAR, Instr};
 use crate::value::CompiledFunction;
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
@@ -14,9 +14,8 @@ pub struct ClosureCode {
     pub captures: Rc<[CaptureSource]>,
 }
 
-/// The code of one function for the register VM: its instructions, the
-/// constants they load, and the span of source each instruction came from,
-/// at the same index.
+/// The code of one function: its instructions, the constants they load,
+/// and the span of source each instruction came from, at the same index.
 #[derive(Default, Clone)]
 pub struct Chunk {
     code: Vec<Instr>,
@@ -210,7 +209,7 @@ impl Builder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::register::instr::Reg;
+    use crate::instr::Reg;
 
     #[test]
     fn labels_become_offsets_from_the_next_instruction() {

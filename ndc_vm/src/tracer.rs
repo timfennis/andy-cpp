@@ -1,5 +1,6 @@
+use crate::chunk::Chunk;
 use crate::duration::format_duration;
-use crate::register::Instr;
+use crate::instr::Instr;
 use ndc_core::collections::HashMap;
 use ndc_lexer::Span;
 use std::time::{Duration, Instant};
@@ -23,12 +24,12 @@ pub trait VmTracer {
     fn on_complete(&mut self);
 }
 
-/// Tells `tracer`, if the VM has one, that the register VM is about to run
-/// the instruction at `ip` of `chunk`, which came from `source`.
-pub(crate) fn on_register_instruction(
+/// Tells `tracer`, if the VM has one, that the VM is about to run the
+/// instruction at `ip` of `chunk`, which came from `source`.
+pub(crate) fn trace_instruction(
     tracer: &mut Option<Box<dyn VmTracer>>,
     source: Option<&str>,
-    chunk: &crate::register::Chunk,
+    chunk: &Chunk,
     ip: usize,
 ) {
     if let Some(tracer) = tracer {
