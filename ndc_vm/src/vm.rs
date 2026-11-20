@@ -340,6 +340,11 @@ impl Vm {
     /// registers, and leaves for anything that enters or leaves a frame; the
     /// outer one does that and enters the inner loop again for the frame on
     /// top.
+    ///
+    /// The work of a rarer instruction, such as making a closure or an
+    /// iterator, is in a function marked `#[inline(never)]`: inlined, it
+    /// makes the loop bigger and the integer loop and calls measurably
+    /// slower.
     fn run_to_depth(&mut self, target_depth: usize) -> Result<(), VmError> {
         loop {
             let frame = self
@@ -1168,6 +1173,7 @@ impl Vm {
     /// a tuple of one for each. An argument that isn't a tuple is used at
     /// every position: `(1, 2) * 3` is `(3, 6)`. An error is at `span`, the
     /// call's, unless it has a place of its own.
+    #[inline(never)]
     fn call_vec(
         &mut self,
         callee: &Value,
@@ -1232,6 +1238,7 @@ impl Vm {
 
 /// Writes the `out.len()` elements of `value` to `out`, in order, or says
 /// why it can't: `(1, 2)` unpacks into two values, but not into three.
+#[inline(never)]
 fn unpack_into(value: &Value, out: &mut [Value]) -> Result<(), String> {
     let size = out.len();
     let Value::Object(obj) = value else {
@@ -1309,6 +1316,7 @@ fn unpack_into(value: &Value, out: &mut [Value]) -> Result<(), String> {
 
 /// An iterator over `value`: the value itself if it's an iterator, and one
 /// over its elements if it's a list, tuple, deque, string, map or heap.
+#[inline(never)]
 fn iterator_of(value: &Value) -> Result<Value, String> {
     let not_iterable = || format!("{} is not iterable", value.static_type());
     let Value::Object(rc) = value else {
@@ -1460,6 +1468,7 @@ fn try_cast_value(value: &mut Value, target: &StaticType) {
 
 /// The element of `tuple` at `index`, counting a negative index from the
 /// end: `-1` is the last element.
+#[inline(never)]
 fn tuple_element(tuple: &Value, index: i64) -> Result<Value, String> {
     if let Value::Object(object) = tuple
         && let Object::Tuple(elements) = object.as_ref()
@@ -1524,6 +1533,7 @@ fn cannot_cast(value: &Value, target: &StaticType) -> String {
 /// which is a closure over `upvalues`: it shares the cells of the locals it
 /// captures, moving a local into a new cell on its first capture, and its
 /// maker's own captured variables.
+#[inline(never)]
 fn make_closure(
     code: &ClosureCode,
     regs: &mut [Value; WINDOW],
@@ -1574,6 +1584,7 @@ fn make_map(regs: &mut [Value; WINDOW], base: Reg, pairs: u16, default: bool) ->
 
 /// Appends the value in `src` to the list in `list`, leaving `None` in
 /// `src`.
+#[inline(never)]
 fn list_push(regs: &mut [Value; WINDOW], list: Reg, src: Reg) {
     debug_assert_ne!(list, src, "internal error: a list is pushed onto itself");
     let value = std::mem::replace(&mut regs[src.index()], Value::None);
@@ -1588,6 +1599,7 @@ fn list_push(regs: &mut [Value; WINDOW], list: Reg, src: Reg) {
 
 /// Puts the value in `value` under the key in `key` in the map in `map`,
 /// leaving `None` in both.
+#[inline(never)]
 fn map_insert(regs: &mut [Value; WINDOW], map: Reg, key: Reg, value: Reg) {
     debug_assert!(
         map != key && map != value && key != value,
@@ -1605,6 +1617,7 @@ fn map_insert(regs: &mut [Value; WINDOW], map: Reg, key: Reg, value: Reg) {
 }
 
 /// Puts the function in `register` in a memoising wrapper with a new cache.
+#[inline(never)]
 fn memoize(register: &mut Value) {
     let Value::Object(object) = register else {
         unreachable!("internal error: Memoize's register holds a function");
