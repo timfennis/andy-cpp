@@ -98,7 +98,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 
 | Crate | Role |
 |---|---|
-| `ndc_lexer` | Tokenisation, `Span` (offset+length) |
+| `ndc_lexer` | Tokenisation, `Span` (source id, offset, length) |
 | `ndc_parser` | AST (`Expression`, `ExpressionLocation`), parser |
 | `ndc_core` | `StaticType`, `FunctionRegistry`, `NodeId` |
 | `ndc_resolver` | Name resolution: `NameResolver`, `SymbolId`, per-use candidate symbols and closure captures |
@@ -121,7 +121,7 @@ The AST is syntax only. The analyser runs name resolution (`ndc_resolver`) on ea
 
 **Value type** — `ndc_vm/src/value/mod.rs` defines the one runtime `Value`. It is constrained to 16 bytes: `Int(i64)`, `Float(f64)`, `Number(Rc<AdvancedNumber>)` (BigInt/Rational/Complex), `Bool`, `None`, `Object(Rc<Object>)`, and `Cell` for captured locals.
 
-**Function overloading** — Functions are matched by name and arity. The semantic analyser produces `Binding::Resolved` (exact compile-time match) or `Binding::Dynamic(Vec<ResolvedVar>)` (runtime dispatch among candidates). Binary operators like `+` are parsed as `Expression::Call`.
+**Function overloading** — Functions are matched by name and by the number and types of their arguments. The semantic analyser picks one overload for every call before the program runs: `Binding::Resolved`, or `Binding::PerPosition` for an operator on tuples whose positions take different overloads. There is no dispatch at runtime. Binary operators like `+` are parsed as `Expression::OperatorCall`.
 
 **Semantic analyser** — `ndc_analyser/src/analyser/` infers `StaticType` and resolves function bindings: `mod.rs` holds the expression match, with calls, assignments and declarations in their own modules. `StaticType::Unknown` is what nothing settles the type of; only a type parameter or `Any` takes it.
 

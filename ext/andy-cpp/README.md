@@ -5,7 +5,7 @@
 This extension provides editor support for the Andy C++ programming language:
 
 - Syntax highlighting for `.ndc` files
-- Language server features (via the bundled `ndc` binary):
+- Language server features (via the `ndc` binary on the `PATH`, or the one `andy-cpp.ndcPath` names):
   - Diagnostics (lexer, parser, and type errors)
   - Inlay type hints
   - Hover (inferred types; signatures and docs for built-ins)
