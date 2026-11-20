@@ -77,7 +77,7 @@ pub struct CompiledFunction {
     /// hold its native before it runs; empty for any other function.
     pub(crate) natives: Vec<usize>,
     /// The function's code.
-    pub(crate) registers: crate::register::Chunk,
+    pub(crate) body: crate::chunk::Chunk,
     /// How many registers the function uses: its locals, then the most
     /// temporaries its code needs at once.
     pub(crate) frame_size: usize,

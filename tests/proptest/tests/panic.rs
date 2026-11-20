@@ -34,7 +34,7 @@ use ndc_core::FunctionRegistry;
 use ndc_interpreter as _;
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 use ndc_parser::Parser;
-use ndc_vm::register::Compiler;
+use ndc_vm::compiler::Compiler;
 use ndc_vm::{Natives, OutputSink};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;

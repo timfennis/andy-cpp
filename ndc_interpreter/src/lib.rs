@@ -8,8 +8,7 @@ pub use ndc_core::{Builtins, IntrinsicFunction};
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
 pub use ndc_vm::InputSource;
-use ndc_vm::compiler::Session;
-use ndc_vm::register::Compiler as RegisterCompiler;
+use ndc_vm::compiler::{Compiler, Session};
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
 use std::rc::Rc;
@@ -221,7 +220,7 @@ impl Interpreter {
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(RegisterCompiler::compile(
+        Ok(Compiler::compile(
             expressions.into_iter(),
             result.analysis,
             &self.natives,
@@ -334,14 +333,9 @@ impl Interpreter {
         let mut timings = ExecutionTimings::default();
         let code = measure(&mut timings, Phase::Compiling, || {
             if self.resumable {
-                RegisterCompiler::compile_line(
-                    expressions,
-                    analysis,
-                    &self.natives,
-                    &mut self.session,
-                )
+                Compiler::compile_line(expressions, analysis, &self.natives, &mut self.session)
             } else {
-                RegisterCompiler::compile(expressions, analysis, &self.natives)
+                Compiler::compile(expressions, analysis, &self.natives)
             }
         })?;
         let output = if self.capturing {
