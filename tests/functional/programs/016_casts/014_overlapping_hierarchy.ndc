@@ -1,6 +1,5 @@
 // A [Any] may hold only Ints, so the cast is possible and gets checked
-// at runtime rather than rejected outright. A copy is cast, as `xs` and `m`
-// still hold their containers.
+// at runtime rather than rejected outright.
 let xs: [Any] = [1, 2];
 assert_eq(cast::<[Int]>(xs.clone()), [1, 2]);
 

@@ -1,8 +1,7 @@
 // A cast is what lets a typed container overload be selected. `sum` has
 // separate Int, Float, and Number overloads, and a value the analyser only
 // knows as [Any] matches none of them, so each cast below picks a
-// different overload at compile time. The variables still hold their lists,
-// so a copy of each is cast.
+// different overload at compile time.
 let values: %{Any} = %{};
 values.insert(1);
 values.insert(2);

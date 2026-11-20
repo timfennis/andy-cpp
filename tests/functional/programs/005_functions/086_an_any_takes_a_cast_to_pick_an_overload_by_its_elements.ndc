@@ -1,6 +1,5 @@
 // Neither overload takes a value of type `Any`, so a cast says which list it
-// is, which checks the elements as the program runs. `a` and `b` still hold
-// their lists, so a copy of each is cast.
+// is, which checks the elements as the program runs.
 // expect-output: ints strings
 fn process(xs: [Int]) => "ints";
 fn process(xs: [String]) => "strings";
