@@ -508,7 +508,7 @@ impl Vm {
                         };
                         let arguments = &mut regs[base.index()..base.index() + usize::from(args)];
                         let result = function(arguments);
-                        arguments.fill(Value::None);
+                        clear(arguments);
                         match result {
                             Ok(value) => regs[dst.index()] = value,
                             Err(error) => break Exit::Error(error),
@@ -687,7 +687,7 @@ impl Vm {
             .pop()
             .expect("internal error: a running VM has a frame");
         let mut value = std::mem::replace(&mut self.stack[base + src.index()], Value::None);
-        self.stack[base..base + frame.function.frame_size].fill(Value::None);
+        clear(&mut self.stack[base..base + frame.function.frame_size]);
         if let Some(on_return) = frame.on_return {
             if let Some((cache, key)) = on_return.memo {
                 cache.borrow_mut().insert(key, value.clone());
@@ -760,7 +760,7 @@ impl Vm {
                 let key = memo_key(&self.stack[arguments.clone()]);
                 let cached = cache.borrow().get(&key).cloned();
                 if let Some(cached) = cached {
-                    self.stack[arguments].fill(Value::None);
+                    clear(&mut self.stack[arguments]);
                     self.stack[callee] = cached;
                     return Ok(());
                 }
@@ -881,7 +881,7 @@ impl Vm {
         match &native.func {
             NativeFunc::Simple(function) => {
                 let result = function(arguments);
-                arguments.fill(Value::None);
+                clear(arguments);
                 result
             }
             NativeFunc::WithVm(function) => {
@@ -1034,6 +1034,17 @@ fn memoize(register: &mut Value) {
         cache: Rc::default(),
         function: Rc::new(function.clone()),
     });
+}
+
+/// Leaves `None` in each of `registers`, dropping what they held: the
+/// arguments of a native once it returns, or the frame a call leaves. A
+/// loop rather than `fill`, which clones a `None` into each in a function
+/// of its own.
+#[inline(always)]
+fn clear(registers: &mut [Value]) {
+    for register in registers {
+        *register = Value::None;
+    }
 }
 
 /// The values of `registers`, which are `None` afterwards.
