@@ -16,10 +16,10 @@ printed. A program that prints something else each time, as one using random
 numbers does, is found by running the baseline twice; only its exit status is
 checked.
 
-It ends with the totals and the merge gate of docs/register-vm/plan.md: the
-candidate passes when both totals are at least 1.3x faster, no program takes
-more than 5% longer (and more than two milliseconds longer, which is noise), and
-none behaves differently.
+It ends with the totals and a gate for a change that is meant to make programs
+faster: the candidate passes when both totals are at least 1.3x faster, no
+program takes more than 5% longer (and more than two milliseconds longer, which
+is noise), and none behaves differently.
 
 Build both binaries the same way (same toolchain, same profile) and don't build
 anything else while this runs. To compare two settings of one binary, give it

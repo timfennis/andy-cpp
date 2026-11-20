@@ -4,6 +4,15 @@ use std::fmt;
 /// How many registers a frame can address: one per value of a [`Reg`]. The
 /// VM borrows this many values of the stack from a frame's first register
 /// on, so indexing them with a `Reg` needs no bounds check.
+///
+/// The stack always reaches this far past the top frame, so a VM fills
+/// 1 MB when it starts, which costs a program about a quarter of a
+/// millisecond. Two smaller windows were measured in November 2026 and left
+/// out. One of 4,096, with each register's position masked to it, made
+/// tight loops 5 to 15% slower: the mask is one more instruction on the way
+/// to every operand. One of 256 costs nothing in the loops, as masking to 8
+/// bits is reading one byte, but a map literal of 128 pairs already needs
+/// more registers than that.
 pub const WINDOW: usize = 1 << 16;
 
 /// A register of the running frame: `r0` is the frame's first value. A
@@ -160,6 +169,11 @@ pub enum Instr {
     /// Calls the function in `base` with the `args` values after it, and
     /// puts what it returns in `base`. The callee's frame starts at
     /// `base + 1`, so the arguments are its first registers.
+    ///
+    /// A call of a function declared at the top level loads it from its
+    /// global into `base` first. An instruction that called the global
+    /// directly was measured in November 2026: 5% on recursive `fib`,
+    /// nothing on whole programs, so it was left out.
     Call { base: Reg, args: u16 },
     /// Calls the function in `base`, an operator, with the `args` values
     /// after it element by element, and puts the tuple of the results in
