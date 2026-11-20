@@ -95,8 +95,8 @@ for (k, v) in m {
 | `&` | Intersection | `true` | `false` |
 | `~` | [Symmetric difference](https://en.wikipedia.org/wiki/Symmetric_difference) | `true` | `false` |
 | `in` | Test if `lhs` is part of the Set or a key in the Map | `true` | `true` |
-| `==` | Equality | `true` | `true` |
-| `!=` | Inequality | `true` | `true` |
+| `==` | Equality | `false` | `true` |
+| `!=` | Inequality | `false` | `true` |
 
 > **Note:** The union, intersection and symmetric difference operations retain the default value from the **left operand**
 
