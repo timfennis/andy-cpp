@@ -1209,8 +1209,10 @@ impl Eq for Value {}
 
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        // A number starts with its own tag, 0 to 2, which none of the tags
+        // below shares, so it needs no tag of its own here: one write less
+        // for each number a map or a memo cache hashes.
         if let Some(number) = self.numeric_ref() {
-            state.write_u8(1);
             number.hash(state);
             return;
         }

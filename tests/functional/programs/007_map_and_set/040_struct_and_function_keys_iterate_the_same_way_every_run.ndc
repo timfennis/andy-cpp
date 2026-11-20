@@ -17,5 +17,5 @@ names[four] = "four";
 names[five] = "five";
 print(points);
 print([names[f] for f in names.keys]);
-// expect-output: %{P {x: 5},P {x: 1},P {x: 4},P {x: 0},P {x: 7},P {x: 3},P {x: 6},P {x: 2}}
+// expect-output: %{P {x: 7},P {x: 3},P {x: 6},P {x: 2},P {x: 5},P {x: 1},P {x: 4},P {x: 0}}
 // expect-output: ["one","five","two","four","three"]

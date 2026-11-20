@@ -133,6 +133,7 @@ impl Default for AdvancedNumber {
 }
 
 /// Tags keeping the three hashing schemes below from colliding with each other.
+/// `Value` hashes a number by these alone, so its other tags start at 3.
 const HASH_TAG_EXACT_I64: u8 = 0;
 const HASH_TAG_CANONICAL: u8 = 1;
 const HASH_TAG_EXACT_F64: u8 = 2;
