@@ -1438,6 +1438,13 @@ impl Compiler {
             BindingPattern::Sequence(patterns) => {
                 let len = u16::try_from(patterns.len())
                     .map_err(|_too_many| CompileError::too_many_registers(span))?;
+                // Variables in registers one after the other get their
+                // elements straight away: `for (i, x) in xs` unpacks into
+                // `i` and `x`.
+                if let Some(base) = self.declared_registers(&patterns) {
+                    self.emit(Instr::Unpack { src, base, len }, span);
+                    return Ok(());
+                }
                 let mark = self.next_temp;
                 let base = Self::register(mark, span)?;
                 for _ in 0..len {
@@ -1454,6 +1461,35 @@ impl Compiler {
                 Ok(())
             }
         }
+    }
+
+    /// The register a declaration of `pattern` writes its value to, if it's
+    /// one variable whose value is its register's: a local, or a local that
+    /// closures capture, whose declaration writes its register (see
+    /// [`Self::store`]).
+    fn declared_register(&self, pattern: &BindingPatternLocation) -> Option<Reg> {
+        let BindingPattern::Identifier { .. } = pattern.pattern else {
+            return None;
+        };
+        match self.analysis.variable(pattern.id)? {
+            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
+                Self::register(slot, pattern.span).ok()
+            }
+            ResolvedVar::Global { .. } | ResolvedVar::Upvalue { .. } => None,
+        }
+    }
+
+    /// The first of the registers a declaration of `patterns` writes the
+    /// elements of a value to, if each is one variable's register (see
+    /// [`Self::declared_register`]) and they follow each other: `(a, b)` of
+    /// the locals in `r3` and `r4` is `r3`.
+    fn declared_registers(&self, patterns: &[BindingPatternLocation]) -> Option<Reg> {
+        let first = self.declared_register(patterns.first()?)?;
+        patterns
+            .iter()
+            .enumerate()
+            .all(|(index, pattern)| self.declared_register(pattern) == first.offset(index))
+            .then_some(first)
     }
 
     /// Stores the value in `src` in `variable`, which a declaration, when
@@ -1845,18 +1881,32 @@ impl Compiler {
                 let start = self.builder.label();
                 let end = self.builder.label();
                 self.builder.bind(start);
-                let value = self.alloc_temp(span)?;
-                self.builder.jump(
-                    Instr::IterNext {
-                        iter,
-                        dst: value,
-                        offset: 0,
-                    },
-                    end,
-                    span,
-                );
-                self.declare_pattern(l_value.clone(), value, span)?;
-                self.next_temp = value.index();
+                // A loop variable in a register gets each value straight
+                // away; a pattern is unpacked from a temporary.
+                if let Some(dst) = self.declared_register(l_value) {
+                    self.builder.jump(
+                        Instr::IterNext {
+                            iter,
+                            dst,
+                            offset: 0,
+                        },
+                        end,
+                        span,
+                    );
+                } else {
+                    let value = self.alloc_temp(span)?;
+                    self.builder.jump(
+                        Instr::IterNext {
+                            iter,
+                            dst: value,
+                            offset: 0,
+                        },
+                        end,
+                        span,
+                    );
+                    self.declare_pattern(l_value.clone(), value, span)?;
+                    self.next_temp = value.index();
+                }
                 self.loops.push(Loop { start, end });
                 self.compile_iterations(rest, span, compile_leaf)?;
                 self.loops.pop();
