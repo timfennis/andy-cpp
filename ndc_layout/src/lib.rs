@@ -112,9 +112,40 @@ impl<'a> Layout<'a> {
     /// it. A frame starts at 0, with a function's parameters first. A block
     /// numbers on from its parent, and its slots are free again once it ends:
     /// in `fn f() { let a = 1; { let b = 2; } let c = 3; }`, `a` is 0, `b` is 1
-    /// and `c` is 1.
+    /// and `c` is 1. A function declared where it may not run has a slot of
+    /// its own instead (see [`Self::own_slot`]).
     pub fn local_slot(self, symbol: SymbolId) -> usize {
+        if self.resolver.may_not_run(symbol) {
+            return self.own_slot(symbol);
+        }
         self.first_slot(self.resolver.scope_of(symbol)) + self.resolver.binding_position(symbol)
+    }
+
+    /// The slot of a function declared where it may not run, whose name is in
+    /// scope after it all the same ([`NameResolver::may_not_run`]): one past
+    /// the slots of its frame's other locals, so nothing but its declaration
+    /// ever writes it, and its name holds unit until the declaration runs.
+    /// In `fn f() { { let a = 1; } false and ((fn g() { 1 }) == ()); }`, `g`
+    /// is 1, not the 0 `a` had, which `g` would read if it shared it.
+    fn own_slot(self, symbol: SymbolId) -> usize {
+        let frame = self.frame_of(self.resolver.scope_of(symbol));
+        let shared = self
+            .resolver
+            .scopes()
+            .filter(|&(id, scope)| scope.kind() != ScopeKind::Program && self.frame_of(id) == frame)
+            .map(|(id, scope)| self.first_slot(id) + scope.bindings().len())
+            .max()
+            .unwrap_or(0);
+        let before = self
+            .resolver
+            .functions_that_may_not_run()
+            .filter(|&other| {
+                other < symbol
+                    && self.global_slot(other).is_none()
+                    && self.frame_of(self.resolver.scope_of(other)) == frame
+            })
+            .count();
+        shared + before
     }
 
     /// How code in `function` reaches `symbol` (`None` for the program's top
@@ -226,8 +257,9 @@ impl<'a> Layout<'a> {
         // highest slot any of its scopes uses. In
         // `fn f(a) { let b = 1; { let c = 2; } }` that's 3. The program scope's
         // own declarations are globals, so at the top level only blocks and
-        // loops count.
-        let mut frame_sizes: HashMap<ScopeId, usize> = HashMap::default();
+        // loops count. Each frame also lists the slots of its own of the
+        // functions declared where they may not run, which start as unit.
+        let mut frames: HashMap<ScopeId, (usize, Vec<usize>)> = HashMap::default();
         for (id, scope) in self.resolver.scopes().skip(first_scope) {
             match scope.kind() {
                 ScopeKind::Builtins | ScopeKind::Program => continue,
@@ -236,17 +268,31 @@ impl<'a> Layout<'a> {
                 }
                 ScopeKind::Block => {}
             }
-            let size = self.first_slot(id) + scope.bindings().len();
-            let frame = frame_sizes.entry(self.frame_of(id)).or_default();
-            *frame = (*frame).max(size);
+            let (size, unit_slots) = frames.entry(self.frame_of(id)).or_default();
+            *size = (*size).max(self.first_slot(id) + scope.bindings().len());
+            for &symbol in scope.bindings() {
+                if self.resolver.may_not_run(symbol) {
+                    let slot = self.own_slot(symbol);
+                    *size = (*size).max(slot + 1);
+                    unit_slots.push(slot);
+                }
+            }
         }
         analysis.top_level_frame_size = 0;
-        for (frame, size) in frame_sizes {
+        analysis.top_level_unit_slots = Vec::new();
+        for (frame, (size, mut unit_slots)) in frames {
+            unit_slots.sort_unstable();
             match self.resolver.scope(frame).kind() {
                 ScopeKind::Function(function) => {
                     analysis.frame_sizes.insert(function, size);
+                    if !unit_slots.is_empty() {
+                        analysis.unit_slots.insert(function, unit_slots);
+                    }
                 }
-                ScopeKind::Program => analysis.top_level_frame_size = size,
+                ScopeKind::Program => {
+                    analysis.top_level_frame_size = size;
+                    analysis.top_level_unit_slots = unit_slots;
+                }
                 ScopeKind::Block | ScopeKind::Builtins => {
                     unreachable!("internal error: a frame is the program or a function")
                 }

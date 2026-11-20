@@ -1,0 +1,28 @@
+== <script> (registers: 3, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 outer>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  GetGlobal r1, g0
+0004  LoadK r2, k1                         false
+0005  Call r1, 1
+0006  Halt r0
+
+== #1 outer (registers: 7) ==
+0000  LoadUnit r3
+0001  LoadK r1, k0                         1
+0002  LoadK r1, k1                         <fn #2 f>
+0003  Copy r4, r0
+0004  JumpIfFalse r4, +4                   -> 0009
+0005  LoadK r3, k2                         <fn #3 g>
+0006  LoadUnit r5
+0007  MakeTuple r6, r6, 0
+0008  Equal r4, r5, r6
+0009  Return r3
+
+== #2 f (registers: 1) ==
+0000  LoadK r0, k0                         1
+0001  Return r0
+
+== #3 g (registers: 1) ==
+0000  LoadK r0, k0                         2
+0001  Return r0

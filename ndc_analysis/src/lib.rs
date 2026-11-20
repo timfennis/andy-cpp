@@ -62,6 +62,14 @@ pub struct Analysis {
     /// How many local slots the top-level code needs for the variables of its
     /// blocks and loops. Its own top-level declarations are globals.
     pub top_level_frame_size: usize,
+    /// The local slots each function puts unit in when it starts, keyed by
+    /// its declaration: those of the named functions it declares where they
+    /// may not run, as `g` in `false and ((fn g() { 1 }) == ())`. No other
+    /// local shares such a slot, so `g` holds unit until its declaration
+    /// runs. Absent for a function that declares none.
+    pub unit_slots: HashMap<NodeId, Vec<usize>>,
+    /// As [`Self::unit_slots`], for the top-level code's blocks and loops.
+    pub top_level_unit_slots: Vec<usize>,
     /// How many global slots the program needs: the natives and every
     /// top-level declaration, counting earlier REPL lines.
     pub global_count: usize,
@@ -125,6 +133,8 @@ impl Analysis {
             cast_checks,
             frame_sizes,
             top_level_frame_size,
+            unit_slots,
+            top_level_unit_slots,
             global_count,
             instances,
             builtin_count,
@@ -143,6 +153,8 @@ impl Analysis {
         self.cast_checks.extend(cast_checks);
         self.frame_sizes.extend(frame_sizes);
         self.top_level_frame_size = top_level_frame_size;
+        self.unit_slots.extend(unit_slots);
+        self.top_level_unit_slots = top_level_unit_slots;
         self.global_count = global_count;
         self.instances = instances;
         self.builtin_count = builtin_count;
@@ -200,6 +212,12 @@ impl Analysis {
             .frame_sizes
             .get(&function)
             .expect("internal error: every function is analysed before it's compiled")
+    }
+
+    /// The local slots the function declared at `function` puts unit in when
+    /// it starts (see [`Self::unit_slots`]).
+    pub fn unit_slots_of(&self, function: NodeId) -> &[usize] {
+        self.unit_slots.get(&function).map_or(&[], Vec::as_slice)
     }
 }
 

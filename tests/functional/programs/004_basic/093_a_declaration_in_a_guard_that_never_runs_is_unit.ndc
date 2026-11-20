@@ -1,0 +1,25 @@
+// A function declared in a guard of a `for` or a comprehension is in scope
+// after the guard, and holds unit if the part of the guard it's in never ran.
+fn in_a_loop() {
+  for x in [1, 2], if x > 0 or ((fn f() { x }) == ()) {
+    let read = fn() { f };
+    assert_eq(read(), ());
+  }
+}
+in_a_loop();
+
+fn in_a_list_comprehension() {
+  assert_eq([f for x in [1, 2], if x > 0 or ((fn f() { x }) == ())], [(), ()]);
+}
+in_a_list_comprehension();
+
+fn in_a_map_comprehension() {
+  assert_eq(%{x: f for x in [1, 2], if x > 0 or ((fn f() { x }) == ())}, %{1: (), 2: ()});
+}
+in_a_map_comprehension();
+
+{
+  for x in [1, 2], if x > 0 or ((fn f() { x }) == ()) {
+    assert_eq(f, ());
+  }
+}

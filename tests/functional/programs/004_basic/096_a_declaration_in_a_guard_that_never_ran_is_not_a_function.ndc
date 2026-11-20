@@ -1,0 +1,6 @@
+// A function declared in a guard that never ran can't be called.
+// expect-error: Unable to invoke () as a function.
+fn main() {
+  print([f() for x in [1, 2], if x > 0 or ((fn f() { x }) == ())]);
+}
+main();
