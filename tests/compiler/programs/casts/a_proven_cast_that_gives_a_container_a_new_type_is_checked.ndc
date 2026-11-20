@@ -1,0 +1,5 @@
+// The type of `xs`, a `[Never]`, proves the cast, but the cast gives the list
+// a new type, so it's checked all the same: the `CheckType` is what copies a
+// list something else holds.
+// compile: analysed
+fn empty() -> [Never] => []; let xs = empty(); cast::<[Int]>(xs)

@@ -1,0 +1,32 @@
+// Each time round the loop the cast gets a copy of the list `held` holds,
+// and a cast of a parameter gets a copy of the caller's list, but a list
+// nothing else holds is cast as it is.
+// expect-output: [1,2] 9
+// expect-output: [5,1] [5]
+// expect-output: [7,1]
+// expect-output: [[0,10],[1,10],[2,10]]
+let held: Any = [1, 2];
+let total = 0;
+for i in 0..3 {
+    let ints = cast::<[Int]>(held);
+    ints.push(i);
+    total += ints.len();
+}
+print(held, total);
+
+fn with_one(xs: Any) -> [Int] {
+    let ints = cast::<[Int]>(xs);
+    ints.push(1);
+    ints
+}
+let mine = [5];
+print(with_one(mine), mine);
+print(with_one([7]));
+
+let made = [];
+for i in 0..3 {
+    let ints = cast::<[Int]>([i]);
+    ints.push(10);
+    made.push(ints);
+}
+print(made);

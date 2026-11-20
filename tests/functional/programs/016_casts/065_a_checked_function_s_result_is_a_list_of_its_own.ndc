@@ -1,0 +1,11 @@
+// What a function cast to a type with a list in its return type returns is
+// checked when it returns, as a cast is, and so it's a list of its own too:
+// `held` is a `[Any]`, and what `get` returns is a `[Int]`.
+// expect-output: [1,"a"] [1,2]
+let held: [Any] = [1];
+let f: Any = fn() => held;
+let get = cast::<fn() -> [Int]>(f);
+let ints = get();
+held.push("a");
+ints.push(2);
+print(held, ints);

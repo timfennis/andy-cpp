@@ -1,0 +1,6 @@
+// A list that isn't the cast's type gives `None`, whether something else
+// holds it or not, and is left as it was.
+// expect-output: None [1,"a"]
+let mixed: [Any] = [1, "a"];
+let any: Any = mixed;
+print(cast?::<[Int]>(any), mixed);

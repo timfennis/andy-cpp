@@ -1,4 +1,5 @@
 // A cast to a container type is the same type check as a cast to any other
-// type, right after the value is read into r0: a `CheckType` of `[Int]`.
+// type, right after the value is read into r0: a `CheckType` of `[Int]`,
+// which also copies the list when something else holds it, as `x` does here.
 // compile: analysed
 let x: Any = [1]; cast::<[Int]>(x)

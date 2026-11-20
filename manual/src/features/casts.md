@@ -52,6 +52,17 @@ let values: [Any] = [1, 2, 3];
 print(cast::<[Int]>(values).sum());  // 6
 ```
 
+A cast of a list gives you a list of your own. When a variable still holds
+the list, the cast copies it, so changing one doesn't change the other:
+
+```ndc
+let values: [Any] = [1, 2];
+let ints = cast::<[Int]>(values);
+values.push("three");
+print(ints);    // [1,2]
+print(values);  // [1,2,"three"]
+```
+
 ## Testing a value's type with `cast?`
 
 `cast?::<T>(value)` is the cast that doesn't fail: it gives `Some(value)` when

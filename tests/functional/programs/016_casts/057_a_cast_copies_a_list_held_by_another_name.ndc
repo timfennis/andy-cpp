@@ -1,0 +1,10 @@
+// `words` holds Strings, so the cast to `[Any]` gets a copy of its list: a
+// push of an Int through `anything` leaves `words` as it was, and a push
+// through `words` leaves `anything` as it was.
+// expect-output: ["a","b","c"] ["a","b",1]
+let words = "a b".split(" ");
+let any: Any = words;
+let anything = cast::<[Any]>(any);
+anything.push(1);
+words.push("c");
+print(words, anything);

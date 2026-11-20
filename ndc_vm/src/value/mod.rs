@@ -60,6 +60,28 @@ fn deep_copy_all<'a, C: FromIterator<Value>>(
     values.map(|value| value.deep_copy_with(copies)).collect()
 }
 
+/// What [`Value::unshare`] has copied so far: each container it copied, by
+/// its address and the part of the type it was reached as, with the
+/// container itself, kept so that no other container gets its address while
+/// the walk goes on, and the copy.
+type UnsharedCopies = HashMap<(*const Object, *const StaticType), (Value, Value)>;
+
+/// Gives each of `values`, a `target`, containers of its own, as
+/// [`Value::unshare`] does. Whether it replaced any of them.
+fn unshare_all<'v>(
+    values: impl IntoIterator<Item = &'v mut Value>,
+    target: &StaticType,
+    copies: &mut UnsharedCopies,
+) -> bool {
+    // A list of Ints has nothing in it to copy, so it isn't walked.
+    if !target.holds_a_mutable_container() {
+        return false;
+    }
+    values.into_iter().fold(false, |replaced, value| {
+        value.unshare_with(target, copies) | replaced
+    })
+}
+
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
 #[derive(Clone)]
@@ -316,23 +338,80 @@ impl Value {
     }
 
     /// This value as a `target`, if it is one, checking every element of a
-    /// container: a function that may be a function `target` is wrapped so
-    /// that each call checks what it returns.
-    pub fn converted_to(&self, target: &StaticType) -> Option<Self> {
+    /// container, or `Err` with the value as it was if it isn't: a function
+    /// that may be a function `target` is wrapped so that each call checks
+    /// what it returns, and a container something else holds is copied (see
+    /// [`Self::unshare`]).
+    pub fn converted_to(mut self, target: &StaticType) -> Result<Self, Self> {
         if let StaticType::Function { .. } = target
-            && let Self::Object(object) = self
+            && let Self::Object(object) = &self
             && let Object::Function(function) = object.as_ref()
         {
             return match function.fit(target) {
-                FunctionFit::Proven => Some(self.clone()),
-                FunctionFit::IfChecked => Some(Self::function(Function::Checked {
+                FunctionFit::Proven => Ok(self),
+                FunctionFit::IfChecked => Ok(Self::function(Function::Checked {
                     function: Rc::new(function.unchecked().clone()),
                     typ: Box::new(target.clone()),
                 })),
-                FunctionFit::No => None,
+                FunctionFit::No => Err(self),
             };
         }
-        self.conforms_to(target).then(|| self.clone())
+        if !self.conforms_to(target) {
+            return Err(self);
+        }
+        self.unshare(target);
+        Ok(self)
+    }
+
+    /// Gives this value, a `target`, containers of its own: each list, map,
+    /// deque or heap that `target` names and that something else holds is
+    /// copied, and a tuple or `Some` around a copy is rebuilt around it.
+    /// After `let a: Any = xs`, `cast::<[Any]>(a)` gets a copy of `xs`'s
+    /// list, so a push through one leaves the other as it was, and
+    /// `cast::<[Int]>([1, 2])` gets the list itself, which nothing else
+    /// holds.
+    ///
+    /// Something else holds a container when its reference count is above
+    /// one, or when it's reached through a tuple or `Some` that something
+    /// else holds: copying the tuple's elements counts one more for each.
+    /// A count that's one too high, as a leftover register can make it,
+    /// costs a copy that wasn't needed.
+    ///
+    /// Only what `target` names is copied: in `[[Int]]` the inner lists
+    /// too, in `[Any]` the list but none of its elements. A container
+    /// reached twice as the same part of `target` is copied once.
+    fn unshare(&mut self, target: &StaticType) {
+        if target.holds_a_mutable_container() {
+            self.unshare_with(target, &mut UnsharedCopies::default());
+        }
+    }
+
+    /// [`Self::unshare`], where `copies` has what's been copied so far.
+    /// Whether it replaced this value with a copy.
+    fn unshare_with(&mut self, target: &StaticType, copies: &mut UnsharedCopies) -> bool {
+        if !target.holds_a_mutable_container() {
+            return false;
+        }
+        let Self::Object(object) = self else {
+            return false;
+        };
+        let key = (Rc::as_ptr(object), std::ptr::from_ref(target));
+        if let Some((_, copy)) = copies.get(&key) {
+            *self = copy.clone();
+            return true;
+        }
+        if let Some(object) = Rc::get_mut(object) {
+            // Nothing else holds it, so it's kept, and only what's in it may
+            // be copied.
+            object.unshare_contents(target, copies);
+            return false;
+        }
+        let Some(copy) = object.unshared_copy(target, copies) else {
+            return false;
+        };
+        let original = std::mem::replace(self, Self::Object(Rc::new(copy)));
+        copies.insert(key, (original, self.clone()));
+        true
     }
 
     /// Check whether this value conforms to `target`, scanning container
@@ -596,6 +675,94 @@ impl Object {
         Self::Map {
             entries: RefCell::new(entries),
             default,
+        }
+    }
+
+    /// A copy of this container, a `target`, with containers of its own
+    /// inside, for [`Value::unshare`]. A tuple or `Some` is copied only to
+    /// rebuild it around a copy of what it holds: `None` for `(1, None)`,
+    /// which holds nothing to copy, and for a container `target` doesn't
+    /// name.
+    fn unshared_copy(&self, target: &StaticType, copies: &mut UnsharedCopies) -> Option<Self> {
+        let only_around_a_copy = match (target, self) {
+            (StaticType::List(_), Self::List(_))
+            | (StaticType::Deque(_), Self::Deque(_))
+            | (StaticType::MinHeap(_), Self::MinHeap(_))
+            | (StaticType::MaxHeap(_), Self::MaxHeap(_))
+            | (StaticType::Map { .. }, Self::Map { .. }) => false,
+            (StaticType::Tuple(_), Self::Tuple(_)) | (StaticType::Option(_), Self::Some(_)) => true,
+            _ => return None,
+        };
+        let mut copy = self.clone();
+        let replaced = copy.unshare_contents(target, copies);
+        (replaced || !only_around_a_copy).then_some(copy)
+    }
+
+    /// Gives what this container, a `target`, holds containers of its own,
+    /// in place, as [`Value::unshare`] does. Whether it replaced any of
+    /// them.
+    fn unshare_contents(&mut self, target: &StaticType, copies: &mut UnsharedCopies) -> bool {
+        match (target, self) {
+            (StaticType::List(element), Self::List(values)) => {
+                unshare_all(values.get_mut(), element, copies)
+            }
+            (StaticType::Deque(element), Self::Deque(values)) => {
+                unshare_all(values.get_mut(), element, copies)
+            }
+            (StaticType::MinHeap(element), Self::MinHeap(heap))
+                if element.holds_a_mutable_container() =>
+            {
+                // A copy is equal to what it copies, so the order holds.
+                let mut values = std::mem::take(heap.get_mut()).into_vec();
+                let replaced = unshare_all(
+                    values.iter_mut().map(|Reverse(OrdValue(value))| value),
+                    element,
+                    copies,
+                );
+                *heap.get_mut() = BinaryHeap::from(values);
+                replaced
+            }
+            (StaticType::MaxHeap(element), Self::MaxHeap(heap))
+                if element.holds_a_mutable_container() =>
+            {
+                let mut values = std::mem::take(heap.get_mut()).into_vec();
+                let replaced = unshare_all(
+                    values.iter_mut().map(|OrdValue(value)| value),
+                    element,
+                    copies,
+                );
+                *heap.get_mut() = BinaryHeap::from(values);
+                replaced
+            }
+            (StaticType::Map { key, value }, Self::Map { entries, default }) => {
+                let entries = entries.get_mut();
+                let mut replaced = default
+                    .as_mut()
+                    .is_some_and(|default| default.unshare_with(value, copies));
+                if key.holds_a_mutable_container() {
+                    // A key can't be changed in place, but a copy of one
+                    // hashes as it did, so the map is made again.
+                    *entries = std::mem::take(entries)
+                        .into_iter()
+                        .map(|(mut entry_key, mut entry_value)| {
+                            replaced |= entry_key.unshare_with(key, copies);
+                            replaced |= entry_value.unshare_with(value, copies);
+                            (entry_key, entry_value)
+                        })
+                        .collect();
+                    replaced
+                } else {
+                    unshare_all(entries.values_mut(), value, copies) | replaced
+                }
+            }
+            (StaticType::Tuple(elements), Self::Tuple(values)) => elements
+                .iter()
+                .zip(values)
+                .fold(false, |replaced, (element, value)| {
+                    value.unshare_with(element, copies) | replaced
+                }),
+            (StaticType::Option(inner), Self::Some(value)) => value.unshare_with(inner, copies),
+            _ => false,
         }
     }
 
@@ -1300,6 +1467,114 @@ mod tests {
 
         // Break the reference cycle so the test does not leak its allocations.
         elements.borrow_mut().clear();
+    }
+
+    /// Whether `a` and `b` are the same container, not two equal ones.
+    fn same(a: &Value, b: &Value) -> bool {
+        match (a, b) {
+            (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),
+            _ => panic!("expected two containers"),
+        }
+    }
+
+    /// The elements of the list or tuple `value`.
+    fn elements(value: &Value) -> Vec<Value> {
+        match value {
+            Value::Object(object) => match object.as_ref() {
+                Object::List(values) => values.borrow().clone(),
+                Object::Tuple(values) => values.clone(),
+                Object::Some(value) => vec![value.clone()],
+                _ => panic!("expected a list, tuple or option"),
+            },
+            _ => panic!("expected a list, tuple or option"),
+        }
+    }
+
+    fn list_of(element: StaticType) -> StaticType {
+        StaticType::List(Box::new(element))
+    }
+
+    fn cast(value: Value, target: &StaticType) -> Value {
+        value
+            .converted_to(target)
+            .unwrap_or_else(|_| panic!("expected a {target}"))
+    }
+
+    /// Where the container `value` is.
+    fn address(value: &Value) -> *const Object {
+        match value {
+            Value::Object(object) => Rc::as_ptr(object),
+            _ => panic!("expected a container"),
+        }
+    }
+
+    #[test]
+    fn a_cast_keeps_a_list_nothing_else_holds() {
+        let fresh = Value::list(vec![Value::Int(1)]);
+        let before = address(&fresh);
+        let cast = cast(fresh, &list_of(StaticType::Int));
+        assert_eq!(address(&cast), before);
+    }
+
+    #[test]
+    fn a_cast_copies_a_list_something_else_holds() {
+        let held = Value::list(vec![Value::Int(1)]);
+        let cast = cast(held.clone(), &list_of(StaticType::Any));
+        assert!(!same(&cast, &held));
+        assert_eq!(elements(&cast), elements(&held));
+    }
+
+    #[test]
+    fn a_cast_keeps_a_new_list_and_copies_a_held_list_in_it() {
+        let held = Value::list(vec![Value::Int(1)]);
+        let outer = Value::list(vec![held.clone(), Value::list(Vec::new())]);
+        let before = address(&outer);
+        let fresh = address(&elements(&outer)[1]);
+        let cast = cast(outer, &list_of(list_of(StaticType::Int)));
+        assert_eq!(address(&cast), before);
+        assert!(!same(&elements(&cast)[0], &held));
+        assert_eq!(address(&elements(&cast)[1]), fresh);
+    }
+
+    #[test]
+    fn a_cast_copies_only_the_containers_its_type_names() {
+        let inner = Value::list(vec![Value::Int(1)]);
+        let held = Value::list(vec![inner.clone()]);
+        let cast = cast(held.clone(), &list_of(StaticType::Any));
+        assert!(!same(&cast, &held));
+        assert!(same(&elements(&cast)[0], &inner));
+    }
+
+    #[test]
+    fn a_cast_rebuilds_a_shared_tuple_only_around_a_copy() {
+        let target = StaticType::Tuple(vec![
+            StaticType::Int,
+            StaticType::Option(Box::new(list_of(StaticType::Int))),
+        ]);
+
+        let list = Value::list(vec![Value::Int(2)]);
+        let shared = Value::tuple(vec![Value::Int(1), Value::option(Some(list.clone()))]);
+        drop(list);
+        let cast_value = cast(shared.clone(), &target);
+        assert!(!same(&cast_value, &shared));
+        let option = elements(&cast_value)[1].clone();
+        let original_option = elements(&shared)[1].clone();
+        assert!(!same(&option, &original_option));
+        assert!(!same(&elements(&option)[0], &elements(&original_option)[0]));
+
+        let without_a_list = Value::tuple(vec![Value::Int(1), Value::None]);
+        let cast_value = cast(without_a_list.clone(), &target);
+        assert!(same(&cast_value, &without_a_list));
+    }
+
+    #[test]
+    fn a_cast_to_a_type_without_a_container_copies_nothing() {
+        let pair = Value::tuple(vec![Value::Int(1), Value::string("a")]);
+        let target = StaticType::Tuple(vec![StaticType::Int, StaticType::String]);
+        assert!(same(&cast(pair.clone(), &target), &pair));
+
+        let list = Value::list(vec![Value::Int(1)]);
+        assert!(same(&cast(list.clone(), &StaticType::Any), &list));
     }
 
     #[test]

@@ -1478,7 +1478,8 @@ fn make_range(start: &Value, end: Option<&Value>, inclusive: bool) -> Result<Val
 /// [`Value::converted_to`] does, or with `None` when it isn't one.
 #[cold]
 fn try_cast_value(value: &mut Value, target: &StaticType) {
-    *value = Value::option(value.converted_to(target));
+    let taken = std::mem::replace(value, Value::None);
+    *value = Value::option(taken.converted_to(target).ok());
 }
 
 /// The element of `tuple` at `index`, counting a negative index from the
@@ -1510,19 +1511,17 @@ fn tuple_index_out_of_bounds(index: i64, length: usize) -> String {
 }
 
 /// Checks that `value` is a `target`, and makes it one: a function that may
-/// be a function `target` gets its calls checked (see
-/// [`Value::converted_to`]).
+/// be a function `target` gets its calls checked, and a container something
+/// else holds is copied (see [`Value::converted_to`]). A value that isn't a
+/// `target` is left as it was.
 fn convert(value: &mut Value, target: &StaticType) -> bool {
-    if !matches!(target, StaticType::Function { .. }) {
-        return value.conforms_to(target);
-    }
-    match value.converted_to(target) {
-        Some(converted) => {
-            *value = converted;
-            true
-        }
-        None => false,
-    }
+    let taken = std::mem::replace(value, Value::None);
+    let (converted, is_a) = match taken.converted_to(target) {
+        Ok(converted) => (converted, true),
+        Err(unchanged) => (unchanged, false),
+    };
+    *value = converted;
+    is_a
 }
 
 /// Checks that `returned`, the result of a call of a [`Function::Checked`],

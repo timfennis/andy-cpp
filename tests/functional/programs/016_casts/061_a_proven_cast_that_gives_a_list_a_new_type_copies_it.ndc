@@ -1,0 +1,11 @@
+// A `[Never]` is a list of every type, so its type proves both casts, but
+// each gives the list a new type: each gets a list of its own, and a push
+// through one reaches neither `xs` nor the other.
+// expect-output: [] [1] ["a"]
+fn empty() -> [Never] => [];
+let xs = empty();
+let ints = cast::<[Int]>(xs);
+let strings = cast::<[String]>(xs);
+ints.push(1);
+strings.push("a");
+print(xs, ints, strings);

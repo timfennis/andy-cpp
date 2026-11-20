@@ -1,0 +1,10 @@
+// The cast gets a new copy of `outer`, which it keeps, but the list inside
+// it is the one `inner` holds, so the cast copies that one: a push through
+// `lists[0]` leaves `inner` as it was, and the other way round.
+// expect-output: ["a","b"] [["a",1]]
+let inner = ["a"];
+let outer: [Any] = [inner];
+let lists = cast::<[[Any]]>(outer.clone());
+lists[0].push(1);
+inner.push("b");
+print(inner, lists);

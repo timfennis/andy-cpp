@@ -1,7 +1,0 @@
-// Not desired, fixed by step 6 of docs/register-vm/plan.md: `ints` is an
-// `Option<[Int]>`, but `xs` holds the same list and puts a String in it.
-// expect-output: Some(["a"])
-let xs = [];
-let ints = cast?::<[Int]>(xs);
-xs.push("a");
-print(ints);

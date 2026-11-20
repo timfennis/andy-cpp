@@ -1,9 +1,0 @@
-// Not desired, fixed by step 6 of docs/register-vm/plan.md: a copy of `outer`
-// is cast, but the list inside it is the one `inner` holds, so a push through
-// `lists[0]` reaches `inner`.
-// expect-output: ["a",1]
-let inner = ["a"];
-let outer: [Any] = [inner];
-let lists = cast::<[[Any]]>(outer.clone());
-lists[0].push(1);
-print(inner);
