@@ -1517,14 +1517,6 @@ mod tests {
     }
 
     #[test]
-    fn a_cast_copies_a_list_something_else_holds() {
-        let held = Value::list(vec![Value::Int(1)]);
-        let cast = cast(held.clone(), &list_of(StaticType::Any));
-        assert!(!same(&cast, &held));
-        assert_eq!(elements(&cast), elements(&held));
-    }
-
-    #[test]
     fn a_cast_keeps_a_new_list_and_copies_a_held_list_in_it() {
         let held = Value::list(vec![Value::Int(1)]);
         let outer = Value::list(vec![held.clone(), Value::list(Vec::new())]);

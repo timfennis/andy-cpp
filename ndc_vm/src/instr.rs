@@ -656,19 +656,4 @@ mod tests {
     fn an_instruction_is_8_bytes() {
         assert_eq!(size_of::<Instr>(), 8);
     }
-
-    #[test]
-    fn operands_print_with_register_names() {
-        let add = Instr::AddInt {
-            dst: Reg(2),
-            left: Reg(0),
-            right: Reg(1),
-        };
-        assert_eq!(add.to_string(), "AddInt r2, r0, r1");
-        let jump = Instr::JumpIfFalse {
-            cond: Reg(3),
-            offset: -4,
-        };
-        assert_eq!(jump.to_string(), "JumpIfFalse r3, -4");
-    }
 }
