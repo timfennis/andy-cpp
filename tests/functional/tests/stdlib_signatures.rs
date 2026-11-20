@@ -4,7 +4,7 @@
 //! a program pass the checker and then fail as it runs. Errors about values,
 //! as a division by zero or an index out of bounds, are what values can do.
 
-use ndc_interpreter::{Backend, Builtins, Interpreter, InterpreterError, StaticType};
+use ndc_interpreter::{Builtins, Interpreter, InterpreterError, StaticType};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Natives this test doesn't call: they print, read files or input, stop the
@@ -251,12 +251,10 @@ fn is_allowed(name: &str, signature: &StaticType, message: &str) -> bool {
 }
 
 /// An interpreter with the standard library that runs each program on its
-/// own, on the VM the environment variable `NDC_VM` names, the stack VM if
-/// it names none.
+/// own.
 fn interpreter() -> Interpreter {
     let mut interpreter = Interpreter::one_shot();
     interpreter.configure(ndc_stdlib::register);
-    interpreter.set_backend(Backend::from_env().expect("NDC_VM names a VM"));
     interpreter
 }
 

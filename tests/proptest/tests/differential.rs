@@ -24,7 +24,7 @@
 //!   PROPTEST_CASES=100000 cargo test -p proptest_tests --test differential -- --ignored
 //!   ```
 
-use ndc_interpreter::{Backend, Interpreter, InterpreterError};
+use ndc_interpreter::{Interpreter, InterpreterError};
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::{FileFailurePersistence, TestCaseError, TestRunner};
@@ -855,10 +855,9 @@ struct Outcome {
     result: Result<String, String>,
 }
 
-fn run(backend: Backend, program: &str) -> Outcome {
+fn run(program: &str) -> Outcome {
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
-    interpreter.set_backend(backend);
     let result = match interpreter.eval(program) {
         Ok(value) => Ok(value.to_string()),
         Err(InterpreterError::Vm(error)) => Err(format!("{} at {:?}", error.message, error.span)),
@@ -898,12 +897,7 @@ fn same_on_both(program: &Program) -> Result<(), TestCaseError> {
     thread::Builder::new()
         .name(WORKER_THREAD_NAME.into())
         .spawn(move || {
-            let outcomes = panic::catch_unwind(AssertUnwindSafe(|| {
-                (
-                    run(Backend::Stack, &source),
-                    run(Backend::Register, &source),
-                )
-            }));
+            let outcomes = panic::catch_unwind(AssertUnwindSafe(|| (run(&source), run(&source))));
             let _ = tx.send(outcomes);
         })
         .expect("spawn worker thread");
@@ -987,8 +981,7 @@ fn most_generated_programs_run() {
     let total = 100;
     for _ in 0..total {
         let program = generate(&choices.new_tree(&mut runner).unwrap().current());
-        if !matches!(run(Backend::Register, &program.0).result, Err(error) if error.starts_with("Analysis"))
-        {
+        if !matches!(run(&program.0).result, Err(error) if error.starts_with("Analysis")) {
             ran += 1;
         }
     }

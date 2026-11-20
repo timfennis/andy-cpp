@@ -1,3 +1,0 @@
-== <script> (locals: 0, globals: 0) ==
-0000  MakeString(0)                        "abc"
-0001  Halt

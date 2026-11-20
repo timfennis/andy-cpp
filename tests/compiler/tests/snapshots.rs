@@ -14,11 +14,10 @@
 //! the expected files instead of comparing.
 
 use ndc_analysis::Analysis;
-use ndc_interpreter::{Backend as Vm, Interpreter};
+use ndc_interpreter::Interpreter;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::Parser;
 use ndc_vm::Natives;
-use ndc_vm::compiler::Compiler;
 use ndc_vm::disassemble::disassemble;
 use ndc_vm::register::Compiler as RegisterCompiler;
 use std::fmt::{self, Write};
@@ -39,18 +38,11 @@ struct Backend {
 }
 
 /// Every backend, each of which has an expected listing for every program.
-const BACKENDS: &[Backend] = &[
-    Backend {
-        name: "stack",
-        listing: stack_listing,
-        optimizes: true,
-    },
-    Backend {
-        name: "register",
-        listing: register_listing,
-        optimizes: false,
-    },
-];
+const BACKENDS: &[Backend] = &[Backend {
+    name: "register",
+    listing: register_listing,
+    optimizes: false,
+}];
 
 /// How a program is compiled: `analysed`, or `stdlib optimized`.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -111,44 +103,6 @@ impl fmt::Display for Mode {
     }
 }
 
-/// The stack VM's bytecode for `source`, as `ndc disassemble` lists it,
-/// without the source excerpts.
-fn stack_listing(source: &str, mode: Mode) -> String {
-    match mode.setup {
-        Setup::Parsed => {
-            let tokens = Lexer::new(source, SourceId::SYNTHETIC)
-                .collect::<Result<Vec<_>, _>>()
-                .expect("lex failed");
-            let expressions = Parser::from_tokens(tokens).parse().expect("parse failed");
-            let natives = Natives::default();
-            let function = if mode.optimized {
-                Compiler::compile(expressions.into_iter(), Analysis::default(), &natives)
-            } else {
-                Compiler::compile_unoptimized(
-                    expressions.into_iter(),
-                    Analysis::default(),
-                    &natives,
-                )
-            }
-            .expect("compile failed");
-            disassemble(&function, &natives, None)
-        }
-        Setup::Analysed | Setup::Stdlib => {
-            let mut interpreter = Interpreter::capturing();
-            if matches!(mode.setup, Setup::Stdlib) {
-                interpreter.configure(ndc_stdlib::register);
-            }
-            let function = if mode.optimized {
-                interpreter.compile_str(source)
-            } else {
-                interpreter.compile_str_unoptimized(source)
-            }
-            .unwrap_or_else(|error| panic!("compile failed: {error:?}"));
-            disassemble(&function, interpreter.natives(), None)
-        }
-    }
-}
-
 /// The register VM's code for `source`, as `ndc disassemble` lists it with
 /// `NDC_VM=register`, without the source excerpts. The register compiler has
 /// no peephole optimizer, so `mode` is never `optimized`.
@@ -170,7 +124,6 @@ fn register_listing(source: &str, mode: Mode) -> String {
             if matches!(mode.setup, Setup::Stdlib) {
                 interpreter.configure(ndc_stdlib::register);
             }
-            interpreter.set_backend(Vm::Register);
             let function = interpreter
                 .compile_str(source)
                 .unwrap_or_else(|error| panic!("compile failed: {error:?}"));

@@ -1,9 +1,0 @@
---- parsed ---
-== <script> (locals: 0, globals: 0) ==
-0000  Constant(0)                          5
-0001  Pop
-0002  Halt
-
---- parsed optimized ---
-== <script> (locals: 0, globals: 0) ==
-0000  Halt

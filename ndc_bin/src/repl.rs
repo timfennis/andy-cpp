@@ -1,6 +1,6 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 use itertools::Itertools;
-use ndc_interpreter::{Backend, InputSource, Interpreter, InterpreterError};
+use ndc_interpreter::{InputSource, Interpreter, InterpreterError};
 use rustyline::Helper;
 use rustyline::config::Configurer;
 use rustyline::error::ReadlineError;
@@ -25,14 +25,13 @@ impl rustyline::highlight::Highlighter for RustylineHelper {
     }
 }
 
-/// An interpreter for the REPL's lines, which `backend` runs.
-fn new_interpreter(backend: Backend) -> Interpreter {
+/// An interpreter for the REPL's lines.
+fn new_interpreter() -> Interpreter {
     // Standard input is the prompt, which the REPL reads lines from.
     let mut interpreter = Interpreter::new()
         .line_by_line()
         .with_input(InputSource::None);
     interpreter.configure(ndc_stdlib::register);
-    interpreter.set_backend(backend);
     interpreter
 }
 
@@ -76,8 +75,8 @@ fn run_in_process(interpreter: &mut Interpreter, name: String, line: &str) {
     }
 }
 
-/// Runs the REPL, its lines on `backend`.
-pub fn run(backend: Backend) -> anyhow::Result<()> {
+/// Runs the REPL.
+pub fn run() -> anyhow::Result<()> {
     #[cfg(unix)]
     let session = crate::isolation::start()?;
 
@@ -87,7 +86,7 @@ pub fn run(backend: Backend) -> anyhow::Result<()> {
     rl.set_color_mode(ColorMode::Enabled);
     rl.set_helper(Some(h));
 
-    let mut interpreter = new_interpreter(backend);
+    let mut interpreter = new_interpreter();
     for command_nr in 1.. {
         match rl.readline("λ ") {
             Ok(line) => {
