@@ -1,0 +1,5 @@
+// The `break` sits inside a partially compiled call: `add` is already in r1 and
+// the constants `1` and `2` in r2 and r3. They need no cleanup, so the `break`
+// is a single `Jump` out of the loop; the `Call` after it is never reached.
+// compile: stdlib
+fn add(a: Int, b: Int, c: Int) -> Int { a + b + c } while true { add(1, 2, break); }

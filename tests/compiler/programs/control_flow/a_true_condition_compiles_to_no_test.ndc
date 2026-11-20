@@ -1,0 +1,5 @@
+// A condition written as `true` needs no test, so there's no `JumpIfFalse`:
+// the then-branch loads its `1` into r0 straight away and jumps over the
+// else-branch, which is still compiled though nothing reaches it.
+// compile: parsed
+if true { 1 } else { 2 }

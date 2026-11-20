@@ -1,6 +1,7 @@
-// `values` and `delta` take slots 0 and 1 of `f`'s frame. The indexed
-// assignment's temporaries (cached container, cached index and the operation
-// result) come after them, in slots 2 to 4, so `f` has 5 locals.
+// `values` and `delta` take registers 0 and 1 of `f`'s frame. The temporaries
+// of the indexed assignment come after them: r2 holds a copy of the container,
+// r3 the index, r4 the sum, and r5 to r7 the arguments of `[]` and `[]=`, so
+// `f` has 8 registers.
 // compile: stdlib
 fn f() {
     let values = [1];

@@ -1,5 +1,0 @@
-// Each branch leaves exactly one value on the stack: the true branch its `3`,
-// the false branch, which ends in a statement, unit (it pops its `3` and pushes
-// `()`).
-// compile: parsed
-if true { 3 } else { 3; }

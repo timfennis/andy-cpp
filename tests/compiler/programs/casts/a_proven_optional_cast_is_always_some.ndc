@@ -1,3 +1,4 @@
-// A proven optional cast is always `Some`, which a `TryCast` to `Any` makes.
+// A proven optional cast is always `Some`, which a `TryCast` to `Any` of the
+// value in r0 makes.
 // compile: analysed
 cast?::<Int>(1)

@@ -1,5 +1,5 @@
-// Short-circuits: if the left operand is false, it stays on the stack as the
-// result and the jump skips the right operand. If it's true, it's popped and
-// the right operand is the result.
+// Short-circuits: the left operand goes in r0, the result's register, and if
+// it's false `JumpIfFalse` skips the right operand, leaving it as the result.
+// If it's true, the right operand overwrites it in r0.
 // compile: parsed
 true and false

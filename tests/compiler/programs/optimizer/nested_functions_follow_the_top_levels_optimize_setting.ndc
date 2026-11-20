@@ -1,7 +1,0 @@
-// When the caller asks for unoptimized output, nested function bodies must also
-// be raw, otherwise debug and inspection callers would silently see optimized
-// bytecode inside the constants table. Raw, `f`'s body for `1;` is `Constant;
-// Pop` followed by the implicit unit `Return`; optimized, the peephole drops
-// the leading `Constant; Pop`.
-// compile: analysed, analysed optimized
-fn f() { 1; }

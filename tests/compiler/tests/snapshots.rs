@@ -1,14 +1,11 @@
-//! Checks what each compiler writes for each program under `programs`
-//! against the listing expected of it, kept next to the program: for the
-//! stack backend, `programs/blocks/a_block_yields_its_last_expression.ndc` is
-//! expected to compile to `a_block_yields_its_last_expression.stack.txt`, and
-//! for the register backend to `a_block_yields_its_last_expression.register.txt`.
+//! Checks what the compiler writes for each program under `programs`
+//! against the listing expected of it, kept next to the program:
+//! `programs/blocks/a_block_yields_its_last_expression.ndc` is expected to
+//! compile to `a_block_yields_its_last_expression.txt`.
 //!
 //! A program says how to compile it in a directive, one line such as
-//! `// compile: stdlib optimized`, which may list several modes separated by
-//! commas; the listing then has a section per mode. The register compiler
-//! has no peephole optimizer, so its listing has one section for a setup
-//! with and without `optimized`, titled without it.
+//! `// compile: stdlib`, which may list several setups separated by commas;
+//! the listing then has a section per setup.
 //!
 //! `BLESS=1 cargo test -p compiler_tests` writes what the compiler gives into
 //! the expected files instead of comparing.
@@ -26,32 +23,6 @@ use std::path::{Path, PathBuf};
 
 include!(concat!(env!("OUT_DIR"), "/snapshot_tests.rs"));
 
-/// A compiler the snapshots check: its name and how it lists a program.
-struct Backend {
-    /// The name the backend's expected files carry: `stack` for
-    /// `program.stack.txt`.
-    name: &'static str,
-    /// The listing of a program's code compiled in a mode.
-    listing: fn(&str, Mode) -> String,
-    /// Whether the backend has a peephole optimizer, which `optimized` runs.
-    optimizes: bool,
-}
-
-/// Every backend, each of which has an expected listing for every program.
-const BACKENDS: &[Backend] = &[Backend {
-    name: "register",
-    listing: register_listing,
-    optimizes: false,
-}];
-
-/// How a program is compiled: `analysed`, or `stdlib optimized`.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Mode {
-    setup: Setup,
-    /// Whether the peephole optimizer runs.
-    optimized: bool,
-}
-
 /// What the compiler knows about a program.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Setup {
@@ -63,51 +34,34 @@ enum Setup {
     Stdlib,
 }
 
-impl Mode {
-    /// The mode a directive names: `analysed` or `stdlib optimized`.
+impl Setup {
+    /// The setup a directive names: `parsed`, `analysed` or `stdlib`.
     fn parse(text: &str) -> Result<Self, String> {
-        let mut words = text.split_whitespace();
-        let setup = match words.next() {
-            Some("parsed") => Setup::Parsed,
-            Some("analysed") => Setup::Analysed,
-            Some("stdlib") => Setup::Stdlib,
-            _ => {
-                return Err(format!(
-                    "`{text}` names no setup: parsed, analysed or stdlib"
-                ));
-            }
-        };
-        let optimized = match words.next() {
-            None => false,
-            Some("optimized") => true,
-            Some(word) => return Err(format!("`{word}` in `{text}` isn't `optimized`")),
-        };
-        if words.next().is_some() {
-            return Err(format!("`{text}` has more than a setup and `optimized`"));
+        match text.trim() {
+            "parsed" => Ok(Self::Parsed),
+            "analysed" => Ok(Self::Analysed),
+            "stdlib" => Ok(Self::Stdlib),
+            _ => Err(format!(
+                "`{text}` names no setup: parsed, analysed or stdlib"
+            )),
         }
-        Ok(Self { setup, optimized })
     }
 }
 
-impl fmt::Display for Mode {
+impl fmt::Display for Setup {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self.setup {
-            Setup::Parsed => "parsed",
-            Setup::Analysed => "analysed",
-            Setup::Stdlib => "stdlib",
-        })?;
-        if self.optimized {
-            f.write_str(" optimized")?;
-        }
-        Ok(())
+        f.write_str(match self {
+            Self::Parsed => "parsed",
+            Self::Analysed => "analysed",
+            Self::Stdlib => "stdlib",
+        })
     }
 }
 
-/// The register VM's code for `source`, as `ndc disassemble` lists it with
-/// `NDC_VM=register`, without the source excerpts. The register compiler has
-/// no peephole optimizer, so `mode` is never `optimized`.
-fn register_listing(source: &str, mode: Mode) -> String {
-    match mode.setup {
+/// The code of `source` compiled with `setup`, as `ndc disassemble` lists
+/// it, without the source excerpts.
+fn listing(source: &str, setup: Setup) -> String {
+    match setup {
         Setup::Parsed => {
             let tokens = Lexer::new(source, SourceId::SYNTHETIC)
                 .collect::<Result<Vec<_>, _>>()
@@ -121,7 +75,7 @@ fn register_listing(source: &str, mode: Mode) -> String {
         }
         Setup::Analysed | Setup::Stdlib => {
             let mut interpreter = Interpreter::capturing();
-            if matches!(mode.setup, Setup::Stdlib) {
+            if setup == Setup::Stdlib {
                 interpreter.configure(ndc_stdlib::register);
             }
             let function = interpreter
@@ -142,86 +96,62 @@ fn blessing() -> bool {
     std::env::var("BLESS").is_ok_and(|value| !value.is_empty() && value != "0")
 }
 
-/// The modes the `// compile:` directive of `source` lists.
-fn modes(source: &str) -> Vec<Mode> {
+/// The setups the `// compile:` directive of `source` lists.
+fn setups(source: &str) -> Vec<Setup> {
     let directive = source
         .lines()
         .find_map(|line| line.trim().strip_prefix("// compile:"))
         .expect("the program has no `// compile:` directive");
     directive
         .split(',')
-        .map(|mode| Mode::parse(mode).unwrap_or_else(|error| panic!("{error}")))
+        .map(|setup| Setup::parse(setup).unwrap_or_else(|error| panic!("{error}")))
         .collect()
 }
 
-/// What `backend` gives for `source` in each of `modes`: the listing alone
-/// for one mode, and a section titled with each mode for more. For a backend
-/// that doesn't optimize, `optimized` is left out of each mode, and a mode
-/// that is then the same as an earlier one is left out.
-fn snapshot(backend: &Backend, source: &str, modes: &[Mode]) -> String {
-    let mut own_modes = Vec::new();
-    for &mode in modes {
-        let mode = Mode {
-            optimized: mode.optimized && backend.optimizes,
-            ..mode
-        };
-        if !own_modes.contains(&mode) {
-            own_modes.push(mode);
-        }
+/// What the compiler gives for `source` with each of `setups`: the listing
+/// alone for one setup, and a section titled with each setup for more.
+fn snapshot(source: &str, setups: &[Setup]) -> String {
+    if let [setup] = setups {
+        return listing(source, *setup);
     }
-    let modes = own_modes.as_slice();
-    if let [mode] = modes {
-        return (backend.listing)(source, *mode);
-    }
-    modes
+    setups
         .iter()
-        .map(|mode| format!("--- {mode} ---\n{}", (backend.listing)(source, *mode)))
+        .map(|setup| format!("--- {setup} ---\n{}", listing(source, *setup)))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// Compares what each backend gives for the program at `relative`, under
+/// Compares what the compiler gives for the program at `relative`, under
 /// `programs`, with its expected listing, or writes the listing there when
 /// blessing.
 fn check_snapshots(relative: &str) {
     let path = programs_dir().join(relative);
     let source = fs::read_to_string(&path).expect("the program can't be read");
-    let modes = modes(&source);
-
-    let mut failures = Vec::new();
-    for backend in BACKENDS {
-        let actual = snapshot(backend, &source, &modes);
-        let expected_path = path.with_extension(format!("{}.txt", backend.name));
-        let expected_name = expected_path
-            .strip_prefix(programs_dir())
-            .unwrap()
-            .display();
-        let expected = fs::read_to_string(&expected_path).ok();
-        if expected.as_deref() == Some(actual.as_str()) {
-            continue;
-        }
-        if blessing() {
-            fs::write(&expected_path, &actual).expect("the expected listing can't be written");
-            continue;
-        }
-        failures.push(match expected {
-            Some(expected) => format!(
-                "programs/{expected_name} isn't what the {} backend writes now \
-                 (- expected, + actual):\n{}",
-                backend.name,
-                diff(&expected, &actual)
-            ),
-            None => format!(
-                "programs/{expected_name} is missing; the {} backend writes:\n{actual}",
-                backend.name
-            ),
-        });
+    let actual = snapshot(&source, &setups(&source));
+    let expected_path = path.with_extension("txt");
+    let expected = fs::read_to_string(&expected_path).ok();
+    if expected.as_deref() == Some(actual.as_str()) {
+        return;
     }
-    assert!(
-        failures.is_empty(),
-        "\n{}\nIf the change is right, run `BLESS=1 cargo test -p compiler_tests` \
-         to write it into the expected files.\n",
-        failures.join("\n")
+    if blessing() {
+        fs::write(&expected_path, &actual).expect("the expected listing can't be written");
+        return;
+    }
+    let expected_name = expected_path
+        .strip_prefix(programs_dir())
+        .unwrap()
+        .display();
+    let failure = match expected {
+        Some(expected) => format!(
+            "programs/{expected_name} isn't what the compiler writes now \
+             (- expected, + actual):\n{}",
+            diff(&expected, &actual)
+        ),
+        None => format!("programs/{expected_name} is missing; the compiler writes:\n{actual}"),
+    };
+    panic!(
+        "\n{failure}\nIf the change is right, run `BLESS=1 cargo test -p compiler_tests` \
+         to write it into the expected file.\n"
     );
 }
 
@@ -299,10 +229,10 @@ fn diff(expected: &str, actual: &str) -> String {
     out
 }
 
-/// Every expected listing is of a program and a backend that exist, so none
-/// is left behind when a program is renamed or a backend removed.
+/// Every expected listing is of a program that exists, so none is left
+/// behind when a program is renamed or removed.
 #[test]
-fn every_expected_listing_belongs_to_a_program_and_a_backend() {
+fn every_expected_listing_belongs_to_a_program() {
     fn check(dir: &Path, stray: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
@@ -313,12 +243,8 @@ fn every_expected_listing_belongs_to_a_program_and_a_backend() {
             if path.extension().is_some_and(|e| e == "ndc") {
                 continue;
             }
-            let file_name = path.file_name().unwrap().to_string_lossy();
-            let belongs = BACKENDS.iter().any(|backend| {
-                file_name
-                    .strip_suffix(&format!(".{}.txt", backend.name))
-                    .is_some_and(|stem| path.with_file_name(format!("{stem}.ndc")).is_file())
-            });
+            let belongs = path.extension().is_some_and(|e| e == "txt")
+                && path.with_extension("ndc").is_file();
             if !belongs {
                 stray.push(path);
             }

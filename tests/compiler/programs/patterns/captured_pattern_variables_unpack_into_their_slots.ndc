@@ -1,6 +1,0 @@
-// Pattern variables a closure captures are declared like any other local: the
-// declaration puts the new value in the slot, replacing the cell of the
-// previous iteration, so `UnpackLocals(1, 2)` covers them too, and there's no
-// `Unpack`.
-// compile: stdlib
-fn f(xs: [(Int, Int)]) { for (a, b) in xs { fn() { a + b }; } }

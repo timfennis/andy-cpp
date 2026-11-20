@@ -1,7 +1,6 @@
-// `values` is a global. The top-level code's own locals are assigned first:
-// slot 0 is `delta`. Preparing an indexed assignment then reserves
-// non-overlapping compiler temporaries after the source locals' high-water
-// mark: slot 1 holds the cached container, slot 2 the cached index and slot 3
-// the operation's result passed to `[]=`.
+// `values` is a global. The top-level code's own locals take the first
+// registers: `delta` is r0, and r1 holds the program's value. The temporaries
+// of the indexed assignment come after them: r2 holds the container, r3 the
+// index, r4 the sum passed to `[]=`, and r5 to r7 the arguments of the calls.
 // compile: stdlib
 let values = [1]; values[0] += { let delta = 2; delta };

@@ -1,5 +1,0 @@
-// Loads of globals, locals and cells are elided like constants: a discarded
-// read of the global `a`, the local `b` or the captured `c` (`GetGlobal; Pop`,
-// `GetLocal; Pop` and `GetCell; Pop` in the raw code) leaves nothing behind.
-// compile: analysed, analysed optimized
-let a = 1; a; { let b = 2; b; let c = 3; c; fn() { c }; }

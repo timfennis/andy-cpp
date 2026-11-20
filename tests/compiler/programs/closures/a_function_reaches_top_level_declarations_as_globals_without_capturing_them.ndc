@@ -1,7 +1,7 @@
 // A function reaches a top-level declaration as a global: `g` is the program's
-// global `g0`, after the intrinsics, which `f` writes and reads with
-// `SetGlobal` and `GetGlobal`. `f` captures nothing, so its declaration loads
-// it as a plain constant, with no `Closure`.
+// global `g0`, which `f` writes and reads with `SetGlobal` and `GetGlobal`. `f`
+// captures nothing, so its declaration loads it as a plain constant with
+// `LoadK`, with no `Closure`.
 // compile: analysed
 let g = 1;
 fn f() { g = 2; g }

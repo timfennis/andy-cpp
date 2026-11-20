@@ -1,5 +1,5 @@
-// Analysed, an `if` without an `else` is `()`, so the branch's own value is
-// dropped for one: the true path pops the `1` and pushes `()`, and the false
-// path pops the condition and pushes `()`.
+// Analysed, an `if` without an `else` is `()`, so its branch's value isn't
+// used and its `1` compiles to nothing; the `if` yields `()` with `LoadUnit`.
+// Its condition is `true`, which needs no test.
 // compile: analysed
 if true { 1 }
