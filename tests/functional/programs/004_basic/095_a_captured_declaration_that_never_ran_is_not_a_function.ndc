@@ -1,0 +1,11 @@
+// A closure that captures a function whose declaration never ran captures
+// unit, which it can't call.
+// expect-error: Unable to invoke () as a function.
+fn main() {
+  for i in 0..2 {
+    if i < 5 { } else if (fn f() { i }) == () { }
+    let call = fn() { f() };
+    print(call());
+  }
+}
+main();

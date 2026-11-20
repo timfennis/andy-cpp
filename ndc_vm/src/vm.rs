@@ -20,6 +20,13 @@
 //! free earlier. So a reference count can read one higher than the values
 //! a program can still reach, which may only ever cost a copy that wasn't
 //! needed, as it does for `++` and for casts.
+//!
+//! A call doesn't clear the registers of the frame it makes, which may hold
+//! what the caller left in its temporaries. Its code writes a local before
+//! reading it: a parameter is written by the call, any other local by its
+//! declaration, and the compiler puts unit in the register of a named
+//! function declared where it may not run, as in
+//! `false and ((fn f() { 1 }) == ())`, when the function starts.
 
 use crate::chunk::{ClosureCode, far_target};
 use crate::error::VmError;
@@ -1068,7 +1075,9 @@ impl Vm {
 
     /// Pushes the frame of a call of `function`, which `closure` is a
     /// closure of if it's one, whose callee register is `callee`, an index
-    /// in the stack: its parameters are the registers after it.
+    /// in the stack: its parameters are the registers after it. The
+    /// registers after its parameters keep what they hold, as the
+    /// function's code writes each of its locals before reading it.
     fn enter_frame(
         &mut self,
         function: Rc<CompiledFunction>,

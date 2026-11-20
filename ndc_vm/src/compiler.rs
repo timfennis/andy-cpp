@@ -14,6 +14,13 @@
 //! reason an instruction that takes its operand, leaving `None` behind (one
 //! that stores it somewhere else, as `MakeList` or `SetGlobal`), is only
 //! ever given a temporary.
+//!
+//! A call doesn't clear the callee's registers, so the code compiled here
+//! writes each local before reading it. A declaration writes its local where
+//! it runs, which is before anything can read the name when it's a
+//! statement; a named function declared anywhere else may not run, and
+//! `Compiler::clear_declarations_that_may_not_run` puts unit in its
+//! register when the function starts.
 
 use crate::chunk::{Builder, Label};
 use crate::instr::{Instr, Reg, WINDOW};
@@ -333,6 +340,7 @@ impl Compiler {
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<(), CompileError> {
         let expressions = expressions.collect::<Vec<_>>();
+        self.clear_declarations_that_may_not_run(&expressions)?;
         // The program's value is its last expression's that isn't a
         // `;`-statement, kept in a register of its own while the statements
         // after it run.
@@ -2497,6 +2505,7 @@ impl Compiler {
             return Err(CompileError::too_many_registers(body.span));
         }
         let mut compiler = self.nested(locals, instance.or(self.instance));
+        compiler.clear_declarations_that_may_not_run(std::slice::from_ref(&body))?;
         let src = match compiler.compile_expr(body, Dest::Any)? {
             Operand::Local(reg) | Operand::Temp(reg) => reg,
             Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
@@ -2507,6 +2516,40 @@ impl Compiler {
             compiler.finish(name, static_type, 0, Vec::new()),
             used_instance,
         ))
+    }
+
+    /// Puts unit in the register of each local that a named function
+    /// declaration in `statements`, the code of the function being
+    /// compiled, declares where it may not run (see
+    /// [`declarations_that_may_not_run`]). Its name holds unit until the
+    /// declaration runs, as the name of any declaration that never ran
+    /// does: after `false and ((fn f() { 1 }) == ())`, `f` is `()`. Nothing
+    /// else writes the register before `f` is read, and a call doesn't
+    /// clear the registers of the frame it makes, which may hold what the
+    /// caller left in them.
+    fn clear_declarations_that_may_not_run(
+        &mut self,
+        statements: &[ExpressionLocation],
+    ) -> Result<(), CompileError> {
+        let mut declarations = Vec::new();
+        for statement in statements {
+            declarations_that_may_not_run(statement, true, &mut declarations);
+        }
+        let mut registers = Vec::with_capacity(declarations.len());
+        for (id, span) in declarations {
+            if let Some(ResolvedVar::Local { slot } | ResolvedVar::Cell { slot }) =
+                self.analysis.variable(id)
+            {
+                registers.push(self.local(slot, span)?);
+            }
+        }
+        // Declarations in blocks that don't overlap may share a register.
+        registers.sort_unstable();
+        registers.dedup();
+        for dst in registers {
+            self.emit(Instr::LoadUnit { dst }, Span::synthetic());
+        }
+        Ok(())
     }
 
     /// What the identifier `id` refers to, in the instance being compiled.
@@ -2573,6 +2616,45 @@ fn upvalue(slot: usize, span: Span) -> Result<u16, CompileError> {
 /// The `u32` a global slot is written as in an instruction.
 fn global(slot: usize) -> u32 {
     u32::try_from(slot).expect("internal error: a program has fewer than 2^32 globals")
+}
+
+/// Adds to `out` the named function declarations in `expression`, with
+/// their spans, that may not run before their name is read: every one that
+/// isn't a statement of a block, of the program or the body of a function
+/// itself. `statement` says whether `expression` is one of those.
+///
+/// A statement runs before what comes after it in its block, which is
+/// everything that can see the name it declares. A declaration anywhere
+/// else is part of an expression that can stop before reaching it, while
+/// its name stays in scope after the expression: `f` in the right operand
+/// of `false and ((fn f() { 1 }) == ())`, in the condition of an `else if`
+/// or a guard, or after a `break` in the condition of a `while`.
+///
+/// The body of a declared function is a function of its own, whose
+/// declarations its own compiler finds.
+fn declarations_that_may_not_run(
+    expression: &ExpressionLocation,
+    statement: bool,
+    out: &mut Vec<(NodeId, Span)>,
+) {
+    match &expression.expression {
+        Expression::FunctionDeclaration { name, .. } => {
+            if name.is_some() && !statement {
+                out.push((expression.id, expression.span));
+            }
+        }
+        Expression::Statement(inner) => declarations_that_may_not_run(inner, statement, out),
+        Expression::Block { statements } => {
+            for statement in statements {
+                declarations_that_may_not_run(statement, true, out);
+            }
+        }
+        _ => {
+            for child in expression.children() {
+                declarations_that_may_not_run(child, false, out);
+            }
+        }
+    }
 }
 
 /// Whether evaluating `expression` may write a local variable: whether it
