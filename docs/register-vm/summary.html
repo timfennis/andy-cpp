@@ -243,7 +243,20 @@
 
   <h1>Moving Andy C++ to a register VM</h1>
   <p class="lede">The plan is to replace the stack-based bytecode and its VM with a register-based one, to make programs run faster. Nothing else about the language changes: same results, same error messages.</p>
-  <p class="status">Summary of <code>docs/register-vm/plan.md</code>, written 19 November 2026. This is a plan. Nothing is built yet.</p>
+  <p class="status">Summary of <code>docs/register-vm/plan.md</code>, written 19 November 2026 as a plan and updated on 20 November with the result.</p>
+
+  <h2>Where it stands</h2>
+  <p>The register VM is built and is the only VM on the branch <code>feat/register-vm</code>; the stack VM is deleted. It runs the whole language and prints the same as master on every test program, the manual's examples and both benchmark sets.</p>
+  <table>
+    <thead><tr><th>Measured against master</th><th>Master</th><th>Branch</th><th>Faster by</th></tr></thead>
+    <tbody>
+      <tr><th>Benchmark programs</th><td>3,698 ms</td><td>2,004 ms</td><td>1.85x</td></tr>
+      <tr><th>Advent of Brian 2025</th><td>2,108 ms</td><td>1,400 ms</td><td>1.51x</td></tr>
+      <tr><th>Integer loop</th><td>395 ms</td><td>42 ms</td><td>9.3x</td></tr>
+      <tr><th><code>fib</code> benchmark</th><td>177 ms</td><td>56 ms</td><td>3.2x</td></tr>
+    </tbody>
+  </table>
+  <p>The merge gate asked for 1.3x on both sets with no program more than 5% slower, and it passes. Two things are left: a proper fix for casts that give one list two types, and the pull request to master. The rest of this page is the plan as it was written, which is still how the VM works.</p>
 
   <h2>What a register VM is</h2>
   <p>Today's VM is a stack machine. To add two variables it copies both onto a stack, adds the top two, and copies the result back into a variable. A register machine gives every variable and every intermediate value a numbered slot in the function's frame, and each instruction names the slots it reads and the slot it writes.</p>
@@ -420,59 +433,59 @@
   </ul>
 
   <h2>The order of work</h2>
-  <p>Grey steps happen on master, blue steps on the branch. Diamonds are points where a measurement decides whether to go on.</p>
+  <p>Diamonds are points where a measurement decides whether to go on. Everything through step 6 is done, all of it on the branch; the cast fix inside step 6 and the merge to master are what remain.</p>
 
   <figure aria-label="Roadmap of the migration">
     <ol class="roadmap">
-      <li>
+      <li class="branch">
         <span class="num">0</span>
-        <h3>Prepare <span class="where">on master</span></h3>
+        <h3>Prepare <span class="where">done, on the branch</span></h3>
         <p>A benchmark script, tests that pin down today's behaviour where the migration could change it, compiler tests turned into snapshots of the disassembly, and the cast's sharing check removed.</p>
       </li>
       <li class="branch">
         <span class="num">1</span>
-        <h3>Skeleton <span class="where">on feat/register-vm</span></h3>
+        <h3>Skeleton <span class="where">done</span></h3>
         <p>The new instruction format and its disassembler, next to the old code.</p>
       </li>
       <li class="branch">
         <span class="num">2</span>
-        <h3>A thin slice that runs</h3>
+        <h3>A thin slice that runs <span class="where">done</span></h3>
         <p>Just enough compiler and VM to run the loop and <code>fib</code>.</p>
       </li>
       <li class="branch gate">
         <span class="num" aria-hidden="true"></span>
-        <h3>Go or stop</h3>
+        <h3>Go or stop <span class="where">passed: 9.5x and 2.7x</span></h3>
         <p>Continue only if the loop is at least 3x faster and <code>fib(32)</code> at least 1.3x.</p>
       </li>
       <li class="branch">
         <span class="num">3</span>
-        <h3>The rest of the language</h3>
+        <h3>The rest of the language <span class="where">done</span></h3>
         <p>Eight pull requests: collections, loops, closures, assignments, natives, structs and casts, generics and the REPL, tracing.</p>
       </li>
       <li class="branch">
         <span class="num">4</span>
-        <h3>Both VMs under every test</h3>
+        <h3>Both VMs under every test <span class="where">done</span></h3>
         <p>Every test program runs on both and the output, errors and error positions are compared.</p>
       </li>
       <li class="branch gate">
         <span class="num" aria-hidden="true"></span>
-        <h3>Same behaviour</h3>
+        <h3>Same behaviour <span class="where">passed</span></h3>
         <p>Everything passes, and no program is more than 5% slower than on master.</p>
       </li>
       <li class="branch">
         <span class="num">5</span>
-        <h3>Optimise, only as far as needed</h3>
+        <h3>Optimise, only as far as needed <span class="where">done</span></h3>
         <p>Numbers written into instructions, compare-and-jump in one instruction, direct calls, integer <code>for</code> loops without an iterator object. One pull request each, each measured.</p>
       </li>
       <li class="branch gate">
         <span class="num" aria-hidden="true"></span>
-        <h3>Merge gate</h3>
+        <h3>Merge gate <span class="where">passed: 1.85x and 1.51x</span></h3>
         <p>Advent of Brian 2025 and the benchmark programs are at least 1.3x faster in total, and nothing is more than 5% slower.</p>
       </li>
       <li class="branch">
         <span class="num">6</span>
-        <h3>Switch and delete</h3>
-        <p>The register VM becomes the only one, the stack VM is removed, docs are updated, the playground is checked, and the branch merges.</p>
+        <h3>Switch and delete <span class="where">done, except the cast fix and the merge</span></h3>
+        <p>The register VM is the only one and the stack VM is removed, with the docs updated. Still to do: fix casts that give one list two types, check the playground in a browser, and merge the branch.</p>
       </li>
       <li>
         <span class="num">7</span>
@@ -498,7 +511,7 @@
     <li><strong>Register numbers are 16 bits wide.</strong> That avoids a limit of 255 values per function and measured the same as 8 bits. The thin slice in step 2 confirms it or falls back.</li>
     <li><strong>No new stack-VM instructions on master while the branch is open.</strong> Each one would have to be built twice.</li>
   </ul>
-  <p>The plan and the prototype are still uncommitted in the worktree where they were written. They need to be committed before another session can pick the work up.</p>
+  <p>The second of these was never needed: master didn't change while the branch was open.</p>
 
 </main>
 <div id="tooltip" role="status"></div>
