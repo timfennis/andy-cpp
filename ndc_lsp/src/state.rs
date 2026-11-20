@@ -37,6 +37,8 @@ pub struct DocumentState {
     pub variable_types: HashMap<String, StaticType>,
     /// Expression end offset -> inferred type, for dot-completion on arbitrary
     /// receiver expressions (e.g. `read_file("foo").`). Same resilience rationale.
+    /// Where several expressions end at one offset, it's the type of the
+    /// largest: in `1 < 2` the comparison's `Bool`, not the `Int` of `2`.
     pub expression_types: HashMap<usize, StaticType>,
 }
 
@@ -88,7 +90,11 @@ impl DocumentState {
         };
         walk_ast(&mut collector, &ast);
         self.variable_types = collector.variable_types;
-        self.expression_types = collector.expression_types;
+        self.expression_types = collector
+            .expression_types
+            .into_iter()
+            .map(|(end, (_start, typ))| (end, typ))
+            .collect();
         self.ast = ast;
         self.analysis = analysis;
         self.analysis_matches_source = true;
@@ -99,13 +105,26 @@ impl DocumentState {
 struct MapCollector<'a> {
     analysis: &'a Analysis,
     variable_types: HashMap<String, StaticType>,
-    expression_types: HashMap<usize, StaticType>,
+    /// End offset -> start offset and type of the largest expression found
+    /// ending there so far.
+    expression_types: HashMap<usize, (usize, StaticType)>,
 }
 
 impl AstVisitor for MapCollector<'_> {
+    /// Keeps the expression that starts first among those that end at the
+    /// same offset. Of two with the same span, it keeps the inner one, which
+    /// comes later: a statement has its expression's span but not its type.
     fn on_expression(&mut self, expr: &ExpressionLocation) {
-        if let Some(typ) = self.analysis.expr_types.get(&expr.id) {
-            self.expression_types.insert(expr.span.end(), typ.clone());
+        let Some(typ) = self.analysis.expr_types.get(&expr.id) else {
+            return;
+        };
+        let start = expr.span.offset();
+        match self.expression_types.get(&expr.span.end()) {
+            Some((kept_start, _)) if *kept_start < start => {}
+            _ => {
+                self.expression_types
+                    .insert(expr.span.end(), (start, typ.clone()));
+            }
         }
     }
 
@@ -126,6 +145,31 @@ impl AstVisitor for MapCollector<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn expression_types(source: &str) -> HashMap<usize, StaticType> {
+        let mut interpreter = ndc_interpreter::Interpreter::capturing();
+        interpreter.configure(ndc_stdlib::register);
+        let (ast, result) = interpreter
+            .analyse_str(source)
+            .expect("analysis should succeed");
+        DocumentState::from_analysis(source.to_string(), ast, result).expression_types
+    }
+
+    #[test]
+    fn an_offset_holds_the_type_of_the_largest_expression_ending_there() {
+        // `1 < 2`, its `2` and the statement around it all end at byte 5.
+        let types = expression_types("1 < 2;");
+        assert_eq!(types.get(&5), Some(&StaticType::Bool));
+        assert_eq!(types.get(&1), Some(&StaticType::Int));
+
+        // `len(xs)`, `xs` ends earlier; `[1] ++ xs` and `xs` end together.
+        let types = expression_types("let xs = [1]; len(xs); [1] ++ xs;");
+        assert_eq!(types.get(&21), Some(&StaticType::Int));
+        assert_eq!(
+            types.get(&32),
+            Some(&StaticType::List(Box::new(StaticType::Int)))
+        );
+    }
 
     #[test]
     fn a_document_without_analysis_does_not_match_its_source() {
