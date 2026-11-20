@@ -1,11 +1,10 @@
 //! Property-based panic test for the Andy C++ pipeline.
 //!
 //! Generates random `Vec<TokenLocation>` and pushes each through
-//! parser → analyser → compiler → VM, once on each VM. Errors are expected;
-//! panics, `unwrap`s, and `unreachable!`s count as failures, and so does a
-//! program the two VMs run differently: printing something else, giving
-//! another value, or failing with another error. Few random token streams
-//! get past the parser; `differential.rs` generates programs that run.
+//! parser → analyser → compiler → VM. Errors are expected; panics,
+//! `unwrap`s, and `unreachable!`s count as failures. Few random token
+//! streams get past the parser; `generated_programs.rs` generates programs
+//! that run.
 //!
 //! Each generated program runs in a worker thread with a 500ms timeout,
 //! so generated infinite loops don't hang the test. Panics are caught
@@ -35,7 +34,7 @@ use ndc_core::FunctionRegistry;
 use ndc_interpreter as _;
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 use ndc_parser::Parser;
-use ndc_vm::compiler::Compiler;
+use ndc_vm::register::Compiler;
 use ndc_vm::{Natives, OutputSink};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
@@ -233,40 +232,13 @@ fn stdlib_natives() -> Natives {
     natives
 }
 
-/// Which compiler, and so which VM, runs a program.
-#[derive(Clone, Copy)]
-enum Vm {
-    Stack,
-    Register,
-}
-
-/// What running a program did on a VM: what it printed, and its value or
-/// its error, either of which compiling it can be too.
-#[derive(Debug, PartialEq)]
-struct Outcome {
-    output: Vec<u8>,
-    result: Result<String, String>,
-}
-
 /// Drive parser → analyser → compiler → VM with the stdlib registered, so
 /// the analyser accepts programs that reference built-ins like `print`,
-/// `len`, `sum`, etc., on each VM, and fails if they do something
-/// different.
-fn run_pipeline(tokens: Vec<TokenLocation>) -> Result<(), String> {
-    let stack = run_on(tokens.clone(), Vm::Stack);
-    let register = run_on(tokens, Vm::Register);
-    if stack == register {
-        Ok(())
-    } else {
-        Err(format!(
-            "the VMs differ:\n  stack:    {stack:?}\n  register: {register:?}"
-        ))
-    }
-}
-
-/// What the program `tokens` makes does on `vm`, if it gets to compiling.
-fn run_on(tokens: Vec<TokenLocation>, vm: Vm) -> Option<Outcome> {
-    let expressions = Parser::from_tokens(tokens).parse().ok()?;
+/// `len`, `sum`, etc. Each stage stops at the first error.
+fn run_pipeline(tokens: Vec<TokenLocation>) {
+    let Ok(expressions) = Parser::from_tokens(tokens).parse() else {
+        return;
+    };
 
     let natives = Rc::new(stdlib_natives());
     let mut analyser = Analyser::with_builtins(Rc::clone(&natives) as Rc<dyn Builtins>);
@@ -275,36 +247,17 @@ fn run_on(tokens: Vec<TokenLocation>, vm: Vm) -> Option<Outcome> {
     }
     let result = analyser.take_result();
     if !result.errors.is_empty() {
-        return None;
+        return;
     }
 
-    let analysis = result.analysis;
-    let compile = match vm {
-        Vm::Stack => Compiler::compile,
-        Vm::Register => ndc_vm::register::Compiler::compile,
-    };
-    let compiled = match compile(expressions.into_iter(), analysis, &natives) {
-        Ok(compiled) => compiled,
-        Err(error) => {
-            return Some(Outcome {
-                output: Vec::new(),
-                result: Err(format!("{error:?}")),
-            });
-        }
+    let Ok(compiled) = Compiler::compile(expressions.into_iter(), result.analysis, &natives) else {
+        return;
     };
 
-    let num_locals = compiled.num_locals();
     let globals = ndc_vm::native_globals(&natives);
     let mut vm =
         ndc_vm::Vm::new(compiled, globals, &natives).with_output(OutputSink::Buffer(Vec::new()));
-    let result = match vm.run() {
-        Ok(()) => Ok(vm.last_value(num_locals).to_string()),
-        Err(error) => Err(format!("{} at {:?}", error.message, error.span)),
-    };
-    Some(Outcome {
-        output: vm.get_output().unwrap_or_default().to_vec(),
-        result,
-    })
+    let _ = vm.run();
 }
 
 /// Run the pipeline in a worker thread with a hard timeout. Both genuine
@@ -329,8 +282,7 @@ fn run_with_timeout(program: Program) {
             PER_CASE_TIMEOUT.as_millis()
         ),
         Ok(Err(payload)) => panic::resume_unwind(payload),
-        Ok(Ok(Err(difference))) => panic!("{difference}"),
-        Ok(Ok(Ok(()))) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        Ok(Ok(())) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
     }
 }
 

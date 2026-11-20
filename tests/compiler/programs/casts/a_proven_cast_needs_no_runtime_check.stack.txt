@@ -1,6 +1,0 @@
-== <script> (locals: 0, globals: 0) ==
-0000  Constant(0)                          1
-0001  Pop
-0002  Constant(1)                          1
-0003  MakeList(1)
-0004  Halt

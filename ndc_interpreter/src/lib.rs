@@ -24,32 +24,6 @@ pub use timing::ExecutionTimings;
 
 mod timing;
 
-/// Which VM runs the code: the stack VM, or the register VM that is being
-/// built to replace it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Backend {
-    #[default]
-    Stack,
-    Register,
-}
-
-impl Backend {
-    /// The VM the environment variable `NDC_VM` names: `register` for the
-    /// register VM, and the stack VM when it's `stack` or isn't set.
-    pub fn from_env() -> Result<Self, String> {
-        match std::env::var("NDC_VM").as_deref() {
-            Err(std::env::VarError::NotPresent) | Ok("stack") => Ok(Self::Stack),
-            Ok("register") => Ok(Self::Register),
-            Ok(other) => Err(format!(
-                "NDC_VM must be `stack` or `register`, not `{other}`"
-            )),
-            Err(std::env::VarError::NotUnicode(_)) => {
-                Err("NDC_VM must be `stack` or `register`".to_string())
-            }
-        }
-    }
-}
-
 pub struct Interpreter {
     /// Shared with the analyser, which asks for a native's type when a
     /// program uses it.
@@ -88,8 +62,6 @@ pub struct Interpreter {
     /// runs once doesn't make them again after it ends, and registering the
     /// natives doesn't make them for the intrinsics alone first.
     stale: bool,
-    /// Which VM runs the code.
-    backend: Backend,
 }
 
 impl Interpreter {
@@ -131,20 +103,7 @@ impl Interpreter {
             #[cfg(feature = "trace")]
             tracer: None,
             stale: true,
-            backend: Backend::default(),
         }
-    }
-
-    /// Runs the code from now on with `backend`.
-    ///
-    /// Changing the backend forgets everything evaluated so far: a function
-    /// an earlier evaluation declared is compiled for the VM it ran on, and
-    /// the other one can't run it.
-    pub fn set_backend(&mut self, backend: Backend) {
-        if self.backend != backend {
-            self.start_over();
-        }
-        self.backend = backend;
     }
 
     /// Create an interpreter for executing a complete program once.
@@ -262,11 +221,7 @@ impl Interpreter {
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
-        let compile = match self.backend {
-            Backend::Stack => Compiler::compile,
-            Backend::Register => RegisterCompiler::compile,
-        };
-        Ok(compile(
+        Ok(RegisterCompiler::compile(
             expressions.into_iter(),
             result.analysis,
             &self.natives,
@@ -393,20 +348,15 @@ impl Interpreter {
     ) -> Result<(Value, ExecutionTimings), InterpreterError> {
         let mut timings = ExecutionTimings::default();
         let code = measure(&mut timings, Phase::Compiling, || {
-            match (self.backend, self.resumable) {
-                (Backend::Stack, true) => {
-                    Compiler::compile_line(expressions, analysis, &self.natives, &mut self.session)
-                }
-                (Backend::Stack, false) => Compiler::compile(expressions, analysis, &self.natives),
-                (Backend::Register, true) => RegisterCompiler::compile_line(
+            if self.resumable {
+                RegisterCompiler::compile_line(
                     expressions,
                     analysis,
                     &self.natives,
                     &mut self.session,
-                ),
-                (Backend::Register, false) => {
-                    RegisterCompiler::compile(expressions, analysis, &self.natives)
-                }
+                )
+            } else {
+                RegisterCompiler::compile(expressions, analysis, &self.natives)
             }
         })?;
         let num_locals = code.num_locals();
@@ -486,16 +436,9 @@ mod tests {
         registry
     }
 
-    /// The VM the tests run on: the one the environment variable `NDC_VM`
-    /// names, the stack VM if it names none.
-    fn backend() -> Backend {
-        Backend::from_env().expect("NDC_VM names a VM")
-    }
-
     #[test]
     fn natives_can_be_added_after_an_evaluation() {
         let mut interpreter = Interpreter::capturing();
-        interpreter.set_backend(backend());
         interpreter.configure(|env| *env = constant("one", 1));
         assert_eq!(interpreter.eval("one()").expect("one").to_string(), "1");
         interpreter.configure(|env| *env = constant("two", 2));
@@ -511,7 +454,6 @@ mod tests {
     #[test]
     fn a_one_shot_interpreter_forgets_earlier_declarations() {
         let mut interpreter = Interpreter::one_shot();
-        interpreter.set_backend(backend());
         interpreter
             .eval("let value = 1;")
             .expect("first program should succeed");
@@ -549,12 +491,11 @@ mod tests {
         }
     }
 
-    /// What tracing `program` on `backend` records.
+    /// What tracing `program` records.
     #[cfg(feature = "trace")]
-    fn trace(backend: Backend, program: &str) -> Recorded {
+    fn trace(program: &str) -> Recorded {
         let recorded = Rc::new(std::cell::RefCell::new(Recorded::default()));
         let mut interpreter = Interpreter::capturing();
-        interpreter.set_backend(backend);
         interpreter.set_tracer(Box::new(Recorder(Rc::clone(&recorded))));
         // A program that fails is traced too.
         let _ = interpreter.eval(program);
@@ -566,42 +507,33 @@ mod tests {
 
     #[cfg(feature = "trace")]
     #[test]
-    fn either_vm_traces_its_instructions_and_completes_once() {
+    fn the_vm_traces_its_instructions_and_completes_once() {
         // With no natives, so no operators.
         let program = "fn pick(a, b) { if true { a } else { b } } pick(pick(1, 2), 3)";
-        let stack = trace(Backend::Stack, program);
-        assert_eq!(stack.completions, 1);
-        let calls = |recorded: &Recorded, call: &str| {
-            recorded
-                .instructions
-                .iter()
-                .filter(|i| i.starts_with(call))
-                .count()
-        };
-        assert_eq!(calls(&stack, "Call("), 2);
-        assert_eq!(stack.instructions.last().unwrap(), "Halt");
-
-        let register = trace(Backend::Register, program);
-        assert_eq!(register.completions, 1);
-        assert_eq!(calls(&register, "Call r"), 2);
-        assert_eq!(register.instructions.last().unwrap(), "Halt r0");
+        let recorded = trace(program);
+        assert_eq!(recorded.completions, 1);
+        let calls = recorded
+            .instructions
+            .iter()
+            .filter(|i| i.starts_with("Call r"))
+            .count();
+        assert_eq!(calls, 2);
+        assert_eq!(recorded.instructions.last().unwrap(), "Halt r0");
     }
 
     #[cfg(feature = "trace")]
     #[test]
-    fn a_run_that_fails_completes_its_trace_on_either_vm() {
-        for backend in [Backend::Stack, Backend::Register] {
-            let recorded = trace(backend, "let x: Any = 1.5; cast::<Int>(x)");
-            assert_eq!(recorded.completions, 1, "{backend:?}");
-            assert!(
-                recorded
-                    .instructions
-                    .last()
-                    .unwrap()
-                    .starts_with("CheckType"),
-                "{backend:?}: {:?}",
-                recorded.instructions
-            );
-        }
+    fn a_run_that_fails_completes_its_trace() {
+        let recorded = trace("let x: Any = 1.5; cast::<Int>(x)");
+        assert_eq!(recorded.completions, 1);
+        assert!(
+            recorded
+                .instructions
+                .last()
+                .unwrap()
+                .starts_with("CheckType"),
+            "{:?}",
+            recorded.instructions
+        );
     }
 }

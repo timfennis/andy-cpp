@@ -7,7 +7,7 @@
 //! - `print(...);  // text` says what that print outputs. These comments are
 //!   matched to the printed lines in order; a block that prints in a loop
 //!   prints more lines than it has prints, so there they aren't checked.
-use ndc_interpreter::{Backend, Interpreter};
+use ndc_interpreter::Interpreter;
 use std::fs;
 use std::path::Path;
 
@@ -30,9 +30,6 @@ fn run_manual_example(file: &str, line: usize) {
 
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
-    // The VM the environment variable `NDC_VM` names, the stack VM if it
-    // names none.
-    interpreter.set_backend(Backend::from_env().expect("NDC_VM names a VM"));
     let result = interpreter.eval(&code.join("\n"));
     let output = String::from_utf8(interpreter.get_output().expect("output is captured"))
         .expect("output must be valid UTF-8");

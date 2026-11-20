@@ -10,7 +10,7 @@
 //! result.value;  // "42"
 //! ```
 
-use ndc_interpreter::{Backend, Interpreter};
+use ndc_interpreter::Interpreter;
 use wasm_bindgen::prelude::*;
 
 mod editor;
@@ -55,17 +55,11 @@ impl Session {
     #[wasm_bindgen(constructor)]
     #[must_use]
     pub fn new() -> Self {
-        Self::with_backend(Backend::default())
-    }
-
-    /// A session whose code runs on `backend`.
-    fn with_backend(backend: Backend) -> Self {
         #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
         console_error_panic_hook::set_once();
 
         let mut interpreter = Interpreter::capturing();
         interpreter.configure(ndc_stdlib::register);
-        interpreter.set_backend(backend);
         Self {
             interpreter,
             printed: 0,
@@ -127,15 +121,9 @@ pub fn run(code: &str) -> Evaluation {
 mod tests {
     use super::*;
 
-    /// A session on the VM the environment variable `NDC_VM` names, the
-    /// stack VM if it names none.
-    fn session() -> Session {
-        Session::with_backend(Backend::from_env().expect("NDC_VM names a VM"))
-    }
-
     #[test]
     fn a_session_remembers_declarations_and_splits_output() {
-        let mut session = session();
+        let mut session = Session::new();
         let first = session.eval("let x = 20; print(\"hi\");");
         assert_eq!(first.output, "hi\n");
         assert!(first.error.is_none());
@@ -147,7 +135,7 @@ mod tests {
 
     #[test]
     fn errors_are_rendered_with_the_source() {
-        let result = session().eval("let x = 1 / 0;");
+        let result = Session::new().eval("let x = 1 / 0;");
         let error = result.error.expect("dividing by zero should fail");
         assert!(error.contains("<cell:1>"), "{error}");
     }

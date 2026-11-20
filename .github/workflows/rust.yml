@@ -30,12 +30,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test
-      # The register VM is being built to replace the stack VM: every test
-      # that runs a program runs on it too.
-      - name: Run tests on the register VM
-        run: cargo test
-        env:
-          NDC_VM: register
       # Other workspace crates enable the stdlib's default features, so only
       # building it on its own checks that it compiles without them.
       - name: Build stdlib without default features
@@ -45,7 +39,7 @@ jobs:
         run: cargo clippy -p ndc_lsp --no-default-features --all-targets
       - name: Build with tracing
         run: cargo build --features trace
-      # Tracing on both VMs, which only a build with the feature tests.
+      # Tracing, which only a build with the feature tests.
       - name: Test tracing
         run: cargo test -p ndc_interpreter --features trace
       # The manual runs its examples on this build, deployed only from master.

@@ -1,6 +1,0 @@
-== <script> (locals: 0, globals: 0) ==
-0000  Constant(0)                          true
-0001  JumpIfFalse(2)                       -> 0004
-0002  Pop
-0003  Constant(1)                          false
-0004  Halt

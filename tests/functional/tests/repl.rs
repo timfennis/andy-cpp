@@ -1,16 +1,9 @@
-use ndc_interpreter::{Backend, Interpreter};
-
-/// The VM the tests run on: the one the environment variable `NDC_VM`
-/// names, the stack VM if it names none.
-fn backend() -> Backend {
-    Backend::from_env().expect("NDC_VM names a VM")
-}
+use ndc_interpreter::Interpreter;
 
 /// An interpreter that runs lines as the REPL does.
 fn repl_interpreter() -> Interpreter {
     let mut interpreter = Interpreter::capturing().line_by_line();
     interpreter.configure(ndc_stdlib::register);
-    interpreter.set_backend(backend());
     interpreter
 }
 
@@ -178,6 +171,24 @@ fn functions_share_globals_with_later_lines() {
     assert_eq!(out.trim(), "2\n11");
 }
 
+// A `pure fn` from one line keeps the results of its calls for later lines,
+// one cache for each instance.
+#[test]
+fn a_pure_function_keeps_its_results_for_later_lines() {
+    let out = repl_output(&[
+        "fn inc(x) { x + 1 }",
+        "let total = inc(1);",
+        "print(inc(2.5), total)",
+        "pure fn twice(x) { print(\"once\"); x ++ x }",
+        "print(twice(\"a\") ++ twice(\"a\"))",
+        "twice([1])",
+        "let xs = [];",
+        "xs.push(inc(total));",
+        "print(xs)",
+    ]);
+    assert_eq!(out, "3.5 2\nonce\naaaa\nonce\n[3]\n");
+}
+
 // `j` is a local of the line's own top-level code, which is gone once the
 // line has run.
 #[test]
@@ -194,7 +205,6 @@ fn closures_keep_the_loop_variables_of_a_finished_line() {
 #[test]
 fn configure_after_a_line_ran_updates_the_globals() {
     let mut interp = Interpreter::capturing();
-    interp.set_backend(backend());
     interp.eval("1;").unwrap();
     interp.configure(ndc_stdlib::register);
     interp.eval("print(1)").unwrap();
@@ -301,7 +311,6 @@ fn a_function_value_from_an_earlier_lines_generic_body_cast_from_any_is_checked(
 fn a_failed_line_takes_the_instances_it_made_with_it() {
     let mut interp = Interpreter::capturing();
     interp.configure(ndc_stdlib::register);
-    interp.set_backend(backend());
     interp.eval("fn inc(x) => x + 1;").unwrap();
     assert!(interp.eval("print(inc(2.5)); [1][5]").is_err());
     interp.eval("fn inc(x) => x + 1;").unwrap();

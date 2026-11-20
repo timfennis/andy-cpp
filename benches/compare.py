@@ -24,7 +24,7 @@ none behaves differently.
 Build both binaries the same way (same toolchain, same profile) and don't build
 anything else while this runs. To compare two settings of one binary, give it
 twice with `--baseline-env` and `--candidate-env`, as in
-`compare.py ndc ndc --candidate-env NDC_VM=register`, and not through a wrapper
+`compare.py ndc ndc --candidate-env NAME=VALUE`, and not through a wrapper
 script on one side: starting a shell costs about a millisecond, which a short
 program would be charged for.
 """

@@ -1,12 +1,11 @@
-//! Runs programs on the stack VM and on the register VM, which must print
-//! the same, give the same value, and fail with the same error at the same
-//! place.
+//! Programs that take the VM through each kind of instruction and call:
+//! locals, globals and temporaries, natives and callbacks, closures and
+//! their cells, literals, loops, assignments, casts, and errors with their
+//! spans. Each checks what the program prints, gives or fails with.
 
-use ndc_interpreter::{Backend, Interpreter, InterpreterError};
-use std::fs;
-use std::path::{Path, PathBuf};
+use ndc_interpreter::{Interpreter, InterpreterError};
 
-/// What running a program did, in a form two runs can be compared by.
+/// What running a program did.
 #[derive(Debug, PartialEq, Eq)]
 struct Outcome {
     output: String,
@@ -14,10 +13,9 @@ struct Outcome {
     result: Result<String, String>,
 }
 
-fn run(backend: Backend, program: &str) -> Outcome {
+fn run(program: &str) -> Outcome {
     let mut interpreter = Interpreter::capturing();
     interpreter.configure(ndc_stdlib::register);
-    interpreter.set_backend(backend);
     let result = match interpreter.eval(program) {
         Ok(value) => Ok(value.to_string()),
         Err(InterpreterError::Vm(error)) => Err(format!("{} at {:?}", error.message, error.span)),
@@ -28,51 +26,9 @@ fn run(backend: Backend, program: &str) -> Outcome {
     Outcome { output, result }
 }
 
-/// Runs `program` on both VMs, requires the same outcome, and returns it.
-fn same_on_both(program: &str) -> Outcome {
-    let stack = run(Backend::Stack, program);
-    let register = run(Backend::Register, program);
-    assert_eq!(stack, register, "the VMs differ on:\n{program}");
-    if let Err(error) = &register.result {
-        assert!(
-            !error.contains("not yet supported"),
-            "the register VM can't compile:\n{program}\n{error}"
-        );
-    }
-    register
-}
-
-/// A function compiled for one VM can't run on the other, so changing the
-/// backend forgets what was declared before, where calling the function
-/// would run code the new VM doesn't have.
-#[test]
-fn changing_the_backend_forgets_earlier_declarations() {
-    let mut interpreter = Interpreter::capturing();
-    interpreter.configure(ndc_stdlib::register);
-    interpreter
-        .eval("fn f() -> Int { 1 }")
-        .expect("a declaration");
-    assert_eq!(interpreter.eval("f()").expect("a call").to_string(), "1");
-
-    interpreter.set_backend(Backend::Register);
-    assert!(
-        interpreter.eval("f()").is_err(),
-        "`f` was declared on the stack VM"
-    );
-    interpreter
-        .eval("fn f() -> Int { 2 }")
-        .expect("a declaration");
-    assert_eq!(interpreter.eval("f()").expect("a call").to_string(), "2");
-
-    // Setting the backend it already has keeps what was declared.
-    interpreter.set_backend(Backend::Register);
-    assert_eq!(interpreter.eval("f()").expect("a call").to_string(), "2");
-}
-
 #[test]
 fn int_loop() {
-    let outcome = same_on_both(
-        "fn run() {
+    let outcome = run("fn run() {
             let i = 0;
             let total = 0;
             while i < 40000 {
@@ -81,34 +37,36 @@ fn int_loop() {
             }
             total
         }
-        print(run());",
-    );
+        print(run());");
     assert_eq!(outcome.output, "1599920000\n");
 }
 
 #[test]
 fn fib() {
-    let outcome = same_on_both(
-        "fn fib(n) {
+    let outcome = run("fn fib(n) {
             if n <= 1 { 1 } else { fib(n - 2) + fib(n - 1) }
         }
-        print(fib(15));",
-    );
+        print(fib(15));");
     assert_eq!(outcome.output, "987\n");
 }
 
 #[test]
 fn the_program_value_is_its_last_expression() {
-    let outcome = same_on_both("fn three() { 3 } three()");
+    let outcome = run("fn three() { 3 } three()");
     assert_eq!(outcome.result, Ok("3".to_string()));
-    same_on_both("fn three() { 3 } three();");
-    same_on_both("fn three() { 3 }");
-    same_on_both("let x = 4; if x > 3 { x } else { 0 }");
+    // A `;`-statement or a declaration last gives unit, which shows as
+    // nothing.
+    assert_eq!(run("fn three() { 3 } three();").result, Ok(String::new()));
+    assert_eq!(run("fn three() { 3 }").result, Ok(String::new()));
+    assert_eq!(
+        run("let x = 4; if x > 3 { x } else { 0 }").result,
+        Ok("4".to_string())
+    );
 }
 
 #[test]
 fn literals_and_native_ops() {
-    let outcome = same_on_both(
+    let outcome = run(
         r#"print(1.5 + 2.25, 3.0 / 2.0, 2.5 * 2.0, 1.0 - 0.5, -4, -2.5, !true);
         print(3 == 3, 2 != 2, 1 <= 2, 2 >= 3, 1 > 0, 1 < 0, 1.5 < 2.5);
         print("text", None, false, 7 - 10);"#,
@@ -121,8 +79,7 @@ fn literals_and_native_ops() {
 
 #[test]
 fn locals_globals_and_assignment() {
-    let outcome = same_on_both(
-        "let counter = 1;
+    let outcome = run("let counter = 1;
         fn bump() { counter = counter + 1; }
         bump();
         bump();
@@ -134,14 +91,13 @@ fn locals_globals_and_assignment() {
             let d = 4;
             a + d
         }
-        print(counter, local());",
-    );
+        print(counter, local());");
     assert_eq!(outcome.output, "3 26\n");
 }
 
 #[test]
 fn if_as_expression_and_statement() {
-    let outcome = same_on_both(
+    let outcome = run(
         "fn sign(n) { if n < 0 { -1 } else if n == 0 { 0 } else { 1 } }
         fn check(n) {
             let out = 0;
@@ -157,8 +113,7 @@ fn if_as_expression_and_statement() {
 
 #[test]
 fn while_with_break_and_continue() {
-    let outcome = same_on_both(
-        "fn sum_odd_below(limit) {
+    let outcome = run("fn sum_odd_below(limit) {
             let i = 0;
             let total = 0;
             while true {
@@ -169,15 +124,13 @@ fn while_with_break_and_continue() {
             }
             total
         }
-        print(sum_odd_below(10));",
-    );
+        print(sum_odd_below(10));");
     assert_eq!(outcome.output, "25\n");
 }
 
 #[test]
 fn return_from_inside_a_loop() {
-    let outcome = same_on_both(
-        "fn first_square_above(n) {
+    let outcome = run("fn first_square_above(n) {
             let i = 0;
             while true {
                 if i * i > n { return i; }
@@ -185,27 +138,25 @@ fn return_from_inside_a_loop() {
             }
             0
         }
-        print(first_square_above(50));",
-    );
+        print(first_square_above(50));");
     assert_eq!(outcome.output, "8\n");
 }
 
 #[test]
 fn generic_functions_run_as_instances() {
-    let outcome = same_on_both("fn inc(x) { x + 1 } print(inc(1), inc(2.5));");
+    let outcome = run("fn inc(x) { x + 1 } print(inc(1), inc(2.5));");
     assert_eq!(outcome.output, "2 3.5\n");
 }
 
 #[test]
 fn natives_that_take_no_vm() {
-    let outcome = same_on_both("print(max(3, 7), 7 / 2, 5 % 3, abs(-4));");
+    let outcome = run("print(max(3, 7), 7 / 2, 5 % 3, abs(-4));");
     assert_eq!(outcome.output, "7 3 2 4\n");
 }
 
 #[test]
 fn a_local_read_before_an_operand_that_assigns_it() {
-    let outcome = same_on_both(
-        "fn op() {
+    let outcome = run("fn op() {
             let x = 1;
             let y = x + { x = 5; x };
             print(y, x);
@@ -226,8 +177,7 @@ fn a_local_read_before_an_operand_that_assigns_it() {
         op();
         call();
         reused_slot();
-        into_itself();",
-    );
+        into_itself();");
     assert_eq!(outcome.output, "6 5\n1 2 2\n3\n11\n");
 }
 
@@ -239,7 +189,7 @@ fn integer_overflow() {
         "fn up(n) { n + 1 } let big = 9223372036854775807; print(up(big));",
         "fn down(n) { n - 1 } let small = -9223372036854775807; print(down(down(small)));",
     ] {
-        let outcome = same_on_both(program);
+        let outcome = run(program);
         assert!(
             outcome
                 .result
@@ -252,8 +202,7 @@ fn integer_overflow() {
 
 #[test]
 fn conditions_that_compare() {
-    let outcome = same_on_both(
-        r#"fn test(a, b) {
+    let outcome = run(r#"fn test(a, b) {
             let out = 0;
             if a < b { out = out + 1; }
             if a <= b { out = out + 10; }
@@ -273,8 +222,7 @@ fn conditions_that_compare() {
         fn text(a, b) { if a < b { 1 } else { 2 } }
         print(test(1, 2), test(3, 3), test(5, 4), test(-40000, 40000));
         print(float(1.0), float(3.0), text("a", "b"), text("b", "a"));
-        print(if (1 < 2) { 1 } else { 2 });"#,
-    );
+        print(if (1 < 2) { 1 } else { 2 });"#);
     assert_eq!(
         outcome.output,
         "100011100011 11010011010 101100101100 100011100011\n1 2 1 2\n1\n"
@@ -283,20 +231,18 @@ fn conditions_that_compare() {
 
 #[test]
 fn an_error_in_a_native() {
-    let outcome = same_on_both("print(1); print(5 % 0); print(2);");
+    let outcome = run("print(1); print(5 % 0); print(2);");
     assert_eq!(outcome.output, "1\n");
     assert!(outcome.result.is_err());
 }
 
 #[test]
 fn natives_that_call_back_into_the_program() {
-    let outcome = same_on_both(
-        r#"fn twice(c) { c ++ c }
+    let outcome = run(r#"fn twice(c) { c ++ c }
         fn not_b(c) { c != "b" }
         fn longer(a, b) { a ++ b }
         print("ab".map(twice), "abcd".filter(not_b), "xyz".fold("", longer));
-        print("abc".map(twice).map(twice));"#,
-    );
+        print("abc".map(twice).map(twice));"#);
     assert_eq!(
         outcome.output,
         "[\"aa\",\"bb\"] [\"a\",\"c\",\"d\"] xyz\n[\"aaaa\",\"bbbb\",\"cccc\"]\n"
@@ -305,33 +251,35 @@ fn natives_that_call_back_into_the_program() {
 
 #[test]
 fn an_error_inside_a_callback() {
-    let outcome = same_on_both(
-        r#"fn bad(c) { if c == "b" { 5 % 0 } else { 1 } }
+    let outcome = run(r#"fn bad(c) { if c == "b" { 5 % 0 } else { 1 } }
         print("a".map(bad));
-        print("ab".map(bad));"#,
-    );
+        print("ab".map(bad));"#);
     assert_eq!(outcome.output, "[1]\n");
     assert!(outcome.result.is_err());
 }
 
 #[test]
 fn function_values() {
-    let outcome = same_on_both(
-        "fn double(x) { x * 2 }
+    let outcome = run("fn double(x) { x * 2 }
         fn pick() { double }
         fn apply(f, x) { f(x) }
         let f = double;
         fn local() { let g = double; g(5) }
-        print(f(21), pick()(4), apply(double, 3), local());",
-    );
+        print(f(21), pick()(4), apply(double, 3), local());");
     assert_eq!(outcome.output, "42 8 6 10\n");
-    same_on_both("let x = 3; x(1)");
+    let outcome = run("let x = 3; x(1)");
+    assert!(
+        outcome
+            .result
+            .as_ref()
+            .is_err_and(|error| error.contains("can't be called")),
+        "{outcome:?}"
+    );
 }
 
 #[test]
 fn struct_constructors_and_accessors() {
-    let outcome = same_on_both(
-        "struct Point { x: Int, y: Int }
+    let outcome = run("struct Point { x: Int, y: Int }
         fn norm(p) { p.x * p.x + p.y * p.y }
         fn local() {
             struct Pair { a: Int, b: Int }
@@ -339,15 +287,13 @@ fn struct_constructors_and_accessors() {
             p.a + p.b
         }
         let p = Point(3, 4);
-        print(p, p.x, norm(p), local());",
-    );
+        print(p, p.x, norm(p), local());");
     assert_eq!(outcome.output, "Point {x: 3, y: 4} 3 25 7\n");
 }
 
 #[test]
 fn closures_share_the_variables_they_capture() {
-    let outcome = same_on_both(
-        "fn counter() {
+    let outcome = run("fn counter() {
             let n = 0;
             fn next() { n = n + 1; n }
             next
@@ -367,15 +313,13 @@ fn closures_share_the_variables_they_capture() {
             print(x, outer(), x);
         }
         nested();
-        print(\"ab\".map(fn(c) => c ++ \"!\"));",
-    );
+        print(\"ab\".map(fn(c) => c ++ \"!\"));");
     assert_eq!(outcome.output, "1 2 1 3\n7\n11 21 21\n[\"a!\",\"b!\"]\n");
 }
 
 #[test]
 fn functions_that_capture_themselves() {
-    let outcome = same_on_both(
-        "fn fact(n) {
+    let outcome = run("fn fact(n) {
             fn go(n) { if n <= 1 { 1 } else { n * go(n - 1) } }
             go(n)
         }
@@ -383,8 +327,7 @@ fn functions_that_capture_themselves() {
             fn is_even(n) { if n == 0 { true } else { !is_even(n - 1) } }
             is_even(n)
         }
-        print(fact(10), even(7), even(8));",
-    );
+        print(fact(10), even(7), even(8));");
     assert_eq!(outcome.output, "3628800 false true\n");
 }
 
@@ -392,8 +335,7 @@ fn functions_that_capture_themselves() {
 /// in it has its own.
 #[test]
 fn closures_made_in_a_loop() {
-    let outcome = same_on_both(
-        "fn loops() {
+    let outcome = run("fn loops() {
             let a = fn() => 0;
             let b = fn() => 0;
             let i = 0;
@@ -406,15 +348,13 @@ fn closures_made_in_a_loop() {
             }
             print(a(), b());
         }
-        loops();",
-    );
+        loops();");
     assert_eq!(outcome.output, "1 11\n");
 }
 
 #[test]
 fn pure_functions_remember_their_results() {
-    let outcome = same_on_both(
-        r#"pure fn slow(n) { print("computing", n); n * 2 }
+    let outcome = run(r#"pure fn slow(n) { print("computing", n); n * 2 }
         print(slow(2), slow(2), slow(3));
         fn local() {
             pure fn fib(n) { if n <= 1 { n } else { fib(n - 1) + fib(n - 2) } }
@@ -422,21 +362,19 @@ fn pure_functions_remember_their_results() {
         }
         print(local());
         pure fn generic(x) { print("once", x); x }
-        print(generic(1), generic(1), generic(1.5));"#,
-    );
+        print(generic(1), generic(1), generic(1.5));"#);
     assert_eq!(
         outcome.output,
         "computing 2\ncomputing 3\n4 4 6\n23416728348467685\nonce 1\nonce 1.5\n1 1 1.5\n"
     );
 }
 
-/// A variable that a call can change is read before the call, as the
-/// stack VM reads it: a captured local, a closure's captured variable and a
+/// A variable that a call can change is read before the call, where the
+/// code reads it: a captured local, a closure's captured variable and a
 /// global.
 #[test]
 fn a_variable_a_call_changes_is_read_before_the_call() {
-    let outcome = same_on_both(
-        "let g = 1;
+    let outcome = run("let g = 1;
         fn set_g() { g = 100; 1 }
         print(g + set_g(), g);
         fn cell() {
@@ -455,15 +393,13 @@ fn a_variable_a_call_changes_is_read_before_the_call() {
             }
             inner();
         }
-        upvalue();",
-    );
+        upvalue();");
     assert_eq!(outcome.output, "2 100\n2 100\n1 100\n2 100\n");
 }
 
 #[test]
 fn literals() {
-    let outcome = same_on_both(
-        r#"fn values() {
+    let outcome = run(r#"fn values() {
             let x = 2;
             let t = (1, x, "three");
             let l = [[x], [x + 1]];
@@ -475,8 +411,7 @@ fn literals() {
             print(t, l, m["b"], s.len(), d["zz"], d["a"], r.list(), ri.list(), (), 1e3, 2.5);
             print(0x10, 0b101, 1_000, (1..).take(3).list());
         }
-        values();"#,
-    );
+        values();"#);
     assert_eq!(
         outcome.output,
         "(1,2,\"three\") [[2],[3]] [3] 2 0 1 [1,2,3] [1,2]  1000.0 2.5\n16 5 1000 [1,2,3]\n"
@@ -493,7 +428,7 @@ fn long_literals() {
         .map(|n| format!("{n}: {}", n * 2))
         .collect::<Vec<_>>()
         .join(", ");
-    let outcome = same_on_both(&format!(
+    let outcome = run(&format!(
         "fn f() {{
             let l = {list};
             let m = %{{{pairs}}};
@@ -509,8 +444,7 @@ fn long_literals() {
 /// reads only once both ran.
 #[test]
 fn logical_operators() {
-    let outcome = same_on_both(
-        r#"fn f(a, b) {
+    let outcome = run(r#"fn f(a, b) {
             let x = b;
             x = a and x;
             let y = b;
@@ -520,8 +454,7 @@ fn logical_operators() {
         }
         f(true, false);
         f(false, true);
-        f(false, false);"#,
-    );
+        f(false, false);"#);
     assert_eq!(
         outcome.output,
         "false true true false true false\nran\nfalse true true false true false\nran\nfalse false false false false true\n"
@@ -530,8 +463,7 @@ fn logical_operators() {
 
 #[test]
 fn for_loops() {
-    let outcome = same_on_both(
-        r#"fn sums() {
+    let outcome = run(r#"fn sums() {
             let total = 0;
             for x in [1, 2, 3, 4, 5, 6] {
                 if x == 2 { continue; }
@@ -553,8 +485,7 @@ fn for_loops() {
         sums();
         let top = [];
         for i in 1..=3 { top.push(i * i); }
-        print(top);"#,
-    );
+        print(top);"#);
     assert_eq!(
         outcome.output,
         "8 [(7,\"x\"),(7,\"y\")] [6,1,1,1] [(\"a\",1),(\"b\",2)]\n[1,4,9]\n"
@@ -563,8 +494,7 @@ fn for_loops() {
 
 #[test]
 fn comprehensions() {
-    let outcome = same_on_both(
-        r#"fn f() {
+    let outcome = run(r#"fn f() {
             let xs = [1, 2, 3, 4];
             let squares = [x * x for x in xs, if x % 2 == 0];
             let grid = [(x, y) for x in 1..3, y in 1..3, if x != y];
@@ -577,8 +507,7 @@ fn comprehensions() {
             print(squares, grid, by_parity[0], by_parity[1], counts[3], counts[9], set.len());
             print(nested, stopped, skipped);
         }
-        f();"#,
-    );
+        f();"#);
     assert_eq!(
         outcome.output,
         "[4,16] [(1,2),(2,1)] 4 3 30 0 3\n[[0],[0,1],[0,1,2]] [1,2] [1,3,4]\n"
@@ -589,8 +518,7 @@ fn comprehensions() {
 /// closure made in it has its own.
 #[test]
 fn closures_made_in_a_for_loop() {
-    let outcome = same_on_both(
-        "fn f() {
+    let outcome = run("fn f() {
             let getters = [];
             for x in 1..4 {
                 let doubled = x * 2;
@@ -599,15 +527,13 @@ fn closures_made_in_a_for_loop() {
             let comprehended = [fn() => y for y in 1..4];
             print(getters.map(fn(g) => g()), comprehended.map(fn(g) => g()));
         }
-        f();",
-    );
+        f();");
     assert_eq!(outcome.output, "[3,6,9] [1,2,3]\n");
 }
 
 #[test]
 fn destructuring_declarations() {
-    let outcome = same_on_both(
-        r#"fn f() {
+    let outcome = run(r#"fn f() {
             let pair = (1, 2);
             let (a, b) = pair;
             let (c, (d, e)) = (3, [4, 5]);
@@ -618,16 +544,14 @@ fn destructuring_declarations() {
         let (g, h) = (7, 8);
         print(g + h);
         fn bad() { let (p, q) = [1, 2, 3]; p + q }
-        bad();"#,
-    );
+        bad();"#);
     assert_eq!(outcome.output, "1 2 3 4 5 h i (1,2)\n15\n");
     assert!(outcome.result.is_err());
 }
 
 #[test]
 fn assignment_to_every_kind_of_target() {
-    let outcome = same_on_both(
-        r#"struct Point { x: Int, y: Int }
+    let outcome = run(r#"struct Point { x: Int, y: Int }
         let g = 1;
         fn f() {
             let xs = [1, 2, 3];
@@ -645,8 +569,7 @@ fn assignment_to_every_kind_of_target() {
             (n, b) = (k(), n);
             print(n, b);
         }
-        f();"#,
-    );
+        f();"#);
     assert_eq!(
         outcome.output,
         "[10,20,3] Point {x: 5, y: 2} 2 30 2 40\n10 10\n"
@@ -657,8 +580,7 @@ fn assignment_to_every_kind_of_target() {
 /// parts once, and reads the target before its value.
 #[test]
 fn assignment_with_an_operator_to_every_kind_of_target() {
-    let outcome = same_on_both(
-        r#"struct Point { x: Int, y: Int }
+    let outcome = run(r#"struct Point { x: Int, y: Int }
         let g = 1;
         fn index() { print("index"); 1 }
         fn f() {
@@ -685,8 +607,7 @@ fn assignment_with_an_operator_to_every_kind_of_target() {
             y += { y = 100; 1 };
             print(x, s, xs, p, m["k"], g, c, l, y);
         }
-        f();"#,
-    );
+        f();"#);
     assert_eq!(
         outcome.output,
         "index\n12 ab [0,12,3] Point {x: 1, y: 14} 10 2 102 [1,2,3] 4\n"
@@ -695,8 +616,7 @@ fn assignment_with_an_operator_to_every_kind_of_target() {
 
 #[test]
 fn casts() {
-    let outcome = same_on_both(
-        r#"fn f() {
+    let outcome = run(r#"fn f() {
             let a: Any = 3;
             let n = cast::<Int>(a);
             let s = cast?::<String>(a);
@@ -708,8 +628,7 @@ fn casts() {
             let text: Any = "x";
             cast::<Int>(text)
         }
-        f();"#,
-    );
+        f();"#);
     assert_eq!(outcome.output, "4 None Some(3) 3\n8 [3,3] [None]\n");
     assert!(
         outcome
@@ -722,29 +641,25 @@ fn casts() {
 
 #[test]
 fn tuple_indexes() {
-    let outcome = same_on_both(
-        "fn f() {
+    let outcome = run("fn f() {
             let t = (1, \"two\", 3.0);
             fn make() { (4, 5) }
             print(t[0], t[1], t[-1], make()[1], (6, 7)[-2]);
         }
-        f();",
-    );
+        f();");
     assert_eq!(outcome.output, "1 two 3.0 5 6\n");
 }
 
 #[test]
 fn deep_recursion() {
-    let outcome = same_on_both(
-        "fn depth(n) { if n == 0 { 0 } else { 1 + depth(n - 1) } }
-        print(depth(10000));",
-    );
+    let outcome = run("fn depth(n) { if n == 0 { 0 } else { 1 + depth(n - 1) } }
+        print(depth(10000));");
     assert_eq!(outcome.output, "10000\n");
 }
 
 #[test]
 fn recursion_past_the_call_depth_limit() {
-    let outcome = same_on_both("fn forever(n) { forever(n + 1) } forever(0);");
+    let outcome = run("fn forever(n) { forever(n + 1) } forever(0);");
     assert!(
         outcome
             .result
@@ -754,95 +669,6 @@ fn recursion_past_the_call_depth_limit() {
     );
 }
 
-/// Every program under `programs/` that the register VM compiles does on
-/// it what it does on the stack VM.
-#[test]
-fn the_test_programs_it_compiles() {
-    fn programs(dir: &Path, out: &mut Vec<PathBuf>) {
-        for entry in fs::read_dir(dir).expect("a directory of programs") {
-            let path = entry.expect("an entry").path();
-            if path.is_dir() {
-                programs(&path, out);
-            } else if path.extension().is_some_and(|extension| extension == "ndc") {
-                out.push(path);
-            }
-        }
-    }
-    let mut paths = Vec::new();
-    programs(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("programs"),
-        &mut paths,
-    );
-    paths.sort();
-    let mut compiled = 0;
-    for path in &paths {
-        let program = fs::read_to_string(path).expect("a program");
-        let register = run(Backend::Register, &program);
-        if register
-            .result
-            .as_ref()
-            .is_err_and(|error| error.contains("not yet supported on the register VM"))
-        {
-            continue;
-        }
-        compiled += 1;
-        let stack = run(Backend::Stack, &program);
-        assert_eq!(stack, register, "the VMs differ on {}", path.display());
-    }
-    #[allow(
-        clippy::print_stdout,
-        reason = "reports how far the register VM has come"
-    )]
-    {
-        println!("compared {compiled} of {} programs", paths.len());
-    }
-    assert!(compiled > 0);
-}
-
-/// What running `lines` one after the other, as the REPL does, printed and
-/// gave, line by line.
-fn run_lines(backend: Backend, lines: &[&str]) -> Vec<Outcome> {
-    let mut interpreter = Interpreter::capturing().line_by_line();
-    interpreter.configure(ndc_stdlib::register);
-    interpreter.set_backend(backend);
-    let mut printed = 0;
-    lines
-        .iter()
-        .map(|line| {
-            let result = match interpreter.eval(line) {
-                Ok(value) => Ok(value.to_string()),
-                Err(error) => Err(format!("{error:?}")),
-            };
-            let output = interpreter.get_output().expect("captured output");
-            let output = String::from_utf8(output[printed..].to_vec()).expect("output is UTF-8");
-            printed += output.len();
-            Outcome { output, result }
-        })
-        .collect()
-}
-
-/// A REPL line sees what earlier lines declared, and makes new instances
-/// of their generic functions.
-#[test]
-fn repl_lines() {
-    let lines = [
-        "fn inc(x) { x + 1 }",
-        "let total = inc(1);",
-        "print(inc(2.5), total)",
-        "pure fn twice(x) { print(\"once\"); x ++ x }",
-        "twice(\"a\") ++ twice(\"a\")",
-        "twice([1])",
-        "let xs = [];",
-        "xs.push(inc(total));",
-        "xs",
-    ];
-    let stack = run_lines(Backend::Stack, &lines);
-    let register = run_lines(Backend::Register, &lines);
-    assert_eq!(stack, register);
-    assert_eq!(register[2].output, "3.5 2\n");
-    assert_eq!(register[8].result, Ok("[3]".to_string()));
-}
-
 /// A map hashes a key by what it holds when the key goes in, and every key
 /// and value of a map literal is evaluated before any goes in. Here the last
 /// value changes the first key, a list, so the map has to find it by what it
@@ -850,7 +676,7 @@ fn repl_lines() {
 #[test]
 fn a_long_map_literal_hashes_its_keys_after_its_last_expression() {
     let pairs: String = (1..=80).map(|n| format!("[{n}]: {n}, ")).collect();
-    let outcome = same_on_both(&format!(
+    let outcome = run(&format!(
         "let k = [0];
         let m = %{{k: -1, {pairs}[100]: {{ k.push(9); 0 }}}};
         print(m[[0, 9]]);

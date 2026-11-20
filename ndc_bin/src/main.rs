@@ -4,7 +4,7 @@ use crate::docs::docs;
 use anyhow::anyhow;
 use clap::{Args, Parser, Subcommand};
 use highlighter::AndycppHighlighter;
-use ndc_interpreter::{Backend, Interpreter};
+use ndc_interpreter::Interpreter;
 use phase_timing::write_phase_timings;
 use std::path::PathBuf;
 use std::process;
@@ -207,7 +207,6 @@ fn main() -> anyhow::Result<()> {
 
             let mut interpreter = Interpreter::one_shot();
             interpreter.configure(ndc_stdlib::register);
-            interpreter.set_backend(backend()?);
 
             #[cfg(feature = "trace")]
             {
@@ -255,7 +254,6 @@ fn main() -> anyhow::Result<()> {
             let string = fs::read_to_string(path)?;
             let mut interpreter = Interpreter::new();
             interpreter.configure(ndc_stdlib::register);
-            interpreter.set_backend(backend()?);
             match interpreter.disassemble_str(&string) {
                 Ok(output) => print!("{output}"),
                 Err(e) => {
@@ -276,17 +274,11 @@ fn main() -> anyhow::Result<()> {
         }
         Action::Docs { query, no_color } => return docs(query.as_deref(), no_color),
         Action::StartRepl => {
-            repl::run(backend()?)?;
+            repl::run()?;
         }
         Action::RunLsp => start_lsp(),
     }
     Ok(())
-}
-
-/// The VM the environment variable `NDC_VM` asks for, as
-/// [`Backend::from_env`] reads it.
-fn backend() -> anyhow::Result<Backend> {
-    Backend::from_env().map_err(|message| anyhow!(message))
 }
 
 fn start_lsp() {

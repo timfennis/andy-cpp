@@ -1,4 +1,0 @@
-== <script> (locals: 0, globals: 0) ==
-0000  Constant(0)                          1
-0001  TryCast(Any)
-0002  Halt
