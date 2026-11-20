@@ -1,0 +1,5 @@
+// A nested pattern unpacks the outer tuple into temporaries: `Unpack r0, r4, 2`
+// puts its elements in r4 and r5. The inner flat pattern is an `Unpack` of r4
+// straight into `a` and `b` (r1 and r2), and `c` (r3) takes r5 with a `Move`.
+// compile: analysed
+fn f(t: ((Int, Int), Int)) { let ((a, b), c) = t; c }

@@ -1,0 +1,6 @@
+// The value of `true and false;` isn't used, but the `and` still runs: its left
+// operand goes in the temporary r1, `JumpIfFalse` skips the right operand when
+// that's false, and the right operand goes in r1 too. The program's value is
+// `()`, in r0.
+// compile: parsed
+true and false;

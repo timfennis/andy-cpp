@@ -1,5 +1,0 @@
-// Top-level variables are globals, which `UnpackLocals` doesn't write: the
-// tuple is unpacked onto the stack with `Unpack(2)` and each element stored
-// with `SetGlobal`.
-// compile: analysed
-let (a, b) = (1, 2);

@@ -1,4 +1,0 @@
-// A discarded constant: the peephole eliminates the `Constant; Pop` pair
-// entirely, leaving just `Halt`.
-// compile: parsed, parsed optimized
-5;

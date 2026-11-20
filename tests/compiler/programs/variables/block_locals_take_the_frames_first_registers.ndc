@@ -1,0 +1,5 @@
+// Block locals take the frame's first registers, ahead of the program's
+// result: `a` and `b` are written straight into r0 and r1 with `LoadK`, and the
+// block's value `a` is a `Copy` into r2. Nothing is cleaned up when it ends.
+// compile: analysed
+{ let a = 1; let b = 2; a }

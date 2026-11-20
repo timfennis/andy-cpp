@@ -1,4 +1,5 @@
-// A branch that's already `()` needs no extra ops: nothing drops its value for
-// another `()`.
+// A branch that's already `()` compiles as it is: `MakeTuple r1, r1, 0` makes
+// the empty tuple in a temporary, though nothing uses it, and the `if` yields
+// its own `()` with `LoadUnit` into r0.
 // compile: analysed
 if true { () }

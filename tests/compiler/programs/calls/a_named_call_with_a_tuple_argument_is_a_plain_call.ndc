@@ -1,5 +1,6 @@
 // A regular function call (not operator syntax) never compiles to `CallVec`,
 // even when the argument is a tuple: vec dispatch is gated to operator syntax
-// via the `OperatorCall` AST variant. `id((1, 2, 3))` is a `Call(1)`.
-// compile: stdlib optimized
+// via the `OperatorCall` AST variant. `id((1, 2, 3))` puts `id` in r1 and the
+// tuple `MakeTuple` makes in r2, then `Call r1, 1`.
+// compile: stdlib
 fn id(x) { x }; id((1, 2, 3))

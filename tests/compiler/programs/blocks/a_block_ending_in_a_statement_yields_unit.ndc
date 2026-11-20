@@ -1,4 +1,4 @@
-// A block ending in a statement (a trailing semicolon) discards that
-// statement's value and yields `()`.
+// A block ending in a statement (a trailing semicolon) yields `()`: its `5;`
+// compiles to nothing, and `LoadUnit` puts `()` in r0.
 // compile: parsed
 { 5; }

@@ -1,0 +1,4 @@
+// A statement whose value isn't used compiles to only what it must run, and a
+// constant runs nothing: `5;` leaves just the program's `()`, a `LoadUnit`.
+// compile: parsed
+5;

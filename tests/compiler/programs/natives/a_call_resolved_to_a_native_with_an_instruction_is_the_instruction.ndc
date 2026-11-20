@@ -1,6 +1,7 @@
 // In the Int instance of `fib`, `<`, `-` and `+` resolve to the natives for two
-// Ints, which the VM has instructions for. The compiler writes those in place
-// of the calls, after the operands; only `fib` itself is called.
+// Ints, which the VM has instructions for, so the compiler writes those instead
+// of calls: `n < 2` is the condition's `JumpIfNotLessI`, `n - 1` and `n - 2`
+// are `SubIntI`, and the sum is `AddInt`. Only `fib` itself is called.
 // compile: stdlib
 fn fib(n) { if n < 2 { n } else { fib(n - 1) + fib(n - 2) } }
 fib(30);

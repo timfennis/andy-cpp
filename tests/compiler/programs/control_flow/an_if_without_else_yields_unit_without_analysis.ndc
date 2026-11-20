@@ -1,0 +1,5 @@
+// Without analysis too, an `if` without an `else` yields `()`, whatever its
+// branch gives: the branch's `1` isn't used and compiles to nothing, and
+// `LoadUnit` puts `()` in r0. Its condition is `true`, which needs no test.
+// compile: parsed
+if true { 1 }

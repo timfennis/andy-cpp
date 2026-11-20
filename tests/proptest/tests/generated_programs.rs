@@ -1,6 +1,8 @@
-//! Differential test of the two VMs: a generated program must do the same on
-//! the stack VM and on the register VM, printing the same, giving the same
-//! value, and failing with the same error at the same place.
+//! Runs generated programs that terminate and mostly type-check, each twice:
+//! at the top level, where its variables are globals, and in the body of a
+//! function `main` that the program calls, where they are registers. Both
+//! must print the same, give the same value, and fail with the same error
+//! at the same place, and neither may panic or run for long.
 //!
 //! The programs are made from what the language has, so most of them get
 //! past the parser and the analyser and run: arithmetic on ints and floats,
@@ -15,13 +17,13 @@
 //! every choice is the first, the simplest one. Proptest shrinks a failing
 //! list, which shrinks the program, and prints the program as source.
 //!
-//! * `generated_programs_do_the_same_on_both_vms` runs in every `cargo test`:
-//!   a few hundred programs, and the seeds in `differential.regressions`.
-//! * `fuzz_generated_programs_on_both_vms` is `#[ignore]`d, for a long run:
+//! * `generated_programs_run_the_same_in_main` runs in every `cargo test`: a
+//!   few hundred programs, and the seeds in `generated_programs.regressions`.
+//! * `fuzz_generated_programs` is `#[ignore]`d, for a long run:
 //!
 //!   ```sh
-//!   cargo test -p proptest_tests --test differential -- --ignored
-//!   PROPTEST_CASES=100000 cargo test -p proptest_tests --test differential -- --ignored
+//!   cargo test -p proptest_tests --test generated_programs -- --ignored
+//!   PROPTEST_CASES=100000 cargo test -p proptest_tests --test generated_programs -- --ignored
 //!   ```
 
 use ndc_interpreter::{Interpreter, InterpreterError};
@@ -43,7 +45,7 @@ use ndc_parser as _;
 use ndc_vm as _;
 use num as _;
 
-/// How long both VMs together may take on one program.
+/// How long both runs of a program together may take.
 const PER_CASE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How many choices a program is generated from, at least and at most.
@@ -62,13 +64,36 @@ const MAX_EXPRESSION_DEPTH: usize = 3;
 /// How deeply blocks of statements nest, at most.
 const MAX_BLOCK_DEPTH: usize = 3;
 
-/// A generated program, which a failure shows as its source.
+/// A generated program, which a failure shows as its source: the functions
+/// it declares, and its statements and value, which it runs at the top level
+/// and in `main`.
 #[derive(Clone)]
-struct Program(String);
+struct Program {
+    functions: String,
+    body: String,
+}
+
+/// What comes before a program's body in `main`, which the top level has a
+/// comment of the same length in place of, so an error in the body is at
+/// the same place in both.
+const MAIN_START: &str = "fn main() {\n";
+
+impl Program {
+    /// The program with its body at the top level.
+    fn at_top_level(&self) -> String {
+        let padding = format!("//{}\n", " ".repeat(MAIN_START.len() - 3));
+        format!("{}{padding}{}\n", self.functions, self.body)
+    }
+
+    /// The program with its body in `main`, which it calls.
+    fn in_main(&self) -> String {
+        format!("{}{MAIN_START}{}\n}}\nmain()\n", self.functions, self.body)
+    }
+}
 
 impl fmt::Debug for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "\n{}\n", self.0)
+        write!(f, "\n{}\n", self.in_main())
     }
 }
 
@@ -168,10 +193,8 @@ impl Generator<'_> {
         Some(candidates[index].clone())
     }
 
-    /// The whole program: some functions, then statements, then the value,
-    /// either at the top level or in the body of a function `main` that the
-    /// program calls, so its variables are locals instead of globals.
-    fn program(&mut self) -> String {
+    /// The whole program: some functions, then statements, then the value.
+    fn program(&mut self) -> Program {
         let mut out = String::new();
         for _ in 0..self.pick(3) {
             let function = self.function();
@@ -185,7 +208,6 @@ impl Generator<'_> {
             writeln!(out, "fn {name}(x) {{ {body} }};").unwrap();
             self.generics.push(name);
         }
-        let in_main = self.chance(2);
         let context = Context {
             in_loop: false,
             loop_budget: MAX_LOOP_DEPTH,
@@ -203,12 +225,11 @@ impl Generator<'_> {
             }
         }
         let value = self.value();
-        if in_main {
-            writeln!(out, "fn main() {{\n{body}{value}\n}}\nmain()").unwrap();
-        } else {
-            writeln!(out, "{body}{value}").unwrap();
+        body.push_str(&value);
+        Program {
+            functions: out,
+            body,
         }
-        out
     }
 
     /// `fn f1(a: Int, b: Int) -> Int { ... }`, whose body sees only its
@@ -844,7 +865,7 @@ fn generate(choices: &[u16]) -> Program {
         generics: Vec::new(),
         names: 0,
     };
-    Program(generator.program())
+    generator.program()
 }
 
 /// What running a program did, in a form two runs can be compared by.
@@ -873,7 +894,7 @@ fn run(program: &str) -> Outcome {
 static RAN: AtomicUsize = AtomicUsize::new(0);
 static GENERATED: AtomicUsize = AtomicUsize::new(0);
 
-const WORKER_THREAD_NAME: &str = "differential-worker";
+const WORKER_THREAD_NAME: &str = "generated-program-worker";
 
 /// Keeps the worker thread's panics quiet, as the test thread reports them.
 fn install_quiet_panic_hook() {
@@ -888,20 +909,22 @@ fn install_quiet_panic_hook() {
     });
 }
 
-/// Runs `program` on both VMs in a worker thread, and fails if they do
-/// something different, panic, or take longer than [`PER_CASE_TIMEOUT`].
-fn same_on_both(program: &Program) -> Result<(), TestCaseError> {
+/// Runs `program` at the top level and in `main` in a worker thread, and
+/// fails if the two do something different, panic, or take longer than
+/// [`PER_CASE_TIMEOUT`].
+fn same_in_main(program: &Program) -> Result<(), TestCaseError> {
     install_quiet_panic_hook();
-    let source = program.0.clone();
+    let (top_level, in_main) = (program.at_top_level(), program.in_main());
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
         .name(WORKER_THREAD_NAME.into())
         .spawn(move || {
-            let outcomes = panic::catch_unwind(AssertUnwindSafe(|| (run(&source), run(&source))));
+            let outcomes =
+                panic::catch_unwind(AssertUnwindSafe(|| (run(&top_level), run(&in_main))));
             let _ = tx.send(outcomes);
         })
         .expect("spawn worker thread");
-    let (stack, register) = match rx.recv_timeout(PER_CASE_TIMEOUT) {
+    let (top_level, in_main) = match rx.recv_timeout(PER_CASE_TIMEOUT) {
         Ok(Ok(outcomes)) => outcomes,
         Ok(Err(payload)) => {
             let message = payload
@@ -909,29 +932,29 @@ fn same_on_both(program: &Program) -> Result<(), TestCaseError> {
                 .cloned()
                 .or_else(|| payload.downcast_ref::<&str>().map(ToString::to_string))
                 .unwrap_or_default();
-            return Err(TestCaseError::fail(format!("a VM panicked: {message}")));
+            return Err(TestCaseError::fail(format!("the VM panicked: {message}")));
         }
         Err(_) => {
             return Err(TestCaseError::fail(format!(
-                "the VMs took longer than {} s",
+                "the program took longer than {} s",
                 PER_CASE_TIMEOUT.as_secs()
             )));
         }
     };
     GENERATED.fetch_add(1, Ordering::Relaxed);
-    if !matches!(&stack.result, Err(error) if error.starts_with("Analysis")) {
+    if !matches!(&top_level.result, Err(error) if error.starts_with("Analysis")) {
         RAN.fetch_add(1, Ordering::Relaxed);
     }
-    if stack != register {
+    if top_level != in_main {
         return Err(TestCaseError::fail(format!(
-            "the VMs differ:\n  stack:    {stack:?}\n  register: {register:?}"
+            "the program does something else in `main`:\n  top level: {top_level:?}\n  in main:   {in_main:?}"
         )));
     }
     Ok(())
 }
 
-/// Runs `cases` generated programs, and the seeds of earlier failures, on
-/// both VMs.
+/// Runs `cases` generated programs, and the seeds of earlier failures, at
+/// the top level and in `main`.
 fn check(cases: u32) {
     let config = ProptestConfig {
         cases,
@@ -943,7 +966,7 @@ fn check(cases: u32) {
     let programs = prop::collection::vec(any::<u16>(), MIN_CHOICES..=MAX_CHOICES)
         .prop_map(|choices| generate(&choices));
     let mut runner = TestRunner::new(config);
-    let result = runner.run(&programs, |program| same_on_both(&program));
+    let result = runner.run(&programs, |program| same_in_main(&program));
     #[allow(clippy::print_stderr, reason = "says how many programs ran")]
     {
         eprintln!(
@@ -958,13 +981,13 @@ fn check(cases: u32) {
 }
 
 #[test]
-fn generated_programs_do_the_same_on_both_vms() {
+fn generated_programs_run_the_same_in_main() {
     check(300);
 }
 
 #[test]
 #[ignore = "long fuzz run; opt in with `cargo test ... -- --ignored`"]
-fn fuzz_generated_programs_on_both_vms() {
+fn fuzz_generated_programs() {
     let cases = std::env::var("PROPTEST_CASES")
         .ok()
         .and_then(|cases| cases.parse().ok())
@@ -981,7 +1004,8 @@ fn most_generated_programs_run() {
     let total = 100;
     for _ in 0..total {
         let program = generate(&choices.new_tree(&mut runner).unwrap().current());
-        if !matches!(run(&program.0).result, Err(error) if error.starts_with("Analysis")) {
+        if !matches!(run(&program.at_top_level()).result, Err(error) if error.starts_with("Analysis"))
+        {
             ran += 1;
         }
     }

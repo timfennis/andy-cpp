@@ -1,5 +1,5 @@
 // An augmented assignment that resolves to a native with an instruction is its
 // instruction too (`AddFloat`, `SubFloat`, `MulFloat`), between reading the
-// target and storing to it.
+// target with `GetGlobal` and storing to it with `SetGlobal`.
 // compile: stdlib
 let total = 1.5; total += 2.0; total -= 0.5; total *= 3.0;

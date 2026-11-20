@@ -1,3 +1,4 @@
-// A value whose type is known needs no check: there is no `CheckType`.
+// A value whose type is known needs no check: `n` is read with `GetGlobal` and
+// stored in `m` with `SetGlobal`, and there is no `CheckType`.
 // compile: analysed
 let n: Int = 1; let m: Int = n;

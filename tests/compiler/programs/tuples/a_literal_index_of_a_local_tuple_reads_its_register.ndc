@@ -1,0 +1,4 @@
+// A local tuple's element is read straight from its register:
+// `TupleIndex r1, r0, #-1` reads the last element of the parameter `t` in r0.
+// compile: stdlib
+fn f(t: (Int, Int)) { t[-1] }

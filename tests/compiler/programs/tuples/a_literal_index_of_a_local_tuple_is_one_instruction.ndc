@@ -1,4 +1,0 @@
-// A local tuple's element is read straight from its slot, in one instruction
-// (`GetLocalTupleIndex`).
-// compile: stdlib
-fn f(t: (Int, Int)) { t[-1] }

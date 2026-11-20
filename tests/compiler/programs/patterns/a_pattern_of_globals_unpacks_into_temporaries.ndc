@@ -1,0 +1,5 @@
+// Top-level variables are globals, which have no registers: `Unpack` writes the
+// elements of the tuple in r1 to the temporaries r2 and r3, and `SetGlobal`
+// stores each in its global.
+// compile: analysed
+let (a, b) = (1, 2);
