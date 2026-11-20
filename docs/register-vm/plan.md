@@ -21,7 +21,8 @@ Progress:
 - **Final measurement, master `5b291ce9` against the branch with only the register VM:** `benches/programs` 3,698 ms to 2,004 ms (1.85x), Advent of Brian 2025 2,108 ms to 1,400 ms (1.51x), no program more than 5% slower, every program printing the same. The merge gate passes.
 - Without a second VM to compare with, the fuzzer of generated programs (`tests/proptest/tests/generated_programs.rs`) runs each program at the top level, where its variables are globals, and inside `fn main()`, where they are registers, and requires the same outcome.
 - Not checked: the playground in a browser. `ndc_wasm` builds for `wasm32-unknown-unknown` and its tests pass, but `./ndc_wasm/build.sh` needs `wasm-bindgen-cli` 0.2.130 and the machine has 0.2.102.
-- **What is left:** the cast-aliasing fix (step 6's last item; the design waits on Tim), then the pull request to master, which Tim merges.
+- **Cast aliasing is fixed (#524).** Tim's decision of 2026-11-20: a cast gives a value whose containers nothing else holds, reusing a container nothing else holds and copying one that something else holds. It reads the same reference count as `++`, on a value that is in a register of the cast's own, so a leftover register can only cause a needless copy. A cast the analyser can prove is checked anyway when it gives a container a new type (`Never` fits every type, so one `[Never]` list could be cast to `[Int]` and to `[String]`). A cast to the type the value already has does nothing and gives the same container. Left alone: a function cast to a type that takes a `[Int]` can still be handed to a function that takes a `[Any]`, as on master.
+- **What is left:** the pull request to master, #523, open as a draft with a hyperfine comparison over 97 Advent of Code solutions in a comment. Tim merges it.
 - What review found that the test programs didn't: a long map literal built in chunks hashed its first keys before its last expression ran (#503). A map literal is now always made at once; a list literal is still built in chunks of 64.
 
 This is a guideline for the sessions that do the work. It records what was measured, what other interpreters learned, the design that follows from both, and the order to build it in. Where the plan says "measure", the number decides, not the plan.
@@ -38,7 +39,7 @@ Tim decided these on 2026-11-19:
 | `unsafe` | Safe Rust by default (`-Dunsafe_code` stays). A small isolated unsafe module is allowed later only if a measurement shows at least 10% on the benchmark set. |
 | Compiler tests | `tests/compiler`'s exact-opcode assertions become disassembly snapshots that are re-blessed with one command. |
 | Merge gate | Advent of Brian 2025 total and `benches/programs`, each against master: totals at least 1.3x faster, no single program more than 5% slower. |
-| Reference counts | The VM doesn't have to reproduce today's counts. The cast check that reads them (`CheckUnshared`) is removed **on the branch, never on master**. The aliasing problem it guards against gets a proper fix on the same branch, after the register VM is done and has passed its gates, so master never loses the check without getting the fix. `++` keeps appending in place. |
+| Reference counts | The VM doesn't have to reproduce today's counts. The cast check that reads them (`CheckUnshared`) is removed **on the branch, never on master**, and replaced on the same branch (#524) by casts that copy a container something else holds and reuse one nothing else holds. `++` keeps appending in place. |
 | Leftover values in registers | Undecided. Build without clearing them (section 4.6) and adjust if it turns out badly. |
 
 ## 2. What was measured

@@ -256,7 +256,7 @@
       <tr><th><code>fib</code> benchmark</th><td>177 ms</td><td>56 ms</td><td>3.2x</td></tr>
     </tbody>
   </table>
-  <p>The merge gate asked for 1.3x on both sets with no program more than 5% slower, and it passes. Two things are left: a proper fix for casts that give one list two types, and the pull request to master. The rest of this page is the plan as it was written, which is still how the VM works.</p>
+  <p>The merge gate asked for 1.3x on both sets with no program more than 5% slower, and it passes. One thing is left: the pull request to master, which is open as a draft. Casts that gave one list two types are fixed: a cast now copies a list that something else holds and reuses one that nothing else holds. The rest of this page is the plan as it was written, which is still how the VM works.</p>
 
   <h2>What a register VM is</h2>
   <p>Today's VM is a stack machine. To add two variables it copies both onto a stack, adds the top two, and copies the result back into a variable. A register machine gives every variable and every intermediate value a numbered slot in the function's frame, and each instruction names the slots it reads and the slot it writes.</p>
@@ -433,7 +433,7 @@
   </ul>
 
   <h2>The order of work</h2>
-  <p>Diamonds are points where a measurement decides whether to go on. Everything through step 6 is done, all of it on the branch; the cast fix inside step 6 and the merge to master are what remain.</p>
+  <p>Diamonds are points where a measurement decides whether to go on. Everything through step 6 is done, all of it on the branch; the merge to master is what remains.</p>
 
   <figure aria-label="Roadmap of the migration">
     <ol class="roadmap">
@@ -484,8 +484,8 @@
       </li>
       <li class="branch">
         <span class="num">6</span>
-        <h3>Switch and delete <span class="where">done, except the cast fix and the merge</span></h3>
-        <p>The register VM is the only one and the stack VM is removed, with the docs updated. Still to do: fix casts that give one list two types, check the playground in a browser, and merge the branch.</p>
+        <h3>Switch and delete <span class="where">done, except the merge</span></h3>
+        <p>The register VM is the only one, the stack VM is removed, the docs are updated and casts are sound again. Still to do: check the playground in a browser, and merge the branch.</p>
       </li>
       <li>
         <span class="num">7</span>
