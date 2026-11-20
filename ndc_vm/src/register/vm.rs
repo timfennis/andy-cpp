@@ -97,10 +97,6 @@ impl Frames {
         self.depth
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.depth == 0
-    }
-
     /// The call on top.
     fn last(&self) -> Option<&Frame> {
         self.slots[..self.depth].last()
@@ -905,10 +901,6 @@ impl Vm {
         callee: usize,
         memo: Option<MemoCache>,
     ) -> Result<(), VmError> {
-        debug_assert!(
-            function.is_register_code(),
-            "internal error: the register VM runs register code"
-        );
         // The frames live on the heap, so without a limit a function that
         // calls itself without end would take memory until the system stops
         // the program.
@@ -1237,8 +1229,6 @@ mod tests {
         CompiledFunction {
             name: None,
             static_type: StaticType::Any,
-            body: crate::chunk::Chunk::default(),
-            num_locals: 0,
             num_globals: 0,
             natives,
             registers: builder.finish(),
@@ -2135,7 +2125,7 @@ mod tests {
     fn run(natives: &Natives, function: CompiledFunction) -> Result<Value, VmError> {
         let mut vm = Vm::new(function, crate::native_globals(natives), natives);
         vm.run()?;
-        Ok(vm.last_value(0))
+        Ok(vm.last_value())
     }
 
     fn emit(builder: &mut Builder, instr: Instr) {

@@ -385,8 +385,6 @@ impl Compiler {
         CompiledFunction {
             name,
             static_type,
-            body: crate::chunk::Chunk::default(),
-            num_locals: 0,
             num_globals,
             natives,
             registers: self.builder.finish(),

@@ -8,7 +8,7 @@ pub use ndc_core::{Builtins, IntrinsicFunction};
 use ndc_lexer::{Lexer, SourceDb, SourceId, TokenLocation};
 use ndc_parser::ExpressionLocation;
 pub use ndc_vm::InputSource;
-use ndc_vm::compiler::{Compiler, Session};
+use ndc_vm::compiler::Session;
 use ndc_vm::register::Compiler as RegisterCompiler;
 use ndc_vm::value::CompiledFunction;
 use ndc_vm::{OutputSink, Vm};
@@ -228,21 +228,6 @@ impl Interpreter {
         )?)
     }
 
-    /// Like [`Self::compile_str`] but skips the peephole optimizer.
-    /// Used by the compiler-tests crate to assert against raw bytecode.
-    pub fn compile_str_unoptimized(
-        &mut self,
-        input: &str,
-    ) -> Result<CompiledFunction, InterpreterError> {
-        let source_id = self.source_db.add("<input>", input);
-        let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile_unoptimized(
-            expressions.into_iter(),
-            result.analysis,
-            &self.natives,
-        )?)
-    }
-
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         let compiled = self.compile_str(input)?;
         Ok(ndc_vm::disassemble::disassemble(
@@ -359,7 +344,6 @@ impl Interpreter {
                 RegisterCompiler::compile(expressions, analysis, &self.natives)
             }
         })?;
-        let num_locals = code.num_locals();
         let output = if self.capturing {
             OutputSink::Buffer(Vec::new())
         } else {
@@ -384,7 +368,7 @@ impl Interpreter {
             self.output.extend_from_slice(output);
         }
         self.input = vm.take_input();
-        let value = vm.last_value(num_locals);
+        let value = vm.last_value();
         (self.globals, self.stack) = vm.into_globals_and_stack();
         run?;
         Ok((value, timings))

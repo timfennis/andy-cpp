@@ -1,48 +1,16 @@
-use crate::chunk::OpCode;
 use crate::duration::format_duration;
 use crate::register::Instr;
 use ndc_core::collections::HashMap;
 use ndc_lexer::Span;
-use std::fmt;
 use std::time::{Duration, Instant};
 
 /// Context passed to a tracer on every dispatched instruction.
 pub struct InstructionContext<'a> {
     /// The instruction's index in its function's code.
     pub ip: usize,
-    pub instruction: Instruction<'a>,
+    pub instruction: Instr,
     pub span: Span,
     pub source: Option<&'a str>,
-}
-
-/// An instruction either VM dispatches: `GetLocal(0)` of the stack VM, or
-/// `AddIntI r0, r0, #1` of the register VM.
-#[derive(Clone, Copy)]
-pub enum Instruction<'a> {
-    Stack(&'a OpCode),
-    Register(Instr),
-}
-
-impl Instruction<'_> {
-    /// The instruction's name, the same for every instruction of its kind:
-    /// `"GetLocal"`, `"AddIntI"`.
-    #[must_use]
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Stack(op) => op.name(),
-            Self::Register(instr) => instr.name(),
-        }
-    }
-}
-
-/// The instruction with its operands: `GetLocal(0)`, `AddIntI r0, r0, #1`.
-impl fmt::Display for Instruction<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Stack(op) => write!(f, "{op:?}"),
-            Self::Register(instr) => write!(f, "{} {instr}", instr.name()),
-        }
-    }
 }
 
 /// Trait for observing VM instruction dispatch.
@@ -66,7 +34,7 @@ pub(crate) fn on_register_instruction(
     if let Some(tracer) = tracer {
         tracer.on_instruction(&InstructionContext {
             ip,
-            instruction: Instruction::Register(chunk.code()[ip]),
+            instruction: chunk.code()[ip],
             span: chunk.span(ip),
             source,
         });

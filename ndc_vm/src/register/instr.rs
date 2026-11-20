@@ -513,13 +513,14 @@ impl Instr {
 /// can say: where it goes is in [`super::Chunk`]'s far jumps instead.
 pub const FAR: i16 = i16::MIN;
 
-/// The operands as the disassembler prints them, without the name:
-/// `r2, r0, r1` for `AddInt { dst: r2, left: r0, right: r1 }`. A
+/// The instruction's name and its operands, as a trace prints them:
+/// `AddInt r2, r0, r1` for `AddInt { dst: r2, left: r0, right: r1 }`. A
 /// constant is `k3`, a global `g12`, a native `n25`, one of the chunk's
 /// closures `c0` or types `t0`, a closure's captured variable `u1`, and a
 /// jump's offset is signed: `+4`.
 impl fmt::Display for Instr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ", self.name())?;
         match *self {
             Self::LoadK { dst, k } | Self::MakeString { dst, k } => write!(f, "{dst}, k{k}"),
             Self::LoadUnit { dst } => write!(f, "{dst}"),
@@ -663,11 +664,11 @@ mod tests {
             left: Reg(0),
             right: Reg(1),
         };
-        assert_eq!(format!("{} {add}", add.name()), "AddInt r2, r0, r1");
+        assert_eq!(add.to_string(), "AddInt r2, r0, r1");
         let jump = Instr::JumpIfFalse {
             cond: Reg(3),
             offset: -4,
         };
-        assert_eq!(jump.to_string(), "r3, -4");
+        assert_eq!(jump.to_string(), "JumpIfFalse r3, -4");
     }
 }

@@ -1,4 +1,3 @@
-pub mod chunk;
 pub mod compiler;
 pub mod disassemble;
 pub mod duration;
@@ -37,12 +36,6 @@ mod test {
     #[test]
     fn a_value_is_16_bytes() {
         assert_eq!(size_of::<Value>(), 16)
-    }
-
-    #[test]
-    fn an_opcode_is_32_bytes() {
-        // NOTE: this is allowed to change, but we'd like to know about it.
-        assert_eq!(size_of::<crate::chunk::OpCode>(), 32)
     }
 
     /// A struct's constructor, getter, and setter must each display
