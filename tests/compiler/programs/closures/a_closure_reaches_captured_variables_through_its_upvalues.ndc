@@ -1,0 +1,8 @@
+// A closure reaches a captured local through its upvalues: `outer`'s `Closure`
+// captures `x` from r0, and `x` is upvalue 0 (`u0`) of `inner`, which writes
+// and reads it with `SetUpvalue` and `GetUpvalue`.
+// compile: analysed
+fn outer() {
+    let x = 1;
+    fn inner() { x = 2; x }
+}

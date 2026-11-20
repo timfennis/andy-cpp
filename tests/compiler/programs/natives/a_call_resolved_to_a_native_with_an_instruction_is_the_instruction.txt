@@ -1,0 +1,21 @@
+== <script> (registers: 3, globals: 2) ==
+0000  LoadK r1, k0                         <fn #1 fib>
+0001  SetGlobal g1, r1
+0002  LoadUnit r0
+0003  GetGlobal r1, g1
+0004  LoadK r2, k1                         30
+0005  Call r1, 1
+0006  Halt r0
+
+== #1 fib (registers: 5) ==
+0000  JumpIfNotLessI r0, #2, +2            -> 0003
+0001  Copy r1, r0
+0002  Jump +7                              -> 0010
+0003  GetGlobal r2, g1
+0004  SubIntI r3, r0, #1
+0005  Call r2, 1
+0006  GetGlobal r3, g1
+0007  SubIntI r4, r0, #2
+0008  Call r3, 1
+0009  AddInt r1, r2, r3
+0010  Return r1

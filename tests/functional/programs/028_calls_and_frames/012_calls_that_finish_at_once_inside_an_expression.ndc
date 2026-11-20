@@ -1,0 +1,21 @@
+// Calls that finish without a frame of their own (a native, a struct's
+// constructor and field reader, a native called through a variable) give
+// their value in the middle of an expression like any call. So does a call
+// of a function a call returned.
+// expect-output: 13 [3,2,1]
+// expect-output: 23
+// expect-output: 33 18
+// expect-output: 11 10
+
+struct P { x: Int, y: Int }
+
+fn add(a: Int, b: Int) -> Int { a + b }
+fn adder(n: Int) { fn(m: Int) -> Int { n + m } }
+
+let p = P(1, 2);
+print(1 + p.x * 10 + p.y, [P(3, 4).x, p.y, x(p)]);
+let length = len;
+print(length([1, 2, 3]) + length([4, 5]) * 10);
+print(add(adder(1)(2), adder(10)(20)), adder(5)(adder(6)(7)));
+let fns = [fn(a: Int) -> Int { a + 1 }, fn(a: Int) -> Int { a * 2 }];
+print(fns[0](fns[1](5)), (fns[1])(3) + (fns[0])(3));

@@ -5,3 +5,6 @@
 # Built by manual/editor/build.sh
 /manual/src/playground/editor.js
 /manual/src/playground/editor.licenses.txt
+
+# Python bytecode, from running benches/compare.py
+__pycache__/

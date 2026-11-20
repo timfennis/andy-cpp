@@ -1,0 +1,16 @@
+== <script> (registers: 5, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 add>
+0001  SetGlobal g0, r1
+0002  GetGlobal r1, g0
+0003  LoadK r2, k1                         1
+0004  LoadK r3, k2                         2
+0005  Jump +2                              -> 0008
+0006  Call r1, 3
+0007  Jump -6                              -> 0002
+0008  LoadUnit r0
+0009  Halt r0
+
+== #1 add (registers: 4) ==
+0000  AddInt r3, r0, r1
+0001  AddInt r3, r3, r2
+0002  Return r3

@@ -1,0 +1,5 @@
+// Both branches put their value in r0, the program's result: the then-branch
+// its `3`, then a `Jump` over the else-branch, and the else-branch, which ends
+// in a statement, `()` with `LoadUnit`; its `3;` compiles to nothing.
+// compile: parsed
+if true { 3 } else { 3; }

@@ -1,645 +1,34 @@
 use crate::Value;
-use crate::hash_map::HashMap;
-use crate::native_op::NativeOp;
+use crate::instr::{FAR, Instr};
+use crate::value::CompiledFunction;
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
-use ndc_core::collections::HashSet;
 use ndc_lexer::Span;
 use std::rc::Rc;
 
-/// A jump destination: either a resolved displacement — "relative offset, in
-/// instructions, from the instruction *after* the jump opcode" — or a symbolic
-/// label that `OptimizerIr::into_chunk` lowers to such an offset.
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum JumpTarget {
-    Offset(isize),
-    Label(LabelId),
+/// A function the code makes closures of, with what they capture, in the
+/// order the closure's upvalues are in: `Closure` makes one.
+#[derive(Clone)]
+pub struct ClosureCode {
+    pub function: Rc<CompiledFunction>,
+    pub captures: Rc<[CaptureSource]>,
 }
 
-impl JumpTarget {
-    pub const PLACEHOLDER: Self = Self::Label(LabelId(usize::MAX));
-
-    /// Advance `ip` by this offset using wrapping signed arithmetic.
-    #[inline]
-    pub fn apply(self, ip: usize) -> usize {
-        match self {
-            Self::Offset(o) => ip.wrapping_add_signed(o),
-            Self::Label(_) => panic!("cannot apply instruction pointer to unresolved label"),
-        }
-    }
-}
-
-impl std::fmt::Debug for JumpTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Offset(offset) => std::fmt::Debug::fmt(&offset, f),
-            Self::Label(label_id) => std::fmt::Debug::fmt(&label_id.0, f),
-        }
-    }
-}
-
-/// A single bytecode instruction.
-///
-/// ## Stack effects
-///
-/// Each instruction documents its net stack effect as `[before → after]`.
-/// Variable-size operands use `n` for the instruction's argument.
-///
-/// | Instruction   | Stack effect                            | Notes                                      |
-/// |---------------|-----------------------------------------|--------------------------------------------|
-/// | `Constant`    | `[… → … value]`                        | +1                                         |
-/// | `MakeString`  | `[… → … string]`                       | +1 (a new string with a constant's text)   |
-/// | `Pop`         | `[… value → …]`                        | −1                                         |
-/// | `GetLocal`    | `[… → … value]`                        | +1 (copies from slot)                      |
-/// | `GetCell`     | `[… → … value]`                        | +1 (reads through the slot's cell)         |
-/// | `GetUpvalue`  | `[… → … value]`                        | +1 (reads upvalue cell)                    |
-/// | `GetGlobal`   | `[… → … value]`                        | +1 (copies from globals)                   |
-/// | `SetLocal`    | `[… value → …]`                        | −1 (pops, writes to slot)                  |
-/// | `SetCell`     | `[… value → …]`                        | −1 (pops, writes through the slot's cell)  |
-/// | `SetUpvalue`  | `[… value → …]`                        | −1 (pops, writes to upvalue cell)          |
-/// | `Call`        | `[… callee a1…an → … result]`          | −n (pops callee + args, pushes result)     |
-/// | `CallVec`     | `[… callee a1…an → … tuple]`           | −n (pops callee + args, pushes result)     |
-/// | `CallNative`  | `[… a1…an → … result]`                 | −(n−1) (pops args, pushes result)          |
-/// | `Return`      | `[… retval → …]`                       | pops retval, truncates frame, pushes retval|
-/// | `Halt`        | `[…]`                                   | terminates execution                       |
-/// | `Jump`        | `[…]`                                   | 0 (unconditional jump)                     |
-/// | `JumpIfTrue`  | `[… bool → … bool]`                    | 0 (peeks, jumps if true)                   |
-/// | `JumpIfFalse` | `[… bool → … bool]`                    | 0 (peeks, jumps if false)                  |
-/// | `MakeList`    | `[… v1…vn → … list]`                   | −(n−1)                                     |
-/// | `MakeTuple`   | `[… v1…vn → … tuple]`                  | −(n−1)                                     |
-/// | `MakeMap`     | `[… k1 v1…kn vn (default?) → … map]`   | −(2n−1) or −2n if `has_default`              |
-/// | `MakeRange`   | `[… start (end?) → … iter]`            | −1 if bounded, 0 if unbounded              |
-/// | `Closure`     | `[… → … closure]`                      | +1                                         |
-/// | `GetIterator` | `[… value → … iter]`                   | 0 (pops value, pushes iterator)            |
-/// | `IterNext`    | `[… iter → … iter value]` or jump      | +1 if has next, 0 + jump if exhausted      |
-/// | `ListPush`    | `[… value → …]`                        | −1 (pops value, mutates list in slot)      |
-/// | `MapInsert`   | `[… key value → …]`                    | −2 (pops both, mutates map in slot)        |
-/// | `Unpack`      | `[… compound → … v1…vn]`               | +(n−1) (pops 1, pushes n)                  |
-/// | `UnpackLocals`| `[… compound → …]`                      | −1 (pops 1, writes n local slots)          |
-/// | `NewCell`     | `[…]`                                   | 0 (puts a fresh cell in a slot)            |
-/// | `Memoize`     | `[… fn → … memoized_fn]`               | 0 (pops and pushes)                        |
-/// | `TupleIndex`  | `[… tuple → … element]`                | 0 (the index is the operand)               |
-/// | `GetLocalTupleIndex` | `[… → … element]`               | +1 (reads the element in the slot's tuple) |
-/// | `AddInt`, …   | `[… left right → … result]`            | −1 (a binary [`NativeOp`])                 |
-/// | `NegInt`, …   | `[… value → … result]`                 | 0 (a unary [`NativeOp`])                   |
-// NOTE: OpCode cannot be Copy because the Closure variant holds Rc<[CaptureSource]>.
-// The dispatch loop accesses opcodes by reference to avoid cloning the 32-byte enum on
-// every iteration; see Vm::run_to_depth.
-#[derive(Clone, PartialEq, Eq)]
-pub enum OpCode {
-    /// Pops callee and `n` arguments, pushes result. `[… callee a1…an → … result]`
-    Call(usize),
-    /// Calls the callee for each element position of tuple arguments. The
-    /// callee is the function for every position, or a tuple of one function
-    /// for each. `[… callee a1…an → … tuple]` where each `ai` is either a
-    /// tuple of the shared axis length or a scalar used at every position.
-    CallVec(usize),
-    /// Calls the native in global slot `slot` with the `args` values on top
-    /// of the stack, for a call the analyser resolved to that native, which
-    /// needs no callee on the stack. `[… a1…an → … result]`
-    CallNative { slot: usize, args: usize },
-    /// Pops top of stack. `[… value → …]`
-    Pop,
-    /// Unconditional jump. `[…] → […]`
-    Jump(JumpTarget),
-    /// Peeks top; jumps if true. `[… bool → … bool]`
-    JumpIfTrue(JumpTarget),
-    /// Peeks top; jumps if false. `[… bool → … bool]`
-    JumpIfFalse(JumpTarget),
-    /// Pushes a constant. `[… → … value]`
-    Constant(usize),
-    /// Pushes a new string with the text of a constant string: a string
-    /// literal makes a new string each time it's evaluated, as a list
-    /// literal makes a new list, since strings can be changed in place.
-    /// `[… → … string]`
-    MakeString(usize),
-    /// Copies local slot onto stack. `[… → … value]`
-    GetLocal(usize),
-    /// Reads a captured local onto the stack: through the cell in its slot,
-    /// or the slot's own value before the first capture. `[… → … value]`
-    GetCell(usize),
-    /// Reads upvalue cell onto stack. `[… → … value]`
-    GetUpvalue(usize),
-    /// Pops top and writes to local slot. `[… value → …]`
-    SetLocal(usize),
-    /// Pops top and writes to a captured local: through the cell in its slot,
-    /// or to the slot itself before the first capture. `[… value → …]`
-    SetCell(usize),
-    /// Pops top and writes to upvalue cell. `[… value → …]`
-    SetUpvalue(usize),
-    /// Copies global slot onto stack. `[… → … value]`
-    GetGlobal(usize),
-    /// Pops top and writes to global slot. `[… value → …]`
-    SetGlobal(usize),
-    /// Pops `n` values, pushes a list. `[… v1…vn → … list]`
-    MakeList(usize),
-    /// Pops `n` values, pushes a tuple. `[… v1…vn → … tuple]`
-    MakeTuple(usize),
-    /// Pops `2n` values (+ optional default), pushes a map.
-    MakeMap { pairs: usize, has_default: bool },
-    /// Pushes a closure, capturing values from locals/upvalues. `[… → … closure]`
-    Closure {
-        constant_idx: usize,
-        values: Rc<[CaptureSource]>,
-    },
-    /// Pops value, pushes iterator. No-op if already an iterator. `[… value → … iter]`
-    GetIterator,
-    /// Peeks iterator; pushes next value or jumps if exhausted. `[… iter → … iter value]`
-    IterNext(JumpTarget),
-    /// Pops value, appends to list at local slot. `[… value → …]`
-    ListPush(usize),
-    /// Pops value then key, inserts into map at local slot. `[… key value → …]`
-    MapInsert(usize),
-    /// Pops start (and end if bounded), pushes range iterator.
-    MakeRange { inclusive: bool, bounded: bool },
-    /// Pops a compound value, pushes `n` elements. `[… compound → … v1…vn]`
-    Unpack(usize),
-    /// Pops a compound value and writes its `count` elements to the local
-    /// slots `first..first + count`, as `Unpack(count)` followed by
-    /// `SetLocal(first)` … `SetLocal(first + count - 1)` would.
-    /// `[… compound → …]`
-    UnpackLocals { first: usize, count: usize },
-    /// Terminates execution.
-    Halt,
-    /// Returns from function call. Pops return value, truncates frame, pushes return value.
-    Return,
-    /// Puts a fresh cell holding unit in a local slot, so a closure created
-    /// before the local's value exists can capture it. No stack change.
-    NewCell(usize),
-    /// Pops function, pushes memoized wrapper. `[… fn → … memoized_fn]`
-    Memoize,
-    /// Peeks top; errors if the value does not conform to the type. `[… value → … value]`
-    CheckType(Rc<StaticType>),
-    /// Peeks top; errors if the value is of the type but a container the
-    /// cast would give that type is held by anything but the value (or the
-    /// container it's in). A value not of the type is left to the cast's own
-    /// test. `[… value → … value]`
-    CheckUnshared(Rc<StaticType>),
-    /// Pops a value, pushes `Some(value)` if it conforms to the type and
-    /// `None` if it doesn't. `[… value → … option]`
-    TryCast(Rc<StaticType>),
-    /// Replaces the tuple on top with its element at the index, counting a
-    /// negative index from the end. `[… tuple → … element]`
-    TupleIndex(i64),
-    /// Pushes the element at `index` of the tuple in local slot `slot`, as
-    /// `GetLocal(slot)` then `TupleIndex(index)` would, without copying the
-    /// tuple. `[… → … element]`
-    GetLocalTupleIndex { slot: usize, index: i64 },
-    /// [`NativeOp::AddInt`] of the two values on top. `[… left right → … result]`
-    AddInt,
-    /// [`NativeOp::SubInt`] of the two values on top. `[… left right → … result]`
-    SubInt,
-    /// [`NativeOp::MulInt`] of the two values on top. `[… left right → … result]`
-    MulInt,
-    /// [`NativeOp::AddFloat`] of the two values on top. `[… left right → … result]`
-    AddFloat,
-    /// [`NativeOp::SubFloat`] of the two values on top. `[… left right → … result]`
-    SubFloat,
-    /// [`NativeOp::MulFloat`] of the two values on top. `[… left right → … result]`
-    MulFloat,
-    /// [`NativeOp::DivFloat`] of the two values on top. `[… left right → … result]`
-    DivFloat,
-    /// [`NativeOp::Less`] of the two values on top. `[… left right → … result]`
-    Less,
-    /// [`NativeOp::LessEqual`] of the two values on top. `[… left right → … result]`
-    LessEqual,
-    /// [`NativeOp::Greater`] of the two values on top. `[… left right → … result]`
-    Greater,
-    /// [`NativeOp::GreaterEqual`] of the two values on top. `[… left right → … result]`
-    GreaterEqual,
-    /// [`NativeOp::Equal`] of the two values on top. `[… left right → … result]`
-    Equal,
-    /// [`NativeOp::NotEqual`] of the two values on top. `[… left right → … result]`
-    NotEqual,
-    /// [`NativeOp::NegInt`] of the value on top. `[… value → … result]`
-    NegInt,
-    /// [`NativeOp::NegFloat`] of the value on top. `[… value → … result]`
-    NegFloat,
-    /// [`NativeOp::Not`] of the value on top. `[… value → … result]`
-    Not,
-}
-
-impl OpCode {
-    /// The instruction that does `op` to the operands on top of the stack.
-    pub fn native(op: NativeOp) -> Self {
-        match op {
-            NativeOp::AddInt => Self::AddInt,
-            NativeOp::SubInt => Self::SubInt,
-            NativeOp::MulInt => Self::MulInt,
-            NativeOp::AddFloat => Self::AddFloat,
-            NativeOp::SubFloat => Self::SubFloat,
-            NativeOp::MulFloat => Self::MulFloat,
-            NativeOp::DivFloat => Self::DivFloat,
-            NativeOp::Less => Self::Less,
-            NativeOp::LessEqual => Self::LessEqual,
-            NativeOp::Greater => Self::Greater,
-            NativeOp::GreaterEqual => Self::GreaterEqual,
-            NativeOp::Equal => Self::Equal,
-            NativeOp::NotEqual => Self::NotEqual,
-            NativeOp::NegInt => Self::NegInt,
-            NativeOp::NegFloat => Self::NegFloat,
-            NativeOp::Not => Self::Not,
-        }
-    }
-
-    /// The variant's name, e.g. `"GetLocal"` for `GetLocal(0)`.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::Call(_) => "Call",
-            Self::CallVec(_) => "CallVec",
-            Self::CallNative { .. } => "CallNative",
-            Self::Pop => "Pop",
-            Self::Jump(_) => "Jump",
-            Self::JumpIfTrue(_) => "JumpIfTrue",
-            Self::JumpIfFalse(_) => "JumpIfFalse",
-            Self::Constant(_) => "Constant",
-            Self::MakeString(_) => "MakeString",
-            Self::GetLocal(_) => "GetLocal",
-            Self::GetCell(_) => "GetCell",
-            Self::GetUpvalue(_) => "GetUpvalue",
-            Self::SetLocal(_) => "SetLocal",
-            Self::SetCell(_) => "SetCell",
-            Self::SetUpvalue(_) => "SetUpvalue",
-            Self::GetGlobal(_) => "GetGlobal",
-            Self::SetGlobal(_) => "SetGlobal",
-            Self::MakeList(_) => "MakeList",
-            Self::MakeTuple(_) => "MakeTuple",
-            Self::MakeMap { .. } => "MakeMap",
-            Self::Closure { .. } => "Closure",
-            Self::GetIterator => "GetIterator",
-            Self::IterNext(_) => "IterNext",
-            Self::ListPush(_) => "ListPush",
-            Self::MapInsert(_) => "MapInsert",
-            Self::MakeRange { .. } => "MakeRange",
-            Self::Unpack(_) => "Unpack",
-            Self::UnpackLocals { .. } => "UnpackLocals",
-            Self::Halt => "Halt",
-            Self::Return => "Return",
-            Self::NewCell(_) => "NewCell",
-            Self::Memoize => "Memoize",
-            Self::CheckType(_) => "CheckType",
-            Self::CheckUnshared(_) => "CheckUnshared",
-            Self::TryCast(_) => "TryCast",
-            Self::TupleIndex(_) => "TupleIndex",
-            Self::GetLocalTupleIndex { .. } => "GetLocalTupleIndex",
-            Self::AddInt => "AddInt",
-            Self::SubInt => "SubInt",
-            Self::MulInt => "MulInt",
-            Self::AddFloat => "AddFloat",
-            Self::SubFloat => "SubFloat",
-            Self::MulFloat => "MulFloat",
-            Self::DivFloat => "DivFloat",
-            Self::Less => "Less",
-            Self::LessEqual => "LessEqual",
-            Self::Greater => "Greater",
-            Self::GreaterEqual => "GreaterEqual",
-            Self::Equal => "Equal",
-            Self::NotEqual => "NotEqual",
-            Self::NegInt => "NegInt",
-            Self::NegFloat => "NegFloat",
-            Self::Not => "Not",
-        }
-    }
-
-    /// The net stack effect of executing this instruction on its fall-through
-    /// path, matching the `[… → …]` comments on the enum variants. The
-    /// compiler simulates the stack depth from these deltas so that `break`
-    /// and `continue` know how many pending operands to pop; a new opcode
-    /// must declare its delta here.
-    pub(crate) fn stack_delta(&self) -> isize {
-        // Arms follow the enum's order so each delta can be reviewed against
-        // its variant's stack comment, rather than being grouped by value.
-        #[allow(clippy::match_same_arms)]
-        #[allow(clippy::cast_possible_wrap)]
-        match self {
-            // Pops the callee and `n` arguments, pushes one result: -(n+1)+1.
-            Self::Call(n) | Self::CallVec(n) => -(*n as isize),
-            // Pops `n` arguments, pushes one result: -n+1.
-            Self::CallNative { args, .. } => 1 - *args as isize,
-            Self::Pop => -1,
-            // The conditional jumps peek at the condition without popping it;
-            // the branch they land in pops it instead.
-            Self::Jump(_) | Self::JumpIfTrue(_) | Self::JumpIfFalse(_) => 0,
-            Self::Constant(_)
-            | Self::MakeString(_)
-            | Self::GetLocal(_)
-            | Self::GetCell(_)
-            | Self::GetUpvalue(_)
-            | Self::GetGlobal(_) => 1,
-            Self::SetLocal(_) | Self::SetCell(_) | Self::SetUpvalue(_) | Self::SetGlobal(_) => -1,
-            // Pops `n` elements, pushes the collection: -n+1.
-            Self::MakeList(n) | Self::MakeTuple(n) => 1 - *n as isize,
-            // Pops a key and a value per pair plus the optional default,
-            // pushes the map: -(2*pairs + has_default) + 1.
-            Self::MakeMap { pairs, has_default } => {
-                1 - 2 * *pairs as isize - isize::from(*has_default)
-            }
-            Self::Closure { .. } => 1,
-            // Pops the sequence, pushes the iterator made from it.
-            Self::GetIterator => 0,
-            // Peeks the iterator and pushes the next element. This is the
-            // fall-through path; the exhausted path jumps without pushing,
-            // which the jump target's code accounts for.
-            Self::IterNext(_) => 1,
-            Self::ListPush(_) => -1,
-            // Pops a key and a value.
-            Self::MapInsert(_) => -2,
-            // Pops the start bound and, when bounded, the end bound; pushes
-            // the range iterator: -(1 + bounded) + 1.
-            Self::MakeRange { bounded, .. } => -isize::from(*bounded),
-            // Pops the compound value, pushes its `n` elements.
-            Self::Unpack(n) => *n as isize - 1,
-            Self::UnpackLocals { .. } => -1,
-            Self::Halt => 0,
-            // Pops the return value; the frame teardown that discards the
-            // rest of the frame happens in the VM, outside this accounting.
-            Self::Return => -1,
-            Self::NewCell(_) => 0,
-            Self::Memoize => 0,
-            // Peeks the value without popping it.
-            Self::CheckType(_) | Self::CheckUnshared(_) => 0,
-            // Replaces the value with the option holding it.
-            Self::TryCast(_) => 0,
-            // Replaces the tuple with its element.
-            Self::TupleIndex(_) => 0,
-            Self::GetLocalTupleIndex { .. } => 1,
-            // Pops two operands, pushes the result.
-            Self::AddInt
-            | Self::SubInt
-            | Self::MulInt
-            | Self::AddFloat
-            | Self::SubFloat
-            | Self::MulFloat
-            | Self::DivFloat
-            | Self::Less
-            | Self::LessEqual
-            | Self::Greater
-            | Self::GreaterEqual
-            | Self::Equal
-            | Self::NotEqual => -1,
-            // Replaces the operand with the result.
-            Self::NegInt | Self::NegFloat | Self::Not => 0,
-        }
-    }
-}
-
-impl std::fmt::Debug for OpCode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Call(n) => write!(f, "Call({n})"),
-            Self::CallVec(n) => write!(f, "CallVec({n})"),
-            Self::CallNative { slot, args } => write!(f, "CallNative({slot}, {args})"),
-            Self::Pop => write!(f, "Pop"),
-            Self::Jump(n) => write!(f, "Jump({n:?})"),
-            Self::JumpIfTrue(n) => write!(f, "JumpIfTrue({n:?})"),
-            Self::JumpIfFalse(n) => write!(f, "JumpIfFalse({n:?})"),
-            Self::Constant(n) => write!(f, "Constant({n})"),
-            Self::MakeString(n) => write!(f, "MakeString({n})"),
-            Self::GetLocal(n) => write!(f, "GetLocal({n})"),
-            Self::SetLocal(n) => write!(f, "SetLocal({n})"),
-            Self::GetGlobal(n) => write!(f, "GetGlobal({n})"),
-            Self::SetGlobal(n) => write!(f, "SetGlobal({n})"),
-            Self::GetCell(n) => write!(f, "GetCell({n})"),
-            Self::SetCell(n) => write!(f, "SetCell({n})"),
-            Self::NewCell(n) => write!(f, "NewCell({n})"),
-            Self::GetUpvalue(n) => write!(f, "GetUpvalue({n})"),
-            Self::SetUpvalue(n) => write!(f, "SetUpvalue({n})"),
-            Self::MakeList(n) => write!(f, "MakeList({n})"),
-            Self::MakeTuple(n) => write!(f, "MakeTuple({n})"),
-            Self::MakeMap { pairs, has_default } => {
-                write!(f, "MakeMap({pairs}, default={has_default})")
-            }
-            Self::Closure {
-                constant_idx,
-                values,
-            } => {
-                write!(f, "Closure({constant_idx}")?;
-                for cap in values.iter() {
-                    match cap {
-                        CaptureSource::Local(n) => write!(f, ", local({n})")?,
-                        CaptureSource::Upvalue(n) => write!(f, ", upvalue({n})")?,
-                    }
-                }
-                write!(f, ")")
-            }
-            Self::GetIterator => write!(f, "GetIterator"),
-            Self::IterNext(n) => write!(f, "IterNext({n:?})"),
-            Self::ListPush(n) => write!(f, "ListPush({n})"),
-            Self::MapInsert(n) => write!(f, "MapInsert({n})"),
-            Self::MakeRange { inclusive, bounded } => {
-                write!(f, "MakeRange(inclusive={inclusive}, bounded={bounded})")
-            }
-            Self::Halt => write!(f, "Halt"),
-            Self::Return => write!(f, "Return"),
-            Self::Unpack(n) => write!(f, "Unpack({n})"),
-            Self::UnpackLocals { first, count } => write!(f, "UnpackLocals({first}, {count})"),
-            Self::Memoize => write!(f, "Memoize"),
-            Self::CheckType(typ) => write!(f, "CheckType({typ})"),
-            Self::CheckUnshared(typ) => write!(f, "CheckUnshared({typ})"),
-            Self::TryCast(typ) => write!(f, "TryCast({typ})"),
-            Self::TupleIndex(index) => write!(f, "TupleIndex({index})"),
-            Self::GetLocalTupleIndex { slot, index } => {
-                write!(f, "GetLocalTupleIndex({slot}, {index})")
-            }
-            Self::AddInt => write!(f, "AddInt"),
-            Self::SubInt => write!(f, "SubInt"),
-            Self::MulInt => write!(f, "MulInt"),
-            Self::AddFloat => write!(f, "AddFloat"),
-            Self::SubFloat => write!(f, "SubFloat"),
-            Self::MulFloat => write!(f, "MulFloat"),
-            Self::DivFloat => write!(f, "DivFloat"),
-            Self::Less => write!(f, "Less"),
-            Self::LessEqual => write!(f, "LessEqual"),
-            Self::Greater => write!(f, "Greater"),
-            Self::GreaterEqual => write!(f, "GreaterEqual"),
-            Self::Equal => write!(f, "Equal"),
-            Self::NotEqual => write!(f, "NotEqual"),
-            Self::NegInt => write!(f, "NegInt"),
-            Self::NegFloat => write!(f, "NegFloat"),
-            Self::Not => write!(f, "Not"),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LabelId(usize);
-
-#[derive(Default, Clone)]
-pub(crate) struct OptimizerIr {
-    constants: Vec<Value>,
-    code: Vec<(LabelId, OpCode, Span)>,
-    stack_depth: isize,
-}
-
-impl OptimizerIr {
-    pub(crate) fn len(&self) -> usize {
-        self.code.len()
-    }
-
-    pub(crate) fn next_label(&self) -> LabelId {
-        LabelId(self.len())
-    }
-
-    pub(crate) fn into_chunk(self) -> Chunk {
-        let label_to_pos: HashMap<LabelId, usize> = self
-            .code
-            .iter()
-            .enumerate()
-            .map(|(idx, (a, _, _))| (*a, idx))
-            .collect();
-
-        let mut op_codes = Vec::with_capacity(self.code.len());
-        let mut spans = Vec::with_capacity(self.code.len());
-
-        // Jump offsets are relative to the instruction *after* the jump: the
-        // VM dispatch loop increments `ip` before calling `apply`. So the
-        // offset is `dest - (cur + 1)`.
-        let resolve = |cur_label: LabelId, dest_label: LabelId| -> JumpTarget {
-            let cur = label_to_pos[&cur_label] as isize;
-            let dest = label_to_pos[&dest_label] as isize;
-            JumpTarget::Offset(dest - cur - 1)
-        };
-
-        for (cur_label, opcode, span) in self.code {
-            spans.push(span);
-            let lowered = match opcode {
-                OpCode::Jump(JumpTarget::Label(d)) => OpCode::Jump(resolve(cur_label, d)),
-                OpCode::JumpIfFalse(JumpTarget::Label(d)) => {
-                    OpCode::JumpIfFalse(resolve(cur_label, d))
-                }
-                OpCode::JumpIfTrue(JumpTarget::Label(d)) => {
-                    OpCode::JumpIfTrue(resolve(cur_label, d))
-                }
-                OpCode::IterNext(JumpTarget::Label(d)) => OpCode::IterNext(resolve(cur_label, d)),
-                op => op,
-            };
-            op_codes.push(lowered);
-        }
-
-        Chunk {
-            constants: self.constants,
-            code: op_codes,
-            spans,
-        }
-    }
-
-    pub(crate) fn peephole(&mut self) {
-        let targets: HashSet<LabelId> = self
-            .code
-            .iter()
-            .filter_map(|(_, op, _)| match op {
-                OpCode::Jump(JumpTarget::Label(l))
-                | OpCode::JumpIfFalse(JumpTarget::Label(l))
-                | OpCode::JumpIfTrue(JumpTarget::Label(l))
-                | OpCode::IterNext(JumpTarget::Label(l)) => Some(*l),
-                _ => None,
-            })
-            .collect();
-
-        loop {
-            let mut out = Vec::with_capacity(self.code.len());
-            let mut i = 0;
-            let mut removed = 0;
-            while i < self.code.len() {
-                let elide = i + 1 < self.code.len()
-                    && matches!(
-                        self.code[i].1,
-                        OpCode::Constant(_)
-                            | OpCode::MakeString(_)
-                            | OpCode::GetGlobal(_)
-                            | OpCode::GetLocal(_)
-                            | OpCode::GetCell(_)
-                    )
-                    && matches!(self.code[i + 1].1, OpCode::Pop)
-                    && !targets.contains(&self.code[i].0)
-                    && !targets.contains(&self.code[i + 1].0);
-                if elide {
-                    i += 2;
-                    removed += 2;
-                } else {
-                    out.push(self.code[i].clone());
-                    i += 1;
-                }
-            }
-
-            self.code = out;
-
-            if removed == 0 {
-                break;
-            }
-        }
-    }
-
-    pub(crate) fn add_constant(&mut self, value: Value) -> usize {
-        self.constants.push(value);
-        self.constants.len() - 1
-    }
-
-    /// Overwrites the jump operand of a `Jump`, `JumpIfTrue`, `JumpIfFalse`, or
-    /// `IterNext` already written at `idx`. Panics on any other opcode.
-    pub(crate) fn set_jump_offset(&mut self, label: LabelId, target: JumpTarget) {
-        let idx = self
-            .code
-            .iter()
-            .position(|(l, _, _)| *l == label)
-            .expect("invalid label");
-
-        match self.code.get_mut(idx) {
-            Some((
-                _label,
-                OpCode::JumpIfFalse(n)
-                | OpCode::JumpIfTrue(n)
-                | OpCode::Jump(n)
-                | OpCode::IterNext(n),
-                _span,
-            )) => *n = target,
-            _ => panic!("expected a patchable jump instruction at index {idx}"),
-        }
-    }
-
-    /// Assigns a concrete frame slot to a compiler-generated local operation.
-    pub(crate) fn set_local_slot(&mut self, instruction_idx: usize, slot: usize) {
-        match self.code.get_mut(instruction_idx) {
-            Some((
-                _label,
-                OpCode::GetLocal(n)
-                | OpCode::SetLocal(n)
-                | OpCode::ListPush(n)
-                | OpCode::MapInsert(n),
-                _span,
-            )) => *n = slot,
-            _ => {
-                panic!("expected a compiler-generated local instruction at index {instruction_idx}")
-            }
-        }
-    }
-
-    pub(crate) fn write(&mut self, op: OpCode, span: Span) -> LabelId {
-        let label = self.next_label();
-        self.stack_depth += op.stack_delta();
-        self.code.push((label, op, span));
-        label
-    }
-
-    pub(crate) fn stack_depth(&self) -> isize {
-        self.stack_depth
-    }
-
-    /// Re-anchor the simulated stack depth. The simulation is exact along
-    /// straight-line code but instructions reached only by a jump (a loop's
-    /// exit pop) leave it off, so `Compiler::compile_expr` re-anchors it at
-    /// every expression boundary.
-    pub(crate) fn set_stack_depth(&mut self, depth: isize) {
-        self.stack_depth = depth;
-    }
-}
-
-/// A chunk of bytecode along with the constants it references.
+/// The code of one function: its instructions, the constants they load,
+/// and the span of source each instruction came from, at the same index.
 #[derive(Default, Clone)]
 pub struct Chunk {
+    code: Vec<Instr>,
     constants: Vec<Value>,
-    code: Vec<OpCode>,
+    /// The functions `Closure` makes closures of, by index.
+    closures: Vec<ClosureCode>,
+    /// The types casts check values against, by index.
+    types: Vec<StaticType>,
     spans: Vec<Span>,
+    /// Where each jump whose offset is [`FAR`] goes, by the jump's index,
+    /// in order: a loop whose condition is a fused comparison and whose body
+    /// is more than 32,767 instructions long.
+    far_jumps: Vec<(usize, usize)>,
 }
 
 impl Chunk {
@@ -650,36 +39,169 @@ impl Chunk {
     pub fn is_empty(&self) -> bool {
         self.code.is_empty()
     }
-    #[inline(always)]
-    pub fn opcode(&self, idx: usize) -> &OpCode {
-        &self.code[idx]
-    }
 
-    pub fn opcodes(&self) -> &[OpCode] {
+    pub fn code(&self) -> &[Instr] {
         &self.code
     }
 
-    pub fn constant(&self, idx: usize) -> &Value {
-        &self.constants[idx]
+    pub fn constants(&self) -> &[Value] {
+        &self.constants
     }
 
+    pub fn constant(&self, k: u32) -> &Value {
+        &self.constants[k as usize]
+    }
+
+    /// The functions `Closure` makes closures of, by index.
+    pub fn closures(&self) -> &[ClosureCode] {
+        &self.closures
+    }
+
+    /// The types casts check values against, by index.
+    pub fn types(&self) -> &[StaticType] {
+        &self.types
+    }
+
+    /// The span of the instruction at `ip`.
     pub fn span(&self, ip: usize) -> Span {
         self.spans[ip]
     }
 
-    /// Iterates opcodes as `(index, opcode, constant_value)` where `constant_value`
-    /// is `Some` for `Constant(idx)`, `MakeString(idx)` and `Closure(idx)` opcodes.
-    pub fn iter(&self) -> impl Iterator<Item = (usize, &OpCode, Option<&Value>)> {
-        self.code.iter().enumerate().map(|(i, op)| {
-            let val = match op {
-                OpCode::Constant(idx)
-                | OpCode::MakeString(idx)
-                | OpCode::Closure {
-                    constant_idx: idx, ..
-                } => Some(&self.constants[*idx]),
-                _ => None,
+    /// Where each jump whose offset is [`FAR`] goes, by the jump's index.
+    pub fn far_jumps(&self) -> &[(usize, usize)] {
+        &self.far_jumps
+    }
+
+    /// The index the jump at `ip` goes to, if it jumps.
+    pub fn jump_target(&self, ip: usize) -> Option<usize> {
+        let offset = self.code[ip].jump_offset()?;
+        if self.code[ip].is_far_jump() {
+            return Some(far_target(&self.far_jumps, ip));
+        }
+        Some((ip + 1).wrapping_add_signed(offset as isize))
+    }
+}
+
+/// Where the jump at `ip`, whose offset is [`FAR`], goes, as `far_jumps`
+/// says.
+#[cold]
+#[inline(never)]
+pub(crate) fn far_target(far_jumps: &[(usize, usize)], ip: usize) -> usize {
+    let index = far_jumps
+        .binary_search_by_key(&ip, |&(jump, _)| jump)
+        .expect("internal error: a far jump is in the chunk's far jumps");
+    far_jumps[index].1
+}
+
+/// A place in the code a jump goes to, made before the code it marks is
+/// written: a loop's end is a label until the loop's body is compiled.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Label(usize);
+
+/// Writes a [`Chunk`]. Jumps name a [`Label`], which [`Self::finish`]
+/// turns into an offset once every label is bound:
+///
+/// ```text
+/// let end = builder.label();
+/// builder.jump(Instr::Jump { offset: 0 }, end, span);
+/// ...
+/// builder.bind(end);
+/// ```
+#[derive(Default)]
+pub struct Builder {
+    code: Vec<Instr>,
+    constants: Vec<Value>,
+    closures: Vec<ClosureCode>,
+    types: Vec<StaticType>,
+    spans: Vec<Span>,
+    /// Where each label is bound: the index of the instruction it marks.
+    labels: Vec<Option<usize>>,
+    /// Each jump written so far, with the label it goes to.
+    jumps: Vec<(usize, Label)>,
+}
+
+impl Builder {
+    /// Writes `instr`, which came from `span`.
+    pub fn emit(&mut self, instr: Instr, span: Span) {
+        debug_assert!(
+            instr.jump_offset().is_none(),
+            "internal error: a jump is written with `Builder::jump`"
+        );
+        self.code.push(instr);
+        self.spans.push(span);
+    }
+
+    /// Writes `jump`, a jumping instruction whose offset doesn't matter,
+    /// going to `target`.
+    pub fn jump(&mut self, jump: Instr, target: Label, span: Span) {
+        debug_assert!(jump.jump_offset().is_some(), "internal error: not a jump");
+        self.jumps.push((self.code.len(), target));
+        self.code.push(jump);
+        self.spans.push(span);
+    }
+
+    /// A new label, bound nowhere yet.
+    pub fn label(&mut self) -> Label {
+        self.labels.push(None);
+        Label(self.labels.len() - 1)
+    }
+
+    /// Binds `label` to the next instruction written.
+    pub fn bind(&mut self, label: Label) {
+        debug_assert!(
+            self.labels[label.0].is_none(),
+            "internal error: a label is bound once"
+        );
+        self.labels[label.0] = Some(self.code.len());
+    }
+
+    /// The index of a new constant holding `value`.
+    pub fn constant(&mut self, value: Value) -> u32 {
+        self.constants.push(value);
+        u32::try_from(self.constants.len() - 1)
+            .expect("internal error: a function has fewer than 2^32 constants")
+    }
+
+    /// The index of `typ` in the chunk's types.
+    pub fn static_type(&mut self, typ: StaticType) -> u32 {
+        self.types.push(typ);
+        u32::try_from(self.types.len() - 1)
+            .expect("internal error: a function has fewer than 2^32 casts")
+    }
+
+    /// The index of a new closure of `function`, which captures `captures`.
+    pub fn closure(&mut self, function: Rc<CompiledFunction>, captures: &[CaptureSource]) -> u32 {
+        self.closures.push(ClosureCode {
+            function,
+            captures: captures.into(),
+        });
+        u32::try_from(self.closures.len() - 1)
+            .expect("internal error: a function has fewer than 2^32 closures")
+    }
+
+    /// The chunk, each jump given the offset to its label, or [`FAR`] and
+    /// an entry in the chunk's far jumps if its offset doesn't fit.
+    pub fn finish(mut self) -> Chunk {
+        let mut far_jumps = Vec::new();
+        for (at, label) in std::mem::take(&mut self.jumps) {
+            let target = self.labels[label.0].expect("internal error: every label is bound");
+            let offset = i32::try_from(target as isize - (at as isize + 1))
+                .expect("internal error: a jump goes fewer than 2^31 instructions");
+            self.code[at] = if let Some(jump) = self.code[at].with_jump_offset(offset) {
+                jump
+            } else {
+                far_jumps.push((at, target));
+                self.code[at].with_short_offset(FAR)
             };
-            (i, op, val)
-        })
+        }
+        far_jumps.sort_unstable();
+        Chunk {
+            code: self.code,
+            constants: self.constants,
+            closures: self.closures,
+            types: self.types,
+            spans: self.spans,
+            far_jumps,
+        }
     }
 }

@@ -1,8 +1,10 @@
 //! Property-based panic test for the Andy C++ pipeline.
 //!
 //! Generates random `Vec<TokenLocation>` and pushes each through
-//! parser → analyser → compiler → VM. Errors are expected and ignored;
-//! only panics, `unwrap`s, and `unreachable!`s count as failures.
+//! parser → analyser → compiler → VM. Errors are expected; panics,
+//! `unwrap`s, and `unreachable!`s count as failures. Few random token
+//! streams get past the parser; `generated_programs.rs` generates programs
+//! that run.
 //!
 //! Each generated program runs in a worker thread with a 500ms timeout,
 //! so generated infinite loops don't hang the test. Panics are caught
@@ -29,10 +31,11 @@
 use ndc_analyser::Analyser;
 use ndc_core::Builtins;
 use ndc_core::FunctionRegistry;
+use ndc_interpreter as _;
 use ndc_lexer::{NumericLiteral, Span, Token, TokenLocation};
 use ndc_parser::Parser;
 use ndc_vm::compiler::Compiler;
-use ndc_vm::{Natives, OutputSink, Vm};
+use ndc_vm::{Natives, OutputSink};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 use std::fmt;
@@ -231,12 +234,10 @@ fn stdlib_natives() -> Natives {
 
 /// Drive parser → analyser → compiler → VM with the stdlib registered, so
 /// the analyser accepts programs that reference built-ins like `print`,
-/// `len`, `sum`, etc. Returns `()` on any error — the test only cares
-/// about panics, not error variants.
+/// `len`, `sum`, etc. Each stage stops at the first error.
 fn run_pipeline(tokens: Vec<TokenLocation>) {
-    let expressions = match Parser::from_tokens(tokens).parse() {
-        Ok(e) => e,
-        Err(_) => return,
+    let Ok(expressions) = Parser::from_tokens(tokens).parse() else {
+        return;
     };
 
     let natives = Rc::new(stdlib_natives());
@@ -249,14 +250,13 @@ fn run_pipeline(tokens: Vec<TokenLocation>) {
         return;
     }
 
-    let analysis = result.analysis;
-    let compiled = match Compiler::compile(expressions.into_iter(), analysis, &natives) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(compiled) = Compiler::compile(expressions.into_iter(), result.analysis, &natives) else {
+        return;
     };
 
     let globals = ndc_vm::native_globals(&natives);
-    let mut vm = Vm::new(compiled, globals, &natives).with_output(OutputSink::Buffer(Vec::new()));
+    let mut vm =
+        ndc_vm::Vm::new(compiled, globals, &natives).with_output(OutputSink::Buffer(Vec::new()));
     let _ = vm.run();
 }
 

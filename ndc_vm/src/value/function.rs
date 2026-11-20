@@ -1,5 +1,4 @@
 use super::{Object, Value};
-use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
 use crate::hash_map::HashMap;
 use ndc_core::StaticType;
@@ -58,19 +57,20 @@ type SimpleFn = dyn Fn(&[Value]) -> Result<Value, VmError>;
 type WithVmFn = dyn Fn(&[Value], &mut crate::Vm) -> Result<Value, VmError>;
 
 pub enum NativeFunc {
-    /// Zero-allocation path: args are a slice directly into the VM stack.
-    /// Use for functions that do not invoke VM callbacks (no `VmCallable` params).
+    /// A native that doesn't call back into the program: its arguments are
+    /// the call's argument registers, a slice of the VM's stack, so a call
+    /// allocates nothing. Use for functions with no `VmCallable` params.
     Simple(Box<SimpleFn>),
-    /// HOF path: args are drained off the stack before the call so `&mut Vm`
-    /// can be passed safely. Use for functions with `&VmCallable` params.
+    /// A native that may call back into the program, as `map` does: its
+    /// arguments are moved out of their registers into a `Vec` first, so it
+    /// can be given the `&mut Vm` its callbacks run on. Use for functions
+    /// with `&VmCallable` params.
     WithVm(Box<WithVmFn>),
 }
 
 pub struct CompiledFunction {
     pub name: Option<String>,
     pub(crate) static_type: StaticType,
-    pub(crate) body: Chunk,
-    pub(crate) num_locals: usize,
     /// For a program run at the top level, how many global slots it needs, so
     /// a declaration that never runs still has its slot; 0 for any other
     /// function.
@@ -79,6 +79,11 @@ pub struct CompiledFunction {
     /// its code reads, in the functions it declares too, each of which must
     /// hold its native before it runs; empty for any other function.
     pub(crate) natives: Vec<usize>,
+    /// The function's code.
+    pub(crate) body: crate::chunk::Chunk,
+    /// How many registers the function uses: its locals, then the most
+    /// temporaries its code needs at once.
+    pub(crate) frame_size: usize,
 }
 
 #[derive(Clone)]
@@ -90,25 +95,12 @@ pub struct ClosureFunction {
 }
 
 impl CompiledFunction {
-    #[must_use]
-    pub fn num_locals(&self) -> usize {
-        self.num_locals
-    }
-
     /// For a program run at the top level, the global slots of the natives
     /// its code reads, each of which must hold its native before it runs, as
     /// [`crate::Vm::new`] puts them there.
     #[must_use]
     pub fn natives(&self) -> &[usize] {
         &self.natives
-    }
-
-    pub fn opcodes(&self) -> &[OpCode] {
-        self.body.opcodes()
-    }
-
-    pub fn body(&self) -> &Chunk {
-        &self.body
     }
 }
 impl Function {

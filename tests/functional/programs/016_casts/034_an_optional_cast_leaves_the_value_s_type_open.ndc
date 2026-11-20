@@ -1,0 +1,7 @@
+// `cast?` doesn't settle the type of what it tests: the empty list stays open,
+// so the push of a String type-checks.
+// expect-output: true ["a"]
+let xs = [];
+let ints = cast?::<[Int]>(xs).is_some();
+xs.push("a");
+print(ints, xs);

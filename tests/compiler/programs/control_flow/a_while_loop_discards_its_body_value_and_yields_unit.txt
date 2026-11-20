@@ -1,0 +1,4 @@
+== <script> (registers: 1, globals: 0) ==
+0000  Jump -1                              -> 0000
+0001  LoadUnit r0
+0002  Halt r0

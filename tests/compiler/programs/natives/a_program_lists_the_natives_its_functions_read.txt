@@ -1,0 +1,17 @@
+== <script> (registers: 2, globals: 2, natives: len, print) ==
+0000  LoadK r1, k0                         <fn #1 f>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  GetGlobal r1, print
+0004  SetGlobal g1, r1
+0005  Halt r0
+
+== #1 f (registers: 1) ==
+0000  LoadK r0, k0                         <fn #2 g>
+0001  Return r0
+
+== #2 g (registers: 2) ==
+0000  LoadK r1, k0                         1
+0001  MakeList r0, r1, 1
+0002  CallNative r0, len, r0, 1
+0003  Return r0

@@ -1,0 +1,11 @@
+== <script> (registers: 2, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 f>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  Halt r0
+
+== #1 f (registers: 6) ==
+0000  Unpack r0, r4, 2
+0001  Unpack r4, r1, 2
+0002  Move r3, r5
+0003  Return r3

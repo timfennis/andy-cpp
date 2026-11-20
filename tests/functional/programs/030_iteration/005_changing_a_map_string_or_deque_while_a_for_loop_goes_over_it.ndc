@@ -1,0 +1,51 @@
+// A `for` loop over a map doesn't visit keys added in the loop. One over a
+// string goes over the string as it is when it gets to each character: added
+// characters are visited, and the loop ends early when it gets shorter. One
+// over a deque visits elements pushed at the back.
+// expect-output: [1,2] 4
+// expect-output: ["a","b","c","x","x"] abcxx
+// expect-output: ["a","c"] cd
+// expect-output: ["a","b","c","d"]
+// expect-output: [1,2,10,20]
+
+let m = %{1: 1, 2: 2};
+let keys = [];
+for k, v in m {
+    keys.push(k);
+    m[k + 10] = v;
+}
+print(keys.sorted, m.len());
+
+let s = "abc";
+let grown = [];
+for c in s {
+    grown.push(c);
+    if s.len() < 5 { s ++= "x"; }
+}
+print(grown, s);
+
+let t = "abcd";
+let shrunk = [];
+for c in t {
+    shrunk.push(c);
+    t[0] = "";
+}
+print(shrunk, t);
+
+let u = "abcd";
+let reassigned = [];
+for c in u {
+    reassigned.push(c);
+    u = "z";
+}
+print(reassigned);
+
+let d = Deque();
+d.push_back(1);
+d.push_back(2);
+let from_deque = [];
+for x in d {
+    from_deque.push(x);
+    if d.len() < 4 { d.push_back(x * 10); }
+}
+print(from_deque);

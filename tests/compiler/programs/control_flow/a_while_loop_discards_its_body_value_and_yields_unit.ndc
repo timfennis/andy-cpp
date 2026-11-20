@@ -1,0 +1,5 @@
+// The loop's body value isn't used, so its `1` compiles to nothing, and its
+// `true` condition needs no test: the loop is a `Jump` back to itself. After
+// it, `LoadUnit` gives `()`, the loop's value.
+// compile: parsed
+while true { 1 }

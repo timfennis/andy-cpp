@@ -1,0 +1,5 @@
+// The comparisons and equality do the same for every overload, so each overload
+// is written as the instruction: `Less`, `Equal` and `NotEqual`, each on the
+// operands in r1 and r2.
+// compile: stdlib
+"a" < "b"; [1] == [1]; (1, 2) != (2, 1);

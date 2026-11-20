@@ -1,0 +1,68 @@
+// A `return` in an operand leaves the function with its value, dropping the
+// operands already read: in a call's arguments, a list or tuple literal, an
+// operator, a range, an index, an op-assignment's value, a condition and the
+// right side of `and`. `005_functions/012_a_value_that_never_arrives_picks_no_overload.ndc`
+// is about the type of such an operand.
+// expect-output: 100 0
+// expect-output: [0] [-1,0,2,3]
+// expect-output: (0,0) (3,3)
+// expect-output: -1 -5
+// expect-output: [0,1] []
+// expect-output: 6 -1
+// expect-output: [11] [5]
+// expect-output: 7 1 2
+// expect-output: false false
+// expect-output: %{} %{2: 2}
+
+fn add(a: Int, b: Int) -> Int { a + b }
+
+fn in_arguments(x: Int) -> Int {
+    add(x, if x > 0 { return 100 } else { 1 })
+}
+print(in_arguments(1), in_arguments(-1));
+
+fn in_a_list(x: Int) -> [Int] {
+    [x, x + 1, if x > 0 { return [0] } else { 2 }, 3]
+}
+print(in_a_list(1), in_a_list(-1));
+
+fn in_a_tuple(x: Int) -> (Int, Int) {
+    (x, if x == 0 { return (0, 0) } else { x })
+}
+print(in_a_tuple(0), in_a_tuple(3));
+
+fn in_an_operator(x: Int) -> Int {
+    x * 10 + (if x > 0 { return -1 } else { 5 })
+}
+print(in_an_operator(1), in_an_operator(-1));
+
+fn in_a_range(n: Int) -> [Int] {
+    [x for x in 0..(if n > 3 { return [] } else { n })]
+}
+print(in_a_range(2), in_a_range(9));
+
+fn in_an_index(xs: [Int], i: Int) -> Int {
+    xs[if i < 0 { return -1 } else { i }]
+}
+print(in_an_index([5, 6], 1), in_an_index([5, 6], -3));
+
+fn in_an_op_assignment(xs: [Int]) -> [Int] {
+    xs[0] += if xs[0] > 1 { return xs } else { 10 };
+    xs
+}
+print(in_an_op_assignment([1]), in_an_op_assignment([5]));
+
+fn in_a_condition(x: Int) -> Int {
+    if x > { if x == 0 { return 7 } else { 1 } } { 1 } else { 2 }
+}
+print(in_a_condition(0), in_a_condition(5), in_a_condition(-5));
+
+fn in_and(x: Bool) -> Bool {
+    x and { return false }
+}
+print(in_and(true), in_and(false));
+
+fn in_a_map(x: Int) -> %{Int: Int} {
+    %{x: if x == 0 { return %{} } else { x }}
+}
+print(in_a_map(0), in_a_map(2));

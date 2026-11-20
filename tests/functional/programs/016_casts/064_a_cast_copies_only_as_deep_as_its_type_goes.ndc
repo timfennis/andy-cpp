@@ -1,0 +1,18 @@
+// A list that holds itself is copied as far as the cast's type names lists:
+// a `[[Any]]` is a copy of the list around a copy of the list, and the cast
+// ends there. A list reached twice as the same part of the type is copied
+// once.
+// expect-output: 1 2 1
+// expect-output: [[1,2],[1,2]] [[1],[1]]
+let xs: [Any] = [];
+xs.push(xs);
+let any: Any = xs;
+let lists = cast::<[[Any]]>(any);
+lists.push([]);
+print(xs.len(), lists.len(), lists[0].len());
+
+let inner = [1];
+let twice: Any = [inner, inner];
+let both = cast::<[[Int]]>(twice);
+both[0].push(2);
+print(both, twice);

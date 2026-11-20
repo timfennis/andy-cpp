@@ -1,0 +1,8 @@
+// An index past the end of a list in the right operand is reported at the
+// index's `[`. The expected error ends with the span, which counts bytes from
+// the start of this file.
+fn second(xs: [Int], i: Int) -> Int {
+    xs[0] + xs[i]
+}
+print(second([1, 2, 3], 5));
+// expect-error: message: "index 5 is out of bounds for a list of 3 elements", span: Some(Span { source_id: SourceId(0), offset: 233, length: 1 })

@@ -51,7 +51,9 @@ pub struct Analysis {
     /// The type each cast checks its value against at runtime, keyed by the
     /// `cast` or `cast?` name, called or used as a value. `None` when the
     /// value is already known to have the type, as in `cast::<Int>(1)`, so
-    /// there is nothing to check.
+    /// there is nothing to check. A cast that gives a container a new type
+    /// is checked even then, as the check is what copies a container
+    /// something else holds.
     pub cast_checks: HashMap<NodeId, Option<StaticType>>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries

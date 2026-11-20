@@ -1,0 +1,18 @@
+== <script> (registers: 4, globals: 0) ==
+0000  MakeString r1, k0                    "a"
+0001  MakeString r2, k1                    "b"
+0002  Less r1, r1, r2
+0003  LoadK r1, k2                         1
+0004  MakeList r1, r1, 1
+0005  LoadK r2, k3                         1
+0006  MakeList r2, r2, 1
+0007  Equal r1, r1, r2
+0008  LoadK r1, k4                         1
+0009  LoadK r2, k5                         2
+0010  MakeTuple r1, r1, 2
+0011  LoadK r2, k6                         2
+0012  LoadK r3, k7                         1
+0013  MakeTuple r2, r2, 2
+0014  NotEqual r1, r1, r2
+0015  LoadUnit r0
+0016  Halt r0

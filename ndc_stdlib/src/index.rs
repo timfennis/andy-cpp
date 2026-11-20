@@ -25,8 +25,9 @@ fn make_get_func() -> NativeFunc {
 /// Allocation-free `[]` for overloads whose parameter type guarantees the
 /// container can never trigger the Map default-function callback path
 /// (List/String/Deque/Tuple). Using `NativeFunc::Simple` here lets the VM
-/// pass stack args by slice instead of draining them into a `Vec<Value>`
-/// on every call — a real win for hot inner loops like `dists[i][j]`.
+/// pass the argument registers by slice instead of moving them into a
+/// `Vec<Value>` on every call — a real win for hot inner loops like
+/// `dists[i][j]`.
 fn make_get_func_simple() -> NativeFunc {
     NativeFunc::Simple(Box::new(|args: &[Value]| {
         let [container, index_value] = args else {

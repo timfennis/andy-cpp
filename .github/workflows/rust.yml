@@ -39,6 +39,9 @@ jobs:
         run: cargo clippy -p ndc_lsp --no-default-features --all-targets
       - name: Build with tracing
         run: cargo build --features trace
+      # Tracing, which only a build with the feature tests.
+      - name: Test tracing
+        run: cargo test -p ndc_interpreter --features trace
       # The manual runs its examples on this build, deployed only from master.
       - name: Build for the browser
         run: |

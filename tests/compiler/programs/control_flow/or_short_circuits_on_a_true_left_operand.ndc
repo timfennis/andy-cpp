@@ -1,0 +1,5 @@
+// Short-circuits: the left operand goes in r0, the result's register, and if
+// it's true `JumpIfTrue` skips the right operand, leaving it as the result. If
+// it's false, the right operand overwrites it in r0.
+// compile: parsed
+true or false

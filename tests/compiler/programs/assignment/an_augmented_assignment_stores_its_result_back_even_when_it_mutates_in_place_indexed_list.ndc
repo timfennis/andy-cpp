@@ -1,0 +1,6 @@
+// `++=` appends to the list in `values[0]` in place, yet its result is still
+// stored back: `[]` reads the element into r4, `CallNative` of `++=` puts the
+// result in r3, and `[]=` stores r3 at `values[0]`. The container and index are
+// read once, into r1 and r2, and copied as the arguments of each call.
+// compile: stdlib
+let value = [1]; let values = [value]; values[0] ++= [2];

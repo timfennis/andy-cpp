@@ -1,0 +1,63 @@
+// `let x = x + 1` declares a new `x` from the `x` it shadows, which keeps its
+// value: the old one is still there when the block that declared the new one
+// ends. The value of a declaration is read in order like any other: in
+// `let y = x + { x = 5; x }` the left `x` is 1.
+// expect-output: ([2,20],[2,20,2,20])
+// expect-output: [2,20,2,1]
+// expect-output: (1,10)
+// expect-output: (5,6)
+// expect-output: 2
+// expect-output: 1
+
+fn shadow() {
+    let x = 1;
+    let x = x + 1;
+    let x = [x, x * 10];
+    let inner = {
+        let x = x ++ x;
+        x
+    };
+    (x, inner)
+}
+print(shadow());
+
+fn in_a_block() {
+    let x = 1;
+    let seen = [];
+    {
+        let x = x + 1;
+        seen.push(x);
+        {
+            let x = x * 10;
+            seen.push(x);
+        }
+        seen.push(x);
+    }
+    seen.push(x);
+    seen
+}
+print(in_a_block());
+
+fn captured() {
+    let x = 1;
+    let old = fn() { x };
+    let x = x + 1;
+    let new = fn() { x };
+    x = 10;
+    (old(), new())
+}
+print(captured());
+
+fn value_order() {
+    let x = 1;
+    let y = x + { x = 5; x };
+    (x, y)
+}
+print(value_order());
+
+let g = 1;
+{
+    let g = g + 1;
+    print(g);
+}
+print(g);

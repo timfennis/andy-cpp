@@ -1,0 +1,52 @@
+// `let a, b = b, a` makes the value from the variables it shadows before it
+// declares the new ones, in a nested block and in the same block. A list
+// taken apart is copied into the new variables: changing the list later
+// doesn't change them.
+// expect-output: (2,1)
+// expect-output: ((2,1),1,2)
+// expect-output: (1,2,3,[100,2,3,4],1)
+// expect-output: ((1,2),2,1)
+// expect-output: 2 1
+
+fn same_block() {
+    let a = 1;
+    let b = 2;
+    let a, b = b, a;
+    (a, b)
+}
+print(same_block());
+
+fn nested_block() {
+    let a = 1;
+    let b = 2;
+    let inner = {
+        let b, a = a, b;
+        (a, b)
+    };
+    (inner, a, b)
+}
+print(nested_block());
+
+fn from_a_list() {
+    let xs = [1, 2, 3];
+    let a, b, c = xs;
+    xs[0] = 100;
+    let (d, e) = (xs, a);
+    xs.push(4);
+    (a, b, c, d, e)
+}
+print(from_a_list());
+
+fn captured() {
+    let a = 1;
+    let b = 2;
+    let read = fn() { (a, b) };
+    let a, b = b, a;
+    (read(), a, b)
+}
+print(captured());
+
+let ga = 1;
+let gb = 2;
+let ga, gb = gb, ga;
+print(ga, gb);

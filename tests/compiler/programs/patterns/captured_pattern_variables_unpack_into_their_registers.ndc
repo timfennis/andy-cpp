@@ -1,0 +1,6 @@
+// Pattern variables a closure captures are declared like any other local: each
+// iteration's `Unpack r4, r1, 2` writes the new values straight into the
+// registers of `a` and `b`, replacing the cells the previous iteration's
+// closure captured.
+// compile: stdlib
+fn f(xs: [(Int, Int)]) { for (a, b) in xs { fn() { a + b }; } }

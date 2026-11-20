@@ -1,0 +1,29 @@
+// `a ++ b ++ c` gives all the elements in order and leaves `a`, `b` and `c`
+// alone, whether they're variables or fresh lists.
+// expect-output: ([1],[2],[3],[1,2,3,4])
+// expect-output: [1,2,3]
+// expect-output: [0,1,2,1] [1]
+// expect-output: [1,1,1,1,1]
+
+fn variables() {
+    let a = [1];
+    let b = [2];
+    let c = [3];
+    let d = a ++ b ++ c;
+    d.push(4);
+    (a, b, c, d)
+}
+print(variables());
+
+let literals = [1] ++ [2] ++ [3];
+print(literals);
+
+let g = [1];
+let mixed = [0] ++ g ++ [2] ++ g;
+print(mixed, g);
+
+fn long_chain() {
+    let a = [1];
+    a ++ a ++ a ++ a ++ a
+}
+print(long_chain());

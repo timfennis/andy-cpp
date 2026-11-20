@@ -1,0 +1,5 @@
+// A branch that never finishes needs nothing after it: the inner `if`'s branch
+// is a `break`, a `Jump` out of the loop to its `LoadUnit`, followed only by
+// the loop's `Jump` back to its start. Neither `true` condition needs a test.
+// compile: analysed
+while true { if true { break } }

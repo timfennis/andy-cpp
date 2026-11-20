@@ -1,0 +1,9 @@
+// An expression nested 16 deep, each level waiting for the one inside
+// it, gives the right result. (Nesting 24 deep overflows the stack of a test
+// thread in a debug build, which is the known deep-nesting overflow.)
+// expect-output: 131055
+
+fn nested(x) {
+    (15 + (14 + (13 + (12 + (11 + (10 + (9 + (8 + (7 + (6 + (5 + (4 + (3 + (2 + (1 + (0 + x * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2) * 2)
+}
+print(nested(1));

@@ -32,7 +32,7 @@ pub struct Interpreter {
     /// declarations. A resumable interpreter keeps them from one evaluation to
     /// the next, which is how a REPL line sees what earlier lines declared.
     globals: Vec<Value>,
-    /// What the last run left on the VM's stack, such as the locals of the
+    /// What the last run left on the VM's stack, such as the registers of the
     /// top-level function. Kept until the next run or until the interpreter
     /// is dropped, so a program that is about to exit can forget the
     /// interpreter and leave freeing all of it to the OS.
@@ -227,26 +227,13 @@ impl Interpreter {
         )?)
     }
 
-    /// Like [`Self::compile_str`] but skips the peephole optimizer.
-    /// Used by the compiler-tests crate to assert against raw bytecode.
-    pub fn compile_str_unoptimized(
-        &mut self,
-        input: &str,
-    ) -> Result<CompiledFunction, InterpreterError> {
-        let source_id = self.source_db.add("<input>", input);
-        let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
-        Ok(Compiler::compile_unoptimized(
-            expressions.into_iter(),
-            result.analysis,
-            &self.natives,
-        )?)
-    }
-
     pub fn disassemble_str(&mut self, input: &str) -> Result<String, InterpreterError> {
         let compiled = self.compile_str(input)?;
-        let mut out = String::new();
-        out.push_str(&ndc_vm::disassemble::disassemble(&compiled, Some(input)));
-        Ok(out)
+        Ok(ndc_vm::disassemble::disassemble(
+            &compiled,
+            &self.natives,
+            Some(input),
+        ))
     }
 
     /// Execute source code and return the resulting [`Value`].
@@ -351,7 +338,6 @@ impl Interpreter {
                 Compiler::compile(expressions, analysis, &self.natives)
             }
         })?;
-        let num_locals = code.num_locals();
         let output = if self.capturing {
             OutputSink::Buffer(Vec::new())
         } else {
@@ -376,7 +362,7 @@ impl Interpreter {
             self.output.extend_from_slice(output);
         }
         self.input = vm.take_input();
-        let value = vm.last_value(num_locals);
+        let value = vm.last_value();
         (self.globals, self.stack) = vm.into_globals_and_stack();
         run?;
         Ok((value, timings))
@@ -453,6 +439,79 @@ mod tests {
         assert!(
             interpreter.eval("value;").is_err(),
             "a one-shot interpreter must treat each program as isolated",
+        );
+    }
+
+    /// What a [`Recorder`] saw: each instruction as the print tracer shows
+    /// it, and how many times the run completed.
+    #[cfg(feature = "trace")]
+    #[derive(Default)]
+    struct Recorded {
+        instructions: Vec<String>,
+        completions: usize,
+    }
+
+    /// A tracer that records what it's told in a [`Recorded`] it shares.
+    #[cfg(feature = "trace")]
+    struct Recorder(Rc<std::cell::RefCell<Recorded>>);
+
+    #[cfg(feature = "trace")]
+    impl tracer::VmTracer for Recorder {
+        fn on_instruction(&mut self, ctx: &tracer::InstructionContext<'_>) {
+            self.0
+                .borrow_mut()
+                .instructions
+                .push(ctx.instruction.to_string());
+        }
+
+        fn on_complete(&mut self) {
+            self.0.borrow_mut().completions += 1;
+        }
+    }
+
+    /// What tracing `program` records.
+    #[cfg(feature = "trace")]
+    fn trace(program: &str) -> Recorded {
+        let recorded = Rc::new(std::cell::RefCell::new(Recorded::default()));
+        let mut interpreter = Interpreter::capturing();
+        interpreter.set_tracer(Box::new(Recorder(Rc::clone(&recorded))));
+        // A program that fails is traced too.
+        let _ = interpreter.eval(program);
+        drop(interpreter);
+        Rc::into_inner(recorded)
+            .expect("the interpreter is dropped")
+            .into_inner()
+    }
+
+    #[cfg(feature = "trace")]
+    #[test]
+    fn the_vm_traces_its_instructions_and_completes_once() {
+        // With no natives, so no operators.
+        let program = "fn pick(a, b) { if true { a } else { b } } pick(pick(1, 2), 3)";
+        let recorded = trace(program);
+        assert_eq!(recorded.completions, 1);
+        let calls = recorded
+            .instructions
+            .iter()
+            .filter(|i| i.starts_with("Call r"))
+            .count();
+        assert_eq!(calls, 2);
+        assert_eq!(recorded.instructions.last().unwrap(), "Halt r0");
+    }
+
+    #[cfg(feature = "trace")]
+    #[test]
+    fn a_run_that_fails_completes_its_trace() {
+        let recorded = trace("let x: Any = 1.5; cast::<Int>(x)");
+        assert_eq!(recorded.completions, 1);
+        assert!(
+            recorded
+                .instructions
+                .last()
+                .unwrap()
+                .starts_with("CheckType"),
+            "{:?}",
+            recorded.instructions
         );
     }
 }

@@ -140,6 +140,19 @@ impl AnalysisError {
         ))
     }
 
+    /// A named function declared inside an expression rather than as a
+    /// statement, as `fn f` in `false and fn f() { true }` or in
+    /// `print(fn f() { 1 })`.
+    pub(crate) fn function_declared_in_an_expression(name: &str, span: Span) -> Self {
+        Self::new(
+            format!("only a statement can declare a named function, and `{name}` is declared inside an expression"),
+            span,
+        )
+        .with_help(format!(
+            "declare `{name}` on a line of its own before the code that uses it, or write an anonymous function here, as in `fn(x) => x + 1`"
+        ))
+    }
+
     /// The type parameter `name` of `function`, which its body settled as
     /// `typ`, or left unused, so it's no type parameter.
     pub(crate) fn type_parameter_is_not_generic(

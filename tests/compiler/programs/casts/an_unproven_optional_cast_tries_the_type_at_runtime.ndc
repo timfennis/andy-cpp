@@ -1,0 +1,4 @@
+// An optional cast tests the value in r0 with a `TryCast` to `Int`, which
+// replaces it with an option, instead of a `CheckType` that fails.
+// compile: analysed
+let x: Any = 1; cast?::<Int>(x)

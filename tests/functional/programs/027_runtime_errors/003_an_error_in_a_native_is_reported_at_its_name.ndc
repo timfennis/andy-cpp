@@ -1,0 +1,10 @@
+// An error a native returns is reported at the native's name in the call,
+// `strip_prefix`, as the native doesn't know where it was called. Its
+// arguments were all read. The expected error ends with the span, which counts
+// bytes from the start of this file.
+fn strip(s: String) -> String {
+    let prefix = "x";
+    s.strip_prefix(prefix)
+}
+print(strip("hello"));
+// expect-error: message: "\"hello\" doesn't start with \"x\"", span: Some(Span { source_id: SourceId(0), offset: 324, length: 12 })

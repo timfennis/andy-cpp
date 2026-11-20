@@ -1,0 +1,5 @@
+// The analyser pins this to a single scalar `+(Int, Int)` overload broadcast
+// across two positions. `GetGlobal` loads that native into r1, the tuples go
+// in r2 and r3, and `CallVec r1, 2` applies it per position at runtime.
+// compile: stdlib
+(1, 2) + (3, 4)

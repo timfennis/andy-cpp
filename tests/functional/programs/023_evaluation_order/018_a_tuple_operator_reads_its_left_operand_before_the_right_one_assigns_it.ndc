@@ -1,0 +1,35 @@
+// An operator applied to each element of tuples reads both tuples before it
+// applies to any element: `t + { t = (10, 20); t }` is `(1, 2) + (10, 20)`.
+// `t op= value` reads `t` before the value runs.
+// expect-output: (11,22)
+// expect-output: ((11,22),(3,8),(10,20))
+// expect-output: ((11,22),(10,20))
+// expect-output: (11,22)
+
+let g = (1, 2);
+print(g + { g = (10, 20); g });
+
+fn local() {
+    let t = (1, 2);
+    let sum = t + { t = (10, 20); t };
+    let u = (1, 2);
+    u *= { u = (5, 5); (3, 4) };
+    let v = (1, 2);
+    let scaled = v * { v = (0, 0); 10 };
+    (sum, u, scaled)
+}
+print(local());
+
+fn cell() {
+    let t = (1, 2);
+    let read = fn() { t };
+    (t + { t = (10, 20); t }, read())
+}
+print(cell());
+
+fn upvalue() {
+    let t = (1, 2);
+    let add = fn() { t + { t = (10, 20); t } };
+    add()
+}
+print(upvalue());

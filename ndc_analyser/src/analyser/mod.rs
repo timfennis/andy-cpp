@@ -152,6 +152,10 @@ pub struct Analyser {
     /// `while true` that none leaves never ends. `break` and `continue`
     /// outside of one are reported.
     loops: Vec<bool>,
+    /// The function declaration that is the statement being analysed, until
+    /// its own analysis starts. A named function declared anywhere else is
+    /// reported (see [`Self::analyse_statement`]).
+    function_statement: Option<NodeId>,
     /// What the current batch's analysis has found so far.
     result: AnalysisResult,
     /// The symbols the current batch's uses pick, which the layout turns into
@@ -258,6 +262,7 @@ impl Analyser {
             struct_types: HashMap::default(),
             return_type_stack: Vec::new(),
             loops: Vec::new(),
+            function_statement: None,
             result: AnalysisResult::default(),
             picks: Picks::default(),
             laid_out_scopes: 0,
@@ -549,7 +554,26 @@ impl Analyser {
             }
             return StaticType::Error;
         }
-        self.analyse_expr(expr_loc)
+        self.analyse_statement(expr_loc)
+    }
+
+    /// Analyses `statement`, one of the program's or of a block's, which is
+    /// the only place a named function can be declared: `fn f() { 1 }` with
+    /// or without a `;` after it is a statement, while the `fn f` in
+    /// `print(fn f() { 1 })` or in `false and fn f() { true }` is part of an
+    /// expression. A statement runs before anything after it in its block,
+    /// which is all that can read the name it declares.
+    fn analyse_statement(&mut self, statement: &ExpressionLocation) -> StaticType {
+        let mut declaration = statement;
+        while let Expression::Statement(inner) = &declaration.expression {
+            declaration = inner;
+        }
+        self.function_statement = matches!(
+            declaration.expression,
+            Expression::FunctionDeclaration { .. }
+        )
+        .then_some(declaration.id);
+        self.analyse_expr(statement)
     }
 
     fn analyse_expr(&mut self, expr_loc: &ExpressionLocation) -> StaticType {
@@ -656,25 +680,45 @@ impl Analyser {
                 name,
                 type_parameters,
                 parameters,
+                parameters_span,
                 body,
                 return_annotation,
                 pure,
-                ..
-            } => self.analyse_function_declaration(FunctionDeclaration {
-                id: *id,
-                name: name.as_deref(),
-                type_parameters,
-                parameters,
-                body,
-                return_annotation: return_annotation.as_ref(),
-                pure: *pure,
-                span: *span,
-            }),
+            } => {
+                let statement = self.function_statement.take() == Some(*id);
+                let typ = self.analyse_function_declaration(FunctionDeclaration {
+                    id: *id,
+                    name: name.as_deref(),
+                    type_parameters,
+                    parameters,
+                    body,
+                    return_annotation: return_annotation.as_ref(),
+                    pure: *pure,
+                    span: *span,
+                });
+                match name {
+                    Some(name) if !statement => {
+                        // From `fn` to the parameters: `fn f(x)`.
+                        let header = Span::new(
+                            span.source_id(),
+                            span.offset(),
+                            parameters_span.end() - span.offset(),
+                        );
+                        self.emit(AnalysisError::function_declared_in_an_expression(
+                            name, header,
+                        ));
+                        // A failed check, so what the expression around it
+                        // does with its value reports nothing further.
+                        StaticType::Error
+                    }
+                    _ => typ,
+                }
+            }
             Expression::Block { statements } => {
                 let mut last = None;
                 let mut diverges = false;
                 for s in statements {
-                    let typ = self.analyse_expr(s);
+                    let typ = self.analyse_statement(s);
                     diverges |= typ == StaticType::Never;
                     last = Some(typ);
                 }

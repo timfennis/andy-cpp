@@ -1,0 +1,44 @@
+use std::env;
+use std::fs;
+use std::io::Write;
+use std::path::Path;
+
+fn main() {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let programs_dir = Path::new(&manifest_dir).join("programs");
+
+    let out_dir = env::var("OUT_DIR").unwrap();
+    let dest_path = Path::new(&out_dir).join("snapshot_tests.rs");
+    let mut output = fs::File::create(dest_path).unwrap();
+
+    generate_tests(&mut output, &programs_dir, &programs_dir);
+
+    println!("cargo:rerun-if-changed=programs");
+}
+
+/// One test per `.ndc` file under `programs`, named after its path:
+/// `control_flow_a_while_loop_yields_unit` checks
+/// `programs/control_flow/a_while_loop_yields_unit.ndc`.
+fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
+    let mut entries: Vec<_> = fs::read_dir(dir).unwrap().filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.path());
+
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            generate_tests(output, base, &path);
+        } else if path.extension().is_some_and(|e| e == "ndc") {
+            let relative = path.strip_prefix(base).unwrap();
+            let test_name = relative
+                .with_extension("")
+                .to_string_lossy()
+                .replace(['/', '\\', '-', ' '], "_");
+            let path_str = relative.to_string_lossy().replace('\\', "/");
+
+            writeln!(output, "#[test]").unwrap();
+            writeln!(output, "fn {test_name}() {{").unwrap();
+            writeln!(output, "    check_snapshots({path_str:?});").unwrap();
+            writeln!(output, "}}").unwrap();
+        }
+    }
+}

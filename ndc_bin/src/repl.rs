@@ -25,6 +25,7 @@ impl rustyline::highlight::Highlighter for RustylineHelper {
     }
 }
 
+/// An interpreter for the REPL's lines.
 fn new_interpreter() -> Interpreter {
     // Standard input is the prompt, which the REPL reads lines from.
     let mut interpreter = Interpreter::new()
@@ -74,6 +75,7 @@ fn run_in_process(interpreter: &mut Interpreter, name: String, line: &str) {
     }
 }
 
+/// Runs the REPL.
 pub fn run() -> anyhow::Result<()> {
     #[cfg(unix)]
     let session = crate::isolation::start()?;

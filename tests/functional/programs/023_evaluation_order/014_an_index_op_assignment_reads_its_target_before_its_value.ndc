@@ -1,0 +1,73 @@
+// `xs[i] op= value` reads `xs`, `i` and the element before the value runs,
+// and writes the result there: a value that assigns `i`, `xs` or the element
+// changes neither where the result goes nor what it's made from.
+// expect-output: [11,20,30] 2
+// expect-output: ([11,20,30],2)
+// expect-output: [11,20,30]
+// expect-output: ([11,20,30],[1,2,3])
+// expect-output: ([0,0],1)
+// expect-output: ([0,0],1)
+// expect-output: [[1,9],[2]]
+// expect-output: ([10,22,30],2)
+
+let g = [10, 20, 30];
+let gi = 0;
+g[gi] += { gi = 2; 1 };
+print(g, gi);
+
+fn index() {
+    let xs = [10, 20, 30];
+    let i = 0;
+    xs[i] += { i = 2; 1 };
+    (xs, i)
+}
+print(index());
+
+fn element() {
+    let xs = [10, 20, 30];
+    xs[0] += { xs[0] = 100; 1 };
+    xs
+}
+print(element());
+
+fn list() {
+    let xs = [10, 20, 30];
+    let old = xs;
+    xs[0] += { xs = [1, 2, 3]; 1 };
+    (old, xs)
+}
+print(list());
+
+fn cell() {
+    let xs = [10, 20, 30];
+    let i = 0;
+    let read = fn() { (xs, i) };
+    xs[i] += { i = 1; xs = [0, 0]; 1 };
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let xs = [10, 20, 30];
+    let i = 0;
+    let bump = fn() { xs[i] += { i = 1; xs = [0, 0]; 1 }; };
+    bump();
+    (xs, i)
+}
+print(upvalue());
+
+fn appends_to_an_element() {
+    let rows = [[1], [2]];
+    let i = 0;
+    rows[i] ++= { i = 1; [9] };
+    rows
+}
+print(appends_to_an_element());
+
+fn the_index_runs_once() {
+    let xs = [10, 20, 30];
+    let i = 0;
+    xs[{ i += 1; i }] += { i += 1; i };
+    (xs, i)
+}
+print(the_index_runs_once());

@@ -1,0 +1,87 @@
+// `a, b = x, y` makes the whole value first, then assigns its parts from the
+// left. An index target is read when its turn comes, after the targets left
+// of it are assigned: `i, xs[i] = 2, 5` writes to `xs[2]`, and
+// `xs[i], i = 5, 2` to `xs[0]`.
+// expect-output: 2 10
+// expect-output: (2,10)
+// expect-output: (2,10)
+// expect-output: (2,10)
+// expect-output: ([0,0,5],2)
+// expect-output: ([5,0,0],2)
+// expect-output: ([0,0],[1,7])
+// expect-output: (3,1,2)
+// expect-output: (10,20,[99,20])
+
+let ga = 1;
+let gb = 2;
+ga, gb = gb, { ga = 10; ga };
+print(ga, gb);
+
+fn local() {
+    let a = 1;
+    let b = 2;
+    a, b = b, { a = 10; a };
+    (a, b)
+}
+print(local());
+
+fn cell() {
+    let a = 1;
+    let b = 2;
+    let read = fn() { (a, b) };
+    a, b = b, { a = 10; a };
+    read()
+}
+print(cell());
+
+fn upvalue() {
+    let a = 1;
+    let b = 2;
+    let swap = fn() { a, b = b, { a = 10; a }; };
+    swap();
+    (a, b)
+}
+print(upvalue());
+
+fn index_after() {
+    let xs = [0, 0, 0];
+    let i = 0;
+    i, xs[i] = 2, 5;
+    (xs, i)
+}
+print(index_after());
+
+fn index_before() {
+    let xs = [0, 0, 0];
+    let i = 0;
+    xs[i], i = 5, 2;
+    (xs, i)
+}
+print(index_before());
+
+fn list_after() {
+    let xs = [0, 0];
+    let old = xs;
+    xs, xs[0] = [7, 7], 1;
+    (old, xs)
+}
+print(list_after());
+
+fn nested() {
+    let a = 1;
+    let b = 2;
+    let c = 3;
+    (a, (b, c)) = (c, (a, b));
+    (a, b, c)
+}
+print(nested());
+
+fn from_a_list() {
+    let a = 1;
+    let b = 2;
+    let pair = [10, 20];
+    a, b = pair;
+    pair[0] = 99;
+    (a, b, pair)
+}
+print(from_a_list());

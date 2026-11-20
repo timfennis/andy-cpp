@@ -1,0 +1,5 @@
+// An `Any` stored where an Int is expected takes a cast, which is the only
+// check: storing what the cast gives needs none, so there's a single
+// `CheckType` of `Int`, before `SetGlobal` stores the value in `n`.
+// compile: analysed
+let a: Any = 1; let n: Int = cast::<Int>(a);

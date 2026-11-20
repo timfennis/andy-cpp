@@ -1,0 +1,17 @@
+// `a ++ [3]` leaves a global `a` alone, at the top level and in a function.
+// expect-output: [1,2] [1,2,3]
+// expect-output: [1,2,4] [1,2]
+// expect-output: [1,2] [1,2,99]
+
+let a = [1, 2];
+let b = a ++ [3];
+print(a, b);
+
+fn extend() {
+    a ++ [4]
+}
+print(extend(), a);
+
+let empty_left = [] ++ a;
+empty_left.push(99);
+print(a, empty_left);

@@ -1,0 +1,38 @@
+// A `return` in a call's argument inside two `for` loops leaves both loops
+// and the function, with the iterators and the operands already read
+// dropped. The same from inside a `while` loop.
+// expect-output: 66
+// expect-output: (0,4)
+// expect-output: [0,1,2] [5]
+
+fn add(a: Int, b: Int) -> Int { a + b }
+
+fn nested_for() -> Int {
+    let total = 0;
+    for i in 0..10 {
+        for j in 0..10 {
+            total += add(i, if i * j == 6 { return total } else { j });
+        }
+    }
+    total
+}
+print(nested_for());
+
+fn nested_while() -> (Int, Int) {
+    let i = 0;
+    while true {
+        let j = 0;
+        while j < 5 {
+            let pair = [i, j, if i + j == 4 { return (i, j) } else { 0 }];
+            j += 1;
+        }
+        i += 1;
+    }
+    (-1, -1)
+}
+print(nested_while());
+
+fn from_a_loop_in_a_list(xs: [Int]) -> [Int] {
+    [0, { for x in xs { if x > 2 { return [x] } }; 1 }, 2]
+}
+print(from_a_loop_in_a_list([1, 2]), from_a_loop_in_a_list([1, 5]));

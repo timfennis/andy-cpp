@@ -1,0 +1,40 @@
+// A map, deque or heap that another name holds is copied too, as is a list
+// held inside a map.
+// expect-output: 1 2
+// expect-output: 1 2
+// expect-output: 1 2
+// expect-output: 1 2
+// expect-output: %{"a": [1,2]} %{"a": [1,"x"]}
+let map = %{"a": 1};
+let any_map: Any = map;
+let strings_too = cast::<%{String: Any}>(any_map);
+strings_too["b"] = "x";
+print(map.len(), strings_too.len());
+
+let deque: Deque<Int> = Deque();
+deque.push_back(1);
+let any_deque: Any = deque;
+let anything = cast::<Deque<Any>>(any_deque);
+anything.push_back("x");
+print(deque.len(), anything.len());
+
+let heap: MinHeap<Int> = MinHeap();
+heap.push(1);
+let any_heap: Any = heap;
+let more = cast::<MinHeap<Int>>(any_heap);
+more.push(2);
+print(heap.len(), more.len());
+
+let max_heap: MaxHeap<Int> = MaxHeap();
+max_heap.push(1);
+let any_max_heap: Any = max_heap;
+let more_max = cast::<MaxHeap<Int>>(any_max_heap);
+more_max.push(2);
+print(max_heap.len(), more_max.len());
+
+let lists = %{"a": [1]};
+let any_lists: Any = lists;
+let anything_lists = cast::<%{String: [Any]}>(any_lists);
+anything_lists["a"].push("x");
+lists["a"].push(2);
+print(lists, anything_lists);

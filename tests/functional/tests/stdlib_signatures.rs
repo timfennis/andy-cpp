@@ -250,10 +250,17 @@ fn is_allowed(name: &str, signature: &StaticType, message: &str) -> bool {
     matches!(name, "[]" | "[]=") && message.contains("cannot use non-range iterator")
 }
 
-#[test]
-fn every_native_takes_what_its_signature_says() {
+/// An interpreter with the standard library that runs each program on its
+/// own.
+fn interpreter() -> Interpreter {
     let mut interpreter = Interpreter::one_shot();
     interpreter.configure(ndc_stdlib::register);
+    interpreter
+}
+
+#[test]
+fn every_native_takes_what_its_signature_says() {
+    let mut interpreter = interpreter();
     let table = interpreter.natives();
     let natives = (0..table.len())
         .filter(|&slot| !SKIPPED.contains(&table.name(slot)))
@@ -312,8 +319,7 @@ fn every_native_takes_what_its_signature_says() {
                 match catch_unwind(AssertUnwindSafe(|| interpreter.eval(&program))) {
                     Err(_) => {
                         failures.push(format!("{name}: panicked on `{program}`"));
-                        interpreter = Interpreter::one_shot();
-                        interpreter.configure(ndc_stdlib::register);
+                        interpreter = self::interpreter();
                     }
                     Ok(Err(InterpreterError::Vm(error)))
                         if !is_allowed(name, signature, &error.message) =>
@@ -378,8 +384,7 @@ fn a_native_without_parameters_is_called_once() {
 /// along with `op`, so an in-place native needs its operator.
 #[test]
 fn every_in_place_operator_has_its_operator() {
-    let mut interpreter = Interpreter::one_shot();
-    interpreter.configure(ndc_stdlib::register);
+    let interpreter = interpreter();
     let table = interpreter.natives();
     let names = (0..table.len())
         .map(|slot| table.name(slot).to_string())

@@ -1,0 +1,29 @@
+// `row ++ [0]` where `row` is a loop variable or a callback's parameter
+// leaves the list it came from alone.
+// expect-output: [[1],[2]] [[1,0],[2,0]]
+// expect-output: [[1],[2]] [[1,0],[2,0]]
+// expect-output: [[1],[2]] [[1,0],[2,0]]
+// expect-output: [[1,0],[2,0]]
+// expect-output: %{"a": [1]}
+
+let rows = [[1], [2]];
+let out = [];
+for row in rows {
+    out.push(row ++ [0]);
+}
+print(rows, out);
+
+let mapped = rows.map(fn(r) { r ++ [0] });
+print(rows, mapped);
+
+let comprehension = [r ++ [0] for r in rows];
+print(rows, comprehension);
+
+let fresh = [[1], [2]].map(fn(r) { r ++ [0] });
+print(fresh);
+
+let m = %{"a": [1]};
+for k, v in m {
+    let w = v ++ [2];
+}
+print(m);

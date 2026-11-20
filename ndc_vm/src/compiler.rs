@@ -1,11 +1,36 @@
-use crate::chunk::{JumpTarget, LabelId, OpCode, OptimizerIr};
+//! Compiles analysed code to the VM's instructions.
+//!
+//! Each expression is compiled with a `Dest`: where its value has to go.
+//! `let x = a + b` compiles `a + b` with `x`'s register as its destination,
+//! which is one instruction, `AddInt x, a, b`. A local variable is its
+//! register; temporaries take the registers after the locals, a watermark
+//! that goes up while an expression needs them and back down when it's done.
+//!
+//! A call's arguments go in consecutive registers after the one the function
+//! is in, and become the callee's first registers. An argument register is
+//! the call's own copy: `f(x)` copies the local `x` into it rather than
+//! handing over `x`'s register, as a native may change a value nothing else
+//! holds in place, the way `a ++ b` appends to `a`'s list. For the same
+//! reason an instruction that takes its operand, leaving `None` behind (one
+//! that stores it somewhere else, as `MakeList` or `SetGlobal`), is only
+//! ever given a temporary.
+//!
+//! A call doesn't clear the callee's registers, so the code compiled here
+//! writes each local before reading it. A parameter is written by the call.
+//! Any other local is written by its declaration, where it runs: a `let`, a
+//! named `fn` and a `struct` are only ever statements, and a statement runs
+//! before anything after it in its block, which is all that can read the
+//! name. A loop's variables, and a comprehension's, are written before each
+//! run of its body or guard.
+
+use crate::chunk::{Builder, Label};
+use crate::instr::{Instr, Reg, WINDOW};
 use crate::native_op::NativeOp;
 use crate::value::{CompiledFunction, Function};
 use crate::{Natives, Value};
-use ndc_analysis::{Analysis, Binding, Callee, Candidate, Instance, ResolvedVar};
-use ndc_core::StaticType;
+use ndc_analysis::{Analysis, Binding, Callee, Candidate, CaptureSource, Instance, ResolvedVar};
 use ndc_core::collections::{HashMap, HashSet};
-use ndc_core::{Intrinsic, NodeId};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 use ndc_lexer::{NumericLiteral, Span};
 use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
@@ -14,12 +39,138 @@ use ndc_parser::{
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+/// How many elements of a list literal, or pairs of a map literal, are made
+/// at once from registers of their own; the ones after them are added one by
+/// one, so a long literal takes no more registers than a short one.
+const LITERAL_CHUNK: usize = 64;
+
+/// Where an expression's value has to go.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Dest {
+    /// Nowhere: the value isn't used, as in `f(x);`.
+    Discard,
+    /// In this register: an argument of a call, or `x` in `let x = ...`.
+    Reg(Reg),
+    /// Wherever is cheapest: a local variable's own register, or a new
+    /// temporary.
+    Any,
+}
+
+/// Where a compiled expression left its value.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Operand {
+    /// In a local variable's register, which an instruction may read but
+    /// not take: the variable still holds it.
+    Local(Reg),
+    /// In a temporary register, which nothing else holds, so an instruction
+    /// may take it.
+    Temp(Reg),
+    /// Nowhere, as asked for with [`Dest::Discard`] or [`Dest::Reg`], which
+    /// says where it is.
+    Placed,
+}
+
 /// Where an instance of a generic function is in [`Analysis::instances`]:
 /// the declaration it's an instance of, and which of its instances it is.
 #[derive(Clone, Copy)]
 struct InstanceAt {
     declaration: NodeId,
     index: usize,
+}
+
+/// What a call resolved to a native compiles to.
+enum NativeCall {
+    /// The op's own instruction: `SubInt` for `n - 1`.
+    Op(NativeOp),
+    /// `CallNative` of the native in this global slot: `len(xs)`.
+    Native(usize),
+}
+
+/// The right operand of a binary op.
+enum Right {
+    Reg(Reg),
+    /// An `Int` written in the code: `2` in `i * 2`.
+    Immediate(i16),
+}
+
+/// An argument of a call or an operand of an instruction, which is
+/// compiled in its turn among the others: an expression, or what an
+/// assignment with an operator has already worked out about its target, as
+/// `xs[i] += 1` reads `xs[i]` with a cached `xs` and `i`.
+enum Arg {
+    Expr(ExpressionLocation),
+    /// The value of a variable, read at `span`.
+    Var {
+        variable: ResolvedVar,
+        span: Span,
+    },
+    /// The value in a temporary that stays in use, which a call copies.
+    Copy(Reg),
+    /// What the call of `getter` with copies of the values in `args` gives,
+    /// at `span`: the read of `xs[i]` or `p.x`.
+    Read {
+        getter: Binding,
+        args: Vec<Reg>,
+        span: Span,
+    },
+}
+
+/// The target of an assignment with an operator, with the parts it's read
+/// and written through worked out: `xs[i] += 1` reads and writes `xs[i]`
+/// with `xs` and `i` in temporaries.
+enum PreparedTarget {
+    Variable {
+        variable: ResolvedVar,
+        span: Span,
+    },
+    Index {
+        container: Reg,
+        index: Reg,
+        /// The target's span, from the container to the index.
+        span: Span,
+        getter: Binding,
+        setter: Binding,
+    },
+    Member {
+        receiver: Reg,
+        /// The member's span.
+        span: Span,
+        getter: Binding,
+        setter: Binding,
+    },
+}
+
+/// The labels of the loop being compiled, which `break` and `continue` jump
+/// to.
+#[derive(Clone, Copy)]
+struct Loop {
+    start: Label,
+    end: Label,
+}
+
+impl Arg {
+    /// Where the argument is in the source.
+    fn span(&self) -> Span {
+        match self {
+            Self::Expr(expression) => expression.span,
+            Self::Var { span, .. } | Self::Read { span, .. } => *span,
+            Self::Copy(_) => Span::synthetic(),
+        }
+    }
+
+    /// Whether compiling the argument may write a local variable (see
+    /// [`may_assign`]).
+    fn may_assign(&self) -> bool {
+        match self {
+            Self::Expr(expression) => may_assign(expression),
+            Self::Var { .. } | Self::Copy(_) | Self::Read { .. } => false,
+        }
+    }
+}
+
+/// The arguments `expressions`, which are expressions.
+fn exprs(expressions: Vec<ExpressionLocation>) -> Vec<Arg> {
+    expressions.into_iter().map(Arg::Expr).collect()
 }
 
 /// What compiling the earlier lines of a REPL session leaves for the lines
@@ -36,7 +187,8 @@ pub struct Session {
     prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
 }
 
-/// A function declaration, as [`Compiler::compile_function_decl`] takes it.
+/// A function declaration a REPL line made, which a later line may compile
+/// instances of.
 #[derive(Clone)]
 struct DeclaredFunction {
     name: Option<String>,
@@ -45,14 +197,9 @@ struct DeclaredFunction {
     span: Span,
 }
 
+/// Compiles one function.
 pub struct Compiler {
-    ir: OptimizerIr,
-    source_locals: usize,
-    temp_count: usize,
-    temp_uses: Vec<TempUse>,
-    loop_stack: Vec<LoopContext>,
-    allow_return: bool,
-    optimize: bool,
+    builder: Builder,
     /// What the analyser worked out about the batch being compiled.
     analysis: Rc<Analysis>,
     /// The instance of a generic function whose body is being compiled,
@@ -69,69 +216,34 @@ pub struct Compiler {
     /// The functions the code compiled so far declared in globals, kept when
     /// compiling a REPL line, whose later lines may need instances of them.
     functions: Option<HashMap<NodeId, DeclaredFunction>>,
-    /// The global slots of the natives the code compiled so far reads or
-    /// calls with `CallNative`, shared with the compilers of the functions
-    /// it declares: every native the program can call, which the VM puts in
-    /// its globals.
+    /// The global slots of the natives the code reads or calls, shared with
+    /// the compilers of the functions it declares, which the VM puts in its
+    /// globals.
     natives: Rc<RefCell<HashSet<usize>>>,
-    /// The op each native does, if it's one, in global slot order: a call
-    /// resolved to one is written as the op's instruction.
+    /// The op each native does, if it's one, in global slot order.
     native_ops: Rc<[Option<NativeOp>]>,
+    /// The declarations whose instances the batch compiled.
+    compiled_instances: HashSet<NodeId>,
+    /// How many registers the function's own variables take, parameters
+    /// first. Temporaries come after them.
+    locals: usize,
+    /// The first free temporary.
+    next_temp: usize,
+    /// The most registers the function has used at once.
+    frame_size: usize,
+    loops: Vec<Loop>,
 }
 
 impl Compiler {
-    fn new() -> Self {
-        Self {
-            ir: Default::default(),
-            source_locals: 0,
-            temp_count: 0,
-            temp_uses: Vec::new(),
-            loop_stack: vec![],
-            allow_return: false,
-            optimize: true,
-            analysis: Rc::default(),
-            instance: None,
-            used_instance: Cell::new(false),
-            prototypes: Rc::default(),
-            functions: None,
-            natives: Rc::default(),
-            native_ops: Rc::new([]),
-        }
-    }
-
-    fn new_without_optimization() -> Self {
-        Self {
-            ir: Default::default(),
-            source_locals: 0,
-            temp_count: 0,
-            temp_uses: Vec::new(),
-            loop_stack: vec![],
-            allow_return: false,
-            optimize: false,
-            analysis: Rc::default(),
-            instance: None,
-            used_instance: Cell::new(false),
-            prototypes: Rc::default(),
-            functions: None,
-            natives: Rc::default(),
-            native_ops: Rc::new([]),
-        }
-    }
-    /// Compiles a program, or one REPL line, into a function the VM runs at
-    /// the top level. Its locals are only what the code's blocks declare; its
-    /// top-level declarations are globals.
+    /// Compiles a program into a function the VM runs at the top level.
     pub fn compile(
         expressions: impl Iterator<Item = ExpressionLocation>,
         analysis: Analysis,
         natives: &Natives,
     ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self {
-            analysis: Rc::new(analysis),
-            native_ops: natives.ops(),
-            ..Self::new()
-        };
-        compiler.compile_batch(expressions)?;
-        Ok(compiler.finish())
+        let mut compiler = Self::top_level(Rc::new(analysis), natives, Rc::default(), None);
+        compiler.compile_statements(expressions)?;
+        compiler.finish_program()
     }
 
     /// Compiles one line of a REPL session, `analysis` being what the
@@ -145,24 +257,51 @@ impl Compiler {
         session: &mut Session,
     ) -> Result<CompiledFunction, CompileError> {
         Rc::make_mut(&mut session.analysis).extend(analysis);
-        let mut compiler = Self {
-            analysis: Rc::clone(&session.analysis),
-            native_ops: natives.ops(),
-            prototypes: Rc::clone(&session.prototypes),
-            functions: Some(std::mem::take(&mut session.functions)),
-            ..Self::new()
-        };
+        let mut compiler = Self::top_level(
+            Rc::clone(&session.analysis),
+            natives,
+            Rc::clone(&session.prototypes),
+            Some(std::mem::take(&mut session.functions)),
+        );
         let result = compiler
             .compile_earlier_instances()
-            .and_then(|()| compiler.compile_batch(expressions));
+            .and_then(|()| compiler.compile_statements(expressions));
         session.functions = compiler.functions.take().unwrap_or_default();
         result?;
-        Ok(compiler.finish())
+        compiler.finish_program()
     }
 
-    /// Stores the instances the batch made of functions earlier batches
+    /// A compiler for code run at the top level, which `analysis` is about.
+    /// `functions` keeps the functions it declares in globals, for a REPL
+    /// line, whose later lines may make instances of them.
+    fn top_level(
+        analysis: Rc<Analysis>,
+        natives: &Natives,
+        prototypes: Rc<RefCell<HashMap<NodeId, Rc<CompiledFunction>>>>,
+        functions: Option<HashMap<NodeId, DeclaredFunction>>,
+    ) -> Self {
+        let locals = analysis.top_level_frame_size;
+        Self {
+            builder: Builder::default(),
+            analysis,
+            instance: None,
+            used_instance: Cell::new(false),
+            prototypes,
+            functions,
+            natives: Rc::default(),
+            native_ops: natives.ops(),
+            compiled_instances: HashSet::default(),
+            locals,
+            next_temp: locals,
+            frame_size: locals,
+            loops: Vec::new(),
+        }
+    }
+
+    /// Stores the instances the line made of functions earlier lines
     /// declared, each its function's body compiled with the instance's
-    /// picks, as [`Self::compile_function_decl`] stores a function's own.
+    /// picks, as [`Self::compile_function_declaration`] stores a function's
+    /// own.
     fn compile_earlier_instances(&mut self) -> Result<(), CompileError> {
         let analysis = Rc::clone(&self.analysis);
         let earlier = analysis
@@ -182,160 +321,231 @@ impl Compiler {
                     function.body.clone(),
                     Some(at),
                 )?;
-                self.store_instance(body, instance, function.pure, function.span);
+                self.store_function(
+                    Rc::new(body),
+                    &[],
+                    function.pure,
+                    instance.variable,
+                    function.span,
+                )?;
             }
+            self.compiled_instances.insert(declaration);
         }
         Ok(())
     }
 
-    /// Stores the compiled body of `instance` in its global, with a cache of
-    /// its own if it's an instance of a `pure fn`.
-    fn store_instance(
-        &mut self,
-        body: CompiledFunction,
-        instance: &Instance,
-        pure: bool,
-        span: Span,
-    ) {
-        let idx = self
-            .ir
-            .add_constant(Value::function(Function::Compiled(Rc::new(body))));
-        self.ir.write(OpCode::Constant(idx), span);
-        if pure {
-            self.ir.write(OpCode::Memoize, span);
-        }
-        self.emit_declare(instance.variable, span);
-    }
-
-    /// Compile expressions without running the peephole optimizer. Useful
-    /// for tests that want to inspect the raw compiler output, and for
-    /// debugging tools (e.g. a future `--no-optimize` disassembler flag).
-    pub fn compile_unoptimized(
-        expressions: impl Iterator<Item = ExpressionLocation>,
-        analysis: Analysis,
-        natives: &Natives,
-    ) -> Result<CompiledFunction, CompileError> {
-        let mut compiler = Self {
-            analysis: Rc::new(analysis),
-            native_ops: natives.ops(),
-            ..Self::new_without_optimization()
-        };
-        compiler.compile_batch(expressions)?;
-        Ok(compiler.finish())
-    }
-
-    /// Compiles one batch of top-level expressions, [`Self::analysis`] being
-    /// what the analyser worked out about them.
-    fn compile_batch(
+    /// Compiles the program's `expressions`, then `Halt` with the value of
+    /// the last one that isn't a `;`-statement.
+    fn compile_statements(
         &mut self,
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<(), CompileError> {
-        self.source_locals = self.analysis.top_level_frame_size;
-        for expression in expressions {
-            self.compile_expr(expression)?;
+        let expressions = expressions.collect::<Vec<_>>();
+        // The program's value is its last expression's that isn't a
+        // `;`-statement, kept in a register of its own while the statements
+        // after it run.
+        let last_value = expressions
+            .iter()
+            .rposition(|expression| !matches!(expression.expression, Expression::Statement(_)));
+        let result = self.alloc_temp(Span::synthetic())?;
+        for (index, expression) in expressions.into_iter().enumerate() {
+            let dest = if Some(index) == last_value {
+                Dest::Reg(result)
+            } else {
+                Dest::Discard
+            };
+            self.compile_expr(expression, dest)?;
         }
+        if last_value.is_none() {
+            self.emit(Instr::LoadUnit { dst: result }, Span::synthetic());
+        }
+        self.emit(Instr::Halt { src: result }, Span::synthetic());
         Ok(())
     }
 
-    /// Push the unit value; the result of expressions that have nothing else
-    /// to produce. `span` is synthetic because unit has no source of its own.
-    fn emit_unit(&mut self) {
-        let idx = self.ir.add_constant(Value::unit());
-        self.ir.write(OpCode::Constant(idx), Span::synthetic());
-    }
-
-    /// Pop the stack down to a loop's entry depth. Emitted before the jump of
-    /// a `break`/`continue` that sits inside a partially compiled expression,
-    /// e.g. `f(1 + break)`, so the pending operands don't leak.
-    fn emit_operand_cleanup(&mut self, target_depth: isize, span: Span) {
-        for _ in target_depth..self.ir.stack_depth() {
-            self.ir.write(OpCode::Pop, span);
+    /// The program compiled so far, as a function the VM runs at the top
+    /// level.
+    fn finish_program(self) -> Result<CompiledFunction, CompileError> {
+        // Only `compile_line` makes instances of functions declared before
+        // the code it compiles.
+        if self
+            .analysis
+            .instances
+            .keys()
+            .any(|declaration| !self.compiled_instances.contains(declaration))
+        {
+            return Err(CompileError::uncompiled_instances());
         }
-    }
-
-    fn allocate_temp(&mut self) -> TempSlot {
-        let temp = TempSlot(self.temp_count);
-        self.temp_count += 1;
-        temp
-    }
-
-    fn write_temp(&mut self, temp: TempSlot, span: Span, opcode: impl FnOnce(usize) -> OpCode) {
-        let instruction_idx = self.ir.len();
-        self.ir.write(opcode(0), span);
-        self.temp_uses.push(TempUse {
-            instruction_idx,
-            temp,
-        });
-    }
-
-    fn layout_temporaries(&mut self) {
-        for temp_use in &self.temp_uses {
-            self.ir.set_local_slot(
-                temp_use.instruction_idx,
-                self.source_locals + temp_use.temp.0,
-            );
-        }
-    }
-
-    /// Number of local slots: the code's own variables, then the temporaries.
-    fn num_locals(&self) -> usize {
-        self.source_locals + self.temp_count
-    }
-
-    /// Ends the top-level function with `Halt`.
-    fn finish(mut self) -> CompiledFunction {
-        self.layout_temporaries();
-        self.ir.write(OpCode::Halt, Span::synthetic());
-        if self.optimize {
-            self.ir.peephole();
-        }
-
-        let num_locals = self.num_locals();
         let mut natives = self.natives.take().into_iter().collect::<Vec<_>>();
         natives.sort_unstable();
-        CompiledFunction {
-            name: None,
-            static_type: StaticType::Function {
+        let num_globals = self.analysis.global_count;
+        Ok(self.finish(
+            None,
+            StaticType::Function {
                 parameters: Some(vec![]),
                 return_type: Box::new(StaticType::Any),
             },
-            body: self.ir.into_chunk(),
-            num_locals,
-            num_globals: self.analysis.global_count,
+            num_globals,
             natives,
+        ))
+    }
+
+    /// A compiler for the body of a function the code this one compiles
+    /// declares, whose own variables take `locals` registers, compiled with
+    /// the picks of `instance`.
+    fn nested(&self, locals: usize, instance: Option<InstanceAt>) -> Self {
+        Self {
+            builder: Builder::default(),
+            analysis: Rc::clone(&self.analysis),
+            instance,
+            used_instance: Cell::new(false),
+            prototypes: Rc::clone(&self.prototypes),
+            functions: None,
+            natives: Rc::clone(&self.natives),
+            native_ops: Rc::clone(&self.native_ops),
+            compiled_instances: HashSet::default(),
+            locals,
+            next_temp: locals,
+            frame_size: locals,
+            loops: Vec::new(),
         }
     }
 
-    /// Compile one expression. Leaves exactly one result value on the stack,
-    /// on top of any local slots the expression declared. Diverging
-    /// expressions (`break`, `continue`, `return`) leave nothing because
-    /// control never returns to observe a result.
+    fn finish(
+        self,
+        name: Option<String>,
+        static_type: StaticType,
+        num_globals: usize,
+        natives: Vec<usize>,
+    ) -> CompiledFunction {
+        CompiledFunction {
+            name,
+            static_type,
+            num_globals,
+            natives,
+            body: self.builder.finish(),
+            frame_size: self.frame_size,
+        }
+    }
+
+    fn emit(&mut self, instr: Instr, span: Span) {
+        self.builder.emit(instr, span);
+    }
+
+    /// The register at `index`, if a frame has one.
+    fn register(index: usize, span: Span) -> Result<Reg, CompileError> {
+        u16::try_from(index)
+            .map(Reg)
+            .map_err(|_too_many| CompileError::too_many_registers(span))
+    }
+
+    /// The register of the local variable in `slot`.
+    fn local(&self, slot: usize, span: Span) -> Result<Reg, CompileError> {
+        debug_assert!(
+            slot < self.locals,
+            "internal error: slot {slot} is outside the frame's {} locals",
+            self.locals
+        );
+        Self::register(slot, span)
+    }
+
+    /// A new temporary, the first free one.
+    fn alloc_temp(&mut self, span: Span) -> Result<Reg, CompileError> {
+        let reg = Self::register(self.next_temp, span)?;
+        self.next_temp += 1;
+        self.frame_size = self.frame_size.max(self.next_temp);
+        debug_assert!(self.frame_size <= WINDOW);
+        Ok(reg)
+    }
+
+    /// The register an expression compiled with `dest` writes its value to:
+    /// the one asked for, or a new temporary.
+    fn place(&mut self, dest: Dest, span: Span) -> Result<Reg, CompileError> {
+        match dest {
+            Dest::Reg(reg) => Ok(reg),
+            Dest::Any | Dest::Discard => self.alloc_temp(span),
+        }
+    }
+
+    /// What an expression compiled with `dest` that wrote its value to
+    /// `reg`, which [`Self::place`] gave, returns.
+    fn placed(dest: Dest, reg: Reg) -> Operand {
+        match dest {
+            Dest::Any => Operand::Temp(reg),
+            Dest::Reg(_) | Dest::Discard => Operand::Placed,
+        }
+    }
+
+    /// Compiles `expression`, putting its value where `dest` says. With
+    /// [`Dest::Any`], the value is in a local's register, which takes no
+    /// temporary, or in the first free temporary, which stays taken.
     fn compile_expr(
         &mut self,
-        expression_location: ExpressionLocation,
-    ) -> Result<(), CompileError> {
+        expression: ExpressionLocation,
+        dest: Dest,
+    ) -> Result<Operand, CompileError> {
+        let mark = self.next_temp;
+        let operand = self.compile_expr_inner(expression, dest)?;
+        Ok(self.settle(mark, operand, dest))
+    }
+
+    /// Frees the temporaries an expression compiled with `dest` from `mark`
+    /// on took, but for the one its value is in, which is the first.
+    fn settle(&mut self, mark: usize, operand: Operand, dest: Dest) -> Operand {
+        match operand {
+            Operand::Temp(reg) => {
+                debug_assert_eq!(dest, Dest::Any);
+                debug_assert_eq!(
+                    reg.index(),
+                    mark,
+                    "internal error: a value is in the first free temporary"
+                );
+                self.next_temp = mark + 1;
+            }
+            Operand::Local(_) | Operand::Placed => self.next_temp = mark,
+        }
+        operand
+    }
+
+    /// Compiles `arg`, putting its value where `dest` says, as
+    /// [`Self::compile_expr`] does.
+    fn compile_arg(&mut self, arg: Arg, dest: Dest) -> Result<Operand, CompileError> {
+        let mark = self.next_temp;
+        let operand = match arg {
+            Arg::Expr(expression) => return self.compile_expr(expression, dest),
+            Arg::Var { variable, span } => self.read_variable(variable, dest, span)?,
+            // The register stays in use, so the value is read where it is.
+            Arg::Copy(reg) => match dest {
+                Dest::Any => Operand::Local(reg),
+                Dest::Reg(dst) => {
+                    if dst != reg {
+                        self.emit(Instr::Copy { dst, src: reg }, Span::synthetic());
+                    }
+                    Operand::Placed
+                }
+                Dest::Discard => Operand::Placed,
+            },
+            Arg::Read { getter, args, span } => {
+                let args = args.into_iter().map(Arg::Copy).collect();
+                self.compile_binding_call(&getter, args, dest, span)?
+            }
+        };
+        Ok(self.settle(mark, operand, dest))
+    }
+
+    fn compile_expr_inner(
+        &mut self,
+        expression: ExpressionLocation,
+        dest: Dest,
+    ) -> Result<Operand, CompileError> {
         let ExpressionLocation {
             id,
             expression,
             span,
-        } = expression_location;
-        let entry_depth = self.ir.stack_depth();
-        // A `;`-statement pops its own value and is the one expression that
-        // leaves nothing on the stack.
-        let leaves_value = !matches!(expression, Expression::Statement(_));
+        } = expression;
         match expression {
-            Expression::BoolLiteral(b) => {
-                let idx = self.ir.add_constant(Value::Bool(b));
-                self.ir.write(OpCode::Constant(idx), span);
-            }
-            Expression::NoneLiteral => {
-                let idx = self.ir.add_constant(Value::None);
-                self.ir.write(OpCode::Constant(idx), span);
-            }
-            Expression::StringLiteral(s) => {
-                let idx = self.ir.add_constant(Value::string(s));
-                self.ir.write(OpCode::MakeString(idx), span);
-            }
+            Expression::BoolLiteral(b) => self.load_constant(Value::Bool(b), dest, span),
+            Expression::NoneLiteral => self.load_constant(Value::None, dest, span),
             Expression::NumericLiteral(literal) => {
                 let value = match literal {
                     // An integer literal is what its use made it: `1` in
@@ -356,178 +566,65 @@ impl Compiler {
                     }
                     NumericLiteral::Complex(c) => Value::complex(c),
                 };
-                let idx = self.ir.add_constant(value);
-                self.ir.write(OpCode::Constant(idx), span);
+                self.load_constant(value, dest, span)
+            }
+            Expression::StringLiteral(text) => {
+                if dest == Dest::Discard {
+                    return Ok(Operand::Placed);
+                }
+                let k = self.builder.constant(Value::string(text));
+                let dst = self.place(dest, span)?;
+                self.emit(Instr::MakeString { dst, k }, span);
+                Ok(Self::placed(dest, dst))
             }
             Expression::Identifier { .. } => {
-                self.compile_named_binding(&self.binding(id), id, span)?;
+                let binding = self.binding(id);
+                self.compile_callee(&binding, Some(id), dest, span)
             }
-            Expression::Statement(stm) => {
-                self.compile_expr(*stm)?;
-                self.ir.write(OpCode::Pop, Span::synthetic());
+            Expression::Statement(statement) => {
+                self.compile_expr(*statement, Dest::Discard)?;
+                self.unit(dest, span)
             }
-            Expression::Logical {
-                left,
-                right,
-                operator,
-            } => {
-                let left_span = left.span;
-                self.compile_expr(*left)?;
-                match operator {
-                    LogicalOperator::And => {
-                        let end_jump = self
-                            .ir
-                            .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), left_span);
-                        self.ir.write(OpCode::Pop, Span::synthetic());
-                        self.compile_expr(*right)?;
-                        self.patch_jump(end_jump);
-                    }
-                    LogicalOperator::Or => {
-                        let end_jump = self
-                            .ir
-                            .write(OpCode::JumpIfTrue(JumpTarget::PLACEHOLDER), left_span);
-                        self.ir.write(OpCode::Pop, Span::synthetic());
-                        self.compile_expr(*right)?;
-                        self.patch_jump(end_jump);
-                    }
-                }
-            }
-            Expression::VariableDeclaration { value, l_value, .. } => {
-                self.compile_expr(*value)?;
-                self.compile_binding_pattern(l_value, span)?;
-                self.emit_unit();
-            }
-            Expression::Assignment {
-                l_value,
-                r_value: value,
-            } => match l_value.target {
-                AssignmentTarget::Index {
-                    value: container,
-                    index,
-                } => {
-                    self.compile_binding(&self.setter(l_value.id), span)?;
-                    self.compile_expr(*container)?;
-                    self.compile_expr(*index)?;
-                    self.compile_expr(*value)?;
-                    self.ir.write(OpCode::Call(3), span);
-                }
-                AssignmentTarget::Identifier { span: lv_span, .. } => {
-                    self.compile_expr(*value)?;
-                    self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
-                    self.emit_unit();
-                }
-                AssignmentTarget::Sequence(seq) => {
-                    self.compile_expr(*value)?;
-                    self.ir.write(OpCode::Unpack(seq.len()), span);
-                    for l_value in seq {
-                        self.compile_assignment_target(l_value, span)?;
-                    }
-                    self.emit_unit();
-                }
-                AssignmentTarget::Member {
-                    receiver,
-                    member_span,
-                    ..
-                } => {
-                    self.compile_binding(&self.setter(l_value.id), member_span)?;
-                    self.compile_expr(*receiver)?;
-                    self.compile_expr(*value)?;
-                    self.ir.write(OpCode::Call(2), member_span);
-                }
-            },
-            Expression::OpAssignment {
-                l_value, r_value, ..
-            } => {
-                let target = PreparedAssignmentTarget::prepare(self, l_value)?;
-                let Some(binding) = self.augmented_assignment(id) else {
-                    return Err(CompileError::unresolved_binding(span));
-                };
-
-                if let Some(call) = self.native_call(&binding, 2) {
-                    target.emit_read(self)?;
-                    self.compile_expr(*r_value)?;
-                    self.write_native_call(call, span);
+            Expression::Grouping(inner) => self.compile_expr(*inner, dest),
+            Expression::VariableDeclaration { l_value, value, .. } => {
+                if let BindingPattern::Identifier { .. } = l_value.pattern {
+                    let variable = self.analysis.variable(l_value.id).expect(
+                        "internal error: every binding pattern is analysed before it's compiled",
+                    );
+                    self.store(variable, *value, true, span)?;
                 } else {
-                    let opcode = Self::call_opcode_for(&binding, 2);
-                    self.compile_binding(&binding, span)?;
-                    target.emit_read(self)?;
-                    self.compile_expr(*r_value)?;
-                    self.ir.write(opcode, span);
+                    // The whole value is read before any variable is
+                    // declared.
+                    let mark = self.next_temp;
+                    let src = match self.compile_expr(*value, Dest::Any)? {
+                        Operand::Local(reg) | Operand::Temp(reg) => reg,
+                        Operand::Placed => {
+                            unreachable!("internal error: Dest::Any gives a register")
+                        }
+                    };
+                    self.declare_pattern(l_value, src, span)?;
+                    self.next_temp = mark;
                 }
-                target.emit_store(self)?;
-
-                self.emit_unit();
+                self.unit(dest, span)
+            }
+            Expression::Assignment { l_value, r_value } => {
+                self.compile_assignment(l_value, *r_value, dest, span)
             }
             Expression::FunctionDeclaration {
                 name, body, pure, ..
-            } => {
-                self.compile_function_decl(id, name, *body, pure, span)?;
-            }
-            Expression::StructDeclaration { .. } => {
-                let analysis = Rc::clone(&self.analysis);
-                let declared = analysis.declared_struct(id);
-                // The constructor and accessors share this one `Rc`: struct
-                // values and accessor checks compare their info by identity.
-                let info = Rc::new(declared.info.clone());
-
-                let idx = self
-                    .ir
-                    .add_constant(Value::function(Function::struct_constructor(Rc::clone(
-                        &info,
-                    ))));
-
-                self.ir.write(OpCode::Constant(idx), span);
-
-                let constructor = self
-                    .analysis
-                    .variable(id)
-                    .expect("internal error: a struct declaration declares its constructor");
-                self.emit_declare(constructor, span);
-
-                for (field_offset, field) in declared.fields.iter().enumerate() {
-                    // GET
-                    let get_idx = self
-                        .ir
-                        .add_constant(Value::function(Function::struct_getter(
-                            Rc::clone(&info),
-                            field_offset,
-                        )));
-                    self.ir.write(OpCode::Constant(get_idx), span);
-                    self.emit_declare(field.getter, span);
-
-                    // SET
-                    let set_idx = self
-                        .ir
-                        .add_constant(Value::function(Function::struct_setter(
-                            Rc::clone(&info),
-                            field_offset,
-                        )));
-                    self.ir.write(OpCode::Constant(set_idx), span);
-                    self.emit_declare(field.setter, span);
-                }
-                self.emit_unit();
-            }
-            Expression::Grouping(statements) => {
-                self.compile_expr(*statements)?;
-            }
-            Expression::Block { statements } => {
-                self.compile_block(statements, span)?;
-            }
+            } => self.compile_function_declaration(id, name, *body, pure, dest, span),
+            Expression::Block { statements } => self.compile_block(statements, dest, span),
             Expression::If {
                 condition,
                 on_true,
                 on_false,
-            } => {
-                self.compile_if(*condition, *on_true, on_false.map(|e| *e), span)?;
-            }
+            } => self.compile_if(*condition, *on_true, on_false.map(|e| *e), dest, span),
             Expression::While {
                 expression: condition,
                 loop_body,
             } => {
-                self.compile_while(*condition, *loop_body, span)?;
-            }
-            Expression::For { iterations, body } => {
-                self.compile_for(&iterations, *body, span)?;
+                self.compile_while(*condition, *loop_body)?;
+                self.unit(dest, span)
             }
             Expression::Call {
                 function,
@@ -540,40 +637,44 @@ impl Compiler {
             | Expression::MethodCall {
                 function,
                 arguments,
-            } => {
-                let function_span = function.span;
-                let binding = match &function.expression {
-                    Expression::Identifier { .. } => Some(self.binding(function.id)),
-                    _ => None,
+            } => self.compile_call(*function, arguments, dest),
+            Expression::Return { value } => {
+                let mark = self.next_temp;
+                let src = match self.compile_expr(*value, Dest::Any)? {
+                    Operand::Local(reg) | Operand::Temp(reg) => reg,
+                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
                 };
-                // An intrinsic called by name is written in place of the
-                // call, after its arguments, and a native needs no callee
-                // under them.
-                if let Some(Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(intrinsic)))) =
-                    binding
-                {
-                    self.compile_intrinsic_call(intrinsic, function.id, arguments, function_span)?;
-                } else if let Some(call) = binding
-                    .as_ref()
-                    .and_then(|binding| self.native_call(binding, arguments.len()))
-                {
-                    for argument in arguments {
-                        self.compile_expr(argument)?;
-                    }
-                    self.write_native_call(call, function_span);
-                } else {
-                    let opcode = match &binding {
-                        Some(binding) => Self::call_opcode_for(binding, arguments.len()),
-                        None => OpCode::Call(arguments.len()),
-                    };
-                    self.compile_expr(*function)?;
-
-                    for argument in arguments {
-                        self.compile_expr(argument)?;
-                    }
-
-                    self.ir.write(opcode, function_span);
-                }
+                self.emit(Instr::Return { src }, span);
+                self.next_temp = mark;
+                self.diverged(dest, span)
+            }
+            Expression::Break => {
+                let end = self.current_loop().end;
+                self.builder.jump(Instr::Jump { offset: 0 }, end, span);
+                self.diverged(dest, span)
+            }
+            Expression::Continue => {
+                let start = self.current_loop().start;
+                self.builder.jump(Instr::Jump { offset: 0 }, start, span);
+                self.diverged(dest, span)
+            }
+            Expression::Logical {
+                left,
+                operator,
+                right,
+            } => self.compile_logical(*left, operator, *right, dest),
+            Expression::OpAssignment {
+                l_value, r_value, ..
+            } => {
+                self.compile_op_assignment(id, l_value, *r_value, span)?;
+                self.unit(dest, span)
+            }
+            Expression::StructDeclaration { .. } => {
+                self.compile_struct_declaration(id, span)?;
+                self.unit(dest, span)
+            }
+            Expression::For { iterations, body } => {
+                self.compile_for(&iterations, *body, dest, span)
             }
             Expression::MemberAccess {
                 receiver,
@@ -583,312 +684,517 @@ impl Compiler {
                 let getter = self
                     .getter(id)
                     .expect("internal error: every member access is analysed before it's compiled");
-                self.compile_binding(&getter, member_span)?;
-                self.compile_expr(*receiver)?;
-                self.ir.write(OpCode::Call(1), member_span);
+                self.compile_binding_call(&getter, vec![Arg::Expr(*receiver)], dest, member_span)
             }
-            Expression::Tuple { values } => {
-                let size = values.len();
-                for expression in values {
-                    self.compile_expr(expression)?;
-                }
-                self.ir.write(OpCode::MakeTuple(size), span);
-            }
-            Expression::List { values } => {
-                let size = values.len();
-                for expression in values {
-                    self.compile_expr(expression)?;
-                }
-                self.ir.write(OpCode::MakeList(size), span);
-            }
+            Expression::Tuple { values } => self.compile_tuple(values, dest, span),
+            Expression::List { values } => self.compile_list(values, dest, span),
             Expression::Map { values, default } => {
-                let pairs = values.len();
-                let has_default = default.is_some();
-                for (key, value) in values {
-                    self.compile_expr(key)?;
-                    if let Some(v) = value {
-                        self.compile_expr(v)?
-                    } else {
-                        self.emit_unit();
+                self.compile_map(values, default.map(|default| *default), dest, span)
+            }
+            Expression::RangeInclusive { start, end } => {
+                self.compile_range(start, end, true, dest, span)
+            }
+            Expression::RangeExclusive { start, end } => {
+                self.compile_range(start, end, false, dest, span)
+            }
+        }
+    }
+
+    /// Puts `value`, a constant, where `dest` says.
+    fn load_constant(
+        &mut self,
+        value: Value,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        if dest == Dest::Discard {
+            return Ok(Operand::Placed);
+        }
+        let k = self.builder.constant(value);
+        let dst = self.place(dest, span)?;
+        self.emit(Instr::LoadK { dst, k }, span);
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// Puts unit where `dest` says: the value of a declaration, an
+    /// assignment, a loop or a statement.
+    fn unit(&mut self, dest: Dest, span: Span) -> Result<Operand, CompileError> {
+        if dest == Dest::Discard {
+            return Ok(Operand::Placed);
+        }
+        let dst = self.place(dest, span)?;
+        self.emit(Instr::LoadUnit { dst }, span);
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// What an expression after which the code doesn't go on, as `return`,
+    /// returns: a register nothing writes, as nothing reads it either.
+    fn diverged(&mut self, dest: Dest, span: Span) -> Result<Operand, CompileError> {
+        let dst = self.place(dest, span)?;
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// Puts the value of `variable` where `dest` says.
+    fn read_variable(
+        &mut self,
+        variable: ResolvedVar,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        match variable {
+            ResolvedVar::Local { slot } => {
+                let reg = self.local(slot, span)?;
+                match dest {
+                    Dest::Any => Ok(Operand::Local(reg)),
+                    Dest::Reg(dst) => {
+                        if dst != reg {
+                            self.emit(Instr::Copy { dst, src: reg }, span);
+                        }
+                        Ok(Operand::Placed)
                     }
+                    Dest::Discard => Ok(Operand::Placed),
                 }
-                if let Some(default) = default {
-                    self.compile_expr(*default)?;
-                }
-                self.ir.write(OpCode::MakeMap { pairs, has_default }, span);
             }
-            Expression::Return { value } => {
-                assert!(
-                    self.allow_return,
-                    "internal error: the analyser rejects a return outside of a function"
+            ResolvedVar::Global { slot } => {
+                if slot < self.analysis.builtin_count {
+                    self.natives.borrow_mut().insert(slot);
+                }
+                if dest == Dest::Discard {
+                    return Ok(Operand::Placed);
+                }
+                let dst = self.place(dest, span)?;
+                self.emit(
+                    Instr::GetGlobal {
+                        dst,
+                        slot: global(slot),
+                    },
+                    span,
                 );
-                self.compile_expr(*value)?;
-                self.ir.write(OpCode::Return, span);
+                Ok(Self::placed(dest, dst))
             }
-            Expression::Break => {
-                let context = self
-                    .current_loop_context()
-                    .expect("internal error: the analyser rejects a break outside of a loop");
-                self.emit_operand_cleanup(context.stack_depth, span);
-                let idx = self.ir.write(OpCode::Jump(JumpTarget::PLACEHOLDER), span); // will be backpatched
+            // A captured local is read through its cell, into a register of
+            // its own: a call may change it, as can a closure it calls.
+            ResolvedVar::Cell { slot } => {
+                let src = self.local(slot, span)?;
+                if dest == Dest::Discard {
+                    return Ok(Operand::Placed);
+                }
+                let dst = self.place(dest, span)?;
+                self.emit(Instr::GetCell { dst, src }, span);
+                Ok(Self::placed(dest, dst))
+            }
+            ResolvedVar::Upvalue { slot } => {
+                let index = upvalue(slot, span)?;
+                if dest == Dest::Discard {
+                    return Ok(Operand::Placed);
+                }
+                let dst = self.place(dest, span)?;
+                self.emit(Instr::GetUpvalue { dst, index }, span);
+                Ok(Self::placed(dest, dst))
+            }
+        }
+    }
 
-                self.current_loop_context_mut()
-                    .expect("loop context checked above")
-                    .break_instructions
-                    .push(idx);
+    /// Compiles `value` and stores it in `variable`, which a declaration,
+    /// when `declaring`, or an assignment at `span` writes. A declaration of
+    /// a local that closures capture writes its register, which replaces
+    /// the cell a closure made of an earlier run of it, as in a loop, so
+    /// each run makes a new variable; an assignment writes into the cell.
+    fn store(
+        &mut self,
+        variable: ResolvedVar,
+        value: ExpressionLocation,
+        declaring: bool,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let mark = self.next_temp;
+        match variable {
+            ResolvedVar::Local { slot } => {
+                let dst = self.local(slot, span)?;
+                self.compile_expr(value, Dest::Reg(dst))?;
             }
-            Expression::Continue => {
-                let context = self
-                    .current_loop_context()
-                    .expect("internal error: the analyser rejects a continue outside of a loop");
-                let start = context.start;
-                self.emit_operand_cleanup(context.stack_depth, span);
-                self.write_jump_back(start, span);
+            ResolvedVar::Cell { slot } if declaring => {
+                let dst = self.local(slot, span)?;
+                self.compile_expr(value, Dest::Reg(dst))?;
             }
-            range @ (Expression::RangeInclusive { .. } | Expression::RangeExclusive { .. }) => {
-                let (inclusive, start, end) = match range {
-                    Expression::RangeInclusive { start, end } => (true, start, end),
-                    Expression::RangeExclusive { start, end } => (false, start, end),
-                    _ => unreachable!(),
+            ResolvedVar::Cell { slot } => {
+                let cell = self.local(slot, span)?;
+                let src = self.compile_owned(value)?;
+                self.emit(Instr::SetCell { cell, src }, span);
+            }
+            ResolvedVar::Upvalue { slot } => {
+                let index = upvalue(slot, span)?;
+                let src = self.compile_owned(value)?;
+                self.emit(Instr::SetUpvalue { index, src }, span);
+            }
+            ResolvedVar::Global { slot } => {
+                let src = self.compile_owned(value)?;
+                self.emit(
+                    Instr::SetGlobal {
+                        slot: global(slot),
+                        src,
+                    },
+                    span,
+                );
+            }
+        }
+        self.next_temp = mark;
+        Ok(())
+    }
+
+    /// Compiles `expression` into a register that nothing else holds, for
+    /// an instruction that takes the value out of it: a temporary, or a
+    /// copy of a local's value. The register stays taken until the caller
+    /// frees it.
+    fn compile_owned(&mut self, expression: ExpressionLocation) -> Result<Reg, CompileError> {
+        let span = expression.span;
+        match self.compile_expr(expression, Dest::Any)? {
+            Operand::Temp(reg) => Ok(reg),
+            Operand::Local(reg) => {
+                let temp = self.alloc_temp(span)?;
+                self.emit(
+                    Instr::Copy {
+                        dst: temp,
+                        src: reg,
+                    },
+                    span,
+                );
+                Ok(temp)
+            }
+            Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+        }
+    }
+
+    fn compile_block(
+        &mut self,
+        statements: Vec<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let Some(last) = statements.len().checked_sub(1) else {
+            return self.unit(dest, span);
+        };
+        let mut operand = Operand::Placed;
+        for (index, statement) in statements.into_iter().enumerate() {
+            let statement_dest = if index == last { dest } else { Dest::Discard };
+            operand = self.compile_expr(statement, statement_dest)?;
+        }
+        Ok(operand)
+    }
+
+    fn compile_if(
+        &mut self,
+        condition: ExpressionLocation,
+        on_true: ExpressionLocation,
+        on_false: Option<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let otherwise = self.builder.label();
+        self.jump_unless(condition, otherwise)?;
+        let Some(on_false) = on_false else {
+            // An `if` without an `else` is `()`, whatever its branch gives.
+            self.compile_expr(on_true, Dest::Discard)?;
+            self.builder.bind(otherwise);
+            return self.unit(dest, span);
+        };
+        let end = self.builder.label();
+        // Both branches put their value in the same register.
+        let (branch_dest, dst) = match dest {
+            Dest::Discard => (Dest::Discard, None),
+            Dest::Reg(reg) => (Dest::Reg(reg), None),
+            Dest::Any => {
+                let reg = self.alloc_temp(span)?;
+                (Dest::Reg(reg), Some(reg))
+            }
+        };
+        self.compile_expr(on_true, branch_dest)?;
+        self.builder
+            .jump(Instr::Jump { offset: 0 }, end, Span::synthetic());
+        self.builder.bind(otherwise);
+        self.compile_expr(on_false, branch_dest)?;
+        self.builder.bind(end);
+        Ok(dst.map_or(Operand::Placed, Operand::Temp))
+    }
+
+    fn compile_while(
+        &mut self,
+        condition: ExpressionLocation,
+        body: ExpressionLocation,
+    ) -> Result<(), CompileError> {
+        let start = self.builder.label();
+        let end = self.builder.label();
+        self.builder.bind(start);
+        // A `break` in the condition leaves this loop too.
+        self.loops.push(Loop { start, end });
+        self.jump_unless(condition, end)?;
+        self.compile_expr(body, Dest::Discard)?;
+        self.loops.pop();
+        self.builder
+            .jump(Instr::Jump { offset: 0 }, start, Span::synthetic());
+        self.builder.bind(end);
+        Ok(())
+    }
+
+    /// Compiles `condition` and a jump to `target` taken when it's false.
+    fn jump_unless(
+        &mut self,
+        condition: ExpressionLocation,
+        target: Label,
+    ) -> Result<(), CompileError> {
+        self.jump_when(condition, false, target)
+    }
+
+    /// Compiles `condition` and a jump to `target` taken when it's `when`,
+    /// as jumps that make no `Bool` where they can. A comparison of two
+    /// values is one instruction that compares and jumps: `i < n` is
+    /// `JumpIfNotLess i, n`. `and`, `or` and `!` are jumps on their
+    /// operands: `if a and b` goes past its branch when `a` is false,
+    /// without running `b`.
+    fn jump_when(
+        &mut self,
+        condition: ExpressionLocation,
+        when: bool,
+        target: Label,
+    ) -> Result<(), CompileError> {
+        let mark = self.next_temp;
+        let ExpressionLocation {
+            id,
+            expression,
+            span,
+        } = condition;
+        match expression {
+            Expression::Grouping(inner) => return self.jump_when(*inner, when, target),
+            Expression::BoolLiteral(value) => {
+                if value == when {
+                    self.builder.jump(Instr::Jump { offset: 0 }, target, span);
+                }
+            }
+            Expression::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                // `a and b` is false as soon as `a` is, and `a or b` true as
+                // soon as `a` is.
+                let settled_by_left = match operator {
+                    LogicalOperator::And => false,
+                    LogicalOperator::Or => true,
                 };
-                let start = start.expect("unbounded range start not yet supported");
-                self.compile_expr(*start)?;
-                let bounded = end.is_some();
-                if let Some(end) = end {
-                    self.compile_expr(*end)?;
+                if when == settled_by_left {
+                    self.jump_when(*left, when, target)?;
+                    self.jump_when(*right, when, target)?;
+                } else {
+                    let skip = self.builder.label();
+                    self.jump_when(*left, settled_by_left, skip)?;
+                    self.jump_when(*right, when, target)?;
+                    self.builder.bind(skip);
                 }
-                self.ir
-                    .write(OpCode::MakeRange { inclusive, bounded }, span);
+            }
+            Expression::Call {
+                function,
+                arguments,
+            }
+            | Expression::OperatorCall {
+                function,
+                arguments,
+            }
+            | Expression::MethodCall {
+                function,
+                arguments,
+            } if self.condition_op(&function, arguments.len()).is_some() => {
+                let op = self
+                    .condition_op(&function, arguments.len())
+                    .expect("internal error: the guard found the op");
+                if op == NativeOp::Not {
+                    let Ok([operand]) = <[_; 1]>::try_from(arguments) else {
+                        unreachable!("internal error: `!` takes one operand");
+                    };
+                    return self.jump_when(operand, !when, target);
+                }
+                // A comparison that has to hold to jump jumps over a jump
+                // to `target` when it doesn't.
+                let skip = when.then(|| self.builder.label());
+                let jump = match self.compile_binary_operands(exprs(arguments), true)? {
+                    (left, Right::Reg(right)) => Instr::jump_unless(op, left, right),
+                    (left, Right::Immediate(imm)) => Instr::jump_unless_immediate(op, left, imm),
+                }
+                .expect("internal error: a comparison has a compare-and-branch");
+                self.builder
+                    .jump(jump, skip.unwrap_or(target), function.span);
+                if let Some(skip) = skip {
+                    self.builder.jump(Instr::Jump { offset: 0 }, target, span);
+                    self.builder.bind(skip);
+                }
+            }
+            expression => {
+                let condition = ExpressionLocation {
+                    id,
+                    expression,
+                    span,
+                };
+                let cond = match self.compile_expr(condition, Dest::Any)? {
+                    Operand::Local(reg) | Operand::Temp(reg) => reg,
+                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                };
+                let jump = if when {
+                    Instr::JumpIfTrue { cond, offset: 0 }
+                } else {
+                    Instr::JumpIfFalse { cond, offset: 0 }
+                };
+                self.builder.jump(jump, target, span);
             }
         }
-
-        // Every expression except a statement leaves exactly one value.
-        self.ir
-            .set_stack_depth(entry_depth + isize::from(leaves_value));
+        // The jump has read its operands.
+        self.next_temp = mark;
         Ok(())
     }
 
-    fn compile_assignment_target(
-        &mut self,
-        l_value: AssignmentTargetLocation,
-        span: Span,
-    ) -> Result<(), CompileError> {
-        match l_value.target {
-            AssignmentTarget::Identifier { span: lv_span, .. } => {
-                self.emit_set_var(self.assigned_variable(l_value.id), lv_span);
+    /// The op a call of `function` with `args` arguments does, if it
+    /// resolves to one a condition jumps on without making a `Bool`: a
+    /// comparison, as `<` of two Ints, or `!` of a Bool.
+    fn condition_op(&self, function: &ExpressionLocation, args: usize) -> Option<NativeOp> {
+        let Expression::Identifier { .. } = function.expression else {
+            return None;
+        };
+        match self.native_call(&self.binding(function.id))? {
+            NativeCall::Op(NativeOp::Not) if args == 1 => Some(NativeOp::Not),
+            NativeCall::Op(op) if args == 2 && Instr::jump_unless(op, Reg(0), Reg(0)).is_some() => {
+                Some(op)
             }
-            AssignmentTarget::Index { value, index } => {
-                // Value to store is on top of stack. We need to:
-                // 1. Save it to a temp slot
-                // 2. Compile container and index
-                // 3. Get the value back
-                // 4. Call []= function
-                // 5. Pop the return value
-
-                let tmp_value = self.allocate_temp();
-                self.write_temp(tmp_value, span, OpCode::SetLocal);
-
-                self.compile_binding(&self.setter(l_value.id), span)?;
-                self.compile_expr(*value)?;
-                self.compile_expr(*index)?;
-                self.write_temp(tmp_value, span, OpCode::GetLocal);
-                self.ir.write(OpCode::Call(3), span);
-                self.ir.write(OpCode::Pop, Span::synthetic());
-            }
-            AssignmentTarget::Sequence(seq) => {
-                self.ir.write(OpCode::Unpack(seq.len()), span);
-                for lv in seq {
-                    self.compile_assignment_target(lv, span)?;
-                }
-            }
-            AssignmentTarget::Member { .. } => unreachable!(
-                "member assignment is lowered by Expression::Assignment; the parser rejects members inside destructuring patterns"
-            ),
+            _ => None,
         }
-
-        Ok(())
     }
 
-    fn compile_binding_pattern(
+    fn current_loop(&self) -> Loop {
+        *self
+            .loops
+            .last()
+            .expect("internal error: the analyser rejects break and continue outside of a loop")
+    }
+
+    /// Compiles the call of `function` with `arguments`: of what the name
+    /// refers to (see [`Self::compile_binding_call`]), or of the function
+    /// value any other expression gives, as `make()(1)`.
+    fn compile_call(
         &mut self,
-        pattern: BindingPatternLocation,
-        span: Span,
-    ) -> Result<(), CompileError> {
-        match pattern.pattern {
-            BindingPattern::Identifier { .. } => {
-                let variable = self.analysis.variable(pattern.id).expect(
-                    "internal error: every binding pattern is analysed before it's compiled",
+        function: ExpressionLocation,
+        arguments: Vec<ExpressionLocation>,
+        dest: Dest,
+    ) -> Result<Operand, CompileError> {
+        let span = function.span;
+        if let Expression::Identifier { .. } = function.expression {
+            let binding = self.binding(function.id);
+            if let Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(intrinsic))) = binding {
+                return self.compile_intrinsic_call(
+                    intrinsic,
+                    function.id,
+                    exprs(arguments),
+                    dest,
+                    span,
                 );
-                self.emit_declare(variable, span);
             }
-            BindingPattern::Sequence(seq) => {
-                if let Some(first) = self.local_run(&seq) {
-                    self.ir.write(
-                        OpCode::UnpackLocals {
-                            first,
-                            count: seq.len(),
-                        },
-                        span,
-                    );
-                    return Ok(());
-                }
-                self.ir.write(OpCode::Unpack(seq.len()), span);
-                for lv in seq {
-                    self.compile_binding_pattern(lv, span)?;
-                }
-            }
+            return self.compile_binding_call(&binding, exprs(arguments), dest, span);
         }
-        Ok(())
+        let base = self.alloc_temp(span)?;
+        self.compile_expr(function, Dest::Reg(base))?;
+        self.finish_call(base, exprs(arguments), false, dest, span)
     }
 
-    /// The first slot of `seq` when it's a flat pattern of local variables
-    /// in consecutive slots, `(a, b)` with `a` in slot `n` and `b` in slot
-    /// `n + 1`, which `UnpackLocals` declares at once.
-    fn local_run(&self, seq: &[BindingPatternLocation]) -> Option<usize> {
-        let mut first = None;
-        for (i, pattern) in seq.iter().enumerate() {
-            let BindingPattern::Identifier { .. } = pattern.pattern else {
-                return None;
-            };
-            let (ResolvedVar::Local { slot } | ResolvedVar::Cell { slot }) =
-                self.analysis.variable(pattern.id)?
-            else {
-                return None;
-            };
-            let first = *first.get_or_insert(slot);
-            if slot != first + i {
-                return None;
-            }
-        }
-        first
-    }
-
-    /// The variable the identifier assignment target at `target` writes to.
-    fn assigned_variable(&self, target: NodeId) -> ResolvedVar {
-        self.analysis
-            .variable(target)
-            .expect("internal error: every assignment target is analysed before it's compiled")
-    }
-
-    /// The function an augmented assignment reads the target at `target` with.
-    fn target_getter(&self, target: NodeId) -> Binding {
-        self.getter(target)
-            .expect("internal error: an augmented assignment's target has a getter")
-    }
-
-    /// What the identifier `id` refers to, in the instance being compiled.
-    fn binding(&self, id: NodeId) -> Binding {
-        self.instance_pick(|instance| instance.bindings.get(&id))
-            .unwrap_or_else(|| self.analysis.binding(id))
-            .clone()
-    }
-
-    /// The pick `pick` finds in the instance being compiled, if any, noting
-    /// that the code depends on the instance.
-    fn instance_pick<'a, T>(
-        &'a self,
-        pick: impl FnOnce(&'a Instance) -> Option<&'a T>,
-    ) -> Option<&'a T> {
-        let found = self
-            .instance
-            .map(|at| &self.analysis.instances[&at.declaration][at.index])
-            .and_then(pick);
-        if found.is_some() {
-            self.used_instance.set(true);
-        }
-        found
-    }
-
-    /// The function that reads through the target at `id`, if it reads, in
-    /// the instance being compiled.
-    fn getter(&self, id: NodeId) -> Option<Binding> {
-        self.instance_pick(|instance| instance.getters.get(&id))
-            .or_else(|| self.analysis.getter(id))
-            .cloned()
-    }
-
-    /// The function that writes through the target at `id`, in the instance
-    /// being compiled.
-    fn setter(&self, id: NodeId) -> Binding {
-        self.instance_pick(|instance| instance.setters.get(&id))
-            .unwrap_or_else(|| self.analysis.setter(id))
-            .clone()
-    }
-
-    /// The function the augmented assignment `id` calls, in the instance
-    /// being compiled.
-    fn augmented_assignment(&self, id: NodeId) -> Option<Binding> {
-        self.instance_pick(|instance| instance.augmented_assignments.get(&id))
-            .or_else(|| self.analysis.augmented_assignments.get(&id))
-            .cloned()
-    }
-
-    /// Emit code that puts the resolved callee on top of the stack: the
-    /// function, or for an operator whose tuple positions take different
-    /// overloads, the tuple of them, which `CallVec` applies position by
-    /// position. For a binding no name refers to, as a getter's, which can't
-    /// be an intrinsic.
-    fn compile_binding(&mut self, resolved: &Binding, span: Span) -> Result<(), CompileError> {
-        self.emit_binding(resolved, None, span)
-    }
-
-    /// [`Self::compile_binding`] for the identifier at `site`, which may name
-    /// an intrinsic.
-    fn compile_named_binding(
+    /// Compiles the call at `span` of what `binding` refers to with
+    /// `arguments`: the instruction of the op it resolves to, as `SubInt`
+    /// for `n - 1`, a `CallNative` of the native it resolves to, a `CallVec`
+    /// of an operator applied to each element of tuples, or a `Call` of the
+    /// function value.
+    fn compile_binding_call(
         &mut self,
-        resolved: &Binding,
-        site: NodeId,
+        binding: &Binding,
+        arguments: Vec<Arg>,
+        dest: Dest,
         span: Span,
-    ) -> Result<(), CompileError> {
-        self.emit_binding(resolved, Some(site), span)
+    ) -> Result<Operand, CompileError> {
+        // A binding no name refers to, as a getter's, isn't an intrinsic.
+        if let Binding::Resolved(Candidate::Scalar(Callee::Intrinsic(_))) = binding {
+            return Err(CompileError::unnamed_intrinsic(span));
+        }
+        match self.native_call(binding) {
+            Some(NativeCall::Op(op)) => return self.compile_op(op, arguments, dest, span),
+            Some(NativeCall::Native(slot)) => {
+                // A call with too many to say in a `CallNative` calls the
+                // native as a value.
+                if let (Ok(slot), Ok(args)) = (u16::try_from(slot), u8::try_from(arguments.len())) {
+                    return self.compile_native_call(slot, args, arguments, dest, span);
+                }
+            }
+            None => {}
+        }
+        let vectorised = matches!(
+            binding,
+            Binding::Resolved(Candidate::Vec(_)) | Binding::PerPosition(_)
+        );
+        let base = self.alloc_temp(span)?;
+        self.compile_callee(binding, None, Dest::Reg(base), span)?;
+        self.finish_call(base, arguments, vectorised, dest, span)
     }
 
-    fn emit_binding(
+    /// Puts the value of what `binding`, named at `site` if a name refers
+    /// to it, refers to where `dest` says: the variable's value, or for an
+    /// operator whose tuple positions take different overloads, the tuple
+    /// of them, which `CallVec` applies position by position.
+    fn compile_callee(
         &mut self,
-        resolved: &Binding,
+        binding: &Binding,
         site: Option<NodeId>,
+        dest: Dest,
         span: Span,
-    ) -> Result<(), CompileError> {
-        match resolved {
-            Binding::None => return Err(CompileError::unresolved_binding(span)),
-            Binding::Resolved(candidate) => self.emit_callee(candidate.var(), site, span)?,
+    ) -> Result<Operand, CompileError> {
+        match binding {
+            Binding::None => Err(CompileError::unresolved_binding(span)),
+            Binding::Resolved(candidate) => self.callee_value(candidate.var(), site, dest, span),
             Binding::PerPosition(overloads) => {
+                let mark = self.next_temp;
+                let base = Self::register(mark, span)?;
                 for &overload in overloads {
-                    self.emit_callee(overload, site, span)?;
+                    let reg = self.alloc_temp(span)?;
+                    self.callee_value(overload, site, Dest::Reg(reg), span)?;
                 }
-                self.ir.write(OpCode::MakeTuple(overloads.len()), span);
+                let len = u16::try_from(overloads.len())
+                    .map_err(|_too_many| CompileError::too_many_registers(span))?;
+                // `MakeTuple` reads its elements before it writes `dst`.
+                self.next_temp = mark;
+                let dst = self.place(dest, span)?;
+                self.emit(Instr::MakeTuple { dst, base, len }, span);
+                Ok(Self::placed(dest, dst))
             }
         }
-        Ok(())
     }
 
-    /// Emit code that puts `callee`, named at `site`, on top of the stack as
-    /// a function value. An intrinsic is stored nowhere, so it becomes a
-    /// small function around its bytecode: `cast::<Int>` in
-    /// `xs.map(cast::<Int>)` is `fn(x) => cast::<Int>(x)`.
-    fn emit_callee(
+    /// Puts `callee`, named at `site`, where `dest` says as a function
+    /// value. An intrinsic is stored nowhere, so it becomes a small function
+    /// around its instruction: `cast::<Int>` in `xs.map(cast::<Int>)` is
+    /// `fn(x) => cast::<Int>(x)`.
+    fn callee_value(
         &mut self,
         callee: Callee,
         site: Option<NodeId>,
+        dest: Dest,
         span: Span,
-    ) -> Result<(), CompileError> {
+    ) -> Result<Operand, CompileError> {
         match (callee, site) {
-            (Callee::Var(var), _) => self.emit_get_var(var, span),
+            (Callee::Var(variable), _) => self.read_variable(variable, dest, span),
             (Callee::Intrinsic(intrinsic), Some(site)) => {
                 let function = self.intrinsic_function(intrinsic, site, span)?;
-                let idx = self
-                    .ir
-                    .add_constant(Value::function(Function::Compiled(Rc::new(function))));
-                self.ir.write(OpCode::Constant(idx), span);
+                let value = Value::function(Function::Compiled(Rc::new(function)));
+                self.load_constant(value, dest, span)
             }
-            (Callee::Intrinsic(_), None) => return Err(CompileError::unnamed_intrinsic(span)),
+            (Callee::Intrinsic(_), None) => Err(CompileError::unnamed_intrinsic(span)),
         }
-        Ok(())
     }
 
-    /// The function value of `intrinsic` named at `site`: its arguments, the
-    /// intrinsic's bytecode, and a return. It's compiled in the instance being
-    /// compiled, so what it reads of the instance's picks is that instance's.
+    /// The function value of `intrinsic` named at `site`: the intrinsic's
+    /// instruction on its parameter, and a return. It's compiled in the
+    /// instance being compiled, so what it reads of the instance's picks is
+    /// that instance's.
     fn intrinsic_function(
         &self,
         intrinsic: Intrinsic,
@@ -905,118 +1211,115 @@ impl Compiler {
                 parameters: Some(vec![StaticType::Any; arity]),
                 return_type: Box::new(StaticType::Any),
             });
-        let mut fn_compiler = self.nested(arity, self.instance);
-        for slot in 0..arity {
-            fn_compiler.ir.write(OpCode::GetLocal(slot), span);
+        let mut compiler = self.nested(arity, self.instance);
+        let src = Reg(0);
+        match intrinsic {
+            Intrinsic::Cast | Intrinsic::TryCast => {
+                compiler.emit_cast(site, intrinsic == Intrinsic::TryCast, src, span)?;
+            }
+            // Only a read of `[]` with a number written in the code calls
+            // it, which `Self::compile_intrinsic_call` writes.
+            Intrinsic::TupleIndex => return Err(CompileError::unnamed_intrinsic(span)),
         }
-        fn_compiler.emit_intrinsic(intrinsic, site, span)?;
-        let (compiled, used_instance) = fn_compiler.finish_function(None, static_type);
-        if used_instance {
+        compiler.emit(Instr::Return { src }, Span::synthetic());
+        if compiler.used_instance.get() {
             self.used_instance.set(true);
         }
-        Ok(compiled)
+        Ok(compiler.finish(None, static_type, 0, Vec::new()))
     }
 
-    /// Emit the call of `intrinsic` named at `site` with `arguments`, in
-    /// place of the call. The tuple index takes its index, a number written
-    /// in the code, as the instruction's operand: `t[1]` is `t`, then
-    /// `TupleIndex(1)`, or `GetLocalTupleIndex` when `t` is a local.
+    /// Compiles the call at `span` of `intrinsic`, named at `site`, with
+    /// `arguments`. The tuple index takes its index, a number written in the
+    /// code, as the instruction's operand: `t[1]` is `TupleIndex` of `t`'s
+    /// register and 1. A cast checks its argument in the register it's put
+    /// in, which is the call's own.
     fn compile_intrinsic_call(
         &mut self,
         intrinsic: Intrinsic,
         site: NodeId,
-        arguments: Vec<ExpressionLocation>,
+        arguments: Vec<Arg>,
+        dest: Dest,
         span: Span,
-    ) -> Result<(), CompileError> {
+    ) -> Result<Operand, CompileError> {
         if intrinsic == Intrinsic::TupleIndex {
-            let [tuple, index] = <[_; 2]>::try_from(arguments)
-                .expect("internal error: the tuple index takes a tuple and an index");
-            let index = index
-                .integer_literal()
-                .expect("internal error: the analyser picks the tuple index for a number written in the code");
-            if let Expression::Identifier { .. } = tuple.expression
-                && let Binding::Resolved(Candidate::Scalar(Callee::Var(ResolvedVar::Local {
-                    slot,
-                }))) = self.binding(tuple.id)
-            {
-                self.ir
-                    .write(OpCode::GetLocalTupleIndex { slot, index }, span);
-            } else {
-                self.compile_expr(tuple)?;
-                self.ir.write(OpCode::TupleIndex(index), span);
-            }
-            return Ok(());
+            let [tuple, Arg::Expr(index)] = <[_; 2]>::try_from(arguments)
+                .ok()
+                .expect("internal error: the tuple index takes a tuple and an index")
+            else {
+                unreachable!("internal error: the tuple index's index is an expression");
+            };
+            let index = index.integer_literal().expect(
+                "internal error: the analyser picks the tuple index for a number written in the code",
+            );
+            let index =
+                i16::try_from(index).map_err(|_too_large| CompileError::index_too_large(span))?;
+            let mark = self.next_temp;
+            let src = match self.compile_arg(tuple, Dest::Any)? {
+                Operand::Local(reg) | Operand::Temp(reg) => reg,
+                Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+            };
+            // `TupleIndex` reads the tuple before it writes `dst`.
+            self.next_temp = mark;
+            let dst = self.place(dest, span)?;
+            self.emit(Instr::TupleIndex { dst, src, index }, span);
+            return Ok(Self::placed(dest, dst));
         }
-        for argument in arguments {
-            self.compile_expr(argument)?;
-        }
-        self.emit_intrinsic(intrinsic, site, span)
+        let [value] = <[_; 1]>::try_from(arguments)
+            .ok()
+            .expect("internal error: a cast takes one value");
+        let dst = match dest {
+            Dest::Reg(reg) => reg,
+            Dest::Any | Dest::Discard => self.alloc_temp(span)?,
+        };
+        self.compile_arg(value, Dest::Reg(dst))?;
+        self.emit_cast(site, intrinsic == Intrinsic::TryCast, dst, span)?;
+        Ok(Self::placed(dest, dst))
     }
 
-    /// Emit `intrinsic` used at `site`, its arguments on top of the stack,
-    /// leaving its result in their place.
-    fn emit_intrinsic(
+    /// Writes the cast at `site` of the value in `reg`, in place: a check
+    /// that it has the type the analyser picked for the instance being
+    /// compiled, or for `optional`, `Some` of the value if it has it and
+    /// `None` if not.
+    fn emit_cast(
         &mut self,
-        intrinsic: Intrinsic,
         site: NodeId,
+        optional: bool,
+        reg: Reg,
         span: Span,
     ) -> Result<(), CompileError> {
-        match intrinsic {
-            Intrinsic::Cast => self.emit_cast(site, false, span),
-            Intrinsic::TryCast => self.emit_cast(site, true, span),
-            // Only a read of `[]` with a number written in the code calls
-            // it, which `Self::compile_intrinsic_call` writes.
-            Intrinsic::TupleIndex => Err(CompileError::unnamed_intrinsic(span)),
-        }
-    }
-
-    /// Emit the cast at `site` of the value on top of the stack: a check that
-    /// it has the type the analyser picked for the instance being compiled,
-    /// or for `optional`, `Some` of the value if it has it and `None` if not.
-    fn emit_cast(&mut self, site: NodeId, optional: bool, span: Span) -> Result<(), CompileError> {
         let check = match self
             .instance_pick(|instance| instance.cast_checks.get(&site))
             .or_else(|| self.analysis.cast_checks.get(&site))
         {
             None => return Err(CompileError::unresolved_cast(span)),
-            Some(check) => check.clone().map(Rc::new),
+            Some(check) => check.clone(),
         };
-        // A container the cast gives a new type mustn't be reachable by
-        // another name that keeps the old one, as `xs` is after
-        // `let a: Any = xs; let ys = cast::<[Any]>(a)`: a write through `ys` would
-        // break what `xs` says it holds.
-        if let Some(target) = &check
-            && target.holds_a_mutable_container()
-        {
-            self.ir
-                .write(OpCode::CheckUnshared(Rc::clone(target)), span);
-        }
-        match (check, optional) {
-            (None, false) => {}
-            (Some(target), false) => {
-                self.ir.write(OpCode::CheckType(target), span);
-            }
-            // A value proven to be the type is always `Some`, as every value
-            // is an `Any`.
-            (None, true) => {
-                self.ir
-                    .write(OpCode::TryCast(Rc::new(StaticType::Any)), span);
-            }
-            (Some(target), true) => {
-                self.ir.write(OpCode::TryCast(target), span);
-            }
-        }
+        let instr = match (check, optional) {
+            (None, false) => return Ok(()),
+            (Some(target), false) => Instr::CheckType {
+                reg,
+                typ: self.builder.static_type(target),
+            },
+            // A value proven to be the type is always `Some`, as every
+            // value is an `Any`.
+            (None, true) => Instr::TryCast {
+                reg,
+                typ: self.builder.static_type(StaticType::Any),
+            },
+            (Some(target), true) => Instr::TryCast {
+                reg,
+                typ: self.builder.static_type(target),
+            },
+        };
+        self.emit(instr, span);
         Ok(())
     }
 
-    /// The instruction that calls the native `binding` picks with the
-    /// `args` arguments on top of the stack, if it picks one native and
-    /// applies it to the arguments as they are: the native's own instruction
-    /// if it does an op, as `SubInt` for `-(Int, Int)` in `n - 1`, and
-    /// otherwise `CallNative`, as for `len` in `len(xs)`. Not for `+` in
-    /// `(1, 2) + (3, 4)`, which applies it to each pair of elements, nor for
-    /// a function a program declares, even one named like a native.
-    fn native_call(&self, binding: &Binding, args: usize) -> Option<OpCode> {
+    /// What a call `binding` resolves to compiles to, if it picks one
+    /// native and applies it to the arguments as they are: not `+` in
+    /// `(1, 2) + (3, 4)`, which applies it to each pair of elements, nor a
+    /// function a program declares, even one named like a native.
+    fn native_call(&self, binding: &Binding) -> Option<NativeCall> {
         let Binding::Resolved(Candidate::Scalar(Callee::Var(ResolvedVar::Global { slot }))) =
             *binding
         else {
@@ -1024,296 +1327,1112 @@ impl Compiler {
         };
         // Only natives have an entry; a program's globals come after them.
         Some(match *self.native_ops.get(slot)? {
-            Some(op) => {
-                debug_assert_eq!(op.arity(), args, "the analyser picks an overload by arity");
-                OpCode::native(op)
-            }
-            None => OpCode::CallNative { slot, args },
+            Some(op) => NativeCall::Op(op),
+            None => NativeCall::Native(slot),
         })
     }
 
-    /// Writes `call`, an instruction [`Self::native_call`] made, noting the
-    /// native it calls if it's `CallNative`, so the VM puts it in its
-    /// globals.
-    fn write_native_call(&mut self, call: OpCode, span: Span) {
-        if let OpCode::CallNative { slot, .. } = call {
-            self.natives.borrow_mut().insert(slot);
+    /// Compiles `op` of `arguments` into one instruction that reads them
+    /// where they are.
+    fn compile_op(
+        &mut self,
+        op: NativeOp,
+        arguments: Vec<Arg>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        debug_assert_eq!(
+            op.arity(),
+            arguments.len(),
+            "the analyser picks an overload by arity"
+        );
+        let mark = self.next_temp;
+        if op.arity() == 1 {
+            let [src] = self.compile_operands(arguments)?[..] else {
+                unreachable!("internal error: a unary op takes one operand");
+            };
+            self.next_temp = mark;
+            let dst = self.place(dest, span)?;
+            self.emit(Instr::unary(op, dst, src), span);
+            return Ok(Self::placed(dest, dst));
         }
-        self.ir.write(call, span);
-    }
-
-    /// `CallVec(args)` for an operator applied to each element of tuple
-    /// arguments, `Call(args)` for any other call.
-    fn call_opcode_for(binding: &Binding, args: usize) -> OpCode {
-        match binding {
-            Binding::Resolved(Candidate::Vec(_)) | Binding::PerPosition(_) => OpCode::CallVec(args),
-            _ => OpCode::Call(args),
-        }
-    }
-
-    fn emit_get_var(&mut self, var: ResolvedVar, span: Span) {
-        match var {
-            ResolvedVar::Local { slot } => self.ir.write(OpCode::GetLocal(slot), span),
-            ResolvedVar::Cell { slot } => self.ir.write(OpCode::GetCell(slot), span),
-            ResolvedVar::Upvalue { slot } => self.ir.write(OpCode::GetUpvalue(slot), span),
-            ResolvedVar::Global { slot } => {
-                if slot < self.analysis.builtin_count {
-                    self.natives.borrow_mut().insert(slot);
-                }
-                self.ir.write(OpCode::GetGlobal(slot), span)
-            }
+        let immediate = Instr::binary_immediate(op, Reg(0), Reg(0), 0).is_some();
+        let (left, right) = self.compile_binary_operands(arguments, immediate)?;
+        // The instruction reads its operands before it writes its
+        // destination, which may be one of them.
+        self.next_temp = mark;
+        let dst = self.place(dest, span)?;
+        let instr = match right {
+            Right::Reg(right) => Instr::binary(op, dst, left, right),
+            Right::Immediate(imm) => Instr::binary_immediate(op, dst, left, imm)
+                .expect("internal error: the op has an immediate form"),
         };
+        self.emit(instr, span);
+        Ok(Self::placed(dest, dst))
     }
 
-    fn emit_set_var(&mut self, var: ResolvedVar, span: Span) {
-        match var {
-            ResolvedVar::Local { slot } => {
-                self.ir.write(OpCode::SetLocal(slot), span);
-            }
-            ResolvedVar::Cell { slot } => {
-                self.ir.write(OpCode::SetCell(slot), span);
-            }
-            ResolvedVar::Upvalue { slot } => {
-                self.ir.write(OpCode::SetUpvalue(slot), span);
-            }
-            ResolvedVar::Global { slot } => {
-                self.ir.write(OpCode::SetGlobal(slot), span);
-            }
-        }
-    }
-
-    /// Stores the value on top of the stack in a variable being declared. The
-    /// declaration replaces whatever the slot held, so a captured local declared
-    /// again, as in each loop iteration, gets a new variable instead of writing
-    /// through the cell an earlier closure kept.
-    fn emit_declare(&mut self, var: ResolvedVar, span: Span) {
-        match var {
-            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
-                debug_assert!(
-                    slot < self.source_locals,
-                    "internal error: slot {slot} is outside the frame of {} variables",
-                    self.source_locals
-                );
-                self.ir.write(OpCode::SetLocal(slot), span);
-            }
-            ResolvedVar::Global { slot } => {
-                self.ir.write(OpCode::SetGlobal(slot), span);
-            }
-            ResolvedVar::Upvalue { .. } => {
-                unreachable!("the analyser never assigns a declaration to an upvalue")
-            }
-        }
-    }
-
-    /// Backpatches a forward jump at `op_idx` to land just after the most recently
-    /// written instruction.
-    fn patch_jump(&mut self, label: LabelId) {
-        self.ir
-            .set_jump_offset(label, JumpTarget::Label(self.ir.next_label()));
-    }
-
-    /// Emits a `Jump` that goes back to `target` (a previously recorded chunk offset).
-    fn write_jump_back(&mut self, target: LabelId, span: Span) -> LabelId {
-        self.ir.write(OpCode::Jump(JumpTarget::Label(target)), span)
-    }
-
-    fn compile_block(
+    /// Compiles the two operands of a binary op: two registers, or with
+    /// `immediate`, a register and the `Int` on the right when it's a
+    /// number written in the code that fits an `i16`, as `2` in `i * 2`.
+    fn compile_binary_operands(
         &mut self,
-        statements: Vec<ExpressionLocation>,
-        _span: Span,
+        arguments: Vec<Arg>,
+        immediate: bool,
+    ) -> Result<(Reg, Right), CompileError> {
+        if immediate
+            && let Arg::Expr(right) = &arguments[1]
+            && let Some(imm) = self.small_int(right)
+        {
+            let [left, _] = <[_; 2]>::try_from(arguments)
+                .ok()
+                .expect("internal error: a binary op takes two operands");
+            let left = match self.compile_arg(left, Dest::Any)? {
+                Operand::Local(reg) | Operand::Temp(reg) => reg,
+                Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+            };
+            return Ok((left, Right::Immediate(imm)));
+        }
+        let [left, right] = self.compile_operands(arguments)?[..] else {
+            unreachable!("internal error: a binary op takes two operands");
+        };
+        Ok((left, Right::Reg(right)))
+    }
+
+    /// The value of `expression` if it's an `Int` written in the code that
+    /// fits an `i16`: `2`, but not `2` where the analyser made it a Float.
+    fn small_int(&self, expression: &ExpressionLocation) -> Option<i16> {
+        let Expression::NumericLiteral(NumericLiteral::Int64(value)) = expression.expression else {
+            return None;
+        };
+        if matches!(
+            self.analysis.expr_types.get(&expression.id),
+            Some(StaticType::Float | StaticType::Number)
+        ) {
+            return None;
+        }
+        i16::try_from(value).ok()
+    }
+
+    /// Compiles `arguments` in order into registers an instruction reads,
+    /// and returns them: a local's own register, or a temporary. A local
+    /// read before an argument that may assign it is copied first, so the
+    /// instruction sees it as it was: in `x + { x = 5; x }`, `x` before the
+    /// block.
+    fn compile_operands(&mut self, arguments: Vec<Arg>) -> Result<Vec<Reg>, CompileError> {
+        let mut assigned_later = arguments
+            .iter()
+            .rev()
+            .scan(false, |later, argument| {
+                let before = *later;
+                *later |= argument.may_assign();
+                Some(before)
+            })
+            .collect::<Vec<_>>();
+        assigned_later.reverse();
+        let mut operands = Vec::with_capacity(arguments.len());
+        for (argument, assigned_later) in arguments.into_iter().zip(assigned_later) {
+            let span = argument.span();
+            let reg = match self.compile_arg(argument, Dest::Any)? {
+                Operand::Local(reg) if assigned_later => {
+                    let temp = self.alloc_temp(span)?;
+                    self.emit(
+                        Instr::Copy {
+                            dst: temp,
+                            src: reg,
+                        },
+                        span,
+                    );
+                    temp
+                }
+                Operand::Local(reg) | Operand::Temp(reg) => reg,
+                Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+            };
+            operands.push(reg);
+        }
+        Ok(operands)
+    }
+
+    /// Declares the variables of `pattern`, which a declaration or a `for`
+    /// loop at `span` declares, with the value in `src`: a sequence
+    /// pattern's parts with the elements of the value, which `Unpack` puts
+    /// in temporaries first.
+    fn declare_pattern(
+        &mut self,
+        pattern: BindingPatternLocation,
+        src: Reg,
+        span: Span,
     ) -> Result<(), CompileError> {
-        if statements.is_empty() {
-            self.emit_unit();
+        match pattern.pattern {
+            BindingPattern::Identifier { .. } => {
+                let variable = self.analysis.variable(pattern.id).expect(
+                    "internal error: every binding pattern is analysed before it's compiled",
+                );
+                self.store_from(variable, src, true, span)
+            }
+            BindingPattern::Sequence(patterns) => {
+                let len = u16::try_from(patterns.len())
+                    .map_err(|_too_many| CompileError::too_many_registers(span))?;
+                // Variables in registers one after the other get their
+                // elements straight away: `for (i, x) in xs` unpacks into
+                // `i` and `x`.
+                if let Some(base) = self.declared_registers(&patterns) {
+                    self.emit(Instr::Unpack { src, base, len }, span);
+                    return Ok(());
+                }
+                let mark = self.next_temp;
+                let base = Self::register(mark, span)?;
+                for _ in 0..len {
+                    self.alloc_temp(span)?;
+                }
+                self.emit(Instr::Unpack { src, base, len }, span);
+                for (index, pattern) in patterns.into_iter().enumerate() {
+                    let element = base
+                        .offset(index)
+                        .expect("internal error: the elements' registers exist");
+                    self.declare_pattern(pattern, element, span)?;
+                }
+                self.next_temp = mark;
+                Ok(())
+            }
+        }
+    }
+
+    /// The register a declaration of `pattern` writes its value to, if it's
+    /// one variable whose value is its register's: a local, or a local that
+    /// closures capture, whose declaration writes its register (see
+    /// [`Self::store`]).
+    fn declared_register(&self, pattern: &BindingPatternLocation) -> Option<Reg> {
+        let BindingPattern::Identifier { .. } = pattern.pattern else {
+            return None;
+        };
+        match self.analysis.variable(pattern.id)? {
+            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
+                Self::register(slot, pattern.span).ok()
+            }
+            ResolvedVar::Global { .. } | ResolvedVar::Upvalue { .. } => None,
+        }
+    }
+
+    /// The first of the registers a declaration of `patterns` writes the
+    /// elements of a value to, if each is one variable's register (see
+    /// [`Self::declared_register`]) and they follow each other: `(a, b)` of
+    /// the locals in `r3` and `r4` is `r3`.
+    fn declared_registers(&self, patterns: &[BindingPatternLocation]) -> Option<Reg> {
+        let first = self.declared_register(patterns.first()?)?;
+        patterns
+            .iter()
+            .enumerate()
+            .all(|(index, pattern)| self.declared_register(pattern) == first.offset(index))
+            .then_some(first)
+    }
+
+    /// Stores the value in `src` in `variable`, which a declaration, when
+    /// `declaring`, or an assignment at `span` writes, as [`Self::store`]
+    /// does. The value is taken if `src` is a temporary, and copied if it's
+    /// a local's register.
+    fn store_from(
+        &mut self,
+        variable: ResolvedVar,
+        src: Reg,
+        declaring: bool,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        if let ResolvedVar::Local { slot } = variable {
+            let dst = self.local(slot, span)?;
+            if dst != src {
+                let copy = if src.index() >= self.locals {
+                    Instr::Move { dst, src }
+                } else {
+                    Instr::Copy { dst, src }
+                };
+                self.emit(copy, span);
+            }
+            return Ok(());
+        }
+        if let ResolvedVar::Cell { slot } = variable
+            && declaring
+        {
+            return self.store_from(ResolvedVar::Local { slot }, src, declaring, span);
+        }
+        // The rest take the value, which a local keeps.
+        let mark = self.next_temp;
+        let src = if src.index() >= self.locals {
+            src
         } else {
-            let last = statements.len() - 1;
-            for (i, stmt) in statements.into_iter().enumerate() {
-                // A `;`-terminated statement pops its own value, so it can't
-                // be the block result; substitute unit.
-                let is_last_expr =
-                    i == last && !matches!(stmt.expression, Expression::Statement(_));
-                self.compile_expr(stmt)?;
-                if i == last && !is_last_expr {
-                    self.emit_unit();
+            let temp = self.alloc_temp(span)?;
+            self.emit(Instr::Copy { dst: temp, src }, span);
+            temp
+        };
+        let instr = match variable {
+            ResolvedVar::Cell { slot } => Instr::SetCell {
+                cell: self.local(slot, span)?,
+                src,
+            },
+            ResolvedVar::Upvalue { slot } => Instr::SetUpvalue {
+                index: upvalue(slot, span)?,
+                src,
+            },
+            ResolvedVar::Global { slot } => Instr::SetGlobal {
+                slot: global(slot),
+                src,
+            },
+            ResolvedVar::Local { .. } => unreachable!("internal error: a local is stored above"),
+        };
+        self.emit(instr, span);
+        self.next_temp = mark;
+        Ok(())
+    }
+
+    /// Compiles the assignment of `value` to `target`. Through an index or
+    /// a member, it's a call of the target's setter, whose result is the
+    /// assignment's value: `xs[i] = v` is `[]=(xs, i, v)`. Otherwise it's
+    /// unit.
+    fn compile_assignment(
+        &mut self,
+        target: AssignmentTargetLocation,
+        value: ExpressionLocation,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        match target.target {
+            AssignmentTarget::Identifier { .. } => {
+                let variable = self.analysis.variable(target.id).expect(
+                    "internal error: every assignment target is analysed before it's compiled",
+                );
+                self.store(variable, value, false, span)?;
+            }
+            AssignmentTarget::Index {
+                value: container,
+                index,
+            } => {
+                let setter = self.setter(target.id);
+                let args = vec![Arg::Expr(*container), Arg::Expr(*index), Arg::Expr(value)];
+                return self.compile_binding_call(&setter, args, dest, span);
+            }
+            AssignmentTarget::Member {
+                receiver,
+                member_span,
+                ..
+            } => {
+                let setter = self.setter(target.id);
+                let args = vec![Arg::Expr(*receiver), Arg::Expr(value)];
+                return self.compile_binding_call(&setter, args, dest, member_span);
+            }
+            AssignmentTarget::Sequence(targets) => {
+                // The whole value is read before any target is assigned.
+                let mark = self.next_temp;
+                let src = match self.compile_expr(value, Dest::Any)? {
+                    Operand::Local(reg) | Operand::Temp(reg) => reg,
+                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                };
+                self.assign_sequence(targets, src, span)?;
+                self.next_temp = mark;
+            }
+        }
+        self.unit(dest, span)
+    }
+
+    /// Assigns the elements of the value in `src` to `targets`, from the
+    /// left, for the destructuring assignment at `span`.
+    fn assign_sequence(
+        &mut self,
+        targets: Vec<AssignmentTargetLocation>,
+        src: Reg,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let len = u16::try_from(targets.len())
+            .map_err(|_too_many| CompileError::too_many_registers(span))?;
+        let mark = self.next_temp;
+        let base = Self::register(mark, span)?;
+        for _ in 0..len {
+            self.alloc_temp(span)?;
+        }
+        self.emit(Instr::Unpack { src, base, len }, span);
+        for (index, target) in targets.into_iter().enumerate() {
+            let element = base
+                .offset(index)
+                .expect("internal error: the elements' registers exist");
+            match target.target {
+                AssignmentTarget::Identifier { .. } => {
+                    let variable = self.analysis.variable(target.id).expect(
+                        "internal error: every assignment target is analysed before it's compiled",
+                    );
+                    self.store_from(variable, element, false, span)?;
+                }
+                AssignmentTarget::Index { value, index } => {
+                    let setter = self.setter(target.id);
+                    let args = vec![Arg::Expr(*value), Arg::Expr(*index), Arg::Copy(element)];
+                    self.compile_binding_call(&setter, args, Dest::Discard, span)?;
+                }
+                AssignmentTarget::Sequence(targets) => {
+                    self.assign_sequence(targets, element, span)?;
+                }
+                AssignmentTarget::Member { .. } => unreachable!(
+                    "internal error: the parser rejects members inside destructuring patterns"
+                ),
+            }
+        }
+        self.next_temp = mark;
+        Ok(())
+    }
+
+    /// Compiles the assignment with an operator at `span`, the one `id`
+    /// resolves, of `value` to `target`: `x += 1` is `x = x + 1`, with the
+    /// parts of an index or member target worked out once, so `xs[f()] += 1`
+    /// calls `f` once. The target is read first, then `value`.
+    fn compile_op_assignment(
+        &mut self,
+        id: NodeId,
+        target: AssignmentTargetLocation,
+        value: ExpressionLocation,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let mark = self.next_temp;
+        let target = self.prepare_target(target)?;
+        let Some(operator) = self.augmented_assignment(id) else {
+            return Err(CompileError::unresolved_binding(span));
+        };
+        let read = match &target {
+            PreparedTarget::Variable { variable, span } => Arg::Var {
+                variable: *variable,
+                span: *span,
+            },
+            PreparedTarget::Index {
+                container,
+                index,
+                span,
+                getter,
+                ..
+            } => Arg::Read {
+                getter: getter.clone(),
+                args: vec![*container, *index],
+                span: *span,
+            },
+            PreparedTarget::Member {
+                receiver,
+                span,
+                getter,
+                ..
+            } => Arg::Read {
+                getter: getter.clone(),
+                args: vec![*receiver],
+                span: *span,
+            },
+        };
+        let args = vec![read, Arg::Expr(value)];
+        // A local takes the result in its own register; any other target
+        // has it stored from a temporary.
+        if let PreparedTarget::Variable {
+            variable: ResolvedVar::Local { slot },
+            span: target_span,
+        } = target
+        {
+            let dst = self.local(slot, target_span)?;
+            self.compile_binding_call(&operator, args, Dest::Reg(dst), span)?;
+        } else {
+            let result = self.alloc_temp(span)?;
+            self.compile_binding_call(&operator, args, Dest::Reg(result), span)?;
+            self.store_target(target, result)?;
+        }
+        self.next_temp = mark;
+        Ok(())
+    }
+
+    /// Works out the parts of `target` that an assignment with an operator
+    /// reads and writes it through, each once, into temporaries that stay
+    /// taken until the assignment is done.
+    fn prepare_target(
+        &mut self,
+        target: AssignmentTargetLocation,
+    ) -> Result<PreparedTarget, CompileError> {
+        Ok(match target.target {
+            AssignmentTarget::Identifier { span, .. } => PreparedTarget::Variable {
+                variable: self.analysis.variable(target.id).expect(
+                    "internal error: every assignment target is analysed before it's compiled",
+                ),
+                span,
+            },
+            AssignmentTarget::Index { value, index } => {
+                let span = value.span.merge(index.span);
+                let container = self.alloc_temp(value.span)?;
+                self.compile_expr(*value, Dest::Reg(container))?;
+                let index_reg = self.alloc_temp(index.span)?;
+                self.compile_expr(*index, Dest::Reg(index_reg))?;
+                PreparedTarget::Index {
+                    container,
+                    index: index_reg,
+                    span,
+                    getter: self.target_getter(target.id),
+                    setter: self.setter(target.id),
                 }
             }
-        }
+            AssignmentTarget::Member {
+                receiver,
+                member_span,
+                ..
+            } => {
+                let reg = self.alloc_temp(receiver.span)?;
+                self.compile_expr(*receiver, Dest::Reg(reg))?;
+                PreparedTarget::Member {
+                    receiver: reg,
+                    span: member_span,
+                    getter: self.target_getter(target.id),
+                    setter: self.setter(target.id),
+                }
+            }
+            AssignmentTarget::Sequence(_) => unreachable!(
+                "internal error: name resolution rejects a sequence as an augmented assignment target"
+            ),
+        })
+    }
 
+    /// Stores the value in `src`, a temporary, in `target`.
+    fn store_target(&mut self, target: PreparedTarget, src: Reg) -> Result<(), CompileError> {
+        match target {
+            PreparedTarget::Variable { variable, span } => {
+                self.store_from(variable, src, false, span)
+            }
+            PreparedTarget::Index {
+                container,
+                index,
+                span,
+                setter,
+                ..
+            } => {
+                let args = vec![Arg::Copy(container), Arg::Copy(index), Arg::Copy(src)];
+                self.compile_binding_call(&setter, args, Dest::Discard, span)
+                    .map(|_| ())
+            }
+            PreparedTarget::Member {
+                receiver,
+                span,
+                setter,
+                ..
+            } => {
+                let args = vec![Arg::Copy(receiver), Arg::Copy(src)];
+                self.compile_binding_call(&setter, args, Dest::Discard, span)
+                    .map(|_| ())
+            }
+        }
+    }
+
+    /// Compiles a `for` loop, whose value is unit, or a list or map
+    /// comprehension, whose value is the list or map it makes.
+    fn compile_for(
+        &mut self,
+        iterations: &[ForIteration],
+        body: ForBody,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        match body {
+            ForBody::Block(block) => {
+                self.compile_iterations(iterations, span, &mut |this| {
+                    this.compile_expr(block.clone(), Dest::Discard).map(|_| ())
+                })?;
+                self.unit(dest, span)
+            }
+            ForBody::List { expr } => {
+                let list = self.alloc_temp(span)?;
+                self.emit(
+                    Instr::MakeList {
+                        dst: list,
+                        base: list,
+                        len: 0,
+                    },
+                    span,
+                );
+                self.compile_iterations(iterations, span, &mut |this| {
+                    let src = this.alloc_temp(span)?;
+                    this.compile_expr(expr.clone(), Dest::Reg(src))?;
+                    this.emit(Instr::ListPush { list, src }, span);
+                    this.next_temp = src.index();
+                    Ok(())
+                })?;
+                Ok(self.built(list, dest, span))
+            }
+            ForBody::Map {
+                key,
+                value,
+                default,
+            } => {
+                // The default is made once, before the loop.
+                let map = self.alloc_temp(span)?;
+                let has_default = default.is_some();
+                if let Some(default) = default {
+                    let reg = self.alloc_temp(span)?;
+                    self.compile_expr(*default, Dest::Reg(reg))?;
+                    self.next_temp = map.index() + 1;
+                }
+                let base = map
+                    .offset(1)
+                    .ok_or_else(|| CompileError::too_many_registers(span))?;
+                self.emit(
+                    Instr::MakeMap {
+                        dst: map,
+                        base,
+                        pairs: 0,
+                        default: has_default,
+                    },
+                    span,
+                );
+                self.compile_iterations(iterations, span, &mut |this| {
+                    let (key, value) = this.compile_pair(key.clone(), value.clone(), span)?;
+                    this.emit(Instr::MapInsert { map, key, value }, span);
+                    this.next_temp = key.index();
+                    Ok(())
+                })?;
+                Ok(self.built(map, dest, span))
+            }
+        }
+    }
+
+    /// Compiles the `iterations` of a `for` loop at `span`, each loop inside
+    /// the one before, and a guard's code inside the loop before it, with
+    /// `compile_leaf` compiling the body inside them all. A `break` or
+    /// `continue` in the body leaves or goes on with the innermost loop.
+    fn compile_iterations(
+        &mut self,
+        iterations: &[ForIteration],
+        span: Span,
+        compile_leaf: &mut dyn FnMut(&mut Self) -> Result<(), CompileError>,
+    ) -> Result<(), CompileError> {
+        let Some((first, rest)) = iterations.split_first() else {
+            return compile_leaf(self);
+        };
+        let mark = self.next_temp;
+        match first {
+            ForIteration::Iteration { l_value, sequence } => {
+                let sequence_span = sequence.span;
+                // The iterator takes the sequence's temporary, or one of its
+                // own when the sequence is a local.
+                let (iter, src) = match self.compile_expr(sequence.clone(), Dest::Any)? {
+                    Operand::Temp(reg) => (reg, reg),
+                    Operand::Local(reg) => (self.alloc_temp(sequence_span)?, reg),
+                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                };
+                self.emit(Instr::GetIterator { dst: iter, src }, sequence_span);
+                let start = self.builder.label();
+                let end = self.builder.label();
+                self.builder.bind(start);
+                // A loop variable in a register gets each value straight
+                // away; a pattern is unpacked from a temporary.
+                if let Some(dst) = self.declared_register(l_value) {
+                    self.builder.jump(
+                        Instr::IterNext {
+                            iter,
+                            dst,
+                            offset: 0,
+                        },
+                        end,
+                        span,
+                    );
+                } else {
+                    let value = self.alloc_temp(span)?;
+                    self.builder.jump(
+                        Instr::IterNext {
+                            iter,
+                            dst: value,
+                            offset: 0,
+                        },
+                        end,
+                        span,
+                    );
+                    self.declare_pattern(l_value.clone(), value, span)?;
+                    self.next_temp = value.index();
+                }
+                self.loops.push(Loop { start, end });
+                self.compile_iterations(rest, span, compile_leaf)?;
+                self.loops.pop();
+                self.builder.jump(Instr::Jump { offset: 0 }, start, span);
+                self.builder.bind(end);
+            }
+            ForIteration::Guard(condition) => {
+                let skip = self.builder.label();
+                self.jump_unless(condition.clone(), skip)?;
+                self.compile_iterations(rest, span, compile_leaf)?;
+                self.builder.bind(skip);
+            }
+        }
+        self.next_temp = mark;
         Ok(())
     }
 
-    fn compile_if(
+    /// Compiles `a and b` or `a or b`: `b` only runs when `a` doesn't
+    /// settle it. Both go to one register, which isn't a local's: the left
+    /// operand written to a local's register would change what the right
+    /// one reads of it, as in `x = y and x`.
+    fn compile_logical(
         &mut self,
-        condition: ExpressionLocation,
-        on_true: ExpressionLocation,
-        on_false: Option<ExpressionLocation>,
-        _span: Span,
-    ) -> Result<(), CompileError> {
-        let condition_span = condition.span;
-        self.compile_expr(condition)?;
-        let conditional_jump_idx = self
-            .ir
-            .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), condition_span);
-        self.ir.write(OpCode::Pop, Span::synthetic());
-        let on_true_id = on_true.id;
-        self.compile_expr(on_true)?;
-        // An `if` without an `else` is `()`, so a branch with a value of
-        // its own, as in `if c { 1 }`, gives `()` instead.
-        if on_false.is_none()
-            && !matches!(
-                self.analysis.expr_types.get(&on_true_id),
-                Some(StaticType::Never) | None
-            )
-            && self.analysis.expr_types.get(&on_true_id) != Some(&StaticType::unit())
-        {
-            self.ir.write(OpCode::Pop, Span::synthetic());
-            self.emit_unit();
+        left: ExpressionLocation,
+        operator: LogicalOperator,
+        right: ExpressionLocation,
+        dest: Dest,
+    ) -> Result<Operand, CompileError> {
+        let left_span = left.span;
+        let dst = match dest {
+            Dest::Reg(reg) if reg.index() >= self.locals => reg,
+            Dest::Reg(_) | Dest::Any | Dest::Discard => self.alloc_temp(left_span)?,
+        };
+        self.compile_expr(left, Dest::Reg(dst))?;
+        let end = self.builder.label();
+        let jump = match operator {
+            LogicalOperator::And => Instr::JumpIfFalse {
+                cond: dst,
+                offset: 0,
+            },
+            LogicalOperator::Or => Instr::JumpIfTrue {
+                cond: dst,
+                offset: 0,
+            },
+        };
+        self.builder.jump(jump, end, left_span);
+        self.compile_expr(right, Dest::Reg(dst))?;
+        self.builder.bind(end);
+        Ok(match dest {
+            Dest::Any => Operand::Temp(dst),
+            Dest::Reg(reg) if reg != dst => {
+                self.emit(Instr::Move { dst: reg, src: dst }, left_span);
+                Operand::Placed
+            }
+            Dest::Reg(_) | Dest::Discard => Operand::Placed,
+        })
+    }
+
+    /// Compiles a tuple literal, its elements in order.
+    fn compile_tuple(
+        &mut self,
+        values: Vec<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let len = u16::try_from(values.len())
+            .map_err(|_too_many| CompileError::too_many_registers(span))?;
+        let mark = self.next_temp;
+        let base = self.compile_arguments(exprs(values), span)?;
+        // `MakeTuple` reads its elements before it writes `dst`.
+        self.next_temp = mark;
+        let dst = self.place(dest, span)?;
+        self.emit(Instr::MakeTuple { dst, base, len }, span);
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// Compiles a list literal, its elements in order: the first
+    /// [`LITERAL_CHUNK`] in registers of their own, which `MakeList` makes
+    /// the list of, and each one after them pushed onto it, so a long list
+    /// takes no more registers than a short one.
+    fn compile_list(
+        &mut self,
+        mut values: Vec<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let rest = values.split_off(values.len().min(LITERAL_CHUNK));
+        let len = u16::try_from(values.len()).expect("internal error: a chunk fits a u16");
+        let mark = self.next_temp;
+        let base = self.compile_arguments(exprs(values), span)?;
+        self.next_temp = mark;
+        if rest.is_empty() {
+            let dst = self.place(dest, span)?;
+            self.emit(Instr::MakeList { dst, base, len }, span);
+            return Ok(Self::placed(dest, dst));
         }
-        if let Some(on_false) = on_false {
-            let jump_to_end = self
-                .ir
-                .write(OpCode::Jump(JumpTarget::PLACEHOLDER), Span::synthetic());
-            self.patch_jump(conditional_jump_idx);
-            self.ir.write(OpCode::Pop, Span::synthetic());
-            self.compile_expr(on_false)?;
-            self.patch_jump(jump_to_end);
+        let list = self.alloc_temp(span)?;
+        self.emit(
+            Instr::MakeList {
+                dst: list,
+                base,
+                len,
+            },
+            span,
+        );
+        for value in rest {
+            let src = self.alloc_temp(value.span)?;
+            self.compile_expr(value, Dest::Reg(src))?;
+            self.emit(Instr::ListPush { list, src }, span);
+            self.next_temp = src.index();
+        }
+        Ok(self.built(list, dest, span))
+    }
+
+    /// Compiles a map literal, each key before its value, and its default
+    /// after them, all in registers of their own, which `MakeMap` makes the
+    /// map of. Unlike a list's elements they aren't added in chunks: a key
+    /// is hashed by what it holds when it goes into the map, so a map made
+    /// before its last expression ran would hash a key that expression
+    /// changes, as the list `k` in `%{k: 1, …, other: k.push(0)}`, too early.
+    fn compile_map(
+        &mut self,
+        values: Vec<(ExpressionLocation, Option<ExpressionLocation>)>,
+        default: Option<ExpressionLocation>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let pairs = u16::try_from(values.len())
+            .map_err(|_too_many| CompileError::too_many_registers(span))?;
+        let mark = self.next_temp;
+        let base = Self::register(mark, span)?;
+        for (key, value) in values {
+            self.compile_pair(key, value, span)?;
+        }
+        let has_default = default.is_some();
+        if let Some(default) = default {
+            let reg = self.alloc_temp(default.span)?;
+            self.compile_expr(default, Dest::Reg(reg))?;
+        }
+        // `MakeMap` reads its pairs before it writes `dst`.
+        self.next_temp = mark;
+        let dst = self.place(dest, span)?;
+        self.emit(
+            Instr::MakeMap {
+                dst,
+                base,
+                pairs,
+                default: has_default,
+            },
+            span,
+        );
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// Compiles a key of a map literal and its value, which is unit when
+    /// there's none, as in the set `{1, 2}`, into two new temporaries.
+    fn compile_pair(
+        &mut self,
+        key: ExpressionLocation,
+        value: Option<ExpressionLocation>,
+        span: Span,
+    ) -> Result<(Reg, Reg), CompileError> {
+        let key_reg = self.alloc_temp(key.span)?;
+        let value_reg = self.alloc_temp(span)?;
+        self.compile_expr(key, Dest::Reg(key_reg))?;
+        match value {
+            Some(value) => {
+                self.compile_expr(value, Dest::Reg(value_reg))?;
+            }
+            None => self.emit(Instr::LoadUnit { dst: value_reg }, Span::synthetic()),
+        }
+        Ok((key_reg, value_reg))
+    }
+
+    /// What a literal built in `reg`, the first free temporary but one,
+    /// gives for `dest`.
+    fn built(&mut self, reg: Reg, dest: Dest, span: Span) -> Operand {
+        debug_assert_eq!(reg.index() + 1, self.next_temp);
+        match dest {
+            Dest::Any => Operand::Temp(reg),
+            Dest::Reg(dst) => {
+                self.emit(Instr::Move { dst, src: reg }, span);
+                Operand::Placed
+            }
+            Dest::Discard => Operand::Placed,
+        }
+    }
+
+    /// Compiles the range `start..end`, or `start..=end` if `inclusive`, or
+    /// `start..` without an end.
+    fn compile_range(
+        &mut self,
+        start: Option<Box<ExpressionLocation>>,
+        end: Option<Box<ExpressionLocation>>,
+        inclusive: bool,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let start = start.expect("internal error: the parser gives a range a start");
+        let bounds = std::iter::once(*start).chain(end.map(|end| *end)).collect();
+        let mark = self.next_temp;
+        let operands = self.compile_operands(exprs(bounds))?;
+        // The range reads its bounds before it writes `dst`.
+        self.next_temp = mark;
+        let dst = self.place(dest, span)?;
+        let instr = match (&operands[..], inclusive) {
+            ([start, end], false) => Instr::MakeRange {
+                dst,
+                start: *start,
+                end: *end,
+            },
+            ([start, end], true) => Instr::MakeRangeInclusive {
+                dst,
+                start: *start,
+                end: *end,
+            },
+            ([start], _) => Instr::MakeRangeFrom { dst, start: *start },
+            _ => unreachable!("internal error: a range has one or two bounds"),
+        };
+        self.emit(instr, span);
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// Compiles `arguments` into registers of their own, one after the
+    /// other from the first free temporary, which is returned. A local is
+    /// copied there: an argument register is the call's own copy, which the
+    /// callee may take or change.
+    fn compile_arguments(&mut self, arguments: Vec<Arg>, span: Span) -> Result<Reg, CompileError> {
+        let first = Self::register(self.next_temp, span)?;
+        let registers = arguments
+            .iter()
+            .map(|argument| self.alloc_temp(argument.span()))
+            .collect::<Result<Vec<_>, _>>()?;
+        for (argument, reg) in arguments.into_iter().zip(registers) {
+            self.compile_arg(argument, Dest::Reg(reg))?;
+        }
+        Ok(first)
+    }
+
+    /// Compiles the call of the native in global slot `slot` with
+    /// `arguments`, of which there are `args`.
+    fn compile_native_call(
+        &mut self,
+        slot: u16,
+        args: u8,
+        arguments: Vec<Arg>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        self.natives.borrow_mut().insert(usize::from(slot));
+        let mark = self.next_temp;
+        let base = self.compile_arguments(arguments, span)?;
+        // The native reads its arguments before its result is written.
+        self.next_temp = mark;
+        let dst = self.place(dest, span)?;
+        self.emit(
+            Instr::CallNative {
+                dst,
+                base,
+                slot,
+                args,
+            },
+            span,
+        );
+        Ok(Self::placed(dest, dst))
+    }
+
+    /// Compiles the rest of the call of the function in `base`, the first
+    /// free temporary but one, with `arguments`: they go in the registers
+    /// after it, and the result where the function was. A `vectorised` call
+    /// applies the function to each element of tuples, with `CallVec`.
+    fn finish_call(
+        &mut self,
+        base: Reg,
+        arguments: Vec<Arg>,
+        vectorised: bool,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        debug_assert_eq!(base.index() + 1, self.next_temp);
+        let args = u16::try_from(arguments.len())
+            .map_err(|_too_many| CompileError::too_many_registers(span))?;
+        self.compile_arguments(arguments, span)?;
+        let call = if vectorised {
+            Instr::CallVec { base, args }
         } else {
-            // No else branch — push unit so the if-expression always produces a value.
-            let jump_to_end = self
-                .ir
-                .write(OpCode::Jump(JumpTarget::PLACEHOLDER), Span::synthetic());
-            self.patch_jump(conditional_jump_idx);
-            self.ir.write(OpCode::Pop, Span::synthetic());
-            self.emit_unit();
-            self.patch_jump(jump_to_end);
+            Instr::Call { base, args }
+        };
+        self.emit(call, span);
+        self.next_temp = base.index() + 1;
+        match dest {
+            Dest::Any => Ok(Operand::Temp(base)),
+            Dest::Reg(dst) => {
+                self.emit(Instr::Move { dst, src: base }, span);
+                Ok(Operand::Placed)
+            }
+            Dest::Discard => Ok(Operand::Placed),
         }
-
-        Ok(())
     }
 
-    fn compile_while(
-        &mut self,
-        condition: ExpressionLocation,
-        loop_body: ExpressionLocation,
-        _span: Span,
-    ) -> Result<(), CompileError> {
-        let condition_span = condition.span;
-        let loop_start = self.new_loop_context();
-        self.compile_expr(condition)?;
-        let conditional_jump_idx = self
-            .ir
-            .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), condition_span);
-        self.ir.write(OpCode::Pop, Span::synthetic());
-        self.compile_expr(loop_body)?;
-        self.ir.write(OpCode::Pop, Span::synthetic());
-        self.write_jump_back(loop_start, Span::synthetic());
-        self.patch_jump(conditional_jump_idx);
-        self.ir.write(OpCode::Pop, Span::synthetic());
-        let break_instructions =
-            std::mem::take(&mut self.current_loop_context_mut().unwrap().break_instructions);
-        for instruction in break_instructions {
-            self.patch_jump(instruction)
-        }
-        self.end_loop_context();
-        self.emit_unit();
-        Ok(())
-    }
-
-    fn compile_function_decl(
+    /// Compiles the function declared at `id`: a closure of its body over
+    /// what it captures, or the body alone if it captures nothing, stored in
+    /// the variable its name declares. A function without a name is the
+    /// expression's value instead, which `dest` says where to put; a
+    /// declaration's value is unit. A generic function, which is declared at
+    /// the top level, runs as its instances, each its body compiled with
+    /// the instance's picks and stored in a global of its own.
+    fn compile_function_declaration(
         &mut self,
         id: NodeId,
         name: Option<String>,
         body: ExpressionLocation,
         pure: bool,
+        dest: Dest,
         span: Span,
-    ) -> Result<(), CompileError> {
-        let name_variable = self.analysis.variable(id);
-        // A later REPL line may make instances of a function in a global.
-        let kept = (self.functions.is_some()
-            && self.instance.is_none()
-            && matches!(name_variable, Some(ResolvedVar::Global { .. })))
-        .then(|| DeclaredFunction {
-            name: name.clone(),
-            body: body.clone(),
-            pure,
-            span,
-        });
-        // A generic function whose body depends on the types it's called
-        // with runs only as its instances, each its body compiled with the
-        // instance's picks. It's declared at the top level, so it captures
-        // nothing and is a global, and its instances are stored in globals
-        // of their own. A `pure fn`'s instance has a cache of its own, as
-        // arguments of different types can be equal: `f(1)` and `f(1.0)`
-        // call different instances, which may return different values.
+    ) -> Result<Operand, CompileError> {
         let analysis = Rc::clone(&self.analysis);
+        // A later REPL line may make instances of a function in a global.
+        if let Some(functions) = &mut self.functions
+            && self.instance.is_none()
+            && let Some(ResolvedVar::Global { .. }) = analysis.variable(id)
+        {
+            let declared = DeclaredFunction {
+                name: name.clone(),
+                body: body.clone(),
+                pure,
+                span,
+            };
+            functions.insert(id, declared);
+        }
         if let Some(instances) = analysis.instances.get(&id) {
             for (index, instance) in instances.iter().enumerate() {
                 let at = InstanceAt {
                     declaration: id,
                     index,
                 };
-                let (compiled, _) =
+                let (function, _) =
                     self.compile_function_body(id, name.clone(), body.clone(), Some(at))?;
-                self.store_instance(compiled, instance, pure, span);
+                // A `pure fn`'s instance has a cache of its own, as arguments
+                // of different types can be equal: `f(1)` and `f(1.0)` call
+                // different instances, which may return different values.
+                self.store_function(Rc::new(function), &[], pure, instance.variable, span)?;
             }
-            if let (Some(kept), Some(functions)) = (kept, &mut self.functions) {
-                functions.insert(id, kept);
+            self.compiled_instances.insert(id);
+            return self.unit(dest, span);
+        }
+        let function = self.prototype(id, name, body)?;
+        let captures = analysis.captures(id);
+        let Some(variable) = analysis.variable(id) else {
+            let dst = self.place(dest, span)?;
+            self.make_function(function, captures, pure, dst, span);
+            return Ok(Self::placed(dest, dst));
+        };
+        self.store_function(function, captures, pure, variable, span)?;
+        self.unit(dest, span)
+    }
+
+    /// Stores a function made of `function` (see [`Self::make_function`])
+    /// in `variable`, which its declaration at `span` declares.
+    fn store_function(
+        &mut self,
+        function: Rc<CompiledFunction>,
+        captures: &[CaptureSource],
+        pure: bool,
+        variable: ResolvedVar,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let mark = self.next_temp;
+        match variable {
+            ResolvedVar::Local { slot } => {
+                let dst = self.local(slot, span)?;
+                self.make_function(function, captures, pure, dst, span);
             }
-            self.emit_unit();
-            return Ok(());
+            // A function that captures itself needs its cell before its
+            // value exists.
+            ResolvedVar::Cell { slot } => {
+                let cell = self.local(slot, span)?;
+                self.emit(Instr::NewCell { reg: cell }, span);
+                let src = self.alloc_temp(span)?;
+                self.make_function(function, captures, pure, src, span);
+                self.emit(Instr::SetCell { cell, src }, span);
+            }
+            ResolvedVar::Global { slot } => {
+                let src = self.alloc_temp(span)?;
+                self.make_function(function, captures, pure, src, span);
+                self.emit(
+                    Instr::SetGlobal {
+                        slot: global(slot),
+                        src,
+                    },
+                    span,
+                );
+            }
+            ResolvedVar::Upvalue { .. } => {
+                unreachable!("internal error: the analyser never declares an upvalue")
+            }
         }
-        let compiled = self.prototype(id, name, body)?;
-        let idx = self
-            .ir
-            .add_constant(Value::function(Function::Compiled(compiled)));
+        self.next_temp = mark;
+        Ok(())
+    }
 
-        // A captured function may capture itself, before its value exists, so
-        // its cell must be in place before the closure is made.
-        if let Some(ResolvedVar::Cell { slot }) = name_variable {
-            self.ir.write(OpCode::NewCell(slot), span);
-        }
-
-        let captures = self.analysis.captures(id);
-        if !captures.is_empty() {
-            let values = captures.into();
-            self.ir.write(
-                OpCode::Closure {
-                    constant_idx: idx,
-                    values,
-                },
-                span,
-            );
+    /// Puts a function value of `function` in `dst`: a closure over
+    /// `captures` if it captures anything, the function itself if not, and
+    /// for a `pure` one, that in a memoising wrapper with a cache of its
+    /// own, made each time the declaration runs.
+    fn make_function(
+        &mut self,
+        function: Rc<CompiledFunction>,
+        captures: &[CaptureSource],
+        pure: bool,
+        dst: Reg,
+        span: Span,
+    ) {
+        if captures.is_empty() {
+            let k = self
+                .builder
+                .constant(Value::function(Function::Compiled(function)));
+            self.emit(Instr::LoadK { dst, k }, span);
         } else {
-            self.ir.write(OpCode::Constant(idx), span);
+            let index = self.builder.closure(function, captures);
+            self.emit(Instr::Closure { dst, index }, span);
         }
-
-        // For `pure fn`, wrap the function in a memoization cache.  The cache
-        // is allocated fresh each time the declaration is evaluated, so each
-        // closure instance has its own independent cache.
         if pure {
-            self.ir.write(OpCode::Memoize, span);
+            self.emit(Instr::Memoize { reg: dst }, span);
         }
+    }
 
-        match name_variable {
-            Some(var @ (ResolvedVar::Local { .. } | ResolvedVar::Global { .. })) => {
-                self.emit_declare(var, span);
+    /// Stores `value`, a constant, in `variable`, which a declaration at
+    /// `span` declares. A declaration replaces what a captured local's
+    /// register held, so a declaration that runs again, as in a loop, makes
+    /// a new variable rather than writing to the cell a closure kept.
+    fn declare_value(
+        &mut self,
+        variable: ResolvedVar,
+        value: Value,
+        span: Span,
+    ) -> Result<(), CompileError> {
+        let k = self.builder.constant(value);
+        match variable {
+            ResolvedVar::Local { slot } | ResolvedVar::Cell { slot } => {
+                let dst = self.local(slot, span)?;
+                self.emit(Instr::LoadK { dst, k }, span);
             }
-            Some(ResolvedVar::Cell { slot }) => {
-                self.ir.write(OpCode::SetCell(slot), span);
+            ResolvedVar::Global { slot } => {
+                let mark = self.next_temp;
+                let src = self.alloc_temp(span)?;
+                self.emit(Instr::LoadK { dst: src, k }, span);
+                self.emit(
+                    Instr::SetGlobal {
+                        slot: global(slot),
+                        src,
+                    },
+                    span,
+                );
+                self.next_temp = mark;
             }
-            Some(ResolvedVar::Upvalue { .. }) => {
-                unreachable!("the analyser never assigns a declaration to an upvalue")
+            ResolvedVar::Upvalue { .. } => {
+                unreachable!("internal error: the analyser never declares an upvalue")
             }
-            None => {}
         }
+        Ok(())
+    }
 
-        if let (Some(kept), Some(functions)) = (kept, &mut self.functions) {
-            functions.insert(id, kept);
+    /// Compiles the struct declaration at `id`: its constructor, and the
+    /// getter and setter of each field, made here and stored where the
+    /// analyser put them.
+    fn compile_struct_declaration(&mut self, id: NodeId, span: Span) -> Result<(), CompileError> {
+        let analysis = Rc::clone(&self.analysis);
+        let declared = analysis.declared_struct(id);
+        // The constructor and accessors share this one `Rc`: struct values
+        // and accessor checks compare their info by identity.
+        let info = Rc::new(declared.info.clone());
+        let constructor = analysis
+            .variable(id)
+            .expect("internal error: a struct declaration declares its constructor");
+        self.declare_value(
+            constructor,
+            Value::function(Function::struct_constructor(Rc::clone(&info))),
+            span,
+        )?;
+        for (index, field) in declared.fields.iter().enumerate() {
+            self.declare_value(
+                field.getter,
+                Value::function(Function::struct_getter(Rc::clone(&info), index)),
+                span,
+            )?;
+            self.declare_value(
+                field.setter,
+                Value::function(Function::struct_setter(Rc::clone(&info), index)),
+                span,
+            )?;
         }
-
-        if name_variable.is_some() {
-            self.emit_unit();
-        }
-
         Ok(())
     }
 
@@ -1381,381 +2500,101 @@ impl Compiler {
                 .unwrap_or(shared),
         }
         .clone();
-        let mut fn_compiler = self.nested(self.analysis.frame_size(id), instance.or(self.instance));
-        fn_compiler.compile_expr(body)?;
-        Ok(fn_compiler.finish_function(name, static_type))
-    }
-
-    /// A compiler for the body of a function declared in the code this one
-    /// compiles, whose own variables take `source_locals` slots, compiled
-    /// with the picks of `instance`.
-    fn nested(&self, source_locals: usize, instance: Option<InstanceAt>) -> Self {
-        Self {
-            ir: Default::default(),
-            source_locals,
-            temp_count: 0,
-            temp_uses: Vec::new(),
-            loop_stack: vec![],
-            allow_return: true,
-            optimize: self.optimize,
-            analysis: Rc::clone(&self.analysis),
-            instance,
-            used_instance: Cell::new(false),
-            prototypes: Rc::clone(&self.prototypes),
-            functions: None,
-            natives: Rc::clone(&self.natives),
-            native_ops: Rc::clone(&self.native_ops),
+        let locals = self.analysis.frame_size(id);
+        if locals > WINDOW {
+            return Err(CompileError::too_many_registers(body.span));
         }
-    }
-
-    /// Ends a function's body with `Return`, and returns the function and
-    /// whether its body used a pick of the instance it's compiled in.
-    fn finish_function(
-        mut self,
-        name: Option<String>,
-        static_type: StaticType,
-    ) -> (CompiledFunction, bool) {
-        self.ir.write(OpCode::Return, Span::synthetic());
-        self.layout_temporaries();
-
-        if self.optimize {
-            self.ir.peephole();
-        }
-
-        let num_locals = self.num_locals();
-        let used_instance = self.used_instance.get();
-        (
-            CompiledFunction {
-                name,
-                static_type,
-                body: self.ir.into_chunk(),
-                num_locals,
-                num_globals: 0,
-                natives: Vec::new(),
-            },
-            used_instance,
-        )
-    }
-
-    fn compile_for(
-        &mut self,
-        iterations: &[ForIteration],
-        body: ForBody,
-        span: Span,
-    ) -> Result<(), CompileError> {
-        match body {
-            ForBody::Block(block) => {
-                self.compile_for_iterations(iterations, span, &mut |this| {
-                    // The body is always a block, which always pushes exactly one value.
-                    // Discard it — each iteration's result is unobservable.
-                    this.compile_expr(block.clone())?;
-                    this.ir.write(OpCode::Pop, span);
-                    Ok(())
-                })?;
-                self.emit_unit();
-                Ok(())
-            }
-            ForBody::List { expr } => {
-                let tmp_list = self.allocate_temp();
-                self.ir.write(OpCode::MakeList(0), span);
-                self.write_temp(tmp_list, span, OpCode::SetLocal);
-                self.compile_for_iterations(iterations, span, &mut |this| {
-                    this.compile_expr(expr.clone())?;
-                    this.write_temp(tmp_list, span, OpCode::ListPush);
-                    Ok(())
-                })?;
-                self.write_temp(tmp_list, span, OpCode::GetLocal);
-                Ok(())
-            }
-            ForBody::Map {
-                key,
-                value,
-                default,
-            } => {
-                let tmp_map = self.allocate_temp();
-                let has_default = default.is_some();
-                if let Some(default) = default {
-                    self.compile_expr(*default)?;
-                }
-                self.ir.write(
-                    OpCode::MakeMap {
-                        pairs: 0,
-                        has_default,
-                    },
-                    span,
-                );
-                self.write_temp(tmp_map, span, OpCode::SetLocal);
-                self.compile_for_iterations(iterations, span, &mut |this| {
-                    this.compile_expr(key.clone())?;
-                    if let Some(value) = value.clone() {
-                        this.compile_expr(value)?;
-                    } else {
-                        this.emit_unit();
-                    }
-                    this.write_temp(tmp_map, span, OpCode::MapInsert);
-                    Ok(())
-                })?;
-                self.write_temp(tmp_map, span, OpCode::GetLocal);
-                Ok(())
-            }
-        }
-    }
-
-    /// Shared loop scaffolding for `compile_for_block`, `compile_for_list`, and
-    /// `compile_for_map`. Handles iteration and guard clauses; calls `compile_leaf`
-    /// for the innermost body once all iterations are peeled off.
-    fn compile_for_iterations(
-        &mut self,
-        iterations: &[ForIteration],
-        span: Span,
-        compile_leaf: &mut dyn FnMut(&mut Self) -> Result<(), CompileError>,
-    ) -> Result<(), CompileError> {
-        let Some((first, rest)) = iterations.split_first() else {
-            return compile_leaf(self);
+        let mut compiler = self.nested(locals, instance.or(self.instance));
+        let src = match compiler.compile_expr(body, Dest::Any)? {
+            Operand::Local(reg) | Operand::Temp(reg) => reg,
+            Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
         };
+        compiler.emit(Instr::Return { src }, Span::synthetic());
+        let used_instance = compiler.used_instance.get();
+        Ok((
+            compiler.finish(name, static_type, 0, Vec::new()),
+            used_instance,
+        ))
+    }
 
-        match first {
-            ForIteration::Iteration { l_value, sequence } => {
-                self.compile_expr(sequence.clone())?;
-                self.ir.write(OpCode::GetIterator, sequence.span);
+    /// What the identifier `id` refers to, in the instance being compiled.
+    fn binding(&self, id: NodeId) -> Binding {
+        self.instance_pick(|instance| instance.bindings.get(&id))
+            .unwrap_or_else(|| self.analysis.binding(id))
+            .clone()
+    }
 
-                let loop_start = self.new_loop_context();
-                let iter_next = self
-                    .ir
-                    .write(OpCode::IterNext(JumpTarget::PLACEHOLDER), span);
-                self.compile_binding_pattern(l_value.clone(), span)?;
-
-                self.compile_for_iterations(rest, span, compile_leaf)?;
-
-                self.write_jump_back(loop_start, span);
-
-                // Both IterNext-done and break jump to the iterator Pop
-                self.patch_jump(iter_next);
-                let break_instructions = std::mem::take(
-                    &mut self.current_loop_context_mut().unwrap().break_instructions,
-                );
-                for instruction in break_instructions {
-                    self.patch_jump(instruction);
-                }
-                self.end_loop_context();
-
-                // Pop the iterator
-                self.ir.write(OpCode::Pop, Span::synthetic());
-            }
-            ForIteration::Guard(condition) => {
-                self.compile_expr(condition.clone())?;
-                let skip_jump = self
-                    .ir
-                    .write(OpCode::JumpIfFalse(JumpTarget::PLACEHOLDER), span);
-                self.ir.write(OpCode::Pop, Span::synthetic());
-                self.compile_for_iterations(rest, span, compile_leaf)?;
-                let end_jump = self.ir.write(OpCode::Jump(JumpTarget::PLACEHOLDER), span);
-                self.patch_jump(skip_jump);
-                self.ir.write(OpCode::Pop, Span::synthetic());
-                self.patch_jump(end_jump);
-            }
+    /// The pick `pick` finds in the instance being compiled, if any, noting
+    /// that the code depends on the instance.
+    fn instance_pick<'a, T>(
+        &'a self,
+        pick: impl FnOnce(&'a Instance) -> Option<&'a T>,
+    ) -> Option<&'a T> {
+        let found = self
+            .instance
+            .map(|at| &self.analysis.instances[&at.declaration][at.index])
+            .and_then(pick);
+        if found.is_some() {
+            self.used_instance.set(true);
         }
-
-        Ok(())
+        found
     }
 
-    fn new_loop_context(&mut self) -> LabelId {
-        let start = self.ir.next_label();
-        self.loop_stack.push(LoopContext {
-            start,
-            break_instructions: Vec::new(),
-            stack_depth: self.ir.stack_depth(),
-        });
-        start
+    /// The function that writes through the target at `id`, in the
+    /// instance being compiled: the setter of `p.x`, `x=`.
+    fn setter(&self, id: NodeId) -> Binding {
+        self.instance_pick(|instance| instance.setters.get(&id))
+            .unwrap_or_else(|| self.analysis.setter(id))
+            .clone()
     }
 
-    fn current_loop_context(&self) -> Option<&LoopContext> {
-        self.loop_stack.last()
+    /// The function an assignment with an operator reads its target at
+    /// `target` with.
+    fn target_getter(&self, target: NodeId) -> Binding {
+        self.getter(target)
+            .expect("internal error: an augmented assignment's target has a getter")
     }
 
-    fn current_loop_context_mut(&mut self) -> Option<&mut LoopContext> {
-        self.loop_stack.last_mut()
+    /// The function the assignment with an operator `id` calls, in the
+    /// instance being compiled: `+` for `x += 1`.
+    fn augmented_assignment(&self, id: NodeId) -> Option<Binding> {
+        self.instance_pick(|instance| instance.augmented_assignments.get(&id))
+            .or_else(|| self.analysis.augmented_assignments.get(&id))
+            .cloned()
     }
 
-    fn end_loop_context(&mut self) {
-        self.loop_stack
-            .pop()
-            .expect("expected there to be a loop context to pop");
+    /// The function that reads through the target at `id`, if it reads, in
+    /// the instance being compiled: the getter of `p.x`.
+    fn getter(&self, id: NodeId) -> Option<Binding> {
+        self.instance_pick(|instance| instance.getters.get(&id))
+            .or_else(|| self.analysis.getter(id))
+            .cloned()
     }
 }
 
-#[derive(Clone)]
-struct LoopContext {
-    start: LabelId,
-    break_instructions: Vec<LabelId>,
-    /// The simulated stack depth at loop entry; `break`/`continue` pop back
-    /// down to it before jumping.
-    stack_depth: isize,
+/// The `u16` a closure's captured variable `slot` is written as in an
+/// instruction.
+fn upvalue(slot: usize, span: Span) -> Result<u16, CompileError> {
+    u16::try_from(slot).map_err(|_too_many| CompileError::too_many_registers(span))
 }
 
-/// Logical compiler-local slot, assigned a concrete frame slot after lowering.
-#[derive(Clone, Copy)]
-struct TempSlot(usize);
-
-#[derive(Clone, Copy)]
-struct TempUse {
-    instruction_idx: usize,
-    temp: TempSlot,
+/// The `u32` a global slot is written as in an instruction.
+fn global(slot: usize) -> u32 {
+    u32::try_from(slot).expect("internal error: a program has fewer than 2^32 globals")
 }
 
-/// An assignment location whose side-effecting components have already been
-/// evaluated and cached. This lets augmented assignment use one lowering for
-/// every target without evaluating an index expression more than once.
-enum PreparedAssignmentTarget {
-    Variable {
-        variable: ResolvedVar,
-        span: Span,
-    },
-    Index {
-        cached_container: TempSlot,
-        cached_index: TempSlot,
-        container_span: Span,
-        index_span: Span,
-        getter: Binding,
-        setter: Binding,
-    },
-    Member {
-        cached_receiver: TempSlot,
-        receiver_span: Span,
-        member_span: Span,
-        getter: Binding,
-        setter: Binding,
-    },
-}
-
-impl PreparedAssignmentTarget {
-    fn prepare(
-        compiler: &mut Compiler,
-        l_value: AssignmentTargetLocation,
-    ) -> Result<Self, CompileError> {
-        match l_value.target {
-            AssignmentTarget::Identifier { span, .. } => Ok(Self::Variable {
-                variable: compiler.assigned_variable(l_value.id),
-                span,
-            }),
-            AssignmentTarget::Index { value, index } => {
-                let container_span = value.span;
-                let index_span = index.span;
-                let cached_container = compiler.allocate_temp();
-                let cached_index = compiler.allocate_temp();
-
-                compiler.compile_expr(*value)?;
-                compiler.write_temp(cached_container, container_span, OpCode::SetLocal);
-                compiler.compile_expr(*index)?;
-                compiler.write_temp(cached_index, index_span, OpCode::SetLocal);
-
-                Ok(Self::Index {
-                    cached_container,
-                    cached_index,
-                    container_span,
-                    index_span,
-                    getter: compiler.target_getter(l_value.id),
-                    setter: compiler.setter(l_value.id),
-                })
-            }
-            AssignmentTarget::Member {
-                receiver,
-                member_span,
-                ..
-            } => {
-                let receiver_span = receiver.span;
-                let cached_receiver = compiler.allocate_temp();
-
-                compiler.compile_expr(*receiver)?;
-                compiler.write_temp(cached_receiver, receiver_span, OpCode::SetLocal);
-
-                Ok(Self::Member {
-                    cached_receiver,
-                    receiver_span,
-                    member_span,
-                    getter: compiler.target_getter(l_value.id),
-                    setter: compiler.setter(l_value.id),
-                })
-            }
-            AssignmentTarget::Sequence(_) => unreachable!(
-                "internal error: name resolution rejects a sequence as an augmented assignment target"
-            ),
-        }
-    }
-
-    fn emit_read(&self, compiler: &mut Compiler) -> Result<(), CompileError> {
-        match self {
-            Self::Variable { variable, span } => compiler.emit_get_var(*variable, *span),
-            Self::Index {
-                cached_container,
-                cached_index,
-                container_span,
-                index_span,
-                getter,
-                ..
-            } => {
-                compiler.compile_binding(getter, *index_span)?;
-                compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
-                compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
-                compiler
-                    .ir
-                    .write(OpCode::Call(2), container_span.merge(*index_span));
-            }
-            Self::Member {
-                cached_receiver,
-                receiver_span,
-                member_span,
-                getter,
-                ..
-            } => {
-                compiler.compile_binding(getter, *member_span)?;
-                compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
-                compiler.ir.write(OpCode::Call(1), *member_span);
-            }
-        }
-        Ok(())
-    }
-
-    fn emit_store(&self, compiler: &mut Compiler) -> Result<(), CompileError> {
-        match self {
-            Self::Variable { variable, span } => compiler.emit_set_var(*variable, *span),
-            Self::Index {
-                cached_container,
-                cached_index,
-                container_span,
-                index_span,
-                setter,
-                ..
-            } => {
-                let cached_value = compiler.allocate_temp();
-                let target_span = container_span.merge(*index_span);
-
-                compiler.write_temp(cached_value, target_span, OpCode::SetLocal);
-                compiler.compile_binding(setter, target_span)?;
-                compiler.write_temp(*cached_container, *container_span, OpCode::GetLocal);
-                compiler.write_temp(*cached_index, *index_span, OpCode::GetLocal);
-                compiler.write_temp(cached_value, target_span, OpCode::GetLocal);
-                compiler.ir.write(OpCode::Call(3), target_span);
-                compiler.ir.write(OpCode::Pop, target_span);
-            }
-            Self::Member {
-                cached_receiver,
-                receiver_span,
-                member_span,
-                setter,
-                ..
-            } => {
-                let cached_value = compiler.allocate_temp();
-
-                compiler.write_temp(cached_value, *member_span, OpCode::SetLocal);
-                compiler.compile_binding(setter, *member_span)?;
-                compiler.write_temp(*cached_receiver, *receiver_span, OpCode::GetLocal);
-                compiler.write_temp(cached_value, *member_span, OpCode::GetLocal);
-                compiler.ir.write(OpCode::Call(2), *member_span);
-                compiler.ir.write(OpCode::Pop, *member_span);
-            }
-        }
-        Ok(())
+/// Whether evaluating `expression` may write a local variable: whether it
+/// assigns or declares one, anywhere inside it. A declaration may reuse the
+/// register of a block's variable that went out of scope.
+fn may_assign(expression: &ExpressionLocation) -> bool {
+    match &expression.expression {
+        Expression::Assignment { .. }
+        | Expression::OpAssignment { .. }
+        | Expression::VariableDeclaration { .. }
+        | Expression::FunctionDeclaration { .. }
+        | Expression::StructDeclaration { .. }
+        | Expression::For { .. } => true,
+        _ => expression.children().into_iter().any(may_assign),
     }
 }
 
@@ -1767,9 +2606,39 @@ pub struct CompileError {
 }
 
 impl CompileError {
+    /// What the compiler fails with for code that makes instances
+    /// of a function declared before it, outside of a REPL line.
+    fn uncompiled_instances() -> Self {
+        Self {
+            text: "encountered instances of a function compiled earlier outside of a REPL line, this is probably an internal error".to_string(),
+            span: Span::synthetic(),
+        }
+    }
+
+    /// What the compiler fails with for a function whose values
+    /// don't fit in the registers a frame can have.
+    fn too_many_registers(span: Span) -> Self {
+        Self {
+            text: format!(
+                "this function needs more than {WINDOW} registers, which is more than a frame can have",
+            ),
+            span,
+        }
+    }
+
     fn unresolved_binding(span: Span) -> Self {
         Self {
             text: "encountered unresolved binding during compilation, this is probably an internal error".to_string(),
+            span,
+        }
+    }
+
+    /// What the compiler fails with for a tuple index written in
+    /// the code that doesn't fit its instruction, which no tuple type the
+    /// analyser accepts has.
+    fn index_too_large(span: Span) -> Self {
+        Self {
+            text: "this tuple index is larger than an instruction can say".to_string(),
             span,
         }
     }

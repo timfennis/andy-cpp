@@ -1,0 +1,41 @@
+// A loop pattern takes elements apart: tuples and lists, nested ones, a map's
+// key and value, a string's characters. Each iteration gets new variables,
+// so closures made in the loop keep their own. Unpacking the wrong length is
+// `006_lists/071_destructuring_a_list_of_the_wrong_length_in_a_function_fails.ndc`.
+// expect-output: [12,34,6,15,56,90,5,3,3]
+// expect-output: [3,7]
+// expect-output: [0,0,2] [(0,0),(1,1),(2,4)]
+// expect-output: [(0,"a"),(1,"b"),(2,"c")]
+
+fn walk() {
+    let out = [];
+    for a, b in [(1, 2), (3, 4)] {
+        out.push(a * 10 + b);
+    }
+    for (a, (b, c)) in [(1, (2, 3)), (4, (5, 6))] {
+        out.push(a + b + c);
+    }
+    for x, y in [[7, 8], [9, 10]] {
+        out.push(x * y);
+    }
+    for k, v in %{"k": 5} {
+        out.push(v);
+    }
+    for a, b in ["xy", "zw"] {
+        out.push(len(a ++ b ++ a));
+    }
+    out
+}
+print(walk());
+
+let getters = [];
+for a, b in [(1, 2), (3, 4)] {
+    getters.push(fn() { a + b });
+}
+print([g() for g in getters]);
+
+let tuples = [(i, i * i) for i in 0..3];
+print([b - a for a, b in tuples], tuples);
+
+let indexed = [(i, c) for i, c in "abc".enumerate];
+print(indexed);

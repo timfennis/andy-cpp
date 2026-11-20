@@ -1,0 +1,6 @@
+// An error in a callback that a native calls from inside another native's
+// callback stops the program with the error's message. Where it's reported is
+// pinned by `998_not_desired/an_error_in_a_callback_is_reported_at_the_native_that_called_it.ndc`.
+// expect-error: index 1 is out of bounds for a list of 1 element
+let rows = [[1, 2], [3]];
+let r = rows.map(fn(row) { row.fold(0, fn(acc, x) { acc + [x][x] }) });

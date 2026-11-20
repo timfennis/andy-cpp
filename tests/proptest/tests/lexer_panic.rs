@@ -24,6 +24,7 @@
 
 use ndc_analyser as _;
 use ndc_core as _;
+use ndc_interpreter as _;
 use ndc_lexer::{Lexer, SourceId};
 use ndc_parser as _;
 use ndc_stdlib as _;

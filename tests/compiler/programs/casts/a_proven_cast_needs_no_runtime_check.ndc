@@ -1,0 +1,4 @@
+// Both casts are proven by the value's static type, so there's no `CheckType`:
+// each cast compiles to its argument alone, the `1` and the list.
+// compile: analysed
+cast::<Int>(1); cast::<Any>([1])

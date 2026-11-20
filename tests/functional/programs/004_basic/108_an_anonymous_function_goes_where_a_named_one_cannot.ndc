@@ -1,0 +1,33 @@
+// An anonymous function is an expression, so it goes everywhere a named
+// function declaration can't.
+fn main() {
+  print(false and fn() { true }(), true or fn() { false }());
+  // expect-output: false true
+  print([1, 2].map(fn(x) => x + 1));
+  // expect-output: [2,3]
+  print((fn() { 3 }, 4)[0](), [fn() { 5 }][0](), %{"six": fn() { 6 }}["six"]());
+  // expect-output: 3 5 6
+  if fn() { true }() { print("if"); }
+  // expect-output: if
+  if false { } else if fn() { true }() { print("else if"); }
+  // expect-output: else if
+  let rounds = 0;
+  while fn() { rounds < 2 }() { rounds += 1; }
+  print(rounds);
+  // expect-output: 2
+  for x in [1, 2], if fn() { x > 1 }() { print(x); }
+  // expect-output: 2
+  print([x for x in [1, 2], if fn() { x < 2 }()]);
+  // expect-output: [1]
+  print([7, 8][fn() { 1 }()]);
+  // expect-output: 8
+  let g = fn(n) { n * 3 };
+  print(g(3));
+  // expect-output: 9
+  fn arrow() => fn() { 10 };
+  print(arrow()());
+  // expect-output: 10
+  print((fn() { 11 })());
+  // expect-output: 11
+}
+main();

@@ -1,13 +1,15 @@
-use crate::chunk::OpCode;
+use crate::chunk::Chunk;
 use crate::duration::format_duration;
+use crate::instr::Instr;
 use ndc_core::collections::HashMap;
 use ndc_lexer::Span;
 use std::time::{Duration, Instant};
 
 /// Context passed to a tracer on every dispatched instruction.
 pub struct InstructionContext<'a> {
+    /// The instruction's index in its function's code.
     pub ip: usize,
-    pub opcode: &'a OpCode,
+    pub instruction: Instr,
     pub span: Span,
     pub source: Option<&'a str>,
 }
@@ -20,6 +22,24 @@ pub trait VmTracer {
     /// Called when the VM finishes execution.
     /// Tracers that accumulate data should print their summaries here.
     fn on_complete(&mut self);
+}
+
+/// Tells `tracer`, if the VM has one, that the VM is about to run the
+/// instruction at `ip` of `chunk`, which came from `source`.
+pub(crate) fn trace_instruction(
+    tracer: &mut Option<Box<dyn VmTracer>>,
+    source: Option<&str>,
+    chunk: &Chunk,
+    ip: usize,
+) {
+    if let Some(tracer) = tracer {
+        tracer.on_instruction(&InstructionContext {
+            ip,
+            instruction: chunk.code()[ip],
+            span: chunk.span(ip),
+            source,
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -35,7 +55,7 @@ impl VmTracer for PrintTracer {
             src.get(ctx.span.range())
                 .map(|s| s.trim().replace('\n', "↵"))
         });
-        let op_str = format!("{:?}", ctx.opcode);
+        let op_str = ctx.instruction.to_string();
         match excerpt {
             Some(s) => eprintln!("[VM] {:04} {:<30}  {}", ctx.ip, op_str, s),
             None => eprintln!("[VM] {:04} {}", ctx.ip, op_str),
@@ -71,7 +91,7 @@ impl Default for HistogramTracer {
 
 impl VmTracer for HistogramTracer {
     fn on_instruction(&mut self, ctx: &InstructionContext<'_>) {
-        *self.counts.entry(ctx.opcode.name()).or_insert(0) += 1;
+        *self.counts.entry(ctx.instruction.name()).or_insert(0) += 1;
     }
 
     fn on_complete(&mut self) {
@@ -124,7 +144,7 @@ impl VmTracer for TimingTracer {
         if let Some((prev_name, start)) = self.last.take() {
             *self.times.entry(prev_name).or_default() += now - start;
         }
-        self.last = Some((ctx.opcode.name(), now));
+        self.last = Some((ctx.instruction.name(), now));
     }
 
     fn on_complete(&mut self) {

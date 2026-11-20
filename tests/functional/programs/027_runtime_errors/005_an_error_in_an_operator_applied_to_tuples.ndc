@@ -1,0 +1,8 @@
+// An operator applied to each element of two tuples that fails at one of
+// them says which element, and is reported at the operator. The expected error
+// ends with the span, which counts bytes from the start of this file.
+fn add(t: (Int, Int)) -> (Int, Int) {
+    t + (1, 1)
+}
+print(add((1, 9223372036854775807)));
+// expect-error: message: "while vectorising '+' at index 1: integer operation overflowed or is undefined: 9223372036854775807 + 1", span: Some(Span { source_id: SourceId(0), offset: 269, length: 1 })

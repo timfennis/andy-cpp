@@ -1,13 +1,16 @@
 use ndc_interpreter::Interpreter;
 
+/// An interpreter that runs lines as the REPL does.
+fn repl_interpreter() -> Interpreter {
+    let mut interpreter = Interpreter::capturing().line_by_line();
+    interpreter.configure(ndc_stdlib::register);
+    interpreter
+}
+
 /// Run a sequence of REPL lines against a shared interpreter and return the
 /// collected stdout output after all lines have been executed.
 fn repl_output(lines: &[&str]) -> String {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     for line in lines {
         interp.eval(line).expect("line should not error");
     }
@@ -18,11 +21,7 @@ fn repl_output(lines: &[&str]) -> String {
 /// Run a sequence of REPL lines and expect the last one to produce an error
 /// containing the given substring.
 fn repl_error(lines: &[&str], expected_error: &str) {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     let n = lines.len();
     for line in &lines[..n - 1] {
         interp.eval(line).expect("line should not error");
@@ -71,33 +70,21 @@ fn error_on_undefined_variable() {
 
 #[test]
 fn expression_result_is_returned() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     let result = interp.eval("2 + 3").unwrap();
     assert_eq!(result.to_string(), "5");
 }
 
 #[test]
 fn statement_returns_unit() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     let result = interp.eval("2 + 3;").unwrap();
     assert!(result.is_unit());
 }
 
 #[test]
 fn let_returns_unit() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     let result = interp.eval("let x = 5;").unwrap();
     assert!(result.is_unit());
 }
@@ -108,11 +95,7 @@ fn let_returns_unit() {
 // resumable interpreter starts over after one.
 #[test]
 fn a_failed_evaluation_starts_the_session_over() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     interp.eval("let x = 1;").unwrap();
     assert!(interp.eval("struct Foo { y: Int }\nx = 2; [1][5]").is_err());
     let err = interp.eval("x").expect_err("x should be forgotten");
@@ -137,11 +120,7 @@ fn a_failed_evaluation_starts_the_session_over() {
 // Code that doesn't parse is never analysed or run, so the session stays.
 #[test]
 fn a_syntax_error_keeps_the_session() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     interp.eval("let x = 1;").unwrap();
     assert!(interp.eval("let = ;").is_err());
     interp.eval("print(x)").unwrap();
@@ -151,11 +130,7 @@ fn a_syntax_error_keeps_the_session() {
 
 #[test]
 fn output_of_a_failed_evaluation_is_kept() {
-    let mut interp = {
-        let mut i = Interpreter::capturing().line_by_line();
-        i.configure(ndc_stdlib::register);
-        i
-    };
+    let mut interp = repl_interpreter();
     assert!(interp.eval("print(\"before\"); [1][5]").is_err());
     interp.eval("print(\"after\")").unwrap();
     let out = String::from_utf8(interp.get_output().unwrap()).unwrap();
@@ -194,6 +169,24 @@ fn functions_share_globals_with_later_lines() {
         "print(count)",
     ]);
     assert_eq!(out.trim(), "2\n11");
+}
+
+// A `pure fn` from one line keeps the results of its calls for later lines,
+// one cache for each instance.
+#[test]
+fn a_pure_function_keeps_its_results_for_later_lines() {
+    let out = repl_output(&[
+        "fn inc(x) { x + 1 }",
+        "let total = inc(1);",
+        "print(inc(2.5), total)",
+        "pure fn twice(x) { print(\"once\"); x ++ x }",
+        "print(twice(\"a\") ++ twice(\"a\"))",
+        "twice([1])",
+        "let xs = [];",
+        "xs.push(inc(total));",
+        "print(xs)",
+    ]);
+    assert_eq!(out, "3.5 2\nonce\naaaa\nonce\n[3]\n");
 }
 
 // `j` is a local of the line's own top-level code, which is gone once the

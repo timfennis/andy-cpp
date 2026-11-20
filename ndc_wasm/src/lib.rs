@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn errors_are_rendered_with_the_source() {
-        let result = run("let x = 1 / 0;");
+        let result = Session::new().eval("let x = 1 / 0;");
         let error = result.error.expect("dividing by zero should fail");
         assert!(error.contains("<cell:1>"), "{error}");
     }

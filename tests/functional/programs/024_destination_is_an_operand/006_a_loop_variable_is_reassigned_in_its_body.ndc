@@ -1,0 +1,55 @@
+// Assigning the loop variable in the body changes it for the rest of that
+// iteration only: the next iteration takes the next element. A `while` loop's
+// counter assigned from itself counts as usual.
+// expect-output: 0
+// expect-output: 10
+// expect-output: 20
+// expect-output: [101,102,103,21,43]
+// expect-output: [10,11,12]
+// expect-output: [1,4,9]
+// expect-output: [2,4,6]
+
+for i in 0..3 {
+    i = i * 10;
+    print(i);
+}
+
+fn in_a_function() {
+    let out = [];
+    for x in [1, 2, 3] {
+        x += 100;
+        out.push(x);
+    }
+    for a, b in [(1, 2), (3, 4)] {
+        a, b = b, a;
+        out.push(a * 10 + b);
+    }
+    out
+}
+print(in_a_function());
+
+fn captured() {
+    let getters = [];
+    for i in 0..3 {
+        getters.push(fn() { i });
+        i = i + 10;
+    }
+    [g() for g in getters]
+}
+print(captured());
+
+fn comprehension() {
+    [{ x = x * x; x } for x in 1..4]
+}
+print(comprehension());
+
+fn counter() {
+    let i = 0;
+    let seen = [];
+    while i < 5 {
+        i = i + 2;
+        seen.push(i);
+    }
+    seen
+}
+print(counter());

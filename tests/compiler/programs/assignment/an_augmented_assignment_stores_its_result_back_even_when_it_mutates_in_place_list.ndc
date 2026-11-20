@@ -1,0 +1,6 @@
+// `++=` appends to the list in place, yet its result is still written back with
+// `SetGlobal`, as any augmented assignment's is: `CallNative` of `++=` on the
+// list read into r2 and the `[2]` in r3 puts the result in r1, which
+// `SetGlobal` stores in `value`.
+// compile: stdlib
+let value = [1]; value ++= [2];

@@ -1,0 +1,53 @@
+// A call reads its arguments left to right, each when it gets to it: in
+// `f(x, { x = 2; x })` the first argument is 1. The function a call calls is
+// read before its arguments, so an argument that assigns it doesn't change
+// which function runs. The same for a function the program declares, a
+// native called by its slot (`max`), and a native that calls back.
+// expect-output: (1,2)
+// expect-output: ((1,2),2,[0,3])
+// expect-output: ((1,2),2)
+// expect-output: (1,2)
+// expect-output: 6
+// expect-output: 6 500
+// expect-output: 6
+
+fn pair(a, b) { (a, b) }
+
+let g = 1;
+print(pair(g, { g = 2; g }));
+
+fn local() {
+    let x = 1;
+    (pair(x, { x = 2; x }), max(x, { x = 0; x }), [x].map(fn(v) { v * 10 }) ++ { x = 3; [x] })
+}
+print(local());
+
+fn cell() {
+    let x = 1;
+    let read = fn() { x };
+    (pair(x, { x = 2; x }), read())
+}
+print(cell());
+
+fn upvalue() {
+    let x = 1;
+    let call = fn() { pair(x, { x = 2; x }) };
+    call()
+}
+print(upvalue());
+
+fn callee() {
+    let f = fn(a) { a + 1 };
+    f({ f = fn(a) { a * 100 }; 5 })
+}
+print(callee());
+
+let h = fn(a) { a + 1 };
+print(h({ h = fn(a) { a * 100 }; 5 }), h(5));
+
+fn callee_cell() {
+    let f = fn(a) { a + 1 };
+    let read = fn() { f };
+    f({ f = fn(a) { a * 100 }; 5 })
+}
+print(callee_cell());

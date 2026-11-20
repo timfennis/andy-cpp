@@ -4,6 +4,7 @@ pub mod disassemble;
 pub mod duration;
 pub mod error;
 pub mod hash_map;
+pub mod instr;
 mod io;
 pub mod iterator;
 mod native_op;
@@ -36,12 +37,6 @@ mod test {
     #[test]
     fn a_value_is_16_bytes() {
         assert_eq!(size_of::<Value>(), 16)
-    }
-
-    #[test]
-    fn an_opcode_is_32_bytes() {
-        // NOTE: this is allowed to change, but we'd like to know about it.
-        assert_eq!(size_of::<crate::chunk::OpCode>(), 32)
     }
 
     /// A struct's constructor, getter, and setter must each display

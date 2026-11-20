@@ -1,0 +1,30 @@
+// A named function declared in a function, that calls itself and captures a
+// variable, still works after the function that declared it returned.
+// `005_functions/056_local_functions_can_recurse.ndc` calls such a function in
+// the frame that declared it.
+// expect-output: 1024 81 1
+// expect-output: [3,2,1,0]
+
+fn make_power(base: Int) {
+    fn power(n: Int) -> Int {
+        if n == 0 { 1 } else { base * power(n - 1) }
+    }
+    power
+}
+
+let two = make_power(2);
+let three = make_power(3);
+print(two(10), three(4), two(0));
+
+fn make_walker() {
+    let visited = [];
+    fn walk(n: Int) {
+        visited.push(n);
+        if n > 0 { walk(n - 1); }
+    }
+    let both = (walk, visited);
+    both
+}
+let (walk, visited) = make_walker();
+walk(3);
+print(visited);

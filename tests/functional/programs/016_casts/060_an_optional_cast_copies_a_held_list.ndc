@@ -1,0 +1,8 @@
+// `cast?` that gives `Some` gives a list of its own, as `cast` does: `ints`
+// is an `Option<[Int]>`, and a String pushed through `xs` doesn't reach it.
+// expect-output: ["a"] Some([1])
+let xs = [];
+let ints = cast?::<[Int]>(xs);
+xs.push("a");
+ints.unwrap().push(1);
+print(xs, ints);

@@ -1,0 +1,5 @@
+// A read of a variable whose value isn't used compiles to nothing, for the
+// global `a`, the block's local `b` (r0) and the captured `c` (r1) alike. The
+// discarded lambda is still made with `Closure`, which captures `c`.
+// compile: analysed
+let a = 1; a; { let b = 2; b; let c = 3; c; fn() { c }; }

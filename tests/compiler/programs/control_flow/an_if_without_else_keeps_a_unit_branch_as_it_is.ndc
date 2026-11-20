@@ -1,0 +1,5 @@
+// A branch that's already `()` compiles as it is: `MakeTuple r1, r1, 0` makes
+// the empty tuple in a temporary, though nothing uses it, and the `if` yields
+// its own `()` with `LoadUnit` into r0.
+// compile: analysed
+if true { () }

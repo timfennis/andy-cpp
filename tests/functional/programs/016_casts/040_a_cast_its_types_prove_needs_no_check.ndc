@@ -1,7 +1,8 @@
 // Whether a cast is checked as the program runs depends on what's known
 // about the value once the program is analysed, and in a generic function on
-// the types each call gives it. Here every value already is a [Int], so
-// a list held by another name casts fine.
+// the types each call gives it. Here every value already is a [Int], so a
+// cast changes nothing and gives the list it's given: `c` holds the list
+// `xs` holds, which both say holds Ints.
 let xs = [];
 let c = cast?::<[Int]>(xs);
 xs.push(1);

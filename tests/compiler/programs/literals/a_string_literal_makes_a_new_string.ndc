@@ -1,0 +1,5 @@
+// A string literal makes a new string with the text of its constant
+// (`MakeString`), as a string can be changed in place and a literal is
+// evaluated again in a loop or a second call.
+// compile: parsed
+"abc"

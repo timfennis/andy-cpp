@@ -1,0 +1,3 @@
+// A named function can't be declared in a map.
+// expect-error: only a statement can declare a named function, and `f` is declared inside an expression
+let m = %{"key": fn f() { 1 }};

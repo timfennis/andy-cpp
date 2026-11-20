@@ -1,0 +1,5 @@
+// A function declared in an instance that compiles the same in every instance
+// is the same function, so it keeps its identity: both instances of `make` load
+// the same `f`, which the listing gives one number and lists once.
+// compile: stdlib
+fn make(x) { x + 1; fn f() => 42; f } make(1); make(1.5);

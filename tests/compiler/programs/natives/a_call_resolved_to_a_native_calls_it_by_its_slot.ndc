@@ -1,0 +1,5 @@
+// A call the analyser resolves to one native names it by its global slot: no
+// register holds the callee, only the argument `xs` in r1, and `CallNative`
+// calls `len` with it and puts the result in r0.
+// compile: stdlib
+let xs = [1, 2]; len(xs)

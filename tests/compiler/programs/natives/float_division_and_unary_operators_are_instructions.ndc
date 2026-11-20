@@ -1,0 +1,6 @@
+// Float division and the unary operators the VM has instructions for are
+// instructions too, with one operand for the unary ones: `DivFloat`, `NegInt`,
+// `NegFloat` and `Not` read the parameters in r0 to r3 and write the tuple's
+// elements to r4 to r7.
+// compile: stdlib
+fn f(x: Float, y: Float, a: Int, p: Bool) { (x / y, -a, -x, !p) }

@@ -1,0 +1,9 @@
+// Only the tuple holds the list, but `alias` holds the tuple, so the list
+// can be reached through it too: the cast gets a new tuple around a copy of
+// the list, and a push through one leaves the other as it was.
+// expect-output: (1,Some([2,3])) (1,Some([2]))
+let value: Any = (1, Some([2]));
+let alias = value;
+let pair = cast::<(Int, Option<[Int]>)>(value);
+pair[1].unwrap().push(3);
+print(pair, alias);

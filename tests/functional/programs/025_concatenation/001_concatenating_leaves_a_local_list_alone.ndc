@@ -1,0 +1,28 @@
+// `a ++ [3]` makes a new list when something else holds `a`, so the local
+// `a` keeps its elements. (`++` appends in place to a list nothing else
+// holds, which no variable can see.)
+// expect-output: ([1,2],[1,2,3,4])
+// expect-output: [1,2,3]
+// expect-output: ([1],[1,1],[1,2,1])
+
+fn local() {
+    let a = [1, 2];
+    let b = a ++ [3];
+    b.push(4);
+    (a, b)
+}
+print(local());
+
+fn returned() {
+    let a = [1, 2];
+    a ++ [3]
+}
+print(returned());
+
+fn twice() {
+    let a = [1];
+    let b = a ++ a;
+    let c = a ++ [2] ++ a;
+    (a, b, c)
+}
+print(twice());

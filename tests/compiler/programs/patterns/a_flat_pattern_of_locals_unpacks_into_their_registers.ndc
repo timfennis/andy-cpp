@@ -1,0 +1,5 @@
+// A flat pattern of locals in consecutive registers declares them all with one
+// `Unpack`, which writes the elements of `t` (the parameter in r0) straight to
+// the registers of `a` (r1) and `b` (r2).
+// compile: analysed
+fn f(t: (Int, Int)) { let (a, b) = t; a }
