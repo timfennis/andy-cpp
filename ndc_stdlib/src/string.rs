@@ -302,7 +302,7 @@ mod inner {
         string.trim_end_matches(pat)
     }
 
-    /// Returns `true` if the string consists only of digits.
+    /// Returns `true` if the string, which must be one ASCII character, is a digit.
     pub fn is_digit(string: &str) -> anyhow::Result<bool> {
         if string.len() == 1 {
             Ok(string
@@ -320,7 +320,8 @@ mod inner {
         source.replace(from, to)
     }
 
-    /// Returns `true` if the string consists only of digits in the given radix.
+    /// Returns `true` if the string, which must be one ASCII character, is a digit in the given
+    /// radix.
     #[function(name = "is_digit")]
     pub fn is_digit_radix(string: &str, radix: i64) -> anyhow::Result<bool> {
         if string.len() == 1 {

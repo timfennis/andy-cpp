@@ -2,7 +2,7 @@
 
 Now that the Andy C++ interpreter is installed we can write our first program.
 
-First create a file called `hello.ndc` add the code in Listing 1-1.
+First create a file called `hello.ndc` and add this code:
 
 ```ndc
 print("Hello, world!");

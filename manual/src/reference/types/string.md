@@ -112,5 +112,5 @@ print("oo" in "foobar");  // true
 ```
 
 ```ndc,fails
-let a = "foo" ++ 3; // Error: cannot concatenate string and int
+let a = "foo" ++ 3; // Error: No function called '++' found that matches the arguments 'String, Int'
 ```

@@ -52,7 +52,7 @@ Every value is an `Any`. The other types are:
     * [`%{K: V}`](./types/map-and-set.md): a hashmap that associates keys with values
     * [`Deque<T>`](./types/deque.md): a double-ended queue
     * [`MinHeap<T>` / `MaxHeap<T>`](./types/min-max-heap.md): min/max heap
-    * `Iterator<T>`: produces values when consumed (currently only from range expressions like `5..100`)
+    * `Iterator<T>`: produces values when consumed (from range expressions like `5..100`, and functions like `enumerate`)
   * [`fn(A, B) -> C`](./types/function.md): a function taking an `A` and a `B` and returning a `C`
   * [Structs](./types/struct.md): user-defined record types, one per `struct` declaration
 
@@ -63,10 +63,9 @@ let xs: [Int] = [1, 2, 3];
 let table: %{String: Int} = %{"a": 1, "b": 2};
 let maybe: Option<String> = Some("hi");
 let pair: (Int, String) = (1, "hi");
-let pair2: (Int, String) = (1, "hi");  // tuple shorthand
 let grid: [[Int]] = [[1, 2], [3, 4]];
 
-print(maybe, pair2, grid);  // Some("hi") (1,"hi") [[1,2],[3,4]]
+print(maybe, pair, grid);  // Some("hi") (1,"hi") [[1,2],[3,4]]
 ```
 
 [Struct](./types/struct.md) names are type names like any other:

@@ -62,7 +62,7 @@ mod inner {
         matches!(value, Value::None)
     }
 
-    /// Extracts the value from an Option or errors if it's either None or a non-Option type
+    /// Extracts the value from an Option or errors if it's None
     #[function(signature = "<T>(Option<T>) -> T")]
     pub fn unwrap(value: Value) -> anyhow::Result<Value> {
         match value {

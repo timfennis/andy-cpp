@@ -5,7 +5,7 @@
                        [--baseline-env NAME=VALUE] [--candidate-env NAME=VALUE]
 
 Runs every program in `benches/programs` and, when the directory is there,
-every Advent of Code solution in an Advent of Brian checkout (a copy of it, so
+every 2025 Advent of Code solution in an Advent of Brian checkout (a copy of it, so
 nothing in the checkout is touched). Each program runs `--runs` times on each
 binary, taking turns (more for a program that takes only milliseconds), and
 the fastest run of each counts. Time is CPU time (user + system), so a busy

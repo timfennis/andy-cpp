@@ -208,7 +208,7 @@ fn json_to_value(value: JsonValue) -> Result<Value, anyhow::Error> {
 
 #[export_module]
 mod inner {
-    /// Converts a JSON string to a value: `json_decode("{\"a\": [1, null]}") == %{"a": [1, ()]}`.
+    /// Converts a JSON string to a value: `json_decode("{\"a\": [1, null]}")` gives `%{"a": [1, ()]}`.
     ///
     /// `null` becomes the unit value `()`, arrays become lists, objects become
     /// maps with string keys, and integers too big for `Int` decode losslessly
@@ -218,7 +218,7 @@ mod inner {
         json_to_value(json)
     }
 
-    /// Converts a value to a JSON string: `json_encode(%{"a": [1, ()]}) == "{\"a\":[1,null]}"`.
+    /// Converts a value to a JSON string: `json_encode(%{"a": [1, 2]}) == "{\"a\":[1,2]}"`.
     ///
     /// Only values that decode back to an equal value are accepted, so this is
     /// the exact inverse of `json_decode`. The unit value `()` converts to
@@ -235,7 +235,7 @@ mod inner {
     }
 
     /// Converts any value to a JSON string, accepting values `json_encode`
-    /// rejects by degrading them: `json_encode_lossy((1, Some(1/2))) == "[1,0.5]"`.
+    /// rejects by degrading them: `json_encode_lossy((1, Some(1n/2n))) == "[1,0.5]"`.
     ///
     /// Rationals become floats, complex numbers become strings, `Some(x)` is
     /// unwrapped to `x`, tuples and deques become arrays, heaps become arrays

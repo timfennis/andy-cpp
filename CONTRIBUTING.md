@@ -46,9 +46,9 @@ The workspace has three test crates, each living under `tests/`:
 cargo test
 ```
 
-This runs all three crates. The proptest crate's fuzz test is `#[ignore]`d
-by default (see below); only its **regression replay** runs as part of
-`cargo test`.
+This runs all three crates. The proptest crate's fuzz runs are `#[ignore]`d
+by default (see below); only their **regression replays**, and a short run
+of generated programs, run as part of `cargo test`.
 
 ### Run a single crate
 
@@ -80,14 +80,17 @@ hang:
 
 ```bash
 # Fuzz only (1024 cases by default)
-cargo test -p proptest_tests -- --ignored
+cargo test -p proptest_tests --test panic -- --ignored
 
 # Regressions + fuzz
-cargo test -p proptest_tests -- --include-ignored
+cargo test -p proptest_tests --test panic -- --include-ignored
 
 # Long fuzz run
-PROPTEST_CASES=100000 cargo test -p proptest_tests -- --ignored
+PROPTEST_CASES=100000 cargo test -p proptest_tests --test panic -- --ignored
 ```
+
+Without `--test panic`, these run the ignored tests of every harness in the
+crate.
 
 When a fresh fuzz run finds a new panic, proptest shrinks it and appends
 the seed to `tests/proptest/tests/panic.regressions`. **Commit the
@@ -145,7 +148,8 @@ Its seeds go to `tests/proptest/tests/overloads.regressions`, which
 ### Functional `.ndc` tests
 
 Drop a new `.ndc` file under `tests/functional/programs/<category>/`.
-The file's name becomes the Rust test function name. Use comment
+The file's path becomes the Rust test function name
+(`001_math/001_addition.ndc` is `test_001_math_001_addition`). Use comment
 directives at the top of the file to assert behaviour:
 
 ```ndc

@@ -42,7 +42,8 @@ mod inner {
         Ok(r.is_match(haystack))
     }
 
-    /// Returns all capture groups from the first match of the regular expression.
+    /// Returns the capture groups of every match of the regular expression, each match's as a
+    /// list that starts with the whole match.
     #[function(signature = "(String, String) -> [[String]]")]
     pub fn captures(haystack: &str, regex: &str) -> Result<Value, regex::Error> {
         let r = Regex::new(regex)?;
@@ -62,7 +63,8 @@ mod inner {
         Ok(Value::list(list))
     }
 
-    /// Returns the first capture group from the first match of the regular expression.
+    /// Returns the capture groups of the first match of the regular expression, starting with the
+    /// whole match, or an empty list if nothing matches.
     #[function(return_type = Vec<String>)]
     pub fn capture_once(haystack: &str, regex: &str) -> Result<Value, regex::Error> {
         let r = Regex::new(regex)?;
