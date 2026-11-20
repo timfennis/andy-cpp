@@ -119,7 +119,8 @@ impl Analyser {
     }
 
     /// Resolves a call (regular or operator-form) and returns its result type.
-    /// Only operator-form calls are eligible for vec dispatch.
+    /// Only an operator other than a comparison can apply to each element of
+    /// tuple arguments: see [`CallKind`].
     pub(super) fn analyse_call(
         &mut self,
         function: &ExpressionLocation,
@@ -129,8 +130,7 @@ impl Analyser {
     ) -> StaticType {
         // Higher-order call shapes like `get_function()()` have a non-identifier
         // function position, so the callee is analysed as a value. The callee
-        // comes before the arguments, in source order like the resolver, so
-        // declarations in it get their slots first.
+        // comes before the arguments, in source order like the resolver.
         let Expression::Identifier {
             name,
             type_arguments,

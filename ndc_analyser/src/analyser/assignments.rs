@@ -131,8 +131,8 @@ impl Analyser {
         value_type: &StaticType,
     ) -> bool {
         // A write passes the value where a value of the stored type is
-        // expected, as a call passes an argument: `let xs: Iterable<Int> =
-        // []` settles the list's elements as Ints.
+        // expected, as a call passes an argument: `let xs: [Int] = []`
+        // settles the list's elements as Ints.
         self.vars
             .attempt(|vars| vars.bind_argument(stored_type, value_type))
     }

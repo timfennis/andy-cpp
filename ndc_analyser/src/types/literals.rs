@@ -544,7 +544,7 @@ impl TypeVars {
         }
     }
 
-    /// The types the literal type `var` holds: `x`'s and `Int` in `[x, 1]`.
+    /// The types the literal type `var` holds: `x`'s and the `1`'s in `[x, 1]`.
     pub(super) fn held_types(&self, var: TypeVar) -> Vec<StaticType> {
         self.bounds[var.0 as usize]
             .iter()

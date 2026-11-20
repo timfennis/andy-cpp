@@ -462,7 +462,7 @@ impl AnalysisError {
     }
 
     /// A call that several overloads take, none more specific than the
-    /// others: `f(1, 2)` with `f(a, b)` and `f(a: Any, b: Any)`.
+    /// others: `f(1, 2)` with `f(a: Int, b)` and `f(a, b: Int)`.
     pub(crate) fn ambiguous_call(
         name: &str,
         arguments: &[StaticType],

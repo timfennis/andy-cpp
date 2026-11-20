@@ -204,8 +204,8 @@ impl Analyser {
             "internal error: a use outside of generic bodies has a type parameter in {key:?}"
         );
         // A function whose instance calls it with types built from its own,
-        // as `fn f(x) => f([x])` does, would need instances without end.
-        // The call is left to the program as it runs.
+        // as `fn f(x) => f([x])` does, would need instances without end,
+        // so it's reported.
         if self.grows_an_instance(generic_use, &key) {
             let name = self.resolver.symbol_name(generic_use.function).to_string();
             self.emit(AnalysisError::recursion_changes_types(

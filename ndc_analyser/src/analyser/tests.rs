@@ -157,10 +157,7 @@ fn return_needs_a_function() {
 }
 
 // The body and each `return` make a different element `String` and the others
-// `Int`, so leaving any of them out of the join leaves an `Int` in the tuple.
-// Each position of the tuple gets its `String` from a different source: the
-// first `return`, the second `return`, or the body. A position is only `Any`
-// if that source joined in, so dropping any one of them leaves an `Int`.
+// `Int`, so the tuples they return share no type once they're joined.
 #[test]
 fn a_function_returns_the_join_of_its_body_and_every_return() {
     let (_, result) = analyse_with_globals(
@@ -1785,8 +1782,8 @@ fn an_instance_calls_itself_where_its_body_recurses() {
 
 #[test]
 fn a_list_literal_holding_the_list_it_is_pushed_to_is_analysed() {
-    // `[xs]` holds a list of what it is itself, which used to recurse
-    // forever while its type was settled.
+    // `[xs]` holds a list of what it is itself, which settling its type
+    // mustn't recurse into forever.
     for source in [
         "let xs = []; xs.push([xs]);",
         "let xs = [\"s\"]; xs = [xs];",
@@ -2007,8 +2004,8 @@ fn an_if_whose_other_branch_is_what_it_returns_is_its_first_branch() {
 
 #[test]
 fn a_function_lists_its_instances_in_the_order_they_were_made() {
-    // The compiler gives each instance its slot in the order they're listed,
-    // which mustn't depend on how a hash map orders them.
+    // The compiler compiles the instances in the order they're listed, which
+    // mustn't depend on how a hash map orders them: it's their slots' order.
     let source = (0..12)
         .map(|n| format!("fn f{n}(x) => x + 1; f{n}(1); f{n}(2.5);"))
         .join(" ");
