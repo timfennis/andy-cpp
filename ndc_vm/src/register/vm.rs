@@ -900,6 +900,14 @@ impl Vm {
         function: Function,
         args: &[Value],
     ) -> Result<Value, VmError> {
+        // A native runs on `args` where they are, as the stack VM runs it:
+        // `(a, b) - (c, d)` calls the native `-` for each element.
+        if let Function::Native(native) = &function {
+            return match &native.func {
+                NativeFunc::Simple(function) => function(args),
+                NativeFunc::WithVm(function) => function(args, self),
+            };
+        }
         let top = self
             .register_frames
             .last()
