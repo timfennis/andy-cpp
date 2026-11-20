@@ -677,6 +677,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "functional_tests"
 version = "0.4.1"
 dependencies = [
@@ -1066,6 +1072,7 @@ name = "ndc_core"
 version = "0.4.1"
 dependencies = [
  "ahash",
+ "foldhash",
  "itertools 0.15.0",
 ]
 
@@ -1202,6 +1209,7 @@ name = "ndc_vm"
 version = "0.4.1"
 dependencies = [
  "char_index",
+ "hashbrown 0.17.1",
  "ndc_analysis",
  "ndc_core",
  "ndc_lexer",
