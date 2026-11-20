@@ -95,6 +95,20 @@ pub struct ClosureFunction {
 }
 
 impl CompiledFunction {
+    /// Hashes what tells this function apart on every run alike: its name
+    /// and where its code starts, never its address. Generic functions
+    /// compiled once for each type they're used at share a hash, which only
+    /// costs a map a comparison.
+    pub(crate) fn hash_stable<H: std::hash::Hasher>(&self, state: &mut H) {
+        use std::hash::Hash;
+        self.name.hash(state);
+        if !self.body.is_empty() {
+            let span = self.body.span(0);
+            span.source_id().hash(state);
+            state.write_usize(span.offset());
+        }
+    }
+
     /// For a program run at the top level, the global slots of the natives
     /// its code reads, each of which must hold its native before it runs, as
     /// [`crate::Vm::new`] puts them there.
