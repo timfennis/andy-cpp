@@ -64,7 +64,6 @@
 //! standard library gains a native.
 
 use crate::Natives;
-use crate::chunk::{Chunk, JumpTarget, OpCode};
 use crate::value::{CompiledFunction, Value};
 use ndc_core::Builtins;
 use ndc_core::collections::HashMap;
@@ -150,34 +149,19 @@ impl Disassembler<'_> {
         self.body(function);
     }
 
-    /// How big a call of `function` is: `locals: 2` of the stack VM's, or
-    /// `registers: 5` of the register VM's.
+    /// How big a call of `function` is: `registers: 5`.
     fn frame(function: &CompiledFunction) -> String {
-        if function.is_register_code() {
-            format!("registers: {}", function.frame_size)
-        } else {
-            format!("locals: {}", function.num_locals)
-        }
+        format!("registers: {}", function.frame_size)
     }
 
     /// Lists `function`'s instructions.
     fn body(&mut self, function: &CompiledFunction) {
-        let registers = function.is_register_code();
-        let len = if registers {
-            function.registers.len()
-        } else {
-            function.body.len()
-        };
-        for index in 0..len {
+        for index in 0..function.registers.len() {
             let Line {
                 instruction,
                 annotation,
                 span,
-            } = if registers {
-                crate::register::disassemble::line(self, &function.registers, index)
-            } else {
-                self.stack_line(&function.body, index)
-            };
+            } = crate::register::disassemble::line(self, &function.registers, index);
             let excerpt = self
                 .source
                 .and_then(|source| source.get(span.range()))
@@ -190,32 +174,6 @@ impl Disassembler<'_> {
                 (None, None) => instruction,
             };
             writeln!(self.out, "{index:04}  {}", line.trim_end()).unwrap();
-        }
-    }
-
-    /// The stack VM's instruction at `index` of `chunk`.
-    fn stack_line(&mut self, chunk: &Chunk, index: usize) -> Line {
-        let op = chunk.opcode(index);
-        let annotation = match op {
-            OpCode::Constant(k)
-            | OpCode::MakeString(k)
-            | OpCode::Closure {
-                constant_idx: k, ..
-            } => Some(self.constant(chunk.constant(*k))),
-            _ => Self::jump_destination(op, index),
-        };
-        let instruction = match op {
-            OpCode::GetGlobal(slot) => format!("GetGlobal({})", self.global(*slot)),
-            OpCode::SetGlobal(slot) => format!("SetGlobal({})", self.global(*slot)),
-            OpCode::CallNative { slot, args } => {
-                format!("CallNative({}, {args})", self.global(*slot))
-            }
-            _ => format!("{op:?}"),
-        };
-        Line {
-            instruction,
-            annotation,
-            span: chunk.span(index),
         }
     }
 
@@ -246,24 +204,6 @@ impl Disassembler<'_> {
             next
         });
         format!("<fn #{number} {}>", Self::name(function))
-    }
-
-    /// Where the jump at `index` goes: `-> 0007`.
-    fn jump_destination(op: &OpCode, index: usize) -> Option<String> {
-        let (OpCode::Jump(target)
-        | OpCode::JumpIfTrue(target)
-        | OpCode::JumpIfFalse(target)
-        | OpCode::IterNext(target)) = op
-        else {
-            return None;
-        };
-        let JumpTarget::Offset(offset) = target else {
-            return None;
-        };
-        Some(format!(
-            "-> {:04}",
-            (index + 1).wrapping_add_signed(*offset)
-        ))
     }
 
     fn name(function: &CompiledFunction) -> &str {

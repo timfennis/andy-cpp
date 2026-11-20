@@ -97,16 +97,6 @@ pub enum Object {
     MaxHeap(RefCell<BinaryHeap<OrdValue>>),
 }
 
-impl Value {
-    /// The cell this value is, if a captured local's slot holds one.
-    pub(crate) fn as_cell(&self) -> Option<&Rc<RefCell<Self>>> {
-        match self {
-            Self::Cell(cell) => Some(cell),
-            _ => None,
-        }
-    }
-}
-
 /// Newtype wrapper around `Value` that imposes a total order so values can be
 /// stored in a `BinaryHeap`.
 #[derive(Clone)]

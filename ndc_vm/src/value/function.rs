@@ -1,5 +1,4 @@
 use super::{Object, Value};
-use crate::chunk::{Chunk, OpCode};
 use crate::error::VmError;
 use crate::hash_map::HashMap;
 use ndc_core::StaticType;
@@ -69,8 +68,6 @@ pub enum NativeFunc {
 pub struct CompiledFunction {
     pub name: Option<String>,
     pub(crate) static_type: StaticType,
-    pub(crate) body: Chunk,
-    pub(crate) num_locals: usize,
     /// For a program run at the top level, how many global slots it needs, so
     /// a declaration that never runs still has its slot; 0 for any other
     /// function.
@@ -79,11 +76,10 @@ pub struct CompiledFunction {
     /// its code reads, in the functions it declares too, each of which must
     /// hold its native before it runs; empty for any other function.
     pub(crate) natives: Vec<usize>,
-    /// The function's code for the register VM, empty for a function the
-    /// stack compiler compiled: a function is compiled for one of the two.
+    /// The function's code.
     pub(crate) registers: crate::register::Chunk,
-    /// How many registers the function uses on the register VM: its
-    /// locals, then the most temporaries its code needs at once.
+    /// How many registers the function uses: its locals, then the most
+    /// temporaries its code needs at once.
     pub(crate) frame_size: usize,
 }
 
@@ -96,32 +92,12 @@ pub struct ClosureFunction {
 }
 
 impl CompiledFunction {
-    #[must_use]
-    pub fn num_locals(&self) -> usize {
-        self.num_locals
-    }
-
     /// For a program run at the top level, the global slots of the natives
     /// its code reads, each of which must hold its native before it runs, as
     /// [`crate::Vm::new`] puts them there.
     #[must_use]
     pub fn natives(&self) -> &[usize] {
         &self.natives
-    }
-
-    pub fn opcodes(&self) -> &[OpCode] {
-        self.body.opcodes()
-    }
-
-    pub fn body(&self) -> &Chunk {
-        &self.body
-    }
-
-    /// Whether the register compiler compiled the function, so it runs only
-    /// on the register VM.
-    #[must_use]
-    pub fn is_register_code(&self) -> bool {
-        !self.registers.is_empty()
     }
 }
 impl Function {

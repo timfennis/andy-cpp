@@ -37,14 +37,7 @@ pub(crate) fn line(disassembler: &mut Disassembler<'_>, chunk: &Chunk, ip: usize
             "CallNative {dst}, {}, {base}, {args}",
             disassembler.global(usize::from(slot))
         ),
-        _ => {
-            let operands = instr.to_string();
-            if operands.is_empty() {
-                instr.name().to_string()
-            } else {
-                format!("{} {operands}", instr.name())
-            }
-        }
+        _ => instr.to_string(),
     };
     let annotation = match instr {
         Instr::LoadK { k, .. } | Instr::MakeString { k, .. } => {
@@ -118,8 +111,6 @@ mod tests {
         let function = CompiledFunction {
             name: Some("f".to_string()),
             static_type: StaticType::Any,
-            body: crate::chunk::Chunk::default(),
-            num_locals: 0,
             num_globals: 0,
             natives: Vec::new(),
             registers: builder.finish(),
