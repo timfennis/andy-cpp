@@ -125,7 +125,8 @@ impl<'a> SignatureParser<'a> {
         self.function()
     }
 
-    /// `(…) -> R` after a function's name or after `Fn`.
+    /// `(…) -> R`: a signature after its type parameters, or a function type
+    /// after `fn`.
     fn function(&mut self) -> Result<StaticType, String> {
         self.expect("(")?;
         let parameters = if self.eat("*") {

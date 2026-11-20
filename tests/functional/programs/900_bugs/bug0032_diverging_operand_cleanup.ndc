@@ -1,6 +1,7 @@
-// `break`/`continue` inside a partially evaluated expression used to leak
-// the pending operands on the stack (unboundedly for `continue`, corrupting
-// the iterator in for loops). They now pop back to the loop's level first.
+// `break`/`continue` inside a partially evaluated expression leaves the
+// operands already read behind, and the loop goes on or stops as usual. They
+// once leaked onto the VM's stack, unboundedly for `continue`, corrupting the
+// iterator in for loops.
 // `add` has one overload, which what `break` gives can pick.
 fn add(a: Int, b: Int) -> Int { a + b }
 let n = 0;
@@ -29,7 +30,7 @@ while true {
 }
 assert_eq(map.len(), 0);
 
-// A nested break pops to its own loop's level only.
+// A nested break leaves its own loop only.
 let m = 0;
 for i in [1, 2] {
     m += 10;

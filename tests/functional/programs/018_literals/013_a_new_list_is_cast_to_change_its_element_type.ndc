@@ -1,4 +1,4 @@
-// Nothing else holds the list `split` makes, so a cast can give it another
+// A cast gives the list `split` makes, which nothing else holds, another
 // element type.
 // expect-output: ["a","b",1]
 let anything = cast::<[Any]>("a b".split(" "));

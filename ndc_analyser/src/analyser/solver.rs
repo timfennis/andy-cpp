@@ -1525,8 +1525,8 @@ impl Analyser {
 
     /// Types the number literals among an operator's operands the way the
     /// operator's other operand says, without trying overloads, as numbers
-    /// are in Haskell: in `total + 2.5`, with `total` from `let total = 0`,
-    /// the `0` is a Float, and the two literals of `1 + 2` have one type.
+    /// are in Haskell: in `0 + 2.5`, the `0` is a Float, and the two
+    /// literals of `1 + 2` have one type.
     /// It looks only at the operator's own operands, so the order calls are
     /// solved in doesn't change it.
     fn type_literal_operands(

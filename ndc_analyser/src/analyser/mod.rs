@@ -36,7 +36,8 @@ pub struct AnalysisResult {
     /// What the analyser worked out, keyed by AST node.
     pub analysis: Analysis,
     /// The errors analysis found. It carries on past each with a fallback
-    /// type, usually `Any`, so one pass reports every error it can.
+    /// type, usually [`StaticType::Error`], so one pass reports every error
+    /// it can.
     pub errors: Vec<AnalysisError>,
 }
 

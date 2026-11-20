@@ -315,8 +315,7 @@ impl Analyser {
                     .binding
                 {
                     Binding::Resolved(Candidate::Scalar(symbol)) => Some(symbol),
-                    // The program would pick one as it runs, but a function
-                    // value is one function.
+                    // No overload takes those arguments, or several tie.
                     _ => None,
                 }
             };

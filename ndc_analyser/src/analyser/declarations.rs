@@ -455,7 +455,7 @@ impl Analyser {
 
         // Bind the constructor and per-field accessors with the same
         // types the runtime functions report (StructInfo is the source
-        // of truth), so static bindings and runtime dispatch agree.
+        // of truth), so the analyser and the functions' values agree.
         let info = Rc::clone(&self.struct_registry[struct_id]);
 
         let symbols = self.resolver.struct_symbols(id).clone();

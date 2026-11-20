@@ -28,8 +28,7 @@ impl Parser {
 
     /// Parse a Vec of Tokens into a Vec of statements
     /// # Errors
-    /// If the parsing fails which it could do for many different reasons it will return an [Error]. See the variants of
-    /// this type for more information about the different kinds of errors.
+    /// If the parsing fails which it could do for many different reasons it will return an [Error].
     pub fn parse(&mut self) -> Result<Vec<ExpressionLocation>, Error> {
         let is_valid_statement = |expr: &Expression| -> bool {
             matches!(
@@ -132,7 +131,6 @@ impl Parser {
         } else {
             Err(self.unexpected_end_of_input())
         }
-        // if self.current_token_location().is_some() {
     }
 
     fn consume_token_if(&mut self, tokens: &[Token]) -> Option<TokenLocation> {
@@ -561,7 +559,7 @@ impl Parser {
 
     // The logical not operator that has much lower precedence than the ! operator.
     // ```ndc
-    // x := not foo in bar
+    // let x = not foo in bar;
     // ```
     fn logic_not(&mut self) -> Result<ExpressionLocation, Error> {
         if let Some(operator_token_loc) = self.consume_token_if(&[Token::LogicNot]) {
@@ -697,9 +695,9 @@ impl Parser {
         )
     }
 
-    /// An operand, which `as` no longer follows: a cast is the call
-    /// `cast::<T>(x)`. `as` and `as?` stay keywords, so `x as Int` says how to
-    /// write it now.
+    /// An operand. A cast is the call `cast::<T>(x)`; `as` and `as?` are
+    /// keywords that no cast takes, so that `x as Int` is an error that says
+    /// how to write the cast.
     fn no_as_cast(&mut self) -> Result<ExpressionLocation, Error> {
         let expression = self.tight_unary()?;
         let Some(operator) = self.consume_token_if(&[Token::As, Token::AsOptional]) else {
@@ -870,7 +868,7 @@ impl Parser {
                     // self.expression here allows for this syntax which is maybe a good idea
                     // `foo[1, 2] == foo[(1, 2)]`
                     // and
-                    // `foo[x := 3]`
+                    // `foo[x = 3]`
                     let mut index_expression = self.expression()?;
 
                     // Reject `a[x..=]` — inclusive ranges must have an end.
@@ -904,10 +902,6 @@ impl Parser {
                         _ => {}
                     }
 
-                    // Note: `if x == y { true } else { false }` followed by `[x for x in 1..10]`
-                    // on the next line triggers this path — the list comprehension is parsed as an
-                    // index operation on the if-expression. A semicolon after the if resolves the
-                    // ambiguity.
                     let end_token =
                         self.require_current_token_matches(&Token::RightSquareBracket)?;
 
@@ -982,7 +976,6 @@ impl Parser {
                 };
 
                 // Next we can maybe turn this into a list expression
-                //let last_value_span = values.last().map_or(left_square_bracket_span, |e| e.span);
 
                 Ok(Expression::List { values }
                     .to_location(left_square_bracket_span.merge(right_square_bracket_span)))
@@ -1859,7 +1852,7 @@ impl Parser {
     }
 
     /// Parses `<T, U, ...>` type parameter lists, handling the `>>` / `>=` / `>>=`
-    /// ambiguity that arises with nested generics like `[[Int]]`. Returns
+    /// ambiguity that arises with nested generics like `Option<Option<Int>>`. Returns
     /// the parsed items and the span of the closing `>`.
     fn delimited_type_params(&mut self) -> Result<(Vec<TypeExpr>, Span), Error> {
         self.require_current_token_matches(&Token::Less)?;

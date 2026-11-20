@@ -22,8 +22,8 @@ impl<'a> Lexer<'a> {
     /// if the operator is followed by an `=` we wrap the token in an `OpAssign` token
     /// example:
     /// ```ndc
-    /// foo := false
-    /// foo &&= true
+    /// let foo = false;
+    /// foo &= true;
     /// ```
     fn lex_op_assign(
         &mut self,

@@ -17,8 +17,8 @@ fn main() {
 }
 
 /// One test per `.ndc` file under `programs`, named after its path:
-/// `control_flow_a_while_loop_yields_unit` checks
-/// `programs/control_flow/a_while_loop_yields_unit.ndc`.
+/// `control_flow_a_true_condition_compiles_to_no_test` checks
+/// `programs/control_flow/a_true_condition_compiles_to_no_test.ndc`.
 fn generate_tests(output: &mut impl Write, base: &Path, dir: &Path) {
     let mut entries: Vec<_> = fs::read_dir(dir).unwrap().filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.path());

@@ -4,13 +4,13 @@
 //! alone fixes the group's size, and as a list when the size depends on a value only known at
 //! runtime:
 //!
-//! - `[1, 2, 3].pairwise()` gives `[(1, 2), (2, 3)]`: always pairs, typed `List<(T, T)>`.
+//! - `[1, 2, 3].pairwise()` gives `[(1, 2), (2, 3)]`: always pairs, typed `[(T, T)]`.
 //! - `"ab".enumerate()` gives `(0, "a")`, `(1, "b")`: different element types need a tuple.
 //! - `[1, 2, 3].windows(2)` gives `[[1, 2], [2, 3]]`: the size comes from the `Int` argument.
 //! - `[1, 2, 3].prefixes()` gives `[[1], [1, 2], [1, 2, 3]]`: the sizes come from the input.
 //!
 //! A tuple type records its length and the type of each element, so the type checker can reject
-//! `let (a, b, c) = xs.pairwise()[0]`. A `List<T>` records neither, which is all it can promise
+//! `let (a, b, c) = xs.pairwise()[0]`. A list type `[T]` records neither, which is all it can promise
 //! when the size isn't fixed.
 
 #![allow(clippy::ptr_arg)]

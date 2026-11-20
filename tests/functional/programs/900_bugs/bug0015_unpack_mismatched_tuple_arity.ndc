@@ -1,4 +1,4 @@
-// Destructuring a captured tuple that was reassigned after the function was
+// Destructuring a global tuple that was reassigned before the function was
 // declared should not cause a false "not declared" error.
 // expect-output: 4
 

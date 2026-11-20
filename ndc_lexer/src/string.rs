@@ -10,13 +10,13 @@ pub trait StringLexer {
     /// ```
     ///
     /// # Assumptions:
-    ///  - Assumes the starting `r#"` has already been consumed from the lexer
+    ///  - Assumes the next character is the `r` that starts the literal
     fn lex_string_literal(&mut self) -> Result<TokenLocation, Error>;
 
     /// Lexes a literal string that can contain escape sequences
     ///
     /// # Assumptions:
-    ///  - Assumes the starting `"` has already been consumed from the lexer
+    ///  - Assumes the next character is the starting `"`
     fn lex_string(&mut self) -> Result<TokenLocation, Error>;
 }
 

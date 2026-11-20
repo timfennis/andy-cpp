@@ -17,11 +17,13 @@ pub struct Analysis {
     pub inferred_return_types: HashMap<NodeId, StaticType>,
     /// The type of each name a binding pattern declares, keyed by the pattern:
     /// its annotation, or what the analyser inferred from the value. A
-    /// parameter's type is its annotation, `Any` if it has none.
+    /// parameter's type is its annotation, or what the analyser inferred for
+    /// it.
     pub variable_types: HashMap<NodeId, StaticType>,
     /// The type each function declaration gives the function value, keyed by
-    /// the declaration: its annotated parameter and return types, `Any` where
-    /// there is no annotation. `fn f(x: Int) { x }` is `Function(Int) -> Any`.
+    /// the declaration: its parameters' types, and its annotated return type,
+    /// or `Any` without one, except a lambda's, which is what its body
+    /// returns. `fn f(x: Int) { x }` is `fn(Int) -> Any`.
     pub function_types: HashMap<NodeId, StaticType>,
     /// What each identifier expression refers to, keyed by the identifier. For
     /// a call like `f(x)` that's the overload of `f` the call picks.
@@ -42,9 +44,10 @@ pub struct Analysis {
     /// target, keyed by it: `x=` for `p.x = 1`, `[]=` for `xs[0] = 1`.
     pub setters: HashMap<NodeId, Binding>,
     /// The function each augmented assignment like `x += 1` calls, keyed by the
-    /// assignment: a mutating overload such as `+=` when one fits, otherwise
-    /// the plain operator `+`. Either returns the updated left value, which the
-    /// compiler writes back through the target. Absent when neither fits.
+    /// assignment: a mutating overload, such as `++=` for `xs ++= ys`, when
+    /// one fits, otherwise the plain operator, `+` for `x += 1`. Either
+    /// returns the updated left value, which the compiler writes back
+    /// through the target. Absent when neither fits.
     pub augmented_assignments: HashMap<NodeId, Binding>,
     /// What each struct declaration declares, keyed by the declaration.
     pub structs: HashMap<NodeId, DeclaredStruct>,

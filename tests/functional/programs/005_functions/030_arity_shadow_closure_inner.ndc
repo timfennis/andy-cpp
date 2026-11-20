@@ -1,5 +1,5 @@
 // Inside a nested function, a local fn shadows only the same arity;
-// the other arity is still reachable from the outer scope via upvalue.
+// the other arity is still reachable from the outer scope as a global.
 fn foo(a) { "outer-one:" ++ a }
 fn foo(a, b) { "outer-two:" ++ a ++ "," ++ b }
 

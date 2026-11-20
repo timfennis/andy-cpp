@@ -72,7 +72,7 @@ impl Interpreter {
     }
 
     /// Create an interpreter that captures output into an internal buffer,
-    /// retrievable via [`get_output`], and has no input unless given some
+    /// retrievable via [`get_output`](Self::get_output), and has no input unless given some
     /// with [`with_input`](Self::with_input).
     #[must_use]
     pub fn capturing() -> Self {
@@ -194,7 +194,7 @@ impl Interpreter {
         &self.source_db
     }
 
-    /// Lex, parse, and analyse `input`, returning the annotated AST and an
+    /// Lex, parse, and analyse `input`, returning the AST and an
     /// [`AnalysisResult`] that includes any accumulated analysis errors.
     ///
     /// Lexer and parser errors still short-circuit (no AST to return).

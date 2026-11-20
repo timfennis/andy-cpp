@@ -28,7 +28,7 @@ assert_eq(h.pop, 3n / 2n);
 assert_eq(h.pop, 2);
 assert_eq(h.pop, 5n / 2n);
 
-// MinHeap with Complex (ordered by (re, im) tuple, same as interpreter)
+// MinHeap with Complex (ordered by (re, im) tuple)
 let h = MinHeap();
 h.push(3 + 4i);    // (re=3, im=4)
 h.push(1 + 0i);    // (re=1, im=0)

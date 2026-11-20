@@ -1,7 +1,7 @@
 // Closures that capture a block-scoped variable keep reading that variable after
-// the block ends, even when a later binding reuses its stack slot (#227). The
+// the block ends, even when a later binding reuses its register (#227). The
 // program runs inside a function, as top-level `let`s are globals and reuse
-// no slot.
+// no register.
 fn main() {
     // A `let` captured inside a block.
     let g = fn() { 0 };

@@ -161,8 +161,8 @@ impl<'a> Layout<'a> {
             });
             (node, binding)
         };
-        // In the order the instances were made, as the compiler gives them
-        // their slots in the order they're listed.
+        // In the order the instances were made, which is the order of their
+        // slots, as the compiler compiles them in the order they're listed.
         let mut instances = picks.instances.into_iter().collect::<Vec<_>>();
         instances.sort_unstable_by_key(|(symbol, _)| *symbol);
         for (symbol, picks) in instances {

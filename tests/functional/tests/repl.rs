@@ -201,7 +201,8 @@ fn closures_keep_the_loop_variables_of_a_finished_line() {
     assert_eq!(out.trim(), "[0,1,2]");
 }
 
-// Registering functions after a line already ran must reach the REPL's VM too.
+// Natives registered after a line already ran are in the globals of the lines
+// after it too.
 #[test]
 fn configure_after_a_line_ran_updates_the_globals() {
     let mut interp = Interpreter::capturing();

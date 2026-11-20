@@ -24,7 +24,7 @@ fn make_get_func() -> NativeFunc {
 
 /// Allocation-free `[]` for overloads whose parameter type guarantees the
 /// container can never trigger the Map default-function callback path
-/// (List/String/Deque/Tuple). Using `NativeFunc::Simple` here lets the VM
+/// (List/String/Deque). Using `NativeFunc::Simple` here lets the VM
 /// pass the argument registers by slice instead of moving them into a
 /// `Vec<Value>` on every call — a real win for hot inner loops like
 /// `dists[i][j]`.

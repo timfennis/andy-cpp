@@ -1,6 +1,6 @@
-// A `while` loop in a value position used to leave nothing on the stack,
-// shifting later slots so the VM called `1` as a function. Every expression
-// now produces exactly one value; a loop evaluates to `()`.
+// A `while` loop in a value position evaluates to `()`, and leaves the values
+// around it as they were. It once left nothing on the VM's stack, shifting
+// later slots so the VM called `1` as a function.
 let x = 1;
 print(while false {});
 print(x);

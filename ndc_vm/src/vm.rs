@@ -1410,12 +1410,12 @@ fn vec_element_at(arg: &Value, i: usize) -> Value {
     arg.clone()
 }
 
-/// A callable VM function bound to the parent VM, for use in `VmNative` HOF
-/// implementations. Produced by the `&mut VmCallable` input-type handler in
-/// `ndc_macros::vm_convert`.
+/// A callable VM function bound to the parent VM, for natives that call back
+/// into the program ([`NativeFunc::WithVm`]). Produced by the
+/// `&mut VmCallable` input-type handler in `ndc_macros::vm_convert`.
 ///
 /// Calling `call()` runs the function inline on the parent VM via
-/// `Vm::call_callback` — no child VM is allocated.
+/// [`Vm::call_callback`].
 pub struct VmCallable<'a> {
     pub function: Function,
     pub vm: &'a mut Vm,

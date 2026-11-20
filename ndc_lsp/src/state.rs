@@ -56,7 +56,7 @@ impl DocumentState {
     }
 
     /// Replace the source text. The analysis now predates it, so AST-backed
-    /// features stay off until [`set_analysis`] commits one for this text.
+    /// features stay off until [`set_analysis`](Self::set_analysis) commits one for this text.
     pub fn set_source(&mut self, source: &str) {
         self.source = source.to_string();
         self.line_index = LineIndex::new(source);
@@ -64,7 +64,7 @@ impl DocumentState {
     }
 
     /// Build a state from a successful analysis. Test-only convenience; the
-    /// server commits analysis in place via [`set_analysis`].
+    /// server commits analysis in place via [`set_analysis`](Self::set_analysis).
     #[cfg(test)]
     pub fn from_analysis(
         source: String,

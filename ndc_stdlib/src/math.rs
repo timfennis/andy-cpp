@@ -246,7 +246,7 @@ fn register_binary_arithmetic(env: &mut FunctionRegistry<NativeSpec>) {
 
             // Choosing the evaluator per overload here, instead of letting one
             // shared closure rediscover the output mode on every call, is what
-            // lets `1 + 2` read two `i64` slots and add them.
+            // lets `7 % 2` read two `i64`s and take the remainder.
             if let Some(operator) = operation.operator(left_mode, right_mode) {
                 env.declare_global_fn(NativeSpec::operator(
                     name,
@@ -865,9 +865,6 @@ enum PreservingUnary {
 }
 
 fn register_number_helpers(env: &mut FunctionRegistry<NativeSpec>) {
-    // Reversed for the same reason as `register_binary_arithmetic`: runtime
-    // candidates are inspected in reverse registration order, so registering
-    // `Int` last puts it first where dynamic dispatch looks.
     for mode in NumericMode::ALL.into_iter().rev() {
         declare(
             env,
