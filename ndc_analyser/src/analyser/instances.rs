@@ -447,8 +447,9 @@ impl Analyser {
     }
 
     /// Picks whether each cast of the batch is checked as the program runs:
-    /// not where the type of its value, settled now, proves it. In `fn f(ys)
-    /// => cast::<[Int]>(ys)`, the instance for a `[Int]` needs no check.
+    /// not where the type of its value, settled now, proves it and the cast
+    /// gives no container a new type. In `fn f(ys) => cast::<[Int]>(ys)`,
+    /// the instance for a `[Int]` needs no check.
     pub(super) fn pick_cast_checks(&mut self) {
         for cast in std::mem::take(&mut self.casts) {
             // A type parameter nothing settled, as `T` in `print(f(x))` with
@@ -464,8 +465,14 @@ impl Analyser {
                     .insert(cast.node, None);
                 continue;
             }
-            let check = (!self.vars.resolve(&cast.found).fits(&target))
-                .then(|| self.vars.finish_open(&target));
+            // A cast that gives a container a new type is checked even when
+            // the value's type proves it, as `cast::<[Int]>(xs)` for an `xs:
+            // [Never]`: the check is what copies a container something else
+            // holds, which would otherwise keep the old type for it.
+            let found = self.vars.resolve(&cast.found);
+            let proven =
+                found.fits(&target) && (found == target || !target.holds_a_mutable_container());
+            let check = (!proven).then(|| self.vars.finish_open(&target));
             self.pick_tables(cast.instance)
                 .cast_checks
                 .insert(cast.node, check);
