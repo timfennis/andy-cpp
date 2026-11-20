@@ -57,11 +57,14 @@ type SimpleFn = dyn Fn(&[Value]) -> Result<Value, VmError>;
 type WithVmFn = dyn Fn(&[Value], &mut crate::Vm) -> Result<Value, VmError>;
 
 pub enum NativeFunc {
-    /// Zero-allocation path: args are a slice directly into the VM stack.
-    /// Use for functions that do not invoke VM callbacks (no `VmCallable` params).
+    /// A native that doesn't call back into the program: its arguments are
+    /// the call's argument registers, a slice of the VM's stack, so a call
+    /// allocates nothing. Use for functions with no `VmCallable` params.
     Simple(Box<SimpleFn>),
-    /// HOF path: args are drained off the stack before the call so `&mut Vm`
-    /// can be passed safely. Use for functions with `&VmCallable` params.
+    /// A native that may call back into the program, as `map` does: its
+    /// arguments are moved out of their registers into a `Vec` first, so it
+    /// can be given the `&mut Vm` its callbacks run on. Use for functions
+    /// with `&VmCallable` params.
     WithVm(Box<WithVmFn>),
 }
 

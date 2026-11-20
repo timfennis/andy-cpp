@@ -32,7 +32,7 @@ pub struct Interpreter {
     /// declarations. A resumable interpreter keeps them from one evaluation to
     /// the next, which is how a REPL line sees what earlier lines declared.
     globals: Vec<Value>,
-    /// What the last run left on the VM's stack, such as the locals of the
+    /// What the last run left on the VM's stack, such as the registers of the
     /// top-level function. Kept until the next run or until the interpreter
     /// is dropped, so a program that is about to exit can forget the
     /// interpreter and leave freeing all of it to the OS.

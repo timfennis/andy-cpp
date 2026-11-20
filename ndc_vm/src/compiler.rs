@@ -1,10 +1,19 @@
 //! Compiles analysed code to the VM's instructions.
 //!
-//! Each expression is compiled with a [`Dest`]: where its value has to go.
+//! Each expression is compiled with a `Dest`: where its value has to go.
 //! `let x = a + b` compiles `a + b` with `x`'s register as its destination,
 //! which is one instruction, `AddInt x, a, b`. A local variable is its
 //! register; temporaries take the registers after the locals, a watermark
 //! that goes up while an expression needs them and back down when it's done.
+//!
+//! A call's arguments go in consecutive registers after the one the function
+//! is in, and become the callee's first registers. An argument register is
+//! the call's own copy: `f(x)` copies the local `x` into it rather than
+//! handing over `x`'s register, as a native may change a value nothing else
+//! holds in place, the way `a ++ b` appends to `a`'s list. For the same
+//! reason an instruction that takes its operand, leaving `None` behind (one
+//! that stores it somewhere else, as `MakeList` or `SetGlobal`), is only
+//! ever given a temporary.
 
 use crate::chunk::{Builder, Label};
 use crate::instr::{Instr, Reg, WINDOW};

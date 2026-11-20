@@ -12,25 +12,22 @@ Multiple trace flags can be combined in a single invocation.
 
 ### `--trace-print`
 
-Prints every VM instruction to stderr as it is dispatched, along with the corresponding source excerpt:
+Prints every VM instruction to stderr as it is dispatched, with the registers it reads and writes and the corresponding source excerpt. For a loop that adds up `square(i)`:
 
 ```
-[VM] 0000 GetGlobal(2)                    assert_eq
-[VM] 0001 GetGlobal(87)                   +
-[VM] 0002 Constant(0)                     15
-[VM] 0003 Constant(1)                     3
-[VM] 0004 Call(2)                         +
+[VM] 0008 IterNext r2, r0, +7             for i in 1..=3 {↵    total += square(i);↵}
+[VM] 0009 GetGlobal r4, g639              total
+[VM] 0010 GetGlobal r5, g640              square
+[VM] 0011 Copy r6, r0                     i
+[VM] 0012 Call r5, 1                      square
+[VM] 0000 MulInt r1, r0, r0               *
+[VM] 0001 Return r1
+[VM] 0013 AddInt r3, r4, r5               total += square(i)
+[VM] 0014 SetGlobal g639, r3              total
+[VM] 0015 Jump -8                         for i in 1..=3 {↵    total += square(i);↵}
 ```
 
-This is useful for understanding the exact sequence of bytecode operations your program produces.
-
-When the program runs on the register VM (`NDC_VM=register`), every trace mode shows the register VM's instructions instead, each with the registers it reads and writes:
-
-```
-[VM] 0003 JumpIfNotLess r0, r2, +5        <
-[VM] 0004 MulIntI r2, r0, #2              *
-[VM] 0005 AddInt r2, r1, r2               +
-```
+`r0` is a register of the running function, `g639` a global and `+7` how far a jump goes. This is useful for understanding the exact sequence of bytecode operations your program produces; `ndc disassemble` lists the same instructions without running them.
 
 ### `--trace-histogram`
 
@@ -38,11 +35,12 @@ Prints a summary table of how many times each instruction type was dispatched:
 
 ```
 --------------------------------------------------
-Instruction histogram (179 total)
+Instruction histogram (43 total)
 --------------------------------------------------
-  Call                         43  ( 24.0%)
-  Constant                     44  ( 24.6%)
-  GetLocal                     32  ( 17.9%)
+  GetGlobal                     7  ( 16.3%)
+  SetGlobal                     5  ( 11.6%)
+  LoadK                         4  (  9.3%)
+  IterNext                      4  (  9.3%)
   ...
 ```
 
@@ -52,10 +50,10 @@ Measures cumulative wall-clock time spent per instruction type and prints a summ
 
 ```
 ------------------------------------------------------------
-Instruction timing (total: 184µs)
+Instruction timing (total: 198µs)
 ------------------------------------------------------------
-  Call                        69µs  ( 37.4%)
-  Constant                    33µs  ( 18.1%)
+  Call                       125µs  ( 63.1%)
+  CallNative                  30µs  ( 15.3%)
   ...
 ```
 
