@@ -43,7 +43,6 @@ pub enum Token {
     Comment(String),
 
     // Operator - Assignment
-    // DeclareVar,
     EqualsSign, // =
     // Operator - Logic
     LogicAnd, // and
@@ -77,8 +76,8 @@ pub enum Token {
     Dot,          // .
     DotDot,       // range builder
     DotDotEquals, // inclusive range builder
-    PlusPlus,     // ++ operator will be for concatenation
-    Diamond,      // <> operator will be for string concatenation with coersion
+    PlusPlus,     // ++ concatenation
+    Diamond,      // <> string concatenation with coersion
     RightArrow,   // ->
     FatArrow,     // =>
     // Keywords
@@ -132,7 +131,6 @@ impl fmt::Display for Token {
             }
             Self::Identifier(ident) => ident,
             Self::Comment(comment) => comment,
-            // Self::DeclareVar => ":=",
             Self::EqualsSign => "=",
             Self::EqualsEquals => "==",
             Self::BangEquals => "!=",
