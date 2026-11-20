@@ -341,7 +341,7 @@ impl Value {
     /// container, or `Err` with the value as it was if it isn't: a function
     /// that may be a function `target` is wrapped so that each call checks
     /// what it returns, and a container something else holds is copied (see
-    /// [`Self::unshare`]).
+    /// `Value::unshare`).
     pub fn converted_to(mut self, target: &StaticType) -> Result<Self, Self> {
         if let StaticType::Function { .. } = target
             && let Self::Object(object) = &self
@@ -417,8 +417,8 @@ impl Value {
     /// Check whether this value conforms to `target`, scanning container
     /// elements recursively. Empty containers conform to any element type.
     ///
-    /// It backs the runtime check of casts, where the caller explicitly
-    /// opted into the scan. Shared container aliases are memoized by object and target
+    /// It backs the runtime check of casts, and of the arguments of a call of
+    /// a [`Function::Checked`]. Shared container aliases are memoized by object and target
     /// type. Iterators can't be inspected without consuming them, so they only
     /// conform to targets with `Any` elements.
     pub fn conforms_to(&self, target: &StaticType) -> bool {
@@ -1318,7 +1318,8 @@ impl Hash for Object {
             }
             Self::Map { entries, .. } => {
                 state.write_u8(8);
-                // Order-independent hash: XOR-fold of pair hashes
+                // Order-independent hash: the wrapping sums of the pair
+                // hashes and of their squares
                 // NOTE: the default value is not part of the identity of the map
                 let entries = entries.borrow();
                 state.write_usize(entries.len());

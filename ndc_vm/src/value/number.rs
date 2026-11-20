@@ -395,7 +395,7 @@ impl AdvancedNumber {
     /// `2.5`, `1e300`, `inf` and `5+1i` answer `None`.
     ///
     /// Every representation of one integer answers the same `Some`, which is
-    /// what lets [`Hash`] skip building a [`CanonicalNumber`] for it.
+    /// what lets [`Hash`] skip building a `CanonicalNumber` for it.
     #[must_use]
     pub fn as_exact_i64(&self) -> Option<i64> {
         match self {

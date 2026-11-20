@@ -64,7 +64,7 @@ pub enum NativeFunc {
     /// A native that may call back into the program, as `map` does: its
     /// arguments are moved out of their registers into a `Vec` first, so it
     /// can be given the `&mut Vm` its callbacks run on. Use for functions
-    /// with `&VmCallable` params.
+    /// with `&mut VmCallable` params.
     WithVm(Box<WithVmFn>),
 }
 

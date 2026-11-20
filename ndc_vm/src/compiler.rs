@@ -39,9 +39,9 @@ use ndc_parser::{
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// How many elements of a list literal, or pairs of a map literal, are made
-/// at once from registers of their own; the ones after them are added one by
-/// one, so a long literal takes no more registers than a short one.
+/// How many elements of a list literal are made at once from registers of
+/// their own; the ones after them are added one by one, so a long list takes
+/// no more registers than a short one.
 const LITERAL_CHUNK: usize = 64;
 
 /// Where an expression's value has to go.
@@ -1455,7 +1455,8 @@ impl Compiler {
     /// Declares the variables of `pattern`, which a declaration or a `for`
     /// loop at `span` declares, with the value in `src`: a sequence
     /// pattern's parts with the elements of the value, which `Unpack` puts
-    /// in temporaries first.
+    /// straight in the variables' registers when they follow each other, and
+    /// in temporaries first otherwise.
     fn declare_pattern(
         &mut self,
         pattern: BindingPatternLocation,

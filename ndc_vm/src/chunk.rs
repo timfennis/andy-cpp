@@ -26,8 +26,8 @@ pub struct Chunk {
     types: Vec<StaticType>,
     spans: Vec<Span>,
     /// Where each jump whose offset is [`FAR`] goes, by the jump's index,
-    /// in order: a loop whose condition is a fused comparison and whose body
-    /// is more than 32,767 instructions long.
+    /// in order: a compare-and-branch or an `IterNext` that goes more than
+    /// 32,767 instructions, as over the body of a long loop or `if`.
     far_jumps: Vec<(usize, usize)>,
 }
 
