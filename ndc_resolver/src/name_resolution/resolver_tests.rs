@@ -473,17 +473,6 @@ fn a_lambda_cannot_refer_to_the_let_it_initializes() {
 }
 
 #[test]
-fn named_function_expressions_bind_in_the_enclosing_scope() {
-    let mut resolver = new_resolver([]);
-    resolve_source(&mut resolver, "let g = fn h(n) { n; }; h;").unwrap();
-
-    let [h, n, g] = declared(&resolver);
-    assert_eq!(uses(&resolver, h), 1);
-    assert_eq!(uses(&resolver, n), 1);
-    assert_eq!(uses(&resolver, g), 0);
-}
-
-#[test]
 fn duplicate_parameters_are_rejected() {
     let mut resolver = new_resolver([]);
     let source = "fn f(x, x) { 1; }";
@@ -500,13 +489,11 @@ fn duplicate_parameters_are_rejected() {
 
 #[test]
 fn functions_cannot_redefine_variables_in_the_same_scope() {
-    let cases: [(&[&str], &str); 4] = [
+    let cases: [(&[&str], &str); 3] = [
         (&[], "let a = 1; fn a(x) { 1; }"),
         (&[], "let a = fn(x) { 1; }; fn a(x) { 1; }"),
         // The program's top level is one scope, separate from the builtins.
         (&["a"], "let a = 99; fn a(x, y) { 1; }"),
-        // An arrow body shares the parameter scope; a block body would not.
-        (&[], "fn f(a) => fn a() { 1; };"),
     ];
     for (builtins, source) in cases {
         let mut resolver = new_resolver(builtins.iter().copied());

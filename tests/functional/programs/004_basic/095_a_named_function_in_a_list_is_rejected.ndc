@@ -1,0 +1,5 @@
+// A named function can't be declared in a list, here in a block.
+// expect-error: only a statement can declare a named function, and `f` is declared inside an expression
+{
+  let fs = [fn f() { 1 }];
+}

@@ -2025,3 +2025,69 @@ fn a_function_lists_its_instances_in_the_order_they_were_made() {
         assert!(slots.is_sorted(), "{slots:?}");
     }
 }
+
+/// Places an expression goes, with `{}` where it goes.
+const EXPRESSION_POSITIONS: [&str; 18] = [
+    "false and {}",
+    "true or {}",
+    "fn g(x) { x } g({})",
+    "({}, 2)",
+    "[{}]",
+    "%{{}: 1}",
+    "%{1: {}}",
+    "if {} { 1 }",
+    "if false { } else if {} { }",
+    "while {} { }",
+    "for x in [1], if {} { }",
+    "[x for x in [1], if {}]",
+    "[1][{}]",
+    "let y = {}",
+    "let y = 1; y = {}",
+    "fn g() => {}",
+    "fn g() { return {}; }",
+    "({})()",
+];
+
+#[test]
+fn a_named_function_is_declared_only_as_a_statement() {
+    let rejected =
+        ["only a statement can declare a named function, and `f` is declared inside an expression"];
+    for position in EXPRESSION_POSITIONS {
+        let at_the_top_level = position.replace("{}", "fn f() { true }");
+        let in_a_function = format!("fn outer() {{ {at_the_top_level}; 0 }}");
+        // Once, though each instance has the declaration.
+        let in_a_generic_function =
+            format!("fn outer(z) {{ {at_the_top_level}; z }} outer(1); outer(\"a\");");
+        for source in [at_the_top_level, in_a_function, in_a_generic_function] {
+            assert_eq!(errors(&source, index_natives()), rejected, "{source}");
+        }
+    }
+}
+
+#[test]
+fn an_anonymous_function_goes_anywhere_an_expression_does() {
+    for position in EXPRESSION_POSITIONS {
+        let source = position.replace("{}", "fn() { true }");
+        let rejected = errors(&source, index_natives())
+            .into_iter()
+            .filter(|error| error.contains("only a statement"))
+            .collect::<Vec<_>>();
+        assert!(rejected.is_empty(), "{source}: {rejected:?}");
+    }
+}
+
+#[test]
+fn a_named_function_declared_as_a_statement_is_accepted() {
+    for source in [
+        "fn f() { 1 } f()",
+        "fn f() { 1 }; f()",
+        "fn g() { fn f() { 1 } f() } g()",
+        "fn g() { fn f() { 1 } } g()",
+        "{ fn apply(h) { h() } apply }(fn() { 3 })",
+        "for x in [1] { fn f() { x } f(); }",
+        "if true { fn f() { 1 } f() } else { 2 }",
+        "while false { fn f() { 1 } }",
+    ] {
+        assert_eq!(errors(source, vec![]), Vec::<String>::new(), "{source}");
+    }
+}

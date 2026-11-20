@@ -1,0 +1,35 @@
+// A named function is declared as a statement of the program or of any
+// block, with or without a `;`, and is in scope after it in that block.
+
+// In a block that is itself an expression, here the callee of a call.
+print({ fn twice(h) { h() * 2 } twice }(fn() { 21 }));
+// expect-output: 42
+
+// As the last statement of a block, whose value is then unit.
+fn declares_last() {
+  fn unused() { 1 }
+}
+print(declares_last() == ());
+// expect-output: true
+
+// Nested in another function, calling itself.
+fn outer(n) {
+  fn countdown(k: Int) -> Int { if k > 0 { countdown(k - 1) } else { k } };
+  countdown(n)
+}
+print(outer(3));
+// expect-output: 0
+
+// In a loop body, a new function each round, which a closure keeps.
+let kept = [];
+for i in 1..=3 {
+  fn times(x) { x * i }
+  kept.push(fn(x) => times(x));
+}
+print([f(10) for f in kept]);
+// expect-output: [10,20,30]
+
+// In each branch of an `if`.
+let picked = if kept.len() > 2 { fn big() { "big" } big() } else { fn small() { "small" } small() };
+print(picked);
+// expect-output: big

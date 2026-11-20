@@ -8,9 +8,7 @@
 //! past the parser and the analyser and run: arithmetic on ints and floats,
 //! variables, `if`, `while` with a counter, lists and tuples and indexing,
 //! functions and closures, `for` over ranges and lists, assignment with an
-//! operator, `break` and `continue`, `return`, and a function declared in
-//! the right operand of `and` or `or`, which may not run but whose name the
-//! program reads, calls and captures after it. Every loop ends after a few
+//! operator, `break` and `continue`, `return`. Every loop ends after a few
 //! rounds and no list grows by more than a few elements a round, so a
 //! program can't run or allocate without bound.
 //!
@@ -316,25 +314,13 @@ impl Generator<'_> {
             },
             7 => {
                 let condition = self.expression(Type::Bool, 1);
-                // A function declared in the condition is in scope after the
-                // `if`, not in its branches, which are blocks of their own.
-                let (condition, declared) = if self.chance(4) {
-                    let (condition, name) = self.maybe_declared(&condition, context);
-                    (condition, Some(name))
-                } else {
-                    (condition, None)
-                };
                 let then = self.block(context);
-                let statement = if self.chance(2) {
+                if self.chance(2) {
                     let otherwise = self.block(context);
                     format!("if {condition} {then} else {otherwise};\n")
                 } else {
                     format!("if {condition} {then};\n")
-                };
-                if let Some(name) = declared {
-                    self.declare_maybe_declared(name);
                 }
-                statement
             }
             8 if context.loop_budget > 0 => self.while_loop(context),
             9 if context.loop_budget > 0 => self.for_range(context),
@@ -373,13 +359,6 @@ impl Generator<'_> {
                 ),
                 None => self.declaration(context),
             },
-            16 => {
-                let condition = self.expression(Type::Bool, 1);
-                let (statement, name) = self.maybe_declared(&condition, context);
-                let read = format!("print({name} == ());\n");
-                self.declare_maybe_declared(name);
-                format!("{statement};\n{read}")
-            }
             _ => self.declaration(context),
         }
     }
@@ -397,7 +376,7 @@ impl Generator<'_> {
         };
         let name = self.fresh("v");
         let value = if typ == Type::Closure {
-            self.closure(context, None)
+            self.closure(context)
         } else {
             self.expression(typ, 0)
         };
@@ -409,9 +388,9 @@ impl Generator<'_> {
         format!("let {name} = {value};\n")
     }
 
-    /// `fn(p1: Int) -> Int { ... }`, or `fn h1(p1: Int) -> Int { ... }` with
-    /// a `name`, which may read and assign the variables around it.
-    fn closure(&mut self, context: Context, name: Option<&str>) -> String {
+    /// `fn(p1: Int) -> Int { ... }`, which may read and assign the
+    /// variables around it.
+    fn closure(&mut self, context: Context) -> String {
         let parameter = self.fresh("p");
         let scope = self.vars.len();
         self.vars.push(Var {
@@ -432,32 +411,7 @@ impl Generator<'_> {
         let body = self.statements(context, 2);
         let result = self.expression(Type::Int, 1);
         self.vars.truncate(scope);
-        let keyword = name.map_or_else(|| "fn".to_string(), |name| format!("fn {name}"));
-        format!("{keyword}({parameter}: Int) -> Int {{ {body}{result} }}")
-    }
-
-    /// `fn h1(p1: Int) -> Int { ... }` declared in the right operand of
-    /// `and` or `or`, `condition` being the left one, so it may not run.
-    /// Its name is in scope after it all the same, holding unit until it
-    /// runs, and the program may read it, call it and capture it.
-    fn maybe_declared(&mut self, condition: &str, context: Context) -> (String, String) {
-        let name = self.fresh("h");
-        let operator = ["and", "or"][self.pick(2)];
-        let function = self.closure(context, Some(&name));
-        (
-            format!("({condition} {operator} (({function}) == ()))"),
-            name,
-        )
-    }
-
-    /// Declares `name`, a function [`Self::maybe_declared`] may have
-    /// declared, as a variable later statements can call and capture.
-    fn declare_maybe_declared(&mut self, name: String) {
-        self.vars.push(Var {
-            name,
-            typ: Type::Closure,
-            assignable: false,
-        });
+        format!("fn({parameter}: Int) -> Int {{ {body}{result} }}")
     }
 
     /// `v1 += ...;` and the like, for a variable of a type that has them.

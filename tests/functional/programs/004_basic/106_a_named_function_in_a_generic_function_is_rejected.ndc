@@ -1,0 +1,7 @@
+// A named function declared in an expression is rejected in a generic
+// function too, which each call with other types makes another version of.
+// expect-error: only a statement can declare a named function, and `f` is declared inside an expression
+fn pair(x) {
+  (x, fn f() { x })
+}
+print(pair(1), pair("a"));

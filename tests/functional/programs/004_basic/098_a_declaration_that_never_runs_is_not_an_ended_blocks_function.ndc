@@ -1,9 +1,0 @@
-// A function declared where it may not run doesn't call the function a
-// variable of a block that ended before it held.
-// expect-error: Unable to invoke () as a function.
-fn main() {
-  { let q = fn() => 42; }
-  false and ((fn x() { 5 }) == ());
-  print(x() + 1);
-}
-main();

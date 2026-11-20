@@ -1,0 +1,4 @@
+// A named function can't be declared in an index.
+// expect-error: only a statement can declare a named function, and `first` is declared inside an expression
+let xs = [1, 2];
+print(xs[fn first() { 0 }()]);

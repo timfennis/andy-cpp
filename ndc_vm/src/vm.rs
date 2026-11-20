@@ -22,11 +22,9 @@
 //! needed, as it does for `++` and for casts.
 //!
 //! A call doesn't clear the registers of the frame it makes, which may hold
-//! what the caller left in its temporaries. Its code writes a local before
-//! reading it: a parameter is written by the call, any other local by its
-//! declaration, and the compiler puts unit in the register of a named
-//! function declared where it may not run, as in
-//! `false and ((fn f() { 1 }) == ())`, when the function starts.
+//! what the caller left in its temporaries. Its code writes each local
+//! before reading it: a parameter is written by the call, and any other
+//! local by its declaration (see [`crate::compiler`]).
 
 use crate::chunk::{ClosureCode, far_target};
 use crate::error::VmError;

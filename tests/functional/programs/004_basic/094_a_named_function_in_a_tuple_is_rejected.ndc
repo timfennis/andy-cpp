@@ -1,0 +1,6 @@
+// A named function can't be declared in a tuple, here in a function.
+// expect-error: only a statement can declare a named function, and `three` is declared inside an expression
+fn main() {
+  print((fn three() { 3 }, three)[1]());
+}
+main();

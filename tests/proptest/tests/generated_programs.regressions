@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 021276f68f21a0c553632963bbeffa6c2e3493c9109a4d59f1aaf6aad08dc7f0 # shrinks to  fn main() { let v1 = (((0.25 + 0.25) + (0.5 + 0.5)) + float([0, 0][0])); (([0 for x2 in [0]] == (if true { [1] } else { [0, 0] })) and ((fn h3(p4: Int) -> Int { 0 }) == ())); print(h3 == ()); 0 } main()  
