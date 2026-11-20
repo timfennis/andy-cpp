@@ -16,11 +16,12 @@
 //! ever given a temporary.
 //!
 //! A call doesn't clear the callee's registers, so the code compiled here
-//! writes each local before reading it. A declaration writes its local where
-//! it runs, which is before anything can read the name when it's a
-//! statement. A named function declared anywhere else may not run, as in
-//! `false and ((fn f() { 1 }) == ())`: its local has a register no other
-//! local shares, which the function sets to unit when it starts.
+//! writes each local before reading it. A parameter is written by the call.
+//! Any other local is written by its declaration, where it runs: a `let`, a
+//! named `fn` and a `struct` are only ever statements, and a statement runs
+//! before anything after it in its block, which is all that can read the
+//! name. A loop's variables, and a comprehension's, are written before each
+//! run of its body or guard.
 
 use crate::chunk::{Builder, Label};
 use crate::instr::{Instr, Reg, WINDOW};
@@ -340,8 +341,6 @@ impl Compiler {
         expressions: impl Iterator<Item = ExpressionLocation>,
     ) -> Result<(), CompileError> {
         let expressions = expressions.collect::<Vec<_>>();
-        let analysis = Rc::clone(&self.analysis);
-        self.set_unit_slots(&analysis.top_level_unit_slots)?;
         // The program's value is its last expression's that isn't a
         // `;`-statement, kept in a register of its own while the statements
         // after it run.
@@ -2506,7 +2505,6 @@ impl Compiler {
             return Err(CompileError::too_many_registers(body.span));
         }
         let mut compiler = self.nested(locals, instance.or(self.instance));
-        compiler.set_unit_slots(self.analysis.unit_slots_of(id))?;
         let src = match compiler.compile_expr(body, Dest::Any)? {
             Operand::Local(reg) | Operand::Temp(reg) => reg,
             Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
@@ -2517,21 +2515,6 @@ impl Compiler {
             compiler.finish(name, static_type, 0, Vec::new()),
             used_instance,
         ))
-    }
-
-    /// Puts unit in the registers of `slots`, the locals of the named
-    /// functions the function being compiled declares where they may not
-    /// run ([`Analysis::unit_slots`]). Such a function's name holds unit
-    /// until its declaration runs: after `false and ((fn f() { 1 }) == ())`,
-    /// `f` is `()`. Nothing else writes its register, and a call doesn't
-    /// clear the registers of the frame it makes, which may hold what the
-    /// caller left in them.
-    fn set_unit_slots(&mut self, slots: &[usize]) -> Result<(), CompileError> {
-        for &slot in slots {
-            let dst = self.local(slot, Span::synthetic())?;
-            self.emit(Instr::LoadUnit { dst }, Span::synthetic());
-        }
-        Ok(())
     }
 
     /// What the identifier `id` refers to, in the instance being compiled.

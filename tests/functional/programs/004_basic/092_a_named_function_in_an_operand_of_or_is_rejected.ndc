@@ -1,0 +1,7 @@
+// A named function can't be declared in an operand, here of `or` in a
+// function.
+// expect-error: only a statement can declare a named function, and `f` is declared inside an expression
+fn main() {
+  true or fn f() { true };
+}
+main();

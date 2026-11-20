@@ -176,6 +176,23 @@ fn a_line_rejected_before_running_leaves_the_session_as_it_was() {
 }
 
 #[test]
+fn a_function_declared_inside_an_expression_is_reported_once_per_line() {
+    let (printed, errors) = repl_with_errors(&[
+        "false and fn f() { true }",
+        "fn g(x) { (x, fn h() { x }) }",
+        "print(1)",
+    ]);
+    assert_eq!(printed, ["1"]);
+    assert_eq!(
+        errors
+            .matches("only a statement can declare a named function")
+            .count(),
+        2,
+        "{errors}"
+    );
+}
+
+#[test]
 fn a_struct_declared_on_a_failed_line_is_gone() {
     let printed = repl(&[
         "struct Foo { x: Int }; [1][5]",

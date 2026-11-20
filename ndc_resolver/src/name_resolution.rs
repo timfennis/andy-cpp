@@ -53,9 +53,6 @@ pub struct NameResolver {
     captures: HashMap<NodeId, Vec<SymbolId>>,
     /// Symbols some closure captures. They must outlive their scope (see #227).
     captured: HashSet<SymbolId>,
-    /// The named functions declared where they may not run: anywhere but as
-    /// a statement. In `false and ((fn f() { 1 }) == ())`, `f`.
-    may_not_run: HashSet<SymbolId>,
     /// The operations each augmented assignment can use, keyed by its node.
     /// In `x += 1`, the candidates for `+=` and `+`.
     augmented: HashMap<NodeId, AugmentedCandidates>,
@@ -494,7 +491,6 @@ impl NameResolver {
             assignments: Default::default(),
             captures: Default::default(),
             captured: Default::default(),
-            may_not_run: Default::default(),
             augmented: Default::default(),
             use_sites: Default::default(),
             getters: Default::default(),
@@ -540,17 +536,6 @@ impl NameResolver {
     pub fn resolve_statement(&mut self, statement: &ExpressionLocation) {
         if let Err(error) = self.resolve(statement) {
             self.errors.push(error);
-        }
-        // A function declared as a statement runs before anything after it
-        // in its block, which is all that can read its name.
-        let mut declaration = statement;
-        while let Expression::Statement(inner) = &declaration.expression {
-            declaration = inner;
-        }
-        if let Expression::FunctionDeclaration { .. } = declaration.expression
-            && let Some(symbol) = self.declarations.get(&declaration.id)
-        {
-            self.may_not_run.remove(symbol);
         }
     }
 
@@ -657,19 +642,6 @@ impl NameResolver {
     /// Whether some closure captures `symbol`, so it must outlive its scope.
     pub fn is_captured(&self, symbol: SymbolId) -> bool {
         self.captured.contains(&symbol)
-    }
-
-    /// Whether `symbol` is a named function declared where it may not run,
-    /// anywhere but as a statement, though its name is in scope after it all
-    /// the same: `f` in `false and ((fn f() { 1 }) == ())`, in the condition
-    /// of an `else if`, or after a `break` in the condition of a `while`.
-    pub fn may_not_run(&self, symbol: SymbolId) -> bool {
-        self.may_not_run.contains(&symbol)
-    }
-
-    /// The symbols [`Self::may_not_run`] holds for, in no particular order.
-    pub fn functions_that_may_not_run(&self) -> impl Iterator<Item = SymbolId> + '_ {
-        self.may_not_run.iter().copied()
     }
 
     /// The native's position in the function registry, which is also its global
@@ -903,8 +875,6 @@ impl NameResolver {
                     }
                     let symbol = self.declare_function(name.clone());
                     self.declarations.insert(loc.id, symbol);
-                    // Until `resolve_statement` finds it's a statement.
-                    self.may_not_run.insert(symbol);
                 }
 
                 // Parameter lists are short, so a linear scan beats hashing.

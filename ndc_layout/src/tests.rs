@@ -125,30 +125,6 @@ fn redeclaring_a_local_takes_a_new_slot() {
 }
 
 #[test]
-fn a_function_that_may_not_run_takes_a_slot_after_every_other_local() {
-    assert_eq!(
-        slots_with_natives(
-            "fn f() { { let a = 1; } false and ((fn g() { 1 }) == ()); let c = 3; }",
-            &["=="]
-        ),
-        named(&[
-            ("f", Global(1)),
-            ("a", Local(0)),
-            ("g", Local(2)),
-            ("c", Local(1))
-        ])
-    );
-}
-
-#[test]
-fn a_function_declared_as_a_statement_takes_its_slot_in_its_block() {
-    assert_eq!(
-        slots("fn f() { { let a = 1; } fn g() { 1 } }"),
-        named(&[("f", Global(0)), ("a", Local(0)), ("g", Local(0))])
-    );
-}
-
-#[test]
 fn block_slots_are_free_again_after_the_block() {
     assert_eq!(
         slots("fn f() { let a = 1; { let b = 2; } let c = 3; }"),
@@ -299,21 +275,6 @@ fn a_frame_is_as_large_as_its_deepest_block() {
     let analysis = lay_out_batch(&resolver, 0);
     assert_eq!(analysis.frame_size(statements[0].id), 3);
     assert_eq!(analysis.top_level_frame_size, 0);
-}
-
-#[test]
-fn a_frame_sets_the_slots_of_functions_that_may_not_run_to_unit() {
-    let mut resolver = resolve_with_natives("", &["=="]);
-    let statements = resolve_batch(
-        &mut resolver,
-        "fn f() { false and ((fn g() { 1 }) == ()); fn h() { 2 } } \
-         { true or ((fn k() { 3 }) == ()); }",
-    );
-    let analysis = lay_out_batch(&resolver, 0);
-    assert_eq!(analysis.frame_size(statements[0].id), 3);
-    assert_eq!(analysis.unit_slots_of(statements[0].id), [2]);
-    assert_eq!(analysis.top_level_frame_size, 2);
-    assert_eq!(analysis.top_level_unit_slots, [1]);
 }
 
 #[test]

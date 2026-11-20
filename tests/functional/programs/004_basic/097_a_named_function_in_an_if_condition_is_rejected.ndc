@@ -1,0 +1,7 @@
+// A named function can't be declared in the condition of an `if`, here in a
+// function.
+// expect-error: only a statement can declare a named function, and `f` is declared inside an expression
+fn main() {
+  if fn f() { true } { print(1); }
+}
+main();
