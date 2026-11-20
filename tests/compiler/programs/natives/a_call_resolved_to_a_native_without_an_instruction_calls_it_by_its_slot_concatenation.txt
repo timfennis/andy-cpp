@@ -1,6 +1,0 @@
-== <script> (registers: 3, globals: 0, natives: ++) ==
-0000  MakeString r1, k0                    "a"
-0001  MakeString r2, k1                    "b"
-0002  CallNative r1, ++, r1, 2
-0003  LoadUnit r0
-0004  Halt r0

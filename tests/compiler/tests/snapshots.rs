@@ -1,7 +1,7 @@
 //! Checks what the compiler writes for each program under `programs`
 //! against the listing expected of it, kept next to the program:
-//! `programs/blocks/a_block_yields_its_last_expression.ndc` is expected to
-//! compile to `a_block_yields_its_last_expression.txt`.
+//! `programs/blocks/a_block_discards_all_but_its_last_value.ndc` is expected
+//! to compile to `a_block_discards_all_but_its_last_value.txt`.
 //!
 //! A program says how to compile it in a directive, one line such as
 //! `// compile: stdlib`, which may list several setups separated by commas;

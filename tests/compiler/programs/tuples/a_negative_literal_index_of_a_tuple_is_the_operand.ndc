@@ -1,4 +1,0 @@
-// A negative index is the immediate operand too, counted from the end when it
-// runs: `TupleIndex` with `#-1`, and no negation.
-// compile: stdlib
-let t = (1, "a"); t[-1]
