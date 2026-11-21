@@ -85,7 +85,7 @@ for (k, v) in m {
 
 **Iteration order is unspecified.** Maps are hash-based, so keys may appear in any order.
 
-**Keys are snapshotted at the start of the loop.** A key added to the map during the loop isn't visited, and a key removed before the loop gets to it is skipped. Values read during iteration do reflect changes to existing keys.
+**Keys are snapshotted at the start of the loop.** A key added to the map during the loop isn't visited, and a key removed before the loop gets to it is skipped. Values read during iteration do reflect changes to existing keys. Functions that take a function, like `map` and `filter`, go over a map the same way.
 
 ## Operators
 
