@@ -898,11 +898,21 @@ impl Vm {
                         }
                     }
                     Instr::Unpack { src, base, len } => {
-                        // The value may be in one of the registers it's
-                        // unpacked to.
-                        let value = regs[src.index()].clone();
-                        let out = &mut regs[base.index()..base.index() + usize::from(len)];
-                        if let Err(message) = unpack_into(&value, out) {
+                        let (src, base) = (src.index(), base.index());
+                        let end = base + usize::from(len);
+                        let result = if src < base {
+                            let (below, rest) = regs.split_at_mut(base);
+                            unpack_into(&below[src], &mut rest[..end - base])
+                        } else if src >= end {
+                            let (below, rest) = regs.split_at_mut(end);
+                            unpack_into(&rest[src - end], &mut below[base..])
+                        } else {
+                            // The value is in one of the registers it's
+                            // unpacked to.
+                            let value = regs[src].clone();
+                            unpack_into(&value, &mut regs[base..end])
+                        };
+                        if let Err(message) = result {
                             break Exit::Error(VmError::native(message));
                         }
                     }

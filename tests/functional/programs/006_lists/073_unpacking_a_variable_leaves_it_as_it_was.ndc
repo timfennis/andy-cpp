@@ -1,0 +1,33 @@
+// Unpacking a list or tuple in a variable into other variables copies its
+// elements and leaves the variable as it was; a list element is the same
+// list in both. The same in a function, where the variables are registers
+// and the value's register is below the ones it's unpacked to.
+// expect-output: 1 2 (1,2)
+// expect-output: [9] [[9],[2]]
+// expect-output: 1 2 (1,2)
+// expect-output: [9] [[9],[2]]
+// expect-output: 3 4 (3,4)
+
+let pair = (1, 2);
+let a, b = pair;
+print(a, b, pair);
+let lists = [[1], [2]];
+let first, second = lists;
+first[0] = 9;
+print(first, lists);
+
+fn in_a_function() {
+    let pair = (1, 2);
+    let a, b = pair;
+    print(a, b, pair);
+    let lists = [[1], [2]];
+    let first, second = lists;
+    first[0] = 9;
+    print(first, lists);
+    let both = (3, 4);
+    let x = 0;
+    let y = 0;
+    x, y = both;
+    print(x, y, both);
+}
+in_a_function();
