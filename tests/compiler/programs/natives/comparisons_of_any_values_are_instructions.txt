@@ -1,6 +1,6 @@
 == <script> (registers: 4, globals: 0) ==
-0000  MakeString r1, k0                    "a"
-0001  MakeString r2, k1                    "b"
+0000  LoadK r1, k0                         "a"
+0001  LoadK r2, k1                         "b"
 0002  Less r1, r1, r2
 0003  LoadK r1, k2                         1
 0004  MakeList r1, r1, 1
