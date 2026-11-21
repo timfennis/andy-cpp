@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.5.0](https://github.com/timfennis/andy-cpp/compare/v0.4.1...v0.5.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **vm:** a named function can only be declared as a statement; inside an expression it is now an error.
+
+### Features
+
+* **lexer:** accept float literals with an exponent like 1e-12 🔬 ([#477](https://github.com/timfennis/andy-cpp/issues/477)) ([e2e1032](https://github.com/timfennis/andy-cpp/commit/e2e1032b35f1a80b86d0fc212694b06d63784e3e))
+* **lexer:** support \u{...} Unicode escapes in strings 🦄 ([#478](https://github.com/timfennis/andy-cpp/issues/478)) ([751c60f](https://github.com/timfennis/andy-cpp/commit/751c60f962aaff3668643749f9d196d3a0be1644))
+
+
+### Bug Fixes
+
+* **analyser:** settle what the last fallbacks' solving makes 🧷 ([#484](https://github.com/timfennis/andy-cpp/issues/484)) ([90bfdbe](https://github.com/timfennis/andy-cpp/commit/90bfdbeb64a7ed5e05be39ad99b1e827ce4691fd))
+* **lexer:** spell the invalid-escape error "Invalid escape sequence" ✏️ ([#471](https://github.com/timfennis/andy-cpp/issues/471)) ([94454c9](https://github.com/timfennis/andy-cpp/commit/94454c97c172d3e19680715a59f956e06fb32cbd))
+* **lsp:** leave out types whose check failed instead of showing Any 🙈 ([#479](https://github.com/timfennis/andy-cpp/issues/479)) ([3aaa34e](https://github.com/timfennis/andy-cpp/commit/3aaa34e258ed5ab34a8bb93b1c575d3e6c823f66))
+* **parser:** say what's missing instead of "Expected an expression" 🧭 ([#483](https://github.com/timfennis/andy-cpp/issues/483)) ([90d1364](https://github.com/timfennis/andy-cpp/commit/90d1364cba261f1381c6e76b2f27519024dec77c))
+* **vm:** deepcopy copies each container once, keeping cycles and sharing 🔁 ([#482](https://github.com/timfennis/andy-cpp/issues/482)) ([edf2b70](https://github.com/timfennis/andy-cpp/commit/edf2b70a9345ecbb6f45d090e58e6f04f9ff3204))
+* **vm:** iterate a string or map that changes during the loop 🔂 ([#537](https://github.com/timfennis/andy-cpp/issues/537)) ([c9106c8](https://github.com/timfennis/andy-cpp/commit/c9106c8eb315346c57affd76b7d25c1508c0c89c))
+
+
+### Performance Improvements
+
+* exit without freeing the program's values 🚪 ([#481](https://github.com/timfennis/andy-cpp/issues/481)) ([41fb803](https://github.com/timfennis/andy-cpp/commit/41fb803c67233af2f2db088016d2e834f7f5ad2b))
+* read a tuple's element at a literal index in place 📦 ([#491](https://github.com/timfennis/andy-cpp/issues/491)) ([ed19ec5](https://github.com/timfennis/andy-cpp/commit/ed19ec585347a5c6038531876a233d54903749b6))
+* **stdlib:** decode JSON integers without allocating 🔢 ([#474](https://github.com/timfennis/andy-cpp/issues/474)) ([3625aac](https://github.com/timfennis/andy-cpp/commit/3625aac84495b95bdef378b90ef8454a105dac37))
+* **vm:** hash maps with FxHash and memo keys with 128 bits 🧮 ([#533](https://github.com/timfennis/andy-cpp/issues/533)) ([57ba180](https://github.com/timfennis/andy-cpp/commit/57ba180f10ae2f575d1d77f56a0c487e393d8fea))
+* **vm:** read a local tuple's element at a literal index in one instruction 🎯 ([#492](https://github.com/timfennis/andy-cpp/issues/492)) ([8b6437b](https://github.com/timfennis/andy-cpp/commit/8b6437bea58f4675a4d6658ba67f77b7ede777ee))
+* **vm:** read and write a list element in one instruction 📇 ([#534](https://github.com/timfennis/andy-cpp/issues/534)) ([25bf432](https://github.com/timfennis/andy-cpp/commit/25bf43229620a30d7b2c66caa4ba4fdfc1bcb77e))
+* **vm:** replace the stack VM with a register VM 🚀 ([#523](https://github.com/timfennis/andy-cpp/issues/523)) ([a5ae39e](https://github.com/timfennis/andy-cpp/commit/a5ae39eb4f60dd6bd7ef0d7047220b1eb034529a))
+* **vm:** unpack a pattern of locals straight into their slots 📥 ([#493](https://github.com/timfennis/andy-cpp/issues/493)) ([5b291ce](https://github.com/timfennis/andy-cpp/commit/5b291ce99a25adc554d0774f697f249c11bad3e8))
+* **vm:** write natives as instructions and call the rest by their slot 🏎️ ([#485](https://github.com/timfennis/andy-cpp/issues/485)) ([a6dc860](https://github.com/timfennis/andy-cpp/commit/a6dc86030cdd52134d6f848778d380d492c9dad6))
+
 ## [0.4.1](https://github.com/timfennis/andy-cpp/compare/v0.4.0...v0.4.1) (2026-11-19)
 
 
