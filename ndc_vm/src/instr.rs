@@ -224,8 +224,9 @@ pub enum Instr {
     IterNext { iter: Reg, dst: Reg, offset: i16 },
     /// Starts counting through the range from the `Int` in `counter` to the
     /// `Int` in the register after it, which it includes if `inclusive`:
-    /// `for i in 0..n`. Afterwards the register after `counter` holds the
-    /// last value, and `counter` the next one, or `None` if there is none.
+    /// `for i in 0..n`, or through the `Range` or `RangeFrom` in `counter`:
+    /// `for i in r`. Afterwards the register after `counter` holds the last
+    /// value, and `counter` the next one, or `None` if there is none.
     ForRange { counter: Reg, inclusive: bool },
     /// `dst` = the next value of the range [`Instr::ForRange`] started in
     /// `counter`, or if it has none left, goes `offset` instructions on.

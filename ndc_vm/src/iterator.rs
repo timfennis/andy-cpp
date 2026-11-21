@@ -1,4 +1,4 @@
-use crate::value::VmString;
+use crate::value::{Range, VmString};
 use crate::{Object, OrdValue, Value, ValueIter};
 use std::cell::RefCell;
 use std::cmp::Reverse;
@@ -23,16 +23,6 @@ pub trait VmIterator {
         self.len() == Some(0)
     }
 
-    /// If this iterator represents a range, returns `(start, end, inclusive)`.
-    fn range_bounds(&self) -> Option<(i64, i64, bool)> {
-        None
-    }
-
-    /// If this iterator represents an unbounded range (`start..`), returns the start.
-    fn unbounded_range_start(&self) -> Option<i64> {
-        None
-    }
-
     /// Returns a new independent iterator with the same current state (for `deepcopy`).
     /// Must be implemented for all iterator types so that `deepcopy` works correctly.
     fn deep_copy(&self) -> Option<SharedIterator>;
@@ -40,97 +30,46 @@ pub trait VmIterator {
 
 pub type SharedIterator = Rc<RefCell<dyn VmIterator>>;
 
-/// Exclusive range: `start..end`
+/// A cursor over a [`Range`]'s `Int`s.
 pub struct RangeIter {
-    current: i64,
-    end: i64,
+    /// The next `Int`, or `None` once there are no more.
+    next: Option<i64>,
+    last: i64,
 }
 
 impl RangeIter {
-    pub fn new(start: i64, end: i64) -> Self {
-        Self {
-            current: start,
-            end,
+    pub fn new(range: Range) -> Self {
+        match range.bounds() {
+            Some((first, last)) => Self {
+                next: Some(first),
+                last,
+            },
+            None => Self {
+                next: None,
+                last: 0,
+            },
         }
     }
 }
 
 impl VmIterator for RangeIter {
     fn next(&mut self) -> Option<Value> {
-        if self.current < self.end {
-            let val = self.current;
-            self.current += 1;
-            Some(Value::Int(val))
-        } else {
-            None
-        }
+        let value = self.next?;
+        self.next = (value < self.last).then(|| value + 1);
+        Some(Value::Int(value))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = (self.end - self.current).max(0) as usize;
+        let remaining = self.next.map_or(0, |next| {
+            usize::try_from(i128::from(self.last) - i128::from(next) + 1).unwrap_or(usize::MAX)
+        });
         (remaining, Some(remaining))
-    }
-
-    fn range_bounds(&self) -> Option<(i64, i64, bool)> {
-        Some((self.current, self.end, false))
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
         Some(Rc::new(RefCell::new(Self {
-            current: self.current,
-            end: self.end,
-        })))
-    }
-}
-
-/// Inclusive range: start..=end
-pub struct RangeInclusiveIter {
-    current: i64,
-    end: i64,
-    done: bool,
-}
-
-impl RangeInclusiveIter {
-    pub fn new(start: i64, end: i64) -> Self {
-        Self {
-            current: start,
-            end,
-            done: start > end,
-        }
-    }
-}
-
-impl VmIterator for RangeInclusiveIter {
-    fn next(&mut self) -> Option<Value> {
-        if self.done {
-            return None;
-        }
-        let val = self.current;
-        if self.current == self.end {
-            self.done = true;
-        } else {
-            self.current += 1;
-        }
-        Some(Value::Int(val))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.done {
-            return (0, Some(0));
-        }
-        let remaining = (self.end - self.current).saturating_add(1) as usize;
-        (remaining, Some(remaining))
-    }
-
-    fn range_bounds(&self) -> Option<(i64, i64, bool)> {
-        Some((self.current, self.end, true))
-    }
-
-    fn deep_copy(&self) -> Option<SharedIterator> {
-        Some(Rc::new(RefCell::new(Self {
-            current: self.current,
-            end: self.end,
-            done: self.done,
+            next: self.next,
+            last: self.last,
         })))
     }
 }
@@ -153,10 +92,6 @@ impl VmIterator for UnboundedRangeIter {
         let val = self.current?;
         self.current = val.checked_add(1);
         Some(Value::Int(val))
-    }
-
-    fn unbounded_range_start(&self) -> Option<i64> {
-        self.current
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
@@ -409,7 +344,7 @@ impl CombinationsIter {
     pub fn new(value: Value, k: usize) -> Option<Self> {
         let iter = value.try_into_iter()?;
         let (buffer, source) = match iter {
-            shared @ ValueIter::Shared(_) => (Vec::new(), Some(shared)),
+            lazy if lazy.is_lazy() => (Vec::new(), Some(lazy)),
             eager => (eager.collect(), None),
         };
         Some(Self {
@@ -511,10 +446,7 @@ impl VmIterator for CombinationsIter {
     fn deep_copy(&self) -> Option<SharedIterator> {
         let source_copy = match &self.source {
             None => None,
-            Some(ValueIter::Shared(shared)) => {
-                Some(ValueIter::Shared(shared.borrow().deep_copy()?))
-            }
-            Some(_) => return None, // unreachable: eager sources drain to None at construction
+            Some(source) => Some(source.try_clone()?),
         };
         Some(Rc::new(RefCell::new(Self {
             buffer: self.buffer.clone(),
@@ -563,6 +495,7 @@ impl VmIterator for TakeIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let (lo, hi) = match &self.source {
             ValueIter::Shared(s) => s.borrow().size_hint(),
+            ValueIter::Ints(it) => it.size_hint(),
             _ => (0, None),
         };
         (
@@ -572,11 +505,8 @@ impl VmIterator for TakeIter {
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
-        let ValueIter::Shared(shared) = &self.source else {
-            return None;
-        };
         Some(Rc::new(RefCell::new(Self {
-            source: ValueIter::Shared(shared.borrow().deep_copy()?),
+            source: self.source.try_clone()?,
             remaining: self.remaining,
         })))
     }
@@ -620,15 +550,13 @@ impl VmIterator for EnumerateIter {
             ValueIter::List(it) => it.size_hint(),
             ValueIter::Deque(it) => it.size_hint(),
             ValueIter::Map(it) => it.size_hint(),
+            ValueIter::Ints(it) => it.size_hint(),
         }
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
-        let ValueIter::Shared(shared) = &self.source else {
-            return None;
-        };
         Some(Rc::new(RefCell::new(Self {
-            source: ValueIter::Shared(shared.borrow().deep_copy()?),
+            source: self.source.try_clone()?,
             index: self.index,
         })))
     }

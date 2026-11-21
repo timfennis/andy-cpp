@@ -18,6 +18,7 @@
   - [Tuple](./reference/types/tuple.md)
     - [Unit](./reference/types/unit.md)
   - [Map and Set](./reference/types/map-and-set.md)
+  - [Range](./reference/types/range.md)
   - [Deque](./reference/types/deque.md): A double ended queue
   - [MinHeap & MaxHeap](./reference/types/min-max-heap.md): Min/max Heap
   - [Function](./reference/types/function.md)

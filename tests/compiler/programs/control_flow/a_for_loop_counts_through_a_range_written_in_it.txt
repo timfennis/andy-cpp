@@ -4,7 +4,7 @@
 0002  LoadUnit r0
 0003  Halt r0
 
-== #1 f (registers: 6) ==
+== #1 f (registers: 7) ==
 0000  LoadK r1, k0                         0
 0001  LoadK r4, k1                         0
 0002  Copy r5, r0
@@ -20,8 +20,16 @@
 0012  Jump -3                              -> 0010
 0013  LoadK r4, k3                         0
 0014  MakeRange r2, r4, r0
-0015  GetIterator r4, r2
-0016  IterNext r4, r3, +2                  -> 0019
-0017  AddInt r1, r1, r3
-0018  Jump -3                              -> 0016
-0019  Return r1
+0015  Copy r4, r2
+0016  ForRange r4
+0017  ForRangeNext r4, r3, +2              -> 0020
+0018  AddInt r1, r1, r3
+0019  Jump -3                              -> 0017
+0020  Copy r4, r0
+0021  LoadK r5, k4                         9223372036854775807
+0022  ForRange r4, inclusive
+0023  ForRangeNext r4, r3, +3              -> 0027
+0024  AddInt r1, r1, r3
+0025  Jump +1                              -> 0027
+0026  Jump -4                              -> 0023
+0027  Return r1

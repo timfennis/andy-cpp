@@ -63,6 +63,11 @@ pub enum StaticType {
         value: Box<Self>,
     },
     Iterator(Box<Self>),
+    /// A range with an end, `a..b` or `a..=b`: a value that iterates as its
+    /// `Int`s, every time it's iterated.
+    Range,
+    /// A range without an end, `a..`.
+    RangeFrom,
     MinHeap(Box<Self>),
     MaxHeap(Box<Self>),
     Deque(Box<Self>),
@@ -98,8 +103,21 @@ impl StaticType {
     /// Must stay in sync with its match arms; the unit test
     /// `builtin_type_names_are_constructible` guards this.
     pub const BUILTIN_TYPE_NAMES: &'static [&'static str] = &[
-        "Any", "Never", "Bool", "Number", "Float", "Int", "String", "Option", "Iterable",
-        "Iterator", "MinHeap", "MaxHeap", "Deque",
+        "Any",
+        "Never",
+        "Bool",
+        "Number",
+        "Float",
+        "Int",
+        "String",
+        "Option",
+        "Iterable",
+        "Iterator",
+        "Range",
+        "RangeFrom",
+        "MinHeap",
+        "MaxHeap",
+        "Deque",
     ];
 
     pub fn from_name_and_args(
@@ -114,6 +132,8 @@ impl StaticType {
             "Float" => Self::require_no_args(name, &args).map(|_| Self::Float),
             "Int" => Self::require_no_args(name, &args).map(|_| Self::Int),
             "String" => Self::require_no_args(name, &args).map(|_| Self::String),
+            "Range" => Self::require_no_args(name, &args).map(|_| Self::Range),
+            "RangeFrom" => Self::require_no_args(name, &args).map(|_| Self::RangeFrom),
             "Option" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Option(Box::new(elem)))
             }
@@ -204,6 +224,8 @@ impl StaticType {
                 | Self::Tuple(_)
                 | Self::Map { .. }
                 | Self::Iterator(_)
+                | Self::Range
+                | Self::RangeFrom
                 | Self::MinHeap(_)
                 | Self::MaxHeap(_)
                 | Self::Deque(_)
@@ -225,6 +247,7 @@ impl StaticType {
             | Self::MaxHeap(t)
             | Self::Deque(t) => Some(t.as_ref().clone()),
             Self::String => Some(Self::String),
+            Self::Range | Self::RangeFrom => Some(Self::Int),
             Self::Tuple(elems) => Some(Self::compute_tuple_element_type(elems)),
             Self::Map { key, value } => Some(Self::Tuple(vec![
                 key.as_ref().clone(),
@@ -408,7 +431,9 @@ impl StaticType {
             | Self::Number
             | Self::Float
             | Self::Int
-            | Self::String => self.clone(),
+            | Self::String
+            | Self::Range
+            | Self::RangeFrom => self.clone(),
         }
     }
 
@@ -448,7 +473,9 @@ impl StaticType {
             | Self::Number
             | Self::Float
             | Self::Int
-            | Self::String => false,
+            | Self::String
+            | Self::Range
+            | Self::RangeFrom => false,
         }
     }
 
@@ -549,6 +576,10 @@ impl StaticType {
             ) => Self::held_overlap(t, u),
             (Self::Iterable(t), Self::String) | (Self::String, Self::Iterable(t)) => {
                 Self::held_overlap(t, &Self::String)
+            }
+            (Self::Iterable(t), Self::Range | Self::RangeFrom)
+            | (Self::Range | Self::RangeFrom, Self::Iterable(t)) => {
+                Self::held_overlap(t, &Self::Int)
             }
             (Self::Iterable(t), Self::Tuple(elems)) | (Self::Tuple(elems), Self::Iterable(t)) => {
                 elems.iter().all(|elem| elem.overlaps(t))
@@ -654,6 +685,7 @@ impl StaticType {
             | Self::Deque(elem) => Some(Box::new(std::iter::repeat(&**elem))),
             Self::Tuple(types) => Some(Box::new(types.iter())),
             Self::String => Some(Box::new(std::iter::repeat(&Self::String))),
+            Self::Range | Self::RangeFrom => Some(Box::new(std::iter::repeat(&Self::Int))),
             // An `Any` could hold anything, which a cast has to say first. What
             // isn't known yet is unpacked by the analyser once it is.
             Self::Any
@@ -708,6 +740,8 @@ impl fmt::Display for StaticType {
             }
             Self::Map { key, value } => write!(f, "%{{{key}: {value}}}"),
             Self::Iterator(elem) => write!(f, "Iterator<{elem}>"),
+            Self::Range => write!(f, "Range"),
+            Self::RangeFrom => write!(f, "RangeFrom"),
             Self::MinHeap(elem) => write!(f, "MinHeap<{elem}>"),
             Self::MaxHeap(elem) => write!(f, "MaxHeap<{elem}>"),
             Self::Deque(elem) => write!(f, "Deque<{elem}>"),

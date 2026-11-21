@@ -113,10 +113,10 @@ impl Analyser {
         }
     }
 
-    /// An index expression typed as an integer sequence (e.g. `0..2`) selects
-    /// a slice of the container rather than a single element.
+    /// An index expression typed as a range (e.g. `0..2`) selects a slice
+    /// of the container rather than a single element.
     pub(super) fn index_type_is_slice(index_type: &StaticType) -> bool {
-        index_type.fits(&StaticType::Iterator(Box::new(StaticType::Int)))
+        index_type.fits(&StaticType::Range) || index_type.fits(&StaticType::RangeFrom)
     }
 
     /// Whether a value of `value_type` can be stored where values of

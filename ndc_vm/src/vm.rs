@@ -32,12 +32,13 @@ use crate::hash_map::HashMap;
 use crate::instr::{FAR, Instr, Reg, WINDOW};
 use crate::io::{InputSource, OutputSink};
 use crate::iterator::{
-    HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, SharedIterator, StringIter,
-    UnboundedRangeIter, VmIterator,
+    HeapIter, MapIter, RangeIter, SeqIter, SharedIterator, StringIter, UnboundedRangeIter,
 };
 use crate::memo::{MemoCache, MemoKey};
 use crate::native_op::{NativeOp, list_element, list_index_error, list_set};
-use crate::value::{ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction};
+use crate::value::{
+    ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction, Range,
+};
 use crate::{Natives, Object, Value};
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
@@ -1448,12 +1449,25 @@ fn read_and_write(regs: &mut [Value; WINDOW], read: usize, write: usize) -> (&Va
     }
 }
 
-/// Starts [`Instr::ForRange`]: turns the range from the `Int` in register
-/// `counter` to the `Int` in the one after it, which includes that end if
-/// `inclusive`, into its first value, or `None` if it has none, and its last.
-/// It runs once per loop, so it stays out of the dispatch loop's code.
+/// Starts [`Instr::ForRange`]: turns the range in register `counter`, a
+/// `Range` or `RangeFrom`, or the range from the `Int` there to the `Int`
+/// in the one after it, which includes that end if `inclusive`, into its
+/// first value, or `None` if it has none, and its last. It runs once per
+/// loop, so it stays out of the dispatch loop's code.
 #[inline(never)]
 fn start_range(regs: &mut [Value; WINDOW], counter: usize, inclusive: bool) -> Result<(), String> {
+    if let Value::Object(object) = &regs[counter] {
+        let bounds = match object.as_ref() {
+            Object::Range(range) => range.bounds(),
+            Object::RangeFrom(start) => Some((*start, i64::MAX)),
+            _ => return Err(bad_range_bound(&regs[counter])),
+        };
+        (regs[counter], regs[counter + 1]) = match bounds {
+            Some((first, last)) => (Value::Int(first), Value::Int(last)),
+            None => (Value::None, Value::None),
+        };
+        return Ok(());
+    }
     let (start, end) = (&regs[counter], &regs[counter + 1]);
     let (&Value::Int(start), &Value::Int(end)) = (start, end) else {
         let bad = if matches!(end, Value::Int(_)) {
@@ -1498,6 +1512,8 @@ fn iterator_of(value: &Value) -> Result<Value, String> {
         Object::Map { .. } => Rc::new(RefCell::new(MapIter::new(Rc::clone(rc)))),
         Object::MinHeap(h) => Rc::new(RefCell::new(HeapIter::new_min(h))),
         Object::MaxHeap(h) => Rc::new(RefCell::new(HeapIter::new_max(h))),
+        Object::Range(range) => Rc::new(RefCell::new(RangeIter::new(*range))),
+        Object::RangeFrom(start) => Rc::new(RefCell::new(UnboundedRangeIter::new(*start))),
         _ => return Err(not_iterable()),
     };
     Ok(Value::iterator(iter))
@@ -1607,12 +1623,10 @@ fn make_range(start: &Value, end: Option<&Value>, inclusive: bool) -> Result<Val
     let Value::Int(start) = *start else {
         return Err(bad_range_bound(start));
     };
-    let iter: Rc<RefCell<dyn VmIterator>> = match (inclusive, end) {
-        (_, None) => Rc::new(RefCell::new(UnboundedRangeIter::new(start))),
-        (false, Some(end)) => Rc::new(RefCell::new(RangeIter::new(start, end))),
-        (true, Some(end)) => Rc::new(RefCell::new(RangeInclusiveIter::new(start, end))),
-    };
-    Ok(Value::iterator(iter))
+    Ok(match end {
+        Some(end) => Value::range(Range::new(start, end, inclusive)),
+        None => Value::range_from(start),
+    })
 }
 
 /// Replaces `value` with `Some` of it, made the `target` as

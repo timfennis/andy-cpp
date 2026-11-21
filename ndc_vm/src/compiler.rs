@@ -1996,6 +1996,45 @@ impl Compiler {
                         self.emit(Instr::ForRange { counter, inclusive }, sequence_span);
                         IterNextKind::Range(counter)
                     }
+                    // One without an end counts up to the largest `Int`.
+                    Expression::RangeExclusive {
+                        start: Some(first),
+                        end: None,
+                    } => {
+                        let counter = self.alloc_temp(sequence_span)?;
+                        let last = self.alloc_temp(sequence_span)?;
+                        self.compile_expr((**first).clone(), Dest::Reg(counter))?;
+                        self.load_constant(Value::Int(i64::MAX), Dest::Reg(last), sequence_span)?;
+                        self.next_temp = last.index() + 1;
+                        self.emit(
+                            Instr::ForRange {
+                                counter,
+                                inclusive: true,
+                            },
+                            sequence_span,
+                        );
+                        IterNextKind::Range(counter)
+                    }
+                    // So does any other range: a range is a value, which
+                    // iterating over doesn't change.
+                    _ if matches!(
+                        self.analysis.expr_types.get(&sequence.id),
+                        Some(StaticType::Range | StaticType::RangeFrom)
+                    ) =>
+                    {
+                        let counter = self.alloc_temp(sequence_span)?;
+                        let last = self.alloc_temp(sequence_span)?;
+                        self.compile_expr(sequence.clone(), Dest::Reg(counter))?;
+                        self.next_temp = last.index() + 1;
+                        self.emit(
+                            Instr::ForRange {
+                                counter,
+                                inclusive: false,
+                            },
+                            sequence_span,
+                        );
+                        IterNextKind::Range(counter)
+                    }
                     _ => {
                         // The iterator takes the sequence's temporary, or one
                         // of its own when the sequence is a local, and its

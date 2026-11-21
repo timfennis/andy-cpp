@@ -52,7 +52,8 @@ Every value is an `Any`. The other types are:
     * [`%{K: V}`](./types/map-and-set.md): a hashmap that associates keys with values
     * [`Deque<T>`](./types/deque.md): a double-ended queue
     * [`MinHeap<T>` / `MaxHeap<T>`](./types/min-max-heap.md): min/max heap
-    * `Iterator<T>`: produces values when consumed (from range expressions like `5..100`, and functions like `enumerate`)
+    * [`Range` / `RangeFrom`](./types/range.md): the `Int`s from one number to another, `5..100`, or from one number on, `5..`
+    * `Iterator<T>`: produces values when consumed (from functions like `enumerate` and `take`)
   * [`fn(A, B) -> C`](./types/function.md): a function taking an `A` and a `B` and returning a `C`
   * [Structs](./types/struct.md): user-defined record types, one per `struct` declaration
 
