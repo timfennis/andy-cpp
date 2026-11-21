@@ -234,6 +234,7 @@ impl VmIterator for SeqIter {
 ///
 /// Keys are collected at creation time for a stable iteration order; values are
 /// cloned from the map on demand so the full entry set is never duplicated.
+/// A key removed from the map before the iterator gets to it is skipped.
 pub struct MapIter {
     obj: Rc<Object>,
     keys: Vec<Value>,
@@ -256,21 +257,23 @@ impl MapIter {
 
 impl VmIterator for MapIter {
     fn next(&mut self) -> Option<Value> {
-        if self.index >= self.keys.len() {
-            return None;
-        }
-        let key = self.keys[self.index].clone();
-        let value = match self.obj.as_ref() {
-            Object::Map { entries, .. } => entries.borrow().get(&key).cloned()?,
-            _ => unreachable!("MapIter holds a non-Map object"),
+        let Object::Map { entries, .. } = self.obj.as_ref() else {
+            unreachable!("MapIter holds a non-Map object");
         };
-        self.index += 1;
-        Some(Value::Object(Rc::new(Object::Tuple(vec![key, value]))))
+        let entries = entries.borrow();
+        while let Some(key) = self.keys.get(self.index) {
+            self.index += 1;
+            if let Some(value) = entries.get(key) {
+                return Some(Value::tuple(vec![key.clone(), value.clone()]));
+            }
+        }
+        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.keys.len() - self.index;
-        (remaining, Some(remaining))
+        // Keys removed from the map since are skipped, so this is an upper
+        // bound only.
+        (0, Some(self.keys.len() - self.index))
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
@@ -631,43 +634,38 @@ impl VmIterator for EnumerateIter {
     }
 }
 
-/// Iterates over string characters, yielding each as a single-char string
+/// Iterates over a string's characters, yielding each as a string of one
+/// character. It reads the string as it is when it gets to each character,
+/// by the character's position: a character added in a loop is visited, and
+/// one removed before the position shifts the rest back, as with a list.
 pub struct StringIter {
     string: Rc<VmString>,
-    byte_offset: usize,
+    index: usize,
 }
 
 impl StringIter {
     pub fn new(string: Rc<VmString>) -> Self {
-        Self {
-            string,
-            byte_offset: 0,
-        }
+        Self { string, index: 0 }
     }
 }
 
 impl VmIterator for StringIter {
     fn next(&mut self) -> Option<Value> {
-        let s = self.string.borrow();
-        let remaining = &s[self.byte_offset..];
-        let ch = remaining.chars().next()?;
-        self.byte_offset += ch.len_utf8();
+        let ch = self.string.indexed().get_char(self.index)?;
+        self.index += 1;
         Some(Value::string(ch.to_string()))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let s = self.string.borrow();
-        let remaining_bytes = s.len() - self.byte_offset;
-        // Byte length is a valid upper bound (each char is 1–4 bytes).
-        // Exact char count would require an O(n) scan.
-        (0, Some(remaining_bytes))
+        let remaining = self.string.char_count().saturating_sub(self.index);
+        (remaining, Some(remaining))
     }
 
     fn deep_copy(&self) -> Option<SharedIterator> {
         let s = self.string.borrow().clone();
         Some(Rc::new(RefCell::new(Self {
             string: Rc::new(VmString::new(s)),
-            byte_offset: self.byte_offset,
+            index: self.index,
         })))
     }
 }
