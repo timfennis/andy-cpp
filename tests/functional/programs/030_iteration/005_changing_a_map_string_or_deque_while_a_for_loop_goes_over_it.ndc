@@ -1,11 +1,15 @@
-// A `for` loop over a map doesn't visit keys added in the loop. One over a
-// string goes over the string as it is when it gets to each character: added
-// characters are visited, and the loop ends early when it gets shorter. One
+// A `for` loop over a map doesn't visit keys added in the loop, and skips keys
+// removed before it gets to them. One over a string goes over the string as it
+// is when it gets to each character, by the character's position: added
+// characters are visited, the loop ends early when it gets shorter, and a
+// change that moves where characters start in the string doesn't break it. One
 // over a deque visits elements pushed at the back.
 // expect-output: [1,2] 4
+// expect-output: true true 2
 // expect-output: ["a","b","c","x","x"] abcxx
 // expect-output: ["a","c"] cd
 // expect-output: ["a","b","c","d"]
+// expect-output: ["é","中","b"] b中é
 // expect-output: [1,2,10,20]
 
 let m = %{1: 1, 2: 2};
@@ -15,6 +19,16 @@ for k, v in m {
     m[k + 10] = v;
 }
 print(keys.sorted, m.len());
+
+let shrinking = %{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+let visited = [];
+for k, _ in shrinking {
+    visited.push(k);
+    for other in 2..10 {
+        shrinking.remove(other);
+    }
+}
+print(1 in visited, 10 in visited, shrinking.len());
 
 let s = "abc";
 let grown = [];
@@ -39,6 +53,14 @@ for c in u {
     u = "z";
 }
 print(reassigned);
+
+let w = "é中b";
+let reversed_each_time = [];
+for c in w {
+    reversed_each_time.push(c);
+    w.reverse();
+}
+print(reversed_each_time, w);
 
 let d = Deque();
 d.push_back(1);
