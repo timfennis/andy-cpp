@@ -315,7 +315,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "compiler_tests"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ndc_analysis",
  "ndc_interpreter",
@@ -671,7 +671,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "functional_tests"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ndc_interpreter",
  "ndc_stdlib",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_analyser"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "itertools 0.15.0",
  "ndc_analysis",
@@ -1012,14 +1012,14 @@ dependencies = [
 
 [[package]]
 name = "ndc_analysis"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ndc_core",
 ]
 
 [[package]]
 name = "ndc_bin"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1042,7 +1042,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "foldhash",
  "itertools 0.15.0",
@@ -1051,7 +1051,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_diagnostics"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "codespan-reporting",
  "ndc_interpreter",
@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_fmt"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ndc_lexer",
  "ndc_parser",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_highlight"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ndc_core",
  "ndc_lexer",
@@ -1078,7 +1078,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_interpreter"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ndc_analyser",
  "ndc_analysis",
@@ -1092,7 +1092,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_layout"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ndc_analysis",
  "ndc_core",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_lexer"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "num",
  "ryu",
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_lsp"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ls-types",
  "ndc_analysis",
@@ -1137,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_parser"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "derive_more",
  "ndc_core",
@@ -1147,7 +1147,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_resolver"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "itertools 0.15.0",
  "ndc_core",
@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_stdlib"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "factorial",
@@ -1179,7 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_vm"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "char_index",
  "hashbrown 0.17.1",
@@ -1193,7 +1193,7 @@ dependencies = [
 
 [[package]]
 name = "ndc_wasm"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "console_error_panic_hook",
  "getrandom",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "proptest_tests"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ndc_analyser",
  "ndc_core",
