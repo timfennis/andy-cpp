@@ -1,0 +1,14 @@
+// A call finds the result of an earlier call with equal arguments, even after
+// the list the earlier call took has changed; the changed list is a new
+// argument.
+// expect-output: 3 6 3 2
+let calls = 0;
+pure fn total(xs: [Int]) -> Int {
+    calls += 1;
+    xs.sum()
+}
+let xs = [1, 2];
+let before = total(xs);
+xs.push(3);
+let after = total(xs);
+print(before, after, total([1, 2]), calls);

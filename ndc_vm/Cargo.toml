@@ -12,5 +12,6 @@ char_index.workspace = true
 ndc_core.workspace = true
 ndc_lexer.workspace = true
 ndc_parser.workspace = true
+hashbrown.workspace = true
 num.workspace = true
 thiserror.workspace = true

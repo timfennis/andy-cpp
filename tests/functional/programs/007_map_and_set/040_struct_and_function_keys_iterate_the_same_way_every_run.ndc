@@ -1,0 +1,21 @@
+// Structs and functions hash by what they are, not where they are in memory,
+// so a set of structs and a map keyed by functions print the same every run.
+// The order itself means nothing; it changes when the hash does.
+struct P { x: Int }
+let points = %{};
+for i in 0..8 { points.insert(P(i)); }
+fn one(n: Int) -> Int => n + 1;
+fn two(n: Int) -> Int => n + 2;
+fn three(n: Int) -> Int => n + 3;
+fn four(n: Int) -> Int => n + 4;
+fn five(n: Int) -> Int => n + 5;
+let names = %{};
+names[one] = "one";
+names[two] = "two";
+names[three] = "three";
+names[four] = "four";
+names[five] = "five";
+print(points);
+print([names[f] for f in names.keys]);
+// expect-output: %{P {x: 7},P {x: 3},P {x: 6},P {x: 2},P {x: 5},P {x: 1},P {x: 4},P {x: 0}}
+// expect-output: ["one","five","two","four","three"]
