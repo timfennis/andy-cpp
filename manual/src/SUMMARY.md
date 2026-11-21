@@ -37,6 +37,7 @@
 - [Memoization](./features/memoization.md)
 - [Reading input](./features/reading-input.md)
 - [Tracing](./features/tracing.md)
+- [Performance](./features/performance.md)
 
 # Tooling
 - [Editor support](./tooling/editor-support.md)

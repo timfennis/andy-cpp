@@ -78,21 +78,10 @@ print(empty());  // []
 
 ### Performance: keep the arguments small
 
-To find an earlier result, every call looks at everything in its arguments, so
-passing a big list or map to a pure function costs time on every call. If a big
-value doesn't change between calls, such as a grid or a graph, use it from
-outside the function instead of passing it in:
-
-```ndc,norun
-// Slow: `graph` is looked at on every call
-pure fn count(graph, node, visited) { ... }
-
-// Fast: only `node` and `visited` are looked at
-let graph = build_graph();
-pure fn count(node, visited) {
-    // use graph here
-}
-```
+Every call looks at everything in its arguments, so passing a big list or map
+to a pure function costs time on every call. See
+[Performance](./performance.md#keep-the-arguments-of-a-pure-function-small)
+for how to avoid that.
 
 ### Example: Fibonacci Sequence
 
