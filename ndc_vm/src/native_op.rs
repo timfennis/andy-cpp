@@ -4,7 +4,7 @@
 //! vectorisation does.
 
 use crate::error::VmError;
-use crate::value::Value;
+use crate::value::{Object, Value};
 use std::cmp::Ordering;
 
 /// What a native does, when the VM has an instruction that does the same:
@@ -47,6 +47,12 @@ pub enum NativeOp {
     Equal,
     /// `!=` of any two values.
     NotEqual,
+    /// `[]([T], Int)`: the element of a list at an index, counting a
+    /// negative one from the end, as `xs[-1]` is the last.
+    ListIndex,
+    /// `[]=([T], Int, T)`: puts a value in a list at an index, counting a
+    /// negative one from the end, as `xs[-1] = 0` does.
+    ListSet,
 }
 
 impl NativeOp {
@@ -55,6 +61,7 @@ impl NativeOp {
     pub fn arity(self) -> usize {
         match self {
             Self::NegInt | Self::NegFloat | Self::Not => 1,
+            Self::ListSet => 3,
             _ => 2,
         }
     }
@@ -64,6 +71,9 @@ impl NativeOp {
         match args {
             [value] if self.arity() == 1 => self.unary(value),
             [left, right] if self.arity() == 2 => self.binary(left, right),
+            [list, index, value] if self == Self::ListSet => {
+                list_set(list, index, value.clone()).map(|()| Value::unit())
+            }
             _ => Err(VmError::native(format!(
                 "expected {} arguments, got {}",
                 self.arity(),
@@ -92,9 +102,13 @@ impl NativeOp {
             }
             Self::Equal => Ok(Value::Bool(equal(left, right))),
             Self::NotEqual => Ok(Value::Bool(!equal(left, right))),
+            Self::ListIndex => {
+                list_element(left, right).ok_or_else(|| list_index_error(left, right))
+            }
             Self::NegInt | Self::NegFloat | Self::Not => {
                 unreachable!("internal error: {self:?} takes one operand")
             }
+            Self::ListSet => unreachable!("internal error: {self:?} takes three operands"),
         }
     }
 
@@ -123,6 +137,100 @@ impl NativeOp {
             _ => unreachable!("internal error: {self:?} takes two operands"),
         }
     }
+}
+
+/// The element of the list `list` at the `Int` `index`, counting a negative
+/// one from the end: `None` if there's none there, or if they aren't a list
+/// and an `Int`, which [`list_index_error`] tells apart.
+#[inline(always)]
+pub(crate) fn list_element(list: &Value, index: &Value) -> Option<Value> {
+    if let (Value::Object(object), Value::Int(index)) = (list, index)
+        && let Object::List(elements) = object.as_ref()
+    {
+        let elements = elements.borrow();
+        return list_position(*index, elements.len()).map(|position| elements[position].clone());
+    }
+    None
+}
+
+/// Where element `index` of a list of `len` is, counting a negative `index`
+/// from the end: `None` past either end.
+#[inline(always)]
+fn list_position(index: i64, len: usize) -> Option<usize> {
+    let position = if index < 0 {
+        len.checked_sub(index.unsigned_abs() as usize)?
+    } else {
+        usize::try_from(index).ok()?
+    };
+    (position < len).then_some(position)
+}
+
+/// What `list[index]` fails with when [`list_element`] found nothing.
+#[cold]
+#[inline(never)]
+pub(crate) fn list_index_error(list: &Value, index: &Value) -> VmError {
+    let Value::Object(object) = list else {
+        return VmError::native(format!("cannot index into {}", list.static_type()));
+    };
+    let Object::List(elements) = object.as_ref() else {
+        return VmError::native(format!("cannot index into {}", list.static_type()));
+    };
+    let Value::Int(index) = index else {
+        return VmError::native("Invalid list index. List indices must be Int values.");
+    };
+    list_out_of_bounds(*index, elements.borrow().len())
+}
+
+/// Puts `value` in the list `list` at the `Int` `index`, counting a negative
+/// one from the end: `xs[i] = value`.
+#[inline(always)]
+pub(crate) fn list_set(list: &Value, index: &Value, value: Value) -> Result<(), VmError> {
+    if let (Value::Object(object), Value::Int(index)) = (list, index)
+        && let Object::List(elements) = object.as_ref()
+        && let Ok(mut elements) = elements.try_borrow_mut()
+        && let Some(position) = list_position(*index, elements.len())
+    {
+        elements[position] = value;
+        return Ok(());
+    }
+    Err(list_set_error(list, index))
+}
+
+/// What `list[index] = value` fails with.
+#[cold]
+#[inline(never)]
+fn list_set_error(list: &Value, index: &Value) -> VmError {
+    if let Value::Object(object) = list
+        && let Object::List(elements) = object.as_ref()
+        && elements.try_borrow_mut().is_err()
+    {
+        return VmError::native(
+            "Mutation error: you cannot mutate a value in a list while you're iterating over this list",
+        );
+    }
+    let Value::Object(object) = list else {
+        return VmError::native(format!(
+            "cannot insert into {} at index",
+            list.static_type()
+        ));
+    };
+    if !matches!(object.as_ref(), Object::List(_)) {
+        return VmError::native(format!(
+            "cannot insert into {} at index",
+            list.static_type()
+        ));
+    }
+    list_index_error(list, index)
+}
+
+/// "index 5 is out of bounds for a list of 3 elements".
+#[cold]
+#[inline(never)]
+fn list_out_of_bounds(index: i64, len: usize) -> VmError {
+    let plural = if len == 1 { "" } else { "s" };
+    VmError::native(format!(
+        "index {index} is out of bounds for a list of {len} element{plural}"
+    ))
 }
 
 /// The order of two values, as the comparisons find it.

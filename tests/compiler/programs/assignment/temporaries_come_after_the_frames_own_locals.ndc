@@ -1,6 +1,6 @@
 // `values` is a global. The top-level code's own locals take the first
 // registers: `delta` is r0, and r1 holds the program's value. The temporaries
 // of the indexed assignment come after them: r2 holds the container, r3 the
-// index, r4 the sum passed to `[]=`, and r5 to r7 the arguments of the calls.
+// index, r4 the sum `ListSet` stores, and r5 the element `ListIndex` reads.
 // compile: stdlib
 let values = [1]; values[0] += { let delta = 2; delta };

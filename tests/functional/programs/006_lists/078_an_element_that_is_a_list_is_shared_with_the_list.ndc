@@ -1,0 +1,11 @@
+// expect-output: 4 [[1,2],[3,40]] [3,40] [[1,2],[3,40],[5]]
+fn f() {
+    let grid = [[1, 2], [3, 4]];
+    let row = grid[1];
+    let old = grid[1][1];
+    grid[1][1] = 40;
+    let extra = [5];
+    grid ++= [extra];
+    print(old, grid[0..2], row, grid);
+}
+f();

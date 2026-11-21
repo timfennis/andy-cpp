@@ -106,6 +106,10 @@ enum Arg {
     },
     /// The value in a temporary that stays in use, which a call copies.
     Copy(Reg),
+    /// The value in a temporary that nothing reads after the call: the
+    /// value `xs[i] += 1` stores. An instruction that stores it takes it
+    /// from there; anything else reads it as it reads a [`Self::Copy`].
+    Take(Reg),
     /// What the call of `getter` with copies of the values in `args` gives,
     /// at `span`: the read of `xs[i]` or `p.x`.
     Read {
@@ -154,7 +158,7 @@ impl Arg {
         match self {
             Self::Expr(expression) => expression.span,
             Self::Var { span, .. } | Self::Read { span, .. } => *span,
-            Self::Copy(_) => Span::synthetic(),
+            Self::Copy(_) | Self::Take(_) => Span::synthetic(),
         }
     }
 
@@ -163,7 +167,7 @@ impl Arg {
     fn may_assign(&self) -> bool {
         match self {
             Self::Expr(expression) => may_assign(expression),
-            Self::Var { .. } | Self::Copy(_) | Self::Read { .. } => false,
+            Self::Var { .. } | Self::Copy(_) | Self::Take(_) | Self::Read { .. } => false,
         }
     }
 }
@@ -515,7 +519,7 @@ impl Compiler {
             Arg::Expr(expression) => return self.compile_expr(expression, dest),
             Arg::Var { variable, span } => self.read_variable(variable, dest, span)?,
             // The register stays in use, so the value is read where it is.
-            Arg::Copy(reg) => match dest {
+            Arg::Copy(reg) | Arg::Take(reg) => match dest {
                 Dest::Any => Operand::Local(reg),
                 Dest::Reg(dst) => {
                     if dst != reg {
@@ -1346,6 +1350,9 @@ impl Compiler {
             arguments.len(),
             "the analyser picks an overload by arity"
         );
+        if op == NativeOp::ListSet {
+            return self.compile_list_set(arguments, dest, span);
+        }
         let mark = self.next_temp;
         if op.arity() == 1 {
             let [src] = self.compile_operands(arguments)?[..] else {
@@ -1369,6 +1376,51 @@ impl Compiler {
         };
         self.emit(instr, span);
         Ok(Self::placed(dest, dst))
+    }
+
+    /// Compiles `xs[i] = v`, the call of [`NativeOp::ListSet`] with the
+    /// list, the index and the value, into a `ListSet` that reads the list
+    /// and the index where they are and takes the value: from an
+    /// [`Arg::Take`]'s register, or from a temporary of its own, which a
+    /// local's value is copied into.
+    fn compile_list_set(
+        &mut self,
+        mut arguments: Vec<Arg>,
+        dest: Dest,
+        span: Span,
+    ) -> Result<Operand, CompileError> {
+        let mark = self.next_temp;
+        let taken = match arguments.last() {
+            Some(&Arg::Take(reg)) => {
+                arguments.pop();
+                Some(reg)
+            }
+            _ => None,
+        };
+        let operands = self.compile_operands_where(arguments)?;
+        let reg = |operand: &Operand| match *operand {
+            Operand::Local(reg) | Operand::Temp(reg) => reg,
+            Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+        };
+        let value = match (taken, operands.get(2)) {
+            (Some(reg), None) | (None, Some(&Operand::Temp(reg))) => reg,
+            (None, Some(&Operand::Local(src))) => {
+                let dst = self.alloc_temp(span)?;
+                self.emit(Instr::Copy { dst, src }, span);
+                dst
+            }
+            _ => unreachable!("internal error: ListSet takes three operands"),
+        };
+        self.emit(
+            Instr::ListSet {
+                list: reg(&operands[0]),
+                index: reg(&operands[1]),
+                value,
+            },
+            span,
+        );
+        self.next_temp = mark;
+        self.unit(dest, span)
     }
 
     /// Compiles the two operands of a binary op: two registers, or with
@@ -1419,6 +1471,23 @@ impl Compiler {
     /// instruction sees it as it was: in `x + { x = 5; x }`, `x` before the
     /// block.
     fn compile_operands(&mut self, arguments: Vec<Arg>) -> Result<Vec<Reg>, CompileError> {
+        Ok(self
+            .compile_operands_where(arguments)?
+            .into_iter()
+            .map(|operand| match operand {
+                Operand::Local(reg) | Operand::Temp(reg) => reg,
+                Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+            })
+            .collect())
+    }
+
+    /// [`Self::compile_operands`], saying of each register whether it's a
+    /// local's own, which the instruction may only read, or a temporary,
+    /// which it may take.
+    fn compile_operands_where(
+        &mut self,
+        arguments: Vec<Arg>,
+    ) -> Result<Vec<Operand>, CompileError> {
         let mut assigned_later = arguments
             .iter()
             .rev()
@@ -1442,9 +1511,9 @@ impl Compiler {
                         },
                         span,
                     );
-                    temp
+                    Operand::Temp(temp)
                 }
-                Operand::Local(reg) | Operand::Temp(reg) => reg,
+                operand @ (Operand::Local(_) | Operand::Temp(_)) => operand,
                 Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
             };
             operands.push(reg);
@@ -1662,7 +1731,7 @@ impl Compiler {
                 }
                 AssignmentTarget::Index { value, index } => {
                     let setter = self.setter(target.id);
-                    let args = vec![Arg::Expr(*value), Arg::Expr(*index), Arg::Copy(element)];
+                    let args = vec![Arg::Expr(*value), Arg::Expr(*index), Arg::Take(element)];
                     self.compile_binding_call(&setter, args, Dest::Discard, span)?;
                 }
                 AssignmentTarget::Sequence(targets) => {
@@ -1800,7 +1869,7 @@ impl Compiler {
                 setter,
                 ..
             } => {
-                let args = vec![Arg::Copy(container), Arg::Copy(index), Arg::Copy(src)];
+                let args = vec![Arg::Copy(container), Arg::Copy(index), Arg::Take(src)];
                 self.compile_binding_call(&setter, args, Dest::Discard, span)
                     .map(|_| ())
             }

@@ -1,0 +1,11 @@
+// expect-output: 6 [1,12,3]
+let xs = [1, 2, 3];
+fn total() {
+    let s = 0;
+    for i in 0..3 { s += xs[i]; }
+    s
+}
+fn bump(i: Int) { xs[i] += 10; }
+let before = total();
+bump(1);
+print(before, xs);

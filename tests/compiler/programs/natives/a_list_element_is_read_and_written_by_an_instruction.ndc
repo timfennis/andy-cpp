@@ -1,0 +1,14 @@
+// An element of a list at an `Int` is read and written in one instruction,
+// with no call of `[]` or `[]=`: `ListIndex r5, r0, r1` reads `grid[y]`
+// straight from the registers of `grid` and `y`, and `ListIndex r4, r5, r2`
+// its element at `x` into `n`. `ListSet` reads the list and the index where
+// they are and takes the value it stores from a temporary: the sum, or a copy
+// of the local `v`.
+// compile: stdlib
+fn f(grid: [[Int]], y: Int, x: Int, v: [Int]) {
+    let n = grid[y][x];
+    grid[y][x] = n + 1;
+    grid[y][x] -= 1;
+    grid[0] = v;
+    n
+}

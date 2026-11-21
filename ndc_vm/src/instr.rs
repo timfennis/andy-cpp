@@ -224,6 +224,14 @@ pub enum Instr {
     /// `dst` = the element at `index` of the tuple in `src`, counting a
     /// negative index from the end: `t[1]`.
     TupleIndex { dst: Reg, src: Reg, index: i16 },
+    /// [`NativeOp::ListIndex`]: `dst` = the element at the `Int` in `index`
+    /// of the list in `list`, counting a negative index from the end:
+    /// `xs[i]`.
+    ListIndex { dst: Reg, list: Reg, index: Reg },
+    /// [`NativeOp::ListSet`]: puts the value in `value` in the list in
+    /// `list` at the `Int` in `index`, counting a negative index from the
+    /// end, leaving `None` in `value`, which is another register: `xs[i] = v`.
+    ListSet { list: Reg, index: Reg, value: Reg },
     /// Checks that the value in `reg` is a value of the chunk's type `typ`,
     /// and makes it one, in place: a function whose return type isn't known
     /// gets its calls checked. Fails if it isn't: `cast::<Int>(x)`.
@@ -262,9 +270,15 @@ impl Instr {
             NativeOp::GreaterEqual => Self::GreaterEqual { dst, left, right },
             NativeOp::Equal => Self::Equal { dst, left, right },
             NativeOp::NotEqual => Self::NotEqual { dst, left, right },
+            NativeOp::ListIndex => Self::ListIndex {
+                dst,
+                list: left,
+                index: right,
+            },
             NativeOp::NegInt | NativeOp::NegFloat | NativeOp::Not => {
                 unreachable!("internal error: {op:?} takes one operand")
             }
+            NativeOp::ListSet => unreachable!("internal error: {op:?} takes three operands"),
         }
     }
 
@@ -409,6 +423,8 @@ impl Instr {
             Self::MakeRangeFrom { .. } => "MakeRangeFrom",
             Self::GetIterator { .. } => "GetIterator",
             Self::TupleIndex { .. } => "TupleIndex",
+            Self::ListIndex { .. } => "ListIndex",
+            Self::ListSet { .. } => "ListSet",
             Self::CheckType { .. } => "CheckType",
             Self::TryCast { .. } => "TryCast",
             Self::IterNext { .. } => "IterNext",
@@ -643,6 +659,8 @@ impl fmt::Display for Instr {
             }
             Self::Unpack { src, base, len } => write!(f, "{src}, {base}, {len}"),
             Self::TupleIndex { dst, src, index } => write!(f, "{dst}, {src}, #{index}"),
+            Self::ListIndex { dst, list, index } => write!(f, "{dst}, {list}, {index}"),
+            Self::ListSet { list, index, value } => write!(f, "{list}, {index}, {value}"),
             Self::CheckType { reg, typ } | Self::TryCast { reg, typ } => write!(f, "{reg}, t{typ}"),
             Self::Return { src } | Self::Halt { src } => write!(f, "{src}"),
         }

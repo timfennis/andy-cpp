@@ -1,0 +1,11 @@
+// expect-output: 30 10 [1,2,99]
+fn f() {
+    let xs = [10, 20, 30];
+    let i = -1;
+    let last = xs[i];
+    let first = xs[-3];
+    let ys = [1, 2, 3];
+    ys[-1] = 99;
+    print(last, first, ys);
+}
+f();
