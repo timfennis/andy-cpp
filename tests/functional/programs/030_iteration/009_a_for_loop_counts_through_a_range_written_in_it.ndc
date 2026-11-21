@@ -1,0 +1,28 @@
+// A `for` loop over a range written in the loop counts through it: it
+// includes the end with `..=` and not with `..`, a range that ends before it
+// starts has no values, the bounds are read once, and the range reaches the
+// largest and smallest Int without overflowing.
+// expect-output: [0,1,2,0,1,2,3]
+// expect-output: [9223372036854775806,9223372036854775807] [9223372036854775806] [] [-9223372036854775808]
+// expect-output: 3 0
+// expect-output: [(0,0),(0,1),(2,2),(2,3)]
+// expect-output: 5050 [(1,0),(2,0),(2,1)]
+
+let max = 9223372036854775807;
+let min = -9223372036854775807 - 1;
+let seen = [];
+for i in 0..3 { seen.push(i); }
+for i in 0..=3 { seen.push(i); }
+for i in 3..0 { seen.push(i); }
+for i in 5..=4 { seen.push(i); }
+print(seen);
+print([i for i in max - 1..=max], [i for i in max - 1..max], [i for i in min..min], [i for i in min..=min]);
+let n = 3;
+let count = 0;
+for i in 0..n { n = 0; count += 1; }
+print(count, n);
+let pairs = [];
+for i in 0..4 { if i == 1 { continue; } if i == 3 { break; } for j in i..=i + 1 { pairs.push((i, j)); } }
+print(pairs);
+fn sum_to(n: Int) -> Int { let total = 0; for i in 1..=n { total += i; } total }
+print(sum_to(100), [(i, j) for i in 0..3, j in 0..i]);

@@ -905,34 +905,60 @@ impl Vm {
                     }
                     Instr::IterNext { iter, dst, offset } => {
                         let (iter, position) = (iter.index(), iter.index() + 1);
-                        let Value::Int(index) = regs[position] else {
-                            unreachable!("internal error: GetIterator writes a position");
+                        // A position is never negative.
+                        let index = match regs[position] {
+                            Value::Int(index) => index as usize,
+                            _ => unreachable!("internal error: GetIterator writes a position"),
                         };
                         let (iterated, out) = read_and_write(regs, iter, dst.index());
                         let Value::Object(object) = iterated else {
                             unreachable!("internal error: GetIterator writes an object");
                         };
-                        // A position is never negative.
-                        let index = index as usize;
-                        let next = match object.as_ref() {
-                            Object::Tuple(elements) => {
-                                elements.get(index).map(|element| out.clone_from(element))
-                            }
-                            Object::List(elements) => elements
-                                .borrow()
-                                .get(index)
-                                .map(|element| out.clone_from(element)),
-                            Object::Iterator(iterator) => {
-                                iterator.borrow_mut().next().map(|value| *out = value)
-                            }
+                        // A list or tuple is read at the position after it,
+                        // which moves on; any other iterator counts itself.
+                        let (found, counted) = match object.as_ref() {
+                            Object::Iterator(iterator) => (
+                                iterator.borrow_mut().next().map(|value| *out = value),
+                                false,
+                            ),
+                            Object::Tuple(elements) => (
+                                elements.get(index).map(|element| out.clone_from(element)),
+                                true,
+                            ),
+                            Object::List(elements) => (
+                                elements
+                                    .borrow()
+                                    .get(index)
+                                    .map(|element| out.clone_from(element)),
+                                true,
+                            ),
                             _ => unreachable!("internal error: GetIterator writes an iterable"),
                         };
-                        if next.is_none() {
+                        if found.is_none() {
                             ip = short_jump(ip, offset, far_jumps);
-                        } else if let Value::Int(index) = &mut regs[position] {
-                            *index += 1;
+                        } else if counted {
+                            regs[position] = Value::Int(index as i64 + 1);
                         }
                     }
+                    Instr::ForRange { counter, inclusive } => {
+                        if let Err(message) = start_range(regs, counter.index(), inclusive) {
+                            break Exit::Error(VmError::native(message));
+                        }
+                    }
+                    Instr::ForRangeNext {
+                        counter,
+                        dst,
+                        offset,
+                    } => match (&regs[counter.index()], &regs[counter.index() + 1]) {
+                        (&Value::Int(next), &Value::Int(last)) if next <= last => {
+                            regs[dst.index()] = Value::Int(next);
+                            regs[counter.index()] = match next.checked_add(1) {
+                                Some(after) => Value::Int(after),
+                                None => Value::None,
+                            };
+                        }
+                        _ => ip = short_jump(ip, offset, far_jumps),
+                    },
                     Instr::Unpack { src, base, len } => {
                         let (src, base) = (src.index(), base.index());
                         let end = base + usize::from(len);
@@ -1420,6 +1446,33 @@ fn read_and_write(regs: &mut [Value; WINDOW], read: usize, write: usize) -> (&Va
         let (below, rest) = regs.split_at_mut(read);
         (&rest[0], &mut below[write])
     }
+}
+
+/// Starts [`Instr::ForRange`]: turns the range from the `Int` in register
+/// `counter` to the `Int` in the one after it, which includes that end if
+/// `inclusive`, into its first value, or `None` if it has none, and its last.
+/// It runs once per loop, so it stays out of the dispatch loop's code.
+#[inline(never)]
+fn start_range(regs: &mut [Value; WINDOW], counter: usize, inclusive: bool) -> Result<(), String> {
+    let (start, end) = (&regs[counter], &regs[counter + 1]);
+    let (&Value::Int(start), &Value::Int(end)) = (start, end) else {
+        let bad = if matches!(end, Value::Int(_)) {
+            start
+        } else {
+            end
+        };
+        return Err(bad_range_bound(bad));
+    };
+    let last = if inclusive {
+        Some(end)
+    } else {
+        end.checked_sub(1)
+    };
+    (regs[counter], regs[counter + 1]) = match last {
+        Some(last) => (Value::Int(start), Value::Int(last)),
+        None => (Value::None, Value::Int(end)),
+    };
+    Ok(())
 }
 
 /// Whether `value` is a list or tuple, which `IterNext` iterates over in

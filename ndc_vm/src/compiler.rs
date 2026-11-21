@@ -1974,44 +1974,56 @@ impl Compiler {
         match first {
             ForIteration::Iteration { l_value, sequence } => {
                 let sequence_span = sequence.span;
-                // The iterator takes the sequence's temporary, or one of its
-                // own when the sequence is a local, and its position the
-                // register after it.
-                let (iter, src) = match self.compile_expr(sequence.clone(), Dest::Any)? {
-                    Operand::Temp(reg) if reg.index() + 1 == self.next_temp => (reg, reg),
-                    Operand::Temp(reg) | Operand::Local(reg) => {
-                        (self.alloc_temp(sequence_span)?, reg)
+                let next = match &sequence.expression {
+                    // A range written in the loop is counted through in two
+                    // registers, its next value and its last: nothing else
+                    // can hold it, so nothing sees that it isn't a range.
+                    Expression::RangeExclusive {
+                        start: Some(first),
+                        end: Some(after),
                     }
-                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                    | Expression::RangeInclusive {
+                        start: Some(first),
+                        end: Some(after),
+                    } => {
+                        let inclusive =
+                            matches!(sequence.expression, Expression::RangeInclusive { .. });
+                        let counter = self.alloc_temp(sequence_span)?;
+                        let last = self.alloc_temp(sequence_span)?;
+                        self.compile_expr((**first).clone(), Dest::Reg(counter))?;
+                        self.compile_expr((**after).clone(), Dest::Reg(last))?;
+                        self.next_temp = last.index() + 1;
+                        self.emit(Instr::ForRange { counter, inclusive }, sequence_span);
+                        IterNextKind::Range(counter)
+                    }
+                    _ => {
+                        // The iterator takes the sequence's temporary, or one
+                        // of its own when the sequence is a local, and its
+                        // position the register after it.
+                        let (iter, src) = match self.compile_expr(sequence.clone(), Dest::Any)? {
+                            Operand::Temp(reg) if reg.index() + 1 == self.next_temp => (reg, reg),
+                            Operand::Temp(reg) | Operand::Local(reg) => {
+                                (self.alloc_temp(sequence_span)?, reg)
+                            }
+                            Operand::Placed => {
+                                unreachable!("internal error: Dest::Any gives a register")
+                            }
+                        };
+                        self.alloc_temp(sequence_span)?;
+                        self.emit(Instr::GetIterator { dst: iter, src }, sequence_span);
+                        IterNextKind::Iterator(iter)
+                    }
                 };
-                self.alloc_temp(sequence_span)?;
-                self.emit(Instr::GetIterator { dst: iter, src }, sequence_span);
                 let start = self.builder.label();
                 let end = self.builder.label();
                 self.builder.bind(start);
                 // A loop variable in a register gets each value straight
                 // away; a pattern is unpacked from a temporary.
                 if let Some(dst) = self.declared_register(l_value) {
-                    self.builder.jump(
-                        Instr::IterNext {
-                            iter,
-                            dst,
-                            offset: 0,
-                        },
-                        end,
-                        span,
-                    );
+                    self.builder.jump(next.instr(dst), end, span);
                 } else {
                     let value = self.alloc_temp(span)?;
-                    self.builder.jump(
-                        Instr::IterNext {
-                            iter,
-                            dst: value,
-                            offset: 0,
-                        },
-                        end,
-                        span,
-                    );
+                    self.builder.jump(next.instr(value), end, span);
                     self.declare_pattern(l_value.clone(), value, span)?;
                     self.next_temp = value.index();
                 }
@@ -2735,5 +2747,32 @@ impl CompileError {
 
     pub fn span(&self) -> Span {
         self.span
+    }
+}
+
+/// How a `for` loop gets its next value: from the iterator `GetIterator`
+/// made in a register, or by counting through a range written in the loop.
+#[derive(Clone, Copy)]
+enum IterNextKind {
+    Iterator(Reg),
+    Range(Reg),
+}
+
+impl IterNextKind {
+    /// The instruction that writes the next value to `dst`, or jumps on when
+    /// there's none left.
+    fn instr(self, dst: Reg) -> Instr {
+        match self {
+            Self::Iterator(iter) => Instr::IterNext {
+                iter,
+                dst,
+                offset: 0,
+            },
+            Self::Range(counter) => Instr::ForRangeNext {
+                counter,
+                dst,
+                offset: 0,
+            },
+        }
     }
 }
