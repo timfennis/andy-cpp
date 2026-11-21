@@ -793,7 +793,6 @@ fn aggregate(args: &[Value], mode: NumericMode, product: bool) -> Result<Value, 
     }
 
     let values = args[0]
-        .clone()
         .iter()
         .ok_or_else(|| VmError::native("expected a sequence".to_string()))?;
     aggregate_values(values, mode, product)

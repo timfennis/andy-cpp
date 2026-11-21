@@ -180,7 +180,6 @@ mod inner {
             }
             _ => {
                 let iter = seq
-                    .clone()
                     .iter()
                     .ok_or_else(|| anyhow!("cannot find {name} of non-sequence"))?;
                 return vm_try_extreme(iter, better);
