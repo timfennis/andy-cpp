@@ -13,7 +13,6 @@ let string_value: String = "hello";
 
 let option_value: Option<Any> = Some(3);
 let list_value: [Int] = [1, 2, 3];
-let iterator_value: Iterator<Int> = [1, 2, 3].take(3);
 let lazy_value: Lazy<Int> = [1, 2, 3].lazy;
 let range_value: Range = 1..10;
 let range_from_value: RangeFrom = 1..;

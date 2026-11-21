@@ -1,5 +1,5 @@
-// Early-exit search: lazy enumerate avoids allocating tuples
-// for elements past the target.
+// Early-exit search: `enumerate` is lazy, so `find` makes tuples only
+// up to the target.
 let xs = list(0..1_000_000);
 let target = 750_000;
 let found = xs.enumerate().find(fn(p) => p[1] == target);

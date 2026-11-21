@@ -62,7 +62,6 @@ pub enum StaticType {
         key: Box<Self>,
         value: Box<Self>,
     },
-    Iterator(Box<Self>),
     /// A range with an end, `a..b` or `a..=b`: a value that iterates as its
     /// `Int`s, every time it's iterated.
     Range,
@@ -118,7 +117,6 @@ impl StaticType {
         "String",
         "Option",
         "Iterable",
-        "Iterator",
         "Range",
         "RangeFrom",
         "Lazy",
@@ -147,9 +145,10 @@ impl StaticType {
             "Iterable" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Iterable(Box::new(elem)))
             }
-            "Iterator" => {
-                Self::require_exactly_one_arg(name, args).map(|elem| Self::Iterator(Box::new(elem)))
-            }
+            "Iterator" => Err(StaticTypeConstructionError::new(
+                "unknown type `Iterator`",
+                "`enumerate`, `take` and the like give a list, and `xs.lazy` gives a `Lazy<T>`, which makes its elements as it's read.",
+            )),
             "Lazy" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Lazy(Box::new(elem)))
             }
@@ -233,7 +232,6 @@ impl StaticType {
                 | Self::String
                 | Self::Tuple(_)
                 | Self::Map { .. }
-                | Self::Iterator(_)
                 | Self::Range
                 | Self::RangeFrom
                 | Self::MinHeap(_)
@@ -244,7 +242,7 @@ impl StaticType {
 
     /// Gets the element type when treating a type as a sequence.
     ///
-    /// - `[T]`, `Iterator<T>`, etc. → `T`
+    /// - `[T]`, `Lazy<T>`, etc. → `T`
     /// - `String` → `String`
     /// - `(T1, ..., Tn)` → the join of `T1`, ..., `Tn`
     /// - `%{K: V}` → `(K, V)`
@@ -252,7 +250,6 @@ impl StaticType {
         match self {
             Self::Iterable(t)
             | Self::List(t)
-            | Self::Iterator(t)
             | Self::Lazy(t)
             | Self::MinHeap(t)
             | Self::MaxHeap(t)
@@ -334,7 +331,6 @@ impl StaticType {
             }
             (Self::Option(a), Self::Option(p))
             | (Self::List(a), Self::List(p))
-            | (Self::Iterator(a), Self::Iterator(p))
             | (Self::Lazy(a), Self::Lazy(p))
             | (Self::MinHeap(a), Self::MinHeap(p))
             | (Self::MaxHeap(a), Self::MaxHeap(p))
@@ -421,7 +417,6 @@ impl StaticType {
             Self::Option(t) => Self::Option(map(t)),
             Self::Iterable(t) => Self::Iterable(map(t)),
             Self::List(t) => Self::List(map(t)),
-            Self::Iterator(t) => Self::Iterator(map(t)),
             Self::Lazy(t) => Self::Lazy(map(t)),
             Self::MinHeap(t) => Self::MinHeap(map(t)),
             Self::MaxHeap(t) => Self::MaxHeap(map(t)),
@@ -469,7 +464,6 @@ impl StaticType {
             Self::Option(t)
             | Self::Iterable(t)
             | Self::List(t)
-            | Self::Iterator(t)
             | Self::Lazy(t)
             | Self::MinHeap(t)
             | Self::MaxHeap(t)
@@ -574,18 +568,13 @@ impl StaticType {
             (
                 Self::Iterable(t),
                 Self::List(u)
-                | Self::Iterator(u)
                 | Self::MinHeap(u)
                 | Self::MaxHeap(u)
                 | Self::Deque(u)
                 | Self::Iterable(u),
             )
             | (
-                Self::List(u)
-                | Self::Iterator(u)
-                | Self::MinHeap(u)
-                | Self::MaxHeap(u)
-                | Self::Deque(u),
+                Self::List(u) | Self::MinHeap(u) | Self::MaxHeap(u) | Self::Deque(u),
                 Self::Iterable(t),
             ) => Self::held_overlap(t, u),
             (Self::Iterable(t), Self::String) | (Self::String, Self::Iterable(t)) => {
@@ -608,7 +597,6 @@ impl StaticType {
             // the same.
             (Self::Option(s), Self::Option(t))
             | (Self::List(s), Self::List(t))
-            | (Self::Iterator(s), Self::Iterator(t))
             | (Self::Lazy(s), Self::Lazy(t))
             | (Self::MinHeap(s), Self::MinHeap(t))
             | (Self::MaxHeap(s), Self::MaxHeap(t))
@@ -696,7 +684,6 @@ impl StaticType {
             Self::Error => Some(Box::new(std::iter::repeat(&Self::Error))),
             Self::List(elem)
             | Self::Iterable(elem)
-            | Self::Iterator(elem)
             | Self::MinHeap(elem)
             | Self::MaxHeap(elem)
             | Self::Deque(elem) => Some(Box::new(std::iter::repeat(&**elem))),
@@ -758,7 +745,6 @@ impl fmt::Display for StaticType {
                 write!(f, "%{{{key}}}")
             }
             Self::Map { key, value } => write!(f, "%{{{key}: {value}}}"),
-            Self::Iterator(elem) => write!(f, "Iterator<{elem}>"),
             Self::Lazy(elem) => write!(f, "Lazy<{elem}>"),
             Self::Range => write!(f, "Range"),
             Self::RangeFrom => write!(f, "RangeFrom"),

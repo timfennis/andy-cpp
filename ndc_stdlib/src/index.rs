@@ -392,7 +392,7 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
                     }
                     VmOffset::Range(from, to) => {
                         // Any sequence goes in a slice: a list, a tuple, a
-                        // range or an iterator. It's read before the list is
+                        // range or a deque. It's read before the list is
                         // changed, as it may be the list itself: `xs[0..1] = xs`.
                         let rhs_vec: Vec<Value> = rhs
                             .iter()

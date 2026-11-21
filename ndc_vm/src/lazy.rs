@@ -17,11 +17,18 @@ use std::rc::Rc;
 /// A lazy sequence: `lazy(1..10).map(f).take(3)`.
 #[derive(Clone)]
 pub struct Lazy {
-    /// What the elements come from: a value a `for` loop iterates over, but
-    /// not a lazy sequence, whose steps a lazy sequence made from it takes
-    /// over.
-    source: Value,
+    source: Source,
     steps: Rc<[Step]>,
+}
+
+/// What the elements of a lazy sequence come from.
+#[derive(Clone)]
+enum Source {
+    /// The elements of a value a `for` loop iterates over, but not of a lazy
+    /// sequence, whose steps a lazy sequence made from it takes over.
+    Elements(Value),
+    /// One value, again and again: `repeat(x)`.
+    Repeat(Value),
 }
 
 /// One step of a lazy sequence, which makes its elements from those of the
@@ -44,32 +51,34 @@ pub enum Step {
     Take(usize),
     /// The elements after the first so many.
     Skip(usize),
+    /// Each list of so many elements, in the order they come, as `[a, b]`,
+    /// `[a, c]`, `[b, c]` for 2 of `a`, `b` and `c`.
+    Combinations(usize),
 }
 
 impl Lazy {
     /// The lazy sequence of the elements of `source`, or `source` itself if
     /// it's a lazy sequence already. `None` if `source` isn't something a
-    /// `for` loop iterates over. An iterator is copied as it is now, so
-    /// reading the iterator later doesn't change the sequence.
+    /// `for` loop iterates over.
     pub fn new(source: Value) -> Option<Self> {
-        if let Value::Object(object) = &source {
-            match object.as_ref() {
-                Object::Lazy(lazy) => return Some(lazy.clone()),
-                Object::Iterator(iterator) => {
-                    let copy = iterator.borrow().deep_copy()?;
-                    return Some(Self {
-                        source: Value::iterator(copy),
-                        steps: Rc::from([]),
-                    });
-                }
-                _ => {}
-            }
+        if let Value::Object(object) = &source
+            && let Object::Lazy(lazy) = object.as_ref()
+        {
+            return Some(lazy.clone());
         }
         source.iter()?;
         Some(Self {
-            source,
+            source: Source::Elements(source),
             steps: Rc::from([]),
         })
+    }
+
+    /// The lazy sequence that gives `value` again and again, without end.
+    pub fn repeat(value: Value) -> Self {
+        Self {
+            source: Source::Repeat(value),
+            steps: Rc::from([]),
+        }
     }
 
     /// This sequence with `step` after its steps.
@@ -82,18 +91,30 @@ impl Lazy {
         }
     }
 
-    /// A cursor at the start of the sequence. An iterator is used up by
-    /// reading it, so the cursor reads a copy of the sequence's.
+    /// Whether a step calls a function, which takes the VM: `map` does,
+    /// `enumerate` doesn't.
+    pub fn calls_functions(&self) -> bool {
+        self.steps.iter().any(|step| {
+            matches!(
+                step,
+                Step::Map(_)
+                    | Step::Filter(_)
+                    | Step::FlatMap(_)
+                    | Step::TakeWhile(_)
+                    | Step::SkipWhile(_)
+            )
+        })
+    }
+
+    /// A cursor at the start of the sequence.
     pub fn cursor(&self) -> LazyCursor {
-        let source = self
-            .source
-            .iter()
-            .expect("internal error: a lazy sequence's source is iterable");
-        let source = match source {
-            ValueIter::Shared(_) => source
-                .try_clone()
-                .expect("internal error: a lazy sequence's iterator can be copied"),
-            elements => elements,
+        let source = match &self.source {
+            Source::Elements(value) => SourceCursor::Elements(
+                value
+                    .iter()
+                    .expect("internal error: a lazy sequence's source is iterable"),
+            ),
+            Source::Repeat(value) => SourceCursor::Repeat(value.clone()),
         };
         LazyCursor {
             source,
@@ -116,8 +137,12 @@ impl Lazy {
     /// A copy whose source is a deep copy of this one's.
     #[must_use]
     pub fn deep_copy_source(&self, copy: impl FnOnce(&Value) -> Value) -> Self {
+        let source = match &self.source {
+            Source::Elements(value) => Source::Elements(copy(value)),
+            Source::Repeat(value) => Source::Repeat(copy(value)),
+        };
         Self {
-            source: copy(&self.source),
+            source,
             steps: Rc::clone(&self.steps),
         }
     }
@@ -127,7 +152,10 @@ impl Lazy {
 /// functions: `lazy([1,2,3]).map(<fn f>).take(2)`.
 impl fmt::Display for Lazy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "lazy({:?})", self.source)?;
+        match &self.source {
+            Source::Elements(value) => write!(f, "lazy({value:?})")?,
+            Source::Repeat(value) => write!(f, "repeat({value:?})")?,
+        }
         for step in self.steps.iter() {
             match step {
                 Step::Map(function) => write!(f, ".map({function})")?,
@@ -138,6 +166,7 @@ impl fmt::Display for Lazy {
                 Step::Enumerate => write!(f, ".enumerate()")?,
                 Step::Take(n) => write!(f, ".take({n})")?,
                 Step::Skip(n) => write!(f, ".skip({n})")?,
+                Step::Combinations(k) => write!(f, ".combinations({k})")?,
             }
         }
         Ok(())
@@ -147,8 +176,23 @@ impl fmt::Display for Lazy {
 /// Where reading a lazy sequence has got to: a cursor over its source and
 /// what each step has kept so far.
 pub struct LazyCursor {
-    source: ValueIter,
+    source: SourceCursor,
     stages: Vec<Stage>,
+}
+
+/// Where reading a lazy sequence's source has got to.
+enum SourceCursor {
+    Elements(ValueIter),
+    Repeat(Value),
+}
+
+impl SourceCursor {
+    fn next(&mut self) -> Option<Value> {
+        match self {
+            Self::Elements(elements) => elements.next(),
+            Self::Repeat(value) => Some(value.clone()),
+        }
+    }
 }
 
 /// A step, with what it keeps while the sequence is read.
@@ -172,6 +216,21 @@ enum Stage {
     Enumerate(i64),
     Take(usize),
     Skip(usize),
+    Combinations(Combinations),
+}
+
+/// What the `combinations` step keeps: the elements read so far, and the
+/// positions among them of the elements of the last list it gave.
+struct Combinations {
+    k: usize,
+    elements: Vec<Value>,
+    /// Whether the steps before it have no more elements.
+    exhausted: bool,
+    /// Empty before the first list: it's made only once `k` elements are
+    /// read, so a huge `k` over a short sequence allocates nothing.
+    positions: Vec<usize>,
+    /// Whether it gave its one list, for a `k` of 0.
+    gave_empty: bool,
 }
 
 impl Stage {
@@ -194,6 +253,13 @@ impl Stage {
             Step::Enumerate => Self::Enumerate(0),
             Step::Take(n) => Self::Take(*n),
             Step::Skip(n) => Self::Skip(*n),
+            Step::Combinations(k) => Self::Combinations(Combinations {
+                k: *k,
+                elements: Vec::new(),
+                exhausted: false,
+                positions: Vec::new(),
+                gave_empty: false,
+            }),
         }
     }
 }
@@ -204,21 +270,52 @@ impl LazyCursor {
     pub fn next(&mut self, vm: &mut Vm) -> Result<Option<Value>, VmError> {
         pull(&mut self.source, &mut self.stages, vm)
     }
+
+    /// The next element of a lazy sequence whose steps call no functions
+    /// (see [`Lazy::calls_functions`]), which it makes without the VM.
+    pub fn next_without_calls(&mut self) -> Option<Value> {
+        match pull(&mut self.source, &mut self.stages, &mut NoCalls) {
+            Ok(value) => value,
+            Err(_) => unreachable!("internal error: a step that calls no function doesn't fail"),
+        }
+    }
+}
+
+/// What runs the functions the steps of a lazy sequence call.
+trait Calls {
+    fn call(&mut self, function: &Function, arguments: &[Value]) -> Result<Value, VmError>;
+}
+
+impl Calls for Vm {
+    fn call(&mut self, function: &Function, arguments: &[Value]) -> Result<Value, VmError> {
+        self.call_callback(function.clone(), arguments)
+    }
+}
+
+/// For a lazy sequence whose steps call no functions.
+struct NoCalls;
+
+impl Calls for NoCalls {
+    fn call(&mut self, _function: &Function, _arguments: &[Value]) -> Result<Value, VmError> {
+        unreachable!(
+            "internal error: a lazy sequence whose steps call functions is read with the VM"
+        )
+    }
 }
 
 /// The next element of the steps `stages` over `source`: the last stage's
 /// next one, which it makes from the stages before it.
 fn pull(
-    source: &mut ValueIter,
+    source: &mut SourceCursor,
     stages: &mut [Stage],
-    vm: &mut Vm,
+    vm: &mut impl Calls,
 ) -> Result<Option<Value>, VmError> {
     let Some((stage, before)) = stages.split_last_mut() else {
         return Ok(source.next());
     };
     match stage {
         Stage::Map(function) => match pull(source, before, vm)? {
-            Some(value) => Ok(Some(vm.call_callback(function.clone(), &[value])?)),
+            Some(value) => Ok(Some(vm.call(function, &[value])?)),
             None => Ok(None),
         },
         Stage::Filter(function) => {
@@ -236,7 +333,7 @@ fn pull(
             let Some(value) = pull(source, before, vm)? else {
                 return Ok(None);
             };
-            let elements = vm.call_callback(function.clone(), &[value])?;
+            let elements = vm.call(function, &[value])?;
             *inner = Some(elements.iter().ok_or_else(|| {
                 VmError::native(format!(
                     "flat_map's function gave {}, which isn't a sequence",
@@ -292,12 +389,79 @@ fn pull(
             }
             pull(source, before, vm)
         }
+        Stage::Combinations(combinations) => combinations.next(source, before, vm),
+    }
+}
+
+impl Combinations {
+    /// The next list of `k` elements, reading the elements the steps
+    /// `before` give only as far as it needs to.
+    fn next(
+        &mut self,
+        source: &mut SourceCursor,
+        before: &mut [Stage],
+        vm: &mut impl Calls,
+    ) -> Result<Option<Value>, VmError> {
+        let k = self.k;
+        if k == 0 {
+            let first = !self.gave_empty;
+            self.gave_empty = true;
+            return Ok(first.then(|| Value::list(Vec::new())));
+        }
+        if self.positions.is_empty() {
+            if !self.read_up_to(k - 1, source, before, vm)? {
+                return Ok(None);
+            }
+            self.positions = (0..k).collect();
+        } else {
+            // Read one more element before choosing which position moves
+            // on: otherwise, with the last position at the end of what's
+            // read so far, an earlier one would move on and skip the lists
+            // whose last element isn't read yet.
+            let last = self.positions[k - 1];
+            self.read_up_to(last + 1, source, before, vm)?;
+            let read = self.elements.len();
+            let Some(pivot) = (0..k).rev().find(|&i| self.positions[i] < read - k + i) else {
+                return Ok(None);
+            };
+            self.positions[pivot] += 1;
+            for j in pivot + 1..k {
+                self.positions[j] = self.positions[j - 1] + 1;
+            }
+        }
+        Ok(Some(Value::list(
+            self.positions
+                .iter()
+                .map(|&i| self.elements[i].clone())
+                .collect(),
+        )))
+    }
+
+    /// Reads elements until the one at `position` is read, or there are no
+    /// more; whether it's read.
+    fn read_up_to(
+        &mut self,
+        position: usize,
+        source: &mut SourceCursor,
+        before: &mut [Stage],
+        vm: &mut impl Calls,
+    ) -> Result<bool, VmError> {
+        while self.elements.len() <= position {
+            if self.exhausted {
+                return Ok(false);
+            }
+            match pull(source, before, vm)? {
+                Some(value) => self.elements.push(value),
+                None => self.exhausted = true,
+            }
+        }
+        Ok(true)
     }
 }
 
 /// What `function` says of `value`: a `Bool`, as its type promises.
-fn predicate(vm: &mut Vm, function: &Function, value: &Value) -> Result<bool, VmError> {
-    match vm.call_callback(function.clone(), std::slice::from_ref(value))? {
+fn predicate(vm: &mut impl Calls, function: &Function, value: &Value) -> Result<bool, VmError> {
+    match vm.call(function, std::slice::from_ref(value))? {
         Value::Bool(answer) => Ok(answer),
         other => Err(VmError::native(format!(
             "expected the function to give a Bool, but it gave {}",

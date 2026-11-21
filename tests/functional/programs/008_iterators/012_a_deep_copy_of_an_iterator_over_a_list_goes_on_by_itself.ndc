@@ -1,9 +1,0 @@
-// A deep copy of an iterator over a list goes on from where the iterator was,
-// and reading one doesn't move the other.
-// expect-output: [(1,2),(2,3)]
-// expect-output: []
-let e = enumerate([1, 2, 3]);
-for first in e { break; }
-let d = deepcopy(e);
-print([x for x in d]);
-print([x for x in d]);

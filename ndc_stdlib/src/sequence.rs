@@ -20,7 +20,6 @@ use itertools::Itertools;
 use ndc_macros::export_module;
 use ndc_vm::VmCallable;
 use ndc_vm::value::{Object, Value};
-use ndc_vm::{CombinationsIter, EnumerateIter, TakeIter};
 use std::cmp::Ordering;
 
 pub(crate) fn try_sort_by<E>(
@@ -115,13 +114,6 @@ mod inner {
                 Object::MaxHeap(h) => h.borrow().iter().any(|v| v.0 == *elem),
                 Object::Range(range) => matches!(*elem, Value::Int(n) if range.contains(n)),
                 Object::RangeFrom(start) => matches!(*elem, Value::Int(n) if n >= *start),
-                Object::Iterator(i) => loop {
-                    match i.borrow_mut().next() {
-                        Some(v) if v == *elem => return true,
-                        Some(_) => {}
-                        None => return false,
-                    }
-                },
                 _ => false,
             },
             _ => false,
@@ -365,7 +357,7 @@ mod inner {
 
     /// Returns the number of elements of a collection whose size is known: a list, deque, map or
     /// heap, or a string, for which it's the number of UTF-8 characters. A tuple has a `len` of its
-    /// own. An iterator's length isn't known without reading it.
+    /// own. A lazy sequence's length isn't known without making its elements, which `count` does.
     #[function(signature = "<T>([T]) -> Int")]
     #[function(signature = "(Range) -> Int")]
     #[function(signature = "(String) -> Int")]
@@ -400,14 +392,6 @@ mod inner {
             }
         };
         Ok(length as i64)
-    }
-
-    /// Returns a lazy iterator yielding `(index, value)` tuples for each element of `seq`.
-    #[function(signature = "<T>(Iterable<T>) -> Iterator<(Int, T)>")]
-    pub fn enumerate(seq: Value) -> anyhow::Result<Value> {
-        let iter =
-            EnumerateIter::new(&seq).ok_or_else(|| anyhow!("enumerate requires a sequence"))?;
-        Ok(Value::iterator(iter.into_shared()))
     }
 
     /// Reduces/folds the given sequence using the given combining function and a custom initial value.
@@ -669,30 +653,6 @@ mod inner {
         default.call(&[]).map_err(|e| anyhow!(e))
     }
 
-    /// Returns the `k` sized combinations of the given sequence `seq` as a lazy iterator of lists.
-    #[function(signature = "<T>(Iterable<T>, Int) -> Iterator<[T]>")]
-    pub fn combinations(seq: Value, k: usize) -> anyhow::Result<Value> {
-        let iter = CombinationsIter::new(&seq, k)
-            .ok_or_else(|| anyhow!("combinations requires a sequence"))?;
-        Ok(Value::iterator(iter.into_shared()))
-    }
-
-    /// Returns a lazy iterator yielding the first `n` elements of `seq`.
-    #[function(signature = "<T>(Iterable<T>, Int) -> Iterator<T>")]
-    pub fn take(seq: Value, n: usize) -> anyhow::Result<Value> {
-        let iter = TakeIter::new(&seq, n).ok_or_else(|| anyhow!("take requires a sequence"))?;
-        Ok(Value::iterator(iter.into_shared()))
-    }
-
-    /// Returns the elements of `seq` after the first `n`, as a list.
-    #[function(signature = "<T>(Iterable<T>, Int) -> [T]")]
-    pub fn skip(seq: Value, n: usize) -> anyhow::Result<Value> {
-        let iter = seq
-            .iter()
-            .ok_or_else(|| anyhow!("skip requires a sequence"))?;
-        Ok(Value::list(iter.skip(n).collect()))
-    }
-
     /// Returns the elements of `seq` up to the first the `predicate` gives `false` for, as a list.
     #[function(signature = "<T>(Iterable<T>, fn(T) -> Bool) -> [T]")]
     pub fn take_while(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
@@ -924,20 +884,15 @@ mod inner {
         ))
     }
 
-    /// Returns an infinite iterator that repeats the given value.
-    #[function(signature = "<T>(T) -> Iterator<T>")]
-    pub fn repeat(value: Value) -> Value {
-        Value::iterator(Rc::new(std::cell::RefCell::new(ndc_vm::RepeatIter::new(
-            value,
-        ))))
-    }
-
-    /// Returns an iterator that repeats the given value `times` times.
-    #[function(name = "repeat", signature = "<T>(T, Int) -> Iterator<T>")]
-    pub fn repeat_times(value: Value, times: usize) -> Value {
-        Value::iterator(Rc::new(std::cell::RefCell::new(
-            ndc_vm::RepeatIter::new_limited(value, times),
-        )))
+    /// Returns a list of `times` copies of `value`. Use `repeat(value)` for a lazy sequence of them without end.
+    #[function(name = "repeat", signature = "<T>(T, Int) -> [T]")]
+    pub fn repeat_times(value: Value, times: usize) -> anyhow::Result<Value> {
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(times)
+            .map_err(|_too_many| anyhow!("can't make a list of {times} elements"))?;
+        values.resize(times, value);
+        Ok(Value::list(values))
     }
 }
 

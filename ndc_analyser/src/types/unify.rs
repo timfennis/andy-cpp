@@ -100,7 +100,6 @@ impl TypeVars {
             (StaticType::Option(x), StaticType::Option(y))
             | (StaticType::Iterable(x), StaticType::Iterable(y))
             | (StaticType::List(x), StaticType::List(y))
-            | (StaticType::Iterator(x), StaticType::Iterator(y))
             | (StaticType::Lazy(x), StaticType::Lazy(y))
             | (StaticType::MinHeap(x), StaticType::MinHeap(y))
             | (StaticType::MaxHeap(x), StaticType::MaxHeap(y))

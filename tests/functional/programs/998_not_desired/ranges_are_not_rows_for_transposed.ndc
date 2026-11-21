@@ -1,0 +1,4 @@
+// `transposed` takes rows that are lists or strings: ranges, like the ones
+// `repeat` makes here, aren't rows.
+// expect-error: No function called 'transposed' found that matches the arguments '[Range]'
+let a = (1..10).repeat(5).transposed;

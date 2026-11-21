@@ -31,7 +31,6 @@ use crate::error::VmError;
 use crate::hash_map::HashMap;
 use crate::instr::{FAR, Instr, Reg, WINDOW};
 use crate::io::{InputSource, OutputSink};
-use crate::iterator::ValueIter;
 use crate::memo::{MemoCache, MemoKey};
 use crate::native_op::{NativeOp, list_element, list_index_error, list_set};
 use crate::value::{
@@ -922,12 +921,11 @@ impl Vm {
                             unreachable!("internal error: GetIterator writes an object");
                         };
                         // A list or tuple is read at the position after it,
-                        // which moves on; any other iterator counts itself.
+                        // which moves on; any other cursor counts itself.
                         let (found, counted) = match object.as_ref() {
-                            Object::Iterator(iterator) => (
-                                iterator.borrow_mut().next().map(|value| *out = value),
-                                false,
-                            ),
+                            Object::Cursor(cursor) => {
+                                (cursor.borrow_mut().next().map(|value| *out = value), false)
+                            }
                             Object::Tuple(elements) => (
                                 elements.get(index).map(|element| out.clone_from(element)),
                                 true,
@@ -1447,12 +1445,12 @@ fn unpack_into(value: &Value, out: &mut [Value]) -> Result<(), String> {
                 ));
             }
         }
-        // A deque, heap or iterator unpacks the elements it gives, one
-        // past the variables at most, as an iterator may not end.
+        // A deque, heap or range unpacks the elements it gives, one past
+        // the variables at most, as a range without an end doesn't end.
         _ => {
             let Some(iter) = value.iter() else {
                 return Err(
-                    "cannot unpack: expected a list, tuple, string, deque, heap or iterator"
+                    "cannot unpack: expected a list, tuple, string, deque, heap or range"
                         .to_string(),
                 );
             };
@@ -1534,21 +1532,23 @@ fn is_list_or_tuple(value: &Value) -> bool {
     matches!(value, Value::Object(object) if matches!(object.as_ref(), Object::List(_) | Object::Tuple(_)))
 }
 
-/// An iterator over `value`: the value itself if it's an iterator, a cursor
-/// over its elements (see [`ValueIter`]) if it's a deque, string, map, heap
-/// or range, and a cursor at its start if it's a lazy sequence.
+/// A cursor over `value`'s elements (see [`crate::ValueIter`]) if it's a deque,
+/// string, map, heap, range or a lazy sequence whose steps call no
+/// functions, and a cursor at its start that runs on the VM if it's a lazy
+/// sequence whose steps do.
 #[inline(never)]
 fn iterator_of(value: &Value) -> Result<Value, String> {
-    if let Value::Object(object) = value
-        && let Object::Lazy(lazy) = object.as_ref()
-    {
-        let cursor = Rc::new(RefCell::new(lazy.cursor()));
-        return Ok(Value::Object(Rc::new(Object::LazyCursor(cursor))));
+    if let Some(cursor) = value.iter() {
+        return Ok(Value::Object(Rc::new(Object::Cursor(Rc::new(
+            RefCell::new(cursor),
+        )))));
     }
-    match value.iter() {
-        Some(ValueIter::Shared(_)) => Ok(value.clone()),
-        Some(cursor) => Ok(Value::iterator(Rc::new(RefCell::new(cursor)))),
-        None => Err(format!("{} is not iterable", value.static_type())),
+    match value {
+        Value::Object(object) if let Object::Lazy(lazy) = object.as_ref() => {
+            let cursor = Rc::new(RefCell::new(lazy.cursor()));
+            Ok(Value::Object(Rc::new(Object::LazyCursor(cursor))))
+        }
+        _ => Err(format!("{} is not iterable", value.static_type())),
     }
 }
 

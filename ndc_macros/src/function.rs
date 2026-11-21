@@ -255,20 +255,6 @@ fn map_type_path(p: &syn::TypePath) -> syn::Result<TokenStream> {
                 "MaxHeap requires generic arguments",
             )),
         },
-        "Iterator" => match &segment.arguments {
-            syn::PathArguments::AngleBracketed(args) => {
-                let inner = args.args.first().ok_or_else(|| {
-                    syn::Error::new_spanned(segment, "Iterator requires inner type")
-                })?;
-                if let syn::GenericArgument::Type(inner_ty) = inner {
-                    let mapped = map_type(inner_ty)?;
-                    Ok(quote! { ndc_core::StaticType::Iterator(Box::new(#mapped)) })
-                } else {
-                    Err(syn::Error::new_spanned(inner, "Iterator inner not a type"))
-                }
-            }
-            _ => Ok(quote! { ndc_core::StaticType::Iterator(Box::new(ndc_core::StaticType::Any)) }),
-        },
         "Option" => match &segment.arguments {
             syn::PathArguments::AngleBracketed(args) => {
                 let inner = args.args.first().ok_or_else(|| {

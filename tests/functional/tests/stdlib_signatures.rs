@@ -70,6 +70,8 @@ fn samples(typ: &StaticType, depth: usize) -> Vec<String> {
     let block = |name: &str, body: String| format!("{{ let {name}: {typ} = {body}; {name} }}");
     match typ {
         StaticType::Int => vec!["3".into(), "0".into(), "-2".into()],
+        StaticType::Range => vec!["(0..3)".into(), "(2..=1)".into()],
+        StaticType::RangeFrom => vec!["(1..)".into()],
         StaticType::Float => vec!["1.5".into(), "-0.5".into()],
         StaticType::Number => vec!["Number(3)".into(), "(1n / 3n)".into()],
         StaticType::String => vec!["\"ab\"".into(), "\"12\"".into(), "\"\"".into()],
@@ -137,17 +139,20 @@ fn samples(typ: &StaticType, depth: usize) -> Vec<String> {
                 .collect::<String>();
             vec![format!("{{ let h: {typ} = {make}(); {pushes}h }}")]
         }
-        StaticType::Iterator(element) => first(samples(element, depth + 1), 1)
-            .into_iter()
-            .map(|v| format!("repeat({v}).take(2)"))
-            .collect(),
+        StaticType::Lazy(element) => {
+            let mut out: Vec<String> = first(samples(element, depth + 1), 1)
+                .into_iter()
+                .map(|v| format!("repeat({v}).take(2)"))
+                .collect();
+            out.push(format!("{{ let l: {typ} = [].lazy; l }}"));
+            out
+        }
         StaticType::Iterable(element) => {
             let mut out = Vec::new();
             for container in [
                 StaticType::List(element.clone()),
                 StaticType::Deque(element.clone()),
                 StaticType::MinHeap(element.clone()),
-                StaticType::Iterator(element.clone()),
             ] {
                 out.extend(samples(&container, depth).pop());
             }
@@ -235,19 +240,11 @@ fn covering(pools: &[Vec<String>]) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// Whether `message`, an error from a call of `name` whose signature is
-/// `signature`, is one this test allows: one about a value, or one a known
-/// gap explains.
-fn is_allowed(name: &str, signature: &StaticType, message: &str) -> bool {
-    if !is_about_a_type(message) {
-        return true;
-    }
-    // An `Any` is checked as the program runs, which is what it's for.
-    if signature.contains(&|part| *part == StaticType::Any) {
-        return true;
-    }
-    // A range's type is an `Iterator<Int>` until ranges have one of their own: #400.
-    matches!(name, "[]" | "[]=") && message.contains("cannot use non-range iterator")
+/// Whether `message`, an error from a call whose signature is `signature`,
+/// is one this test allows: one about a value, or one from a signature with
+/// an `Any` in it, which is checked as the program runs.
+fn is_allowed(signature: &StaticType, message: &str) -> bool {
+    !is_about_a_type(message) || signature.contains(&|part| *part == StaticType::Any)
 }
 
 /// An interpreter with the standard library that runs each program on its
@@ -322,7 +319,7 @@ fn every_native_takes_what_its_signature_says() {
                         interpreter = self::interpreter();
                     }
                     Ok(Err(InterpreterError::Vm(error)))
-                        if !is_allowed(name, signature, &error.message) =>
+                        if !is_allowed(signature, &error.message) =>
                     {
                         failures.push(format!(
                             "{name} {signature}: {} on `{program}`",

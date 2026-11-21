@@ -1,6 +1,7 @@
-// An iterator's length isn't known without reading it.
-// expect-error: No function called 'len' found that matches the arguments 'Iterator<Int>'
+// A lazy sequence's length isn't known without making its elements, which
+// `count` does.
+// expect-error: No function called 'len' found that matches the arguments 'Lazy<Int>'
 let heap = MinHeap();
 heap.push(1);
 print(len([1, 2]), len("abc"), len(%{1: 2}), len((1, "a")), heap.len(), len(0..3));
-print(len([1, 2, 3].take(3)));
+print(len([1, 2, 3].lazy));

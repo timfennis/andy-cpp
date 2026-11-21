@@ -107,22 +107,25 @@ fn register_steps(env: &mut FunctionRegistry<NativeSpec>) {
         }
     }
 
+    // These pick elements without calling a function, so they're lazy for
+    // any sequence, and a `for` loop reads one without leaving the VM's
+    // dispatch loop: `for (i, x) in xs.enumerate()` makes no list.
     let with_count: [CountStep; 2] = [
         (
             "take",
-            "Keeps the first `n` elements of the lazy sequence.",
+            "A lazy sequence of the first `n` elements of `seq`.",
             Step::Take,
         ),
         (
             "skip",
-            "Leaves out the first `n` elements of the lazy sequence.",
+            "A lazy sequence of the elements of `seq` after the first `n`.",
             Step::Skip,
         ),
     ];
     for (name, doc, step) in with_count {
         for signature in [
             "<T>(Lazy<T>, Int) -> Lazy<T>",
-            "(RangeFrom, Int) -> Lazy<Int>",
+            "<T>(Iterable<T>, Int) -> Lazy<T>",
         ] {
             simple(env, name, doc, signature, move |args| {
                 let count = count_of(name, &args[1])?;
@@ -132,13 +135,37 @@ fn register_steps(env: &mut FunctionRegistry<NativeSpec>) {
     }
 
     for signature in [
+        "<T>(Lazy<T>, Int) -> Lazy<[T]>",
+        "<T>(Iterable<T>, Int) -> Lazy<[T]>",
+    ] {
+        simple(
+            env,
+            "combinations",
+            "A lazy sequence of each list of `k` elements of `seq`, in the order they come, reading `seq` only as far as each list needs: `[1, 2, 3].combinations(2)` gives `[1, 2]`, `[1, 3]`, `[2, 3]`.",
+            signature,
+            |args| {
+                let k = count_of("combinations", &args[1])?;
+                Ok(lazy_value(lazy_of(&args[0])?.then(Step::Combinations(k))))
+            },
+        );
+    }
+
+    simple(
+        env,
+        "repeat",
+        "A lazy sequence that gives `value` again and again, without end: `repeat(0).take(3)` gives `0`, `0`, `0`.",
+        "<T>(T) -> Lazy<T>",
+        |args| Ok(lazy_value(Lazy::repeat(args[0].clone()))),
+    );
+
+    for signature in [
         "<T>(Lazy<T>) -> Lazy<(Int, T)>",
-        "(RangeFrom) -> Lazy<(Int, Int)>",
+        "<T>(Iterable<T>) -> Lazy<(Int, T)>",
     ] {
         simple(
             env,
             "enumerate",
-            "Pairs each element of the lazy sequence with its position: `(0, a)`, `(1, b)`, …",
+            "A lazy sequence of each element of `seq` with its position: `(0, a)`, `(1, b)`, …",
             signature,
             |args| Ok(lazy_value(lazy_of(&args[0])?.then(Step::Enumerate))),
         );
@@ -247,7 +274,7 @@ fn register_readers(env: &mut FunctionRegistry<NativeSpec>) {
             let mut cursor = lazy_of(&args[0])?.cursor();
             let mut count = 0;
             while let Some(value) = cursor.next(vm)? {
-                if test(vm, &predicate, value)? {
+                if test(vm, &predicate, &value)? {
                     count += 1;
                 }
             }
@@ -263,7 +290,7 @@ fn register_readers(env: &mut FunctionRegistry<NativeSpec>) {
             let predicate = function_of(&args[1])?;
             let mut cursor = lazy_of(&args[0])?.cursor();
             while let Some(value) = cursor.next(vm)? {
-                if test(vm, &predicate, value.clone())? {
+                if test(vm, &predicate, &value)? {
                     return Ok(value);
                 }
             }
@@ -299,7 +326,7 @@ fn register_readers(env: &mut FunctionRegistry<NativeSpec>) {
                 let predicate = function_of(&args[1])?;
                 let mut cursor = lazy_of(&args[0])?.cursor();
                 while let Some(value) = cursor.next(vm)? {
-                    if test(vm, &predicate, value)? == stop_on {
+                    if test(vm, &predicate, &value)? == stop_on {
                         return Ok(Value::Bool(found));
                     }
                 }
@@ -377,8 +404,8 @@ fn fold(
 
 /// What `predicate`, a function its type says gives a `Bool`, gives for
 /// `value`.
-fn test(vm: &mut Vm, predicate: &Function, value: Value) -> Result<bool, VmError> {
-    match vm.call_callback(predicate.clone(), &[value])? {
+fn test(vm: &mut Vm, predicate: &Function, value: &Value) -> Result<bool, VmError> {
+    match vm.call_callback(predicate.clone(), std::slice::from_ref(value))? {
         Value::Bool(answer) => Ok(answer),
         _ => Err(VmError::native(
             "return value of predicate must be a boolean",
@@ -411,7 +438,9 @@ fn function_of(value: &Value) -> Result<Function, VmError> {
 fn count_of(name: &str, value: &Value) -> Result<usize, VmError> {
     match value {
         Value::Int(n) => usize::try_from(*n).map_err(|_negative| {
-            VmError::native(format!("{name} can't take a negative count: {n}"))
+            VmError::native(format!(
+                "{name} expected a non-negative integer, but the value was negative: {n}"
+            ))
         }),
         _ => Err(VmError::native(format!("{name} takes an Int count"))),
     }

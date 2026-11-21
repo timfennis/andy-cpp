@@ -8,5 +8,5 @@ assert_eq(out[2], (2, "Baz"));
 // Laziness: enumerating an unbounded range and taking is finite.
 assert_eq((0..).enumerate().take(3).list(), [(0, 0), (1, 1), (2, 2)]);
 
-// Enumeration composes with iterator combinators.
-assert_eq([10, 20, 30].enumerate().map(fn(p) { p[0] + p[1] }), [10, 21, 32]);
+// Enumeration composes with the steps of a lazy sequence.
+assert_eq([10, 20, 30].enumerate().map(fn(p) { p[0] + p[1] }).list(), [10, 21, 32]);

@@ -30,6 +30,19 @@ let first = [1, 2, 3, 4, 5]
 print(first, checked);  // 9 [1,2,3]
 ```
 
+## Picking elements
+
+`enumerate`, `take`, `skip` and `combinations` only pick elements, without calling a function of yours, so they give a lazy sequence for any sequence, without `.lazy`. A `for` loop over one makes no list:
+
+```ndc
+for (i, name) in ["Ann", "Bob"].enumerate() {
+    print(i, name);
+}
+// 0 Ann
+// 1 Bob
+print([1, 2, 3].combinations(2).list);  // [[1,2],[1,3],[2,3]]
+```
+
 ## Ranges without an end
 
 A range without an end, `1..`, never ends, so `map` and `filter` give a lazy sequence for one without `.lazy`. Take as many elements as you need:
@@ -59,7 +72,7 @@ If you need the elements more than once, make them into a list with `list`, and 
 
 ## Where it goes
 
-A `for` loop, a comprehension and these functions read a lazy sequence: `list`, `set`, `sorted`, `sum`, `product`, `min`, `max`, `join`, `count`, `find`, `any`, `all`, `none`, `first_or`, `fold`, `reduce` and `in`. These add a step to one: `map`, `filter`, `flat_map`, `enumerate`, `take`, `skip`, `take_while` and `skip_while`.
+A `for` loop, a comprehension and these functions read a lazy sequence: `list`, `set`, `sorted`, `sum`, `product`, `min`, `max`, `join`, `count`, `find`, `any`, `all`, `none`, `first_or`, `fold`, `reduce` and `in`. These add a step to one: `map`, `filter`, `flat_map`, `enumerate`, `take`, `skip`, `take_while`, `skip_while` and `combinations`. `repeat(x)` is a lazy sequence that gives `x` without end, and `repeat(x, n)` a list of `n` of them.
 
 Other functions that take a list don't take a lazy sequence. Make it into a list first:
 

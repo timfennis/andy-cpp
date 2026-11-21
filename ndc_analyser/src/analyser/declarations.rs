@@ -544,7 +544,6 @@ impl Analyser {
         typ.contains(&|part| match part {
             StaticType::Any
             | StaticType::Function { .. }
-            | StaticType::Iterator(_)
             | StaticType::Lazy(_)
             | StaticType::MinHeap(_)
             | StaticType::MaxHeap(_) => {

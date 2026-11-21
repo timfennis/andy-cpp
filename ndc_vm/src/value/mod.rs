@@ -11,7 +11,7 @@ pub use range::Range;
 pub use string::VmString;
 
 use crate::hash_map::HashMap;
-use crate::iterator::{SharedIterator, ValueIter};
+use crate::iterator::ValueIter;
 use crate::lazy::{Lazy, LazyCursor};
 use ndc_core::StaticType;
 use ndc_core::collections::quality_hasher;
@@ -116,13 +116,15 @@ pub enum Object {
         info: Rc<StructInfo>,
         fields: RefCell<Vec<Value>>,
     },
-    Iterator(SharedIterator),
     /// `a..b` or `a..=b`.
     Range(Range),
     /// `a..`: the `Int`s from `a` on, up to the largest.
     RangeFrom(i64),
     /// `lazy(xs)` and what the functions that take one give.
     Lazy(Lazy),
+    /// Where a `for` loop over a deque, string, map, heap or range has got
+    /// to, in the loop's register: never a value a program holds.
+    Cursor(Rc<RefCell<ValueIter>>),
     /// Where a `for` loop over a lazy sequence has got to, in the loop's
     /// register: never a value a program holds.
     LazyCursor(Rc<RefCell<LazyCursor>>),
@@ -176,10 +178,6 @@ impl Value {
         Self::Object(Rc::new(Object::String(rc)))
     }
 
-    pub fn iterator(iter: SharedIterator) -> Self {
-        Self::Object(Rc::new(Object::Iterator(iter)))
-    }
-
     pub fn range(range: Range) -> Self {
         Self::Object(Rc::new(Object::Range(range)))
     }
@@ -226,7 +224,7 @@ impl Value {
     /// Creates a shallow copy: scalars are copied by value; mutable collection
     /// types (String, List, Map, Deque, heaps, structs) get new independent
     /// containers with cloned contents; immutable / identity types (Tuple,
-    /// Function, Iterator, Some) share the Rc.
+    /// Function, Some, ranges, lazy sequences) share the Rc.
     pub fn shallow_clone(&self) -> Self {
         match self {
             Self::Object(obj) => match obj.as_ref() {
@@ -317,11 +315,10 @@ impl Value {
     }
 
     /// Whether this value is a `target`, a type that holds no other values
-    /// as a container does: a scalar, a struct, a function or an iterator.
+    /// as a container does: a scalar, a struct, a function or a range.
     /// A function is one if its own type says so (see [`Function::fit`]):
     /// only [`Self::converted_to`] can make one that may be one a function
-    /// whose calls are checked. What an iterator makes can't be checked
-    /// without making it, so an iterator is only an `Iterator<Any>`.
+    /// whose calls are checked.
     fn is_a(&self, target: &StaticType) -> bool {
         if let StaticType::Function { .. } = target
             && let Self::Object(object) = self
@@ -414,8 +411,8 @@ impl Value {
     ///
     /// It backs the runtime check of casts, and of the arguments of a call of
     /// a [`Function::Checked`]. Shared container aliases are memoized by object and target
-    /// type. Iterators can't be inspected without consuming them, so they only
-    /// conform to targets with `Any` elements.
+    /// type. What a lazy sequence gives can't be checked without making it,
+    /// so it only conforms to a `Lazy<Any>`.
     pub fn conforms_to(&self, target: &StaticType) -> bool {
         self.conforms_to_cached(target, &mut ConformanceCache::default())
     }
@@ -550,7 +547,6 @@ impl Value {
                         .borrow()
                         .iter()
                         .all(|OrdValue(value)| value.conforms_to_cached(element, cache)),
-                    Object::Iterator(_) => matches!(element.as_ref(), StaticType::Any),
                     _ => false,
                 },
                 _ => false,
@@ -788,19 +784,16 @@ impl Object {
             )))),
             Self::MinHeap(heap) => Rc::new(Self::MinHeap(RefCell::new(heap.borrow().clone()))),
             Self::MaxHeap(heap) => Rc::new(Self::MaxHeap(RefCell::new(heap.borrow().clone()))),
-            // Iterator: deep_copy if supported, otherwise share the Rc.
             Self::Lazy(lazy) => Rc::new(Self::Lazy(
                 lazy.deep_copy_source(|source| source.deep_copy_with(copies)),
             )),
-            Self::Iterator(shared) => match shared.borrow().deep_copy() {
-                Some(iterator) => Rc::new(Self::Iterator(iterator)),
-                None => Rc::clone(object),
-            },
             // A function or range is shared: neither can change. A lazy
             // cursor is never a program's value.
-            Self::Function(_) | Self::Range(_) | Self::RangeFrom(_) | Self::LazyCursor(_) => {
-                Rc::clone(object)
-            }
+            Self::Function(_)
+            | Self::Range(_)
+            | Self::RangeFrom(_)
+            | Self::Cursor(_)
+            | Self::LazyCursor(_) => Rc::clone(object),
         };
         copies.insert(key, Rc::clone(&copy));
         copy
@@ -814,8 +807,8 @@ impl Object {
     /// type, and `Some` wraps the type of its inner value. Empty lists, deques, and
     /// maps report `Any` for the types they cannot infer.
     ///
-    /// Iterators and heaps always report `Any` elements, because inspecting them
-    /// would consume or expose their internal values.
+    /// Heaps and lazy sequences always report `Any` elements: a heap's
+    /// elements aren't looked at, and a lazy sequence's aren't made.
     pub fn static_type(&self) -> StaticType {
         let mut budget = usize::MAX;
         self.static_type_with_budget(usize::MAX, &mut budget)
@@ -898,9 +891,9 @@ impl Object {
                 }
             }
             Self::Function(f) => f.static_type(),
-            Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
             Self::Lazy(_) => StaticType::Lazy(Box::new(StaticType::Any)),
-            Self::LazyCursor(_) => StaticType::Any,
+            // A cursor is never a program's value.
+            Self::Cursor(_) | Self::LazyCursor(_) => StaticType::Any,
             Self::Range(_) => StaticType::Range,
             Self::RangeFrom(_) => StaticType::RangeFrom,
             Self::Deque(elements) => {
@@ -1018,10 +1011,7 @@ fn display_contents(object: &Object, f: &mut Formatter<'_>) -> fmt::Result {
         Object::Function(func) => write!(f, "{func}"),
         Object::Lazy(lazy) => write!(f, "{lazy}"),
         Object::LazyCursor(_) => write!(f, "<lazy cursor>"),
-        Object::Iterator(iter) => match iter.borrow().len() {
-            Some(n) => write!(f, "<iterator (len={n})>"),
-            None => write!(f, "<iterator>"),
-        },
+        Object::Cursor(_) => write!(f, "<cursor>"),
         Object::Range(range) => write!(f, "{range}"),
         Object::RangeFrom(start) => write!(f, "{start}.."),
         Object::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
@@ -1075,10 +1065,7 @@ impl fmt::Debug for Object {
             Self::Function(func) => write!(f, "{func:?}"),
             Self::Lazy(lazy) => write!(f, "{lazy}"),
             Self::LazyCursor(_) => write!(f, "<lazy cursor>"),
-            Self::Iterator(iter) => match iter.borrow().len() {
-                Some(n) => write!(f, "<iterator (len={n})>"),
-                None => write!(f, "<iterator>"),
-            },
+            Self::Cursor(_) => write!(f, "<cursor>"),
             Self::Range(range) => write!(f, "{range}"),
             Self::RangeFrom(start) => write!(f, "{start}.."),
             Self::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
@@ -1281,10 +1268,7 @@ impl PartialEq for Object {
             // can't be compared without making them.
             (Self::Lazy(a), Self::Lazy(b)) => std::ptr::eq(a, b),
             (Self::LazyCursor(a), Self::LazyCursor(b)) => Rc::ptr_eq(a, b),
-            (Self::Iterator(a), Self::Iterator(b)) => {
-                // Compare iterators by pointer identity
-                std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
-            }
+            (Self::Cursor(a), Self::Cursor(b)) => Rc::ptr_eq(a, b),
             (Self::Range(a), Self::Range(b)) => a == b,
             (Self::RangeFrom(a), Self::RangeFrom(b)) => a == b,
             (Self::Deque(a), Self::Deque(b)) => a.borrow().eq(&*b.borrow()),
@@ -1357,7 +1341,7 @@ impl Hash for Object {
                 state.write_u8(9);
                 hash_function(f, state);
             }
-            Self::Iterator(_) => state.write_u8(11),
+            Self::Cursor(_) => state.write_u8(11),
             Self::Lazy(_) => state.write_u8(18),
             Self::LazyCursor(_) => state.write_u8(19),
             Self::Deque(d) => {

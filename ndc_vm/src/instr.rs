@@ -212,8 +212,9 @@ pub enum Instr {
     MapInsert { map: Reg, key: Reg, value: Reg },
     /// `dst` = what `IterNext` iterates over the value in `src` with, and
     /// the register after `dst` = `0`, the position in it: a list or tuple
-    /// itself, which is iterated over in place, an iterator itself, and an
-    /// iterator over its elements for a deque, string, map or heap.
+    /// itself, which is iterated over in place, a cursor over its elements
+    /// for a deque, string, map, heap or range, and a cursor at its start
+    /// for a lazy sequence.
     GetIterator { dst: Reg, src: Reg },
     /// `dst` = the next value of what `GetIterator` put in `iter`, or if it
     /// has none left, goes `offset` instructions on. Of a list or tuple,

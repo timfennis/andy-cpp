@@ -388,16 +388,13 @@ impl AnalysisError {
             StaticType::Function { .. } => {
                 "`==` says two functions are equal only when they're the same one."
             }
-            StaticType::Iterator(_) => {
-                "`==` says two iterators are equal only when they're the same one."
-            }
             StaticType::Lazy(_) => {
                 "`==` says two lazy sequences are equal only when they're the same one."
             }
             StaticType::MinHeap(_) | StaticType::MaxHeap(_) => {
                 "`==` says two heaps are equal only when they're the same one."
             }
-            _ => "An `Any` could hold a function, an iterator or a heap.",
+            _ => "An `Any` could hold a function, a lazy sequence or a heap.",
         };
         format!(
             "A `pure fn` gives a call the result of an earlier one with equal arguments, so it only takes values `==` compares by what they hold. {why}"
