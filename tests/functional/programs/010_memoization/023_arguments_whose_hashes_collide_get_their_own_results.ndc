@@ -1,0 +1,6 @@
+// These two calls' arguments hash alike with FxHash, whose hash is a sum of
+// what it's given times powers of one constant, so small integers can cancel
+// out. The cache keys results by a 128-bit hash that has no such pattern.
+// expect-output: [0,0,0,3917] [12232,20834,48495,0]
+pure fn f(a: Int, b: Int, c: Int, d: Int) -> [Int] => [a, b, c, d];
+print(f(0, 0, 0, 3917), f(12232, 20834, 48495, 0));

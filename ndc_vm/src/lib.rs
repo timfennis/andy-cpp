@@ -7,6 +7,7 @@ pub mod hash_map;
 pub mod instr;
 mod io;
 pub mod iterator;
+pub mod memo;
 mod native_op;
 mod natives;
 #[cfg(feature = "trace")]

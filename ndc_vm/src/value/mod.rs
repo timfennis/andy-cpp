@@ -8,9 +8,10 @@ pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFlo
 pub use numeric::{NumericMode, NumericRef};
 pub use string::VmString;
 
-use crate::hash_map::{HashMap, hasher};
+use crate::hash_map::HashMap;
 use crate::iterator::SharedIterator;
 use ndc_core::StaticType;
+use ndc_core::collections::quality_hasher;
 use ndc_core::r#struct::StructInfo;
 use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
@@ -1208,8 +1209,10 @@ impl Eq for Value {}
 
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        // A number starts with its own tag, 0 to 2, which none of the tags
+        // below shares, so it needs no tag of its own here: one write less
+        // for each number a map or a memo cache hashes.
         if let Some(number) = self.numeric_ref() {
-            state.write_u8(1);
             number.hash(state);
             return;
         }
@@ -1326,7 +1329,7 @@ impl Hash for Object {
                 let mut acc = 0u64;
                 let mut cube_acc = 0u64;
                 for (key, value) in entries.iter() {
-                    let mut hasher = hasher();
+                    let mut hasher = quality_hasher();
                     key.hash(&mut hasher);
                     value.hash(&mut hasher);
 
@@ -1337,32 +1340,15 @@ impl Hash for Object {
                 state.write_u64(acc);
                 state.write_u64(cube_acc);
             }
+            // A function, iterator or heap is equal only to itself, but hashes by
+            // what stays the same from run to run, never its address: a map's
+            // order follows its keys' hashes, and the same program prints the
+            // same map every time.
             Self::Function(f) => {
                 state.write_u8(9);
-                match f.unchecked() {
-                    Function::Compiled(func) => {
-                        state.write_u8(1);
-                        Rc::as_ptr(func).hash(state);
-                    }
-                    Function::Native(native) => {
-                        state.write_u8(2);
-                        Rc::as_ptr(native).hash(state);
-                    }
-                    Function::Closure(closure) => {
-                        state.write_u8(3);
-                        Rc::as_ptr(&closure.prototype).hash(state);
-                    }
-                    Function::Memoized { cache, .. } => {
-                        state.write_u8(4);
-                        Rc::as_ptr(cache).hash(state);
-                    }
-                    Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
-                }
+                hash_function(f, state);
             }
-            Self::Iterator(iter) => {
-                state.write_u8(11);
-                Rc::as_ptr(iter).hash(state);
-            }
+            Self::Iterator(_) => state.write_u8(11),
             Self::Deque(d) => {
                 state.write_u8(12);
                 let d = d.borrow();
@@ -1371,19 +1357,11 @@ impl Hash for Object {
                     v.hash(state);
                 }
             }
-            Self::MinHeap(h) => {
-                state.write_u8(13);
-                // Hash by address: the RefCell lives inside the Rc<Object> allocation,
-                // so this is equivalent to hashing the outer Rc pointer.
-                (h as *const RefCell<BinaryHeap<Reverse<OrdValue>>>).hash(state);
-            }
-            Self::MaxHeap(h) => {
-                state.write_u8(14);
-                (h as *const RefCell<BinaryHeap<OrdValue>>).hash(state);
-            }
+            Self::MinHeap(_) => state.write_u8(13),
+            Self::MaxHeap(_) => state.write_u8(14),
             Self::Struct { info, fields } => {
                 state.write_u8(15);
-                Rc::as_ptr(info).hash(state);
+                info.id.hash(state);
                 for v in fields.borrow().iter() {
                     v.hash(state);
                 }
@@ -1392,9 +1370,34 @@ impl Hash for Object {
     }
 }
 
+/// Hashes `function` by what stays the same from run to run: its name and
+/// where its code is, never its address.
+fn hash_function<H: Hasher>(function: &Function, state: &mut H) {
+    match function.unchecked() {
+        Function::Compiled(function) => {
+            state.write_u8(1);
+            function.hash_stable(state);
+        }
+        Function::Native(native) => {
+            state.write_u8(2);
+            native.name.hash(state);
+        }
+        Function::Closure(closure) => {
+            state.write_u8(3);
+            closure.prototype.hash_stable(state);
+        }
+        Function::Memoized { function, .. } => {
+            state.write_u8(4);
+            hash_function(function, state);
+        }
+        Function::Checked { .. } => unreachable!("`unchecked` strips the checks"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash_map::hasher;
 
     fn value_hash(value: &Value) -> u64 {
         let mut hasher = hasher();

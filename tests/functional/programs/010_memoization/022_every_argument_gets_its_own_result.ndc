@@ -1,0 +1,14 @@
+// A cache with many results gives each call the result for its own arguments.
+// expect-output: 333328333350000 2016 100000
+let calls = 0;
+pure fn square(n: Int) -> Int {
+    calls += 1;
+    n * n
+}
+pure fn pair(a: Int, b: (Int, Int)) -> Int => a * b[0] + b[1];
+let total = 0;
+for n in 0..100000 { total += square(n); }
+for n in 0..100000 { total -= square(n) - n * n; }
+let pairs = 0;
+for a in 0..8, b in 0..8 { pairs += pair(a, (b, a)) + pair(a, (b, a)); }
+print(total, pairs, calls);

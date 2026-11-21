@@ -18,9 +18,9 @@ mod highlight;
 pub use editor::Editor;
 pub use highlight::{highlight, highlight_classes, highlight_spans};
 
-// Linked only for the `wasm_js` features turned on in Cargo.toml.
+// Linked only for the `wasm_js` feature turned on in Cargo.toml.
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-use {getrandom_03 as _, getrandom_04 as _};
+use getrandom_04 as _;
 
 /// A REPL-like session: each evaluation sees what earlier ones declared.
 #[wasm_bindgen]

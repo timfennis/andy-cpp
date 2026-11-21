@@ -28,13 +28,14 @@
 
 use crate::chunk::{ClosureCode, far_target};
 use crate::error::VmError;
-use crate::hash_map::{HashMap, hasher};
+use crate::hash_map::HashMap;
 use crate::instr::{FAR, Instr, Reg, WINDOW};
 use crate::io::{InputSource, OutputSink};
 use crate::iterator::{
     HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, SharedIterator, StringIter,
     UnboundedRangeIter, VmIterator,
 };
+use crate::memo::{MemoCache, MemoKey};
 use crate::native_op::NativeOp;
 use crate::value::{ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{Natives, Object, Value};
@@ -42,7 +43,6 @@ use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use std::cell::RefCell;
-use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::rc::Rc;
 
@@ -70,7 +70,7 @@ pub struct Vm {
 
 /// The cache of a memoised function's results, and the key of the call
 /// whose result goes in it when the call returns.
-type MemoCache = (Rc<RefCell<HashMap<u64, Value>>>, u64);
+type PendingMemo = (Rc<RefCell<MemoCache>>, MemoKey);
 
 /// How many calls deep a program can go. A frame takes about a hundred
 /// bytes, so this is about 100 MB of frames.
@@ -141,7 +141,7 @@ struct Frames {
 #[derive(Default)]
 struct OnReturn {
     /// For a call of a `pure fn`: store it in the function's cache.
-    memo: Option<MemoCache>,
+    memo: Option<PendingMemo>,
     /// For a call of a [`Function::Checked`]: check that it's a value of
     /// this type, and make it one.
     returns: Option<StaticType>,
@@ -1001,7 +1001,7 @@ impl Vm {
         function: Function,
         callee: usize,
         args: usize,
-        memo: Option<MemoCache>,
+        memo: Option<PendingMemo>,
     ) -> Result<(), VmError> {
         match function {
             Function::Compiled(function) => self.enter_frame(function, None, callee, memo),
@@ -1020,8 +1020,8 @@ impl Vm {
             }
             Function::Memoized { cache, function } => {
                 let arguments = callee + 1..callee + 1 + args;
-                let key = memo_key(&self.stack[arguments.clone()]);
-                let cached = cache.borrow().get(&key).cloned();
+                let key = MemoKey::of(&self.stack[arguments.clone()]);
+                let cached = cache.borrow().get(key).cloned();
                 if let Some(cached) = cached {
                     clear(&mut self.stack[arguments]);
                     self.stack[callee] = cached;
@@ -1081,7 +1081,7 @@ impl Vm {
         function: Rc<CompiledFunction>,
         closure: Option<Rc<Object>>,
         callee: usize,
-        memo: Option<MemoCache>,
+        memo: Option<PendingMemo>,
     ) -> Result<(), VmError> {
         // The frames live on the heap, so without a limit a function that
         // calls itself without end would take memory until the system stops
@@ -1364,17 +1364,6 @@ fn iterator_of(value: &Value) -> Result<Value, String> {
         _ => return Err(not_iterable()),
     };
     Ok(Value::iterator(iter))
-}
-
-/// The key a memoised function's result for `arguments` is cached under.
-/// Arguments `==` calls equal share a result: a `pure fn` takes only values
-/// it compares by what they are, which hash alike when they're equal.
-fn memo_key(arguments: &[Value]) -> u64 {
-    let mut hasher = hasher();
-    for argument in arguments {
-        argument.hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 /// Find the broadcast-axis length for a vec call: the shared length of every
