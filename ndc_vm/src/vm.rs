@@ -880,21 +880,49 @@ impl Vm {
                     Instr::TryCast { reg, typ } => {
                         try_cast_value(&mut regs[reg.index()], &chunk.types()[typ as usize]);
                     }
-                    Instr::GetIterator { dst, src } => match iterator_of(&regs[src.index()]) {
-                        Ok(iterator) => regs[dst.index()] = iterator,
-                        Err(message) => break Exit::Error(VmError::native(message)),
-                    },
+                    Instr::GetIterator { dst, src } => {
+                        let src = &regs[src.index()];
+                        let iterated = if is_list_or_tuple(src) {
+                            Ok(src.clone())
+                        } else {
+                            iterator_of(src)
+                        };
+                        match iterated {
+                            Ok(iterated) => {
+                                regs[dst.index()] = iterated;
+                                regs[dst.index() + 1] = Value::Int(0);
+                            }
+                            Err(message) => break Exit::Error(VmError::native(message)),
+                        }
+                    }
                     Instr::IterNext { iter, dst, offset } => {
-                        let Value::Object(object) = &regs[iter.index()] else {
-                            unreachable!("internal error: IterNext's register holds an iterator");
+                        let (iter, position) = (iter.index(), iter.index() + 1);
+                        let Value::Int(index) = regs[position] else {
+                            unreachable!("internal error: GetIterator writes a position");
                         };
-                        let Object::Iterator(iterator) = object.as_ref() else {
-                            unreachable!("internal error: IterNext's register holds an iterator");
+                        let (iterated, out) = read_and_write(regs, iter, dst.index());
+                        let Value::Object(object) = iterated else {
+                            unreachable!("internal error: GetIterator writes an object");
                         };
-                        let next = iterator.borrow_mut().next();
-                        match next {
-                            Some(value) => regs[dst.index()] = value,
-                            None => ip = short_jump(ip, offset, far_jumps),
+                        // A position is never negative.
+                        let index = index as usize;
+                        let next = match object.as_ref() {
+                            Object::Tuple(elements) => {
+                                elements.get(index).map(|element| out.clone_from(element))
+                            }
+                            Object::List(elements) => elements
+                                .borrow()
+                                .get(index)
+                                .map(|element| out.clone_from(element)),
+                            Object::Iterator(iterator) => {
+                                iterator.borrow_mut().next().map(|value| *out = value)
+                            }
+                            _ => unreachable!("internal error: GetIterator writes an iterable"),
+                        };
+                        if next.is_none() {
+                            ip = short_jump(ip, offset, far_jumps);
+                        } else if let Value::Int(index) = &mut regs[position] {
+                            *index += 1;
                         }
                     }
                     Instr::Unpack { src, base, len } => {
@@ -1371,6 +1399,25 @@ fn unpack_into(value: &Value, out: &mut [Value]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The register `read`, to read, and the register `write`, a different one,
+/// to write.
+#[inline(always)]
+fn read_and_write(regs: &mut [Value; WINDOW], read: usize, write: usize) -> (&Value, &mut Value) {
+    if read < write {
+        let (below, rest) = regs.split_at_mut(write);
+        (&below[read], &mut rest[0])
+    } else {
+        let (below, rest) = regs.split_at_mut(read);
+        (&rest[0], &mut below[write])
+    }
+}
+
+/// Whether `value` is a list or tuple, which `IterNext` iterates over in
+/// place.
+fn is_list_or_tuple(value: &Value) -> bool {
+    matches!(value, Value::Object(object) if matches!(object.as_ref(), Object::List(_) | Object::Tuple(_)))
 }
 
 /// An iterator over `value`: the value itself if it's an iterator, and one
@@ -2070,74 +2117,50 @@ mod tests {
         assert_eq!(error.message, "range bounds must be Int, got Bool");
     }
 
-    /// Sums the elements of a tuple with `GetIterator` and `IterNext`, the
-    /// iterator made in the tuple's register and each element read into the
-    /// iterator's.
+    /// Sums the elements of two tuples with `GetIterator` and `IterNext`,
+    /// each iterated over in its own register, with its position in the one
+    /// after it, and each element read into a register below one tuple and
+    /// above the other.
     #[test]
     fn iterating_in_the_registers_of_the_operands() {
-        let function = program(3, vec![], |b| {
-            let k = b.constant(tuple(&[1, 2, 3]));
-            emit(b, Instr::LoadK { dst: Reg(0), k });
-            emit(
-                b,
-                Instr::GetIterator {
-                    dst: Reg(0),
-                    src: Reg(0),
-                },
-            );
-            load_int(b, Reg(1), 0);
-            let start = b.label();
-            let end = b.label();
-            b.bind(start);
-            b.jump(
-                Instr::IterNext {
-                    iter: Reg(0),
-                    dst: Reg(2),
-                    offset: 0,
-                },
-                end,
-                Span::synthetic(),
-            );
-            emit(
-                b,
-                Instr::AddInt {
-                    dst: Reg(1),
-                    left: Reg(1),
-                    right: Reg(2),
-                },
-            );
-            b.jump(Instr::Jump { offset: 0 }, start, Span::synthetic());
-            b.bind(end);
-            // The last element read into the iterator's own register.
-            let k = b.constant(tuple(&[7]));
-            emit(b, Instr::LoadK { dst: Reg(2), k });
-            emit(
-                b,
-                Instr::GetIterator {
-                    dst: Reg(2),
-                    src: Reg(2),
-                },
-            );
-            b.jump(
-                Instr::IterNext {
-                    iter: Reg(2),
-                    dst: Reg(2),
-                    offset: 0,
-                },
-                start,
-                Span::synthetic(),
-            );
-            emit(
-                b,
-                Instr::MakeTuple {
-                    dst: Reg(0),
-                    base: Reg(1),
-                    len: 2,
-                },
-            );
+        let function = program(6, vec![], |b| {
+            load_int(b, Reg(0), 0);
+            for (iterated, values) in [(Reg(1), &[1, 2, 3][..]), (Reg(4), &[10, 20][..])] {
+                let k = b.constant(tuple(values));
+                emit(b, Instr::LoadK { dst: iterated, k });
+                emit(
+                    b,
+                    Instr::GetIterator {
+                        dst: iterated,
+                        src: iterated,
+                    },
+                );
+                let start = b.label();
+                let end = b.label();
+                b.bind(start);
+                b.jump(
+                    Instr::IterNext {
+                        iter: iterated,
+                        dst: Reg(3),
+                        offset: 0,
+                    },
+                    end,
+                    Span::synthetic(),
+                );
+                emit(
+                    b,
+                    Instr::AddInt {
+                        dst: Reg(0),
+                        left: Reg(0),
+                        right: Reg(3),
+                    },
+                );
+                b.jump(Instr::Jump { offset: 0 }, start, Span::synthetic());
+                b.bind(end);
+            }
             emit(b, Instr::Halt { src: Reg(0) });
         });
-        assert_eq!(run(&Natives::default(), function).unwrap(), tuple(&[6, 7]));
+        assert_eq!(run(&Natives::default(), function).unwrap(), Value::Int(36));
     }
 
     #[test]
@@ -2171,7 +2194,7 @@ mod tests {
 
     #[test]
     fn something_that_isnt_iterable() {
-        let function = program(1, vec![], |b| {
+        let function = program(2, vec![], |b| {
             load_int(b, Reg(0), 3);
             emit(
                 b,

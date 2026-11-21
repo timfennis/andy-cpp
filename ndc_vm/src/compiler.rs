@@ -1975,12 +1975,16 @@ impl Compiler {
             ForIteration::Iteration { l_value, sequence } => {
                 let sequence_span = sequence.span;
                 // The iterator takes the sequence's temporary, or one of its
-                // own when the sequence is a local.
+                // own when the sequence is a local, and its position the
+                // register after it.
                 let (iter, src) = match self.compile_expr(sequence.clone(), Dest::Any)? {
-                    Operand::Temp(reg) => (reg, reg),
-                    Operand::Local(reg) => (self.alloc_temp(sequence_span)?, reg),
+                    Operand::Temp(reg) if reg.index() + 1 == self.next_temp => (reg, reg),
+                    Operand::Temp(reg) | Operand::Local(reg) => {
+                        (self.alloc_temp(sequence_span)?, reg)
+                    }
                     Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
                 };
+                self.alloc_temp(sequence_span)?;
                 self.emit(Instr::GetIterator { dst: iter, src }, sequence_span);
                 let start = self.builder.label();
                 let end = self.builder.label();

@@ -85,7 +85,6 @@ fn unshare_all<'v>(
 
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
-#[derive(Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -1186,6 +1185,37 @@ impl Value {
                 "comparator must return a number, got {}",
                 self.static_type()
             )),
+        }
+    }
+}
+
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Int(n) => Self::Int(*n),
+            Self::Float(f) => Self::Float(*f),
+            Self::Number(n) => Self::Number(Rc::clone(n)),
+            Self::Bool(b) => Self::Bool(*b),
+            Self::None => Self::None,
+            Self::Object(o) => Self::Object(Rc::clone(o)),
+            Self::Cell(c) => Self::Cell(Rc::clone(c)),
+        }
+    }
+
+    /// Writes the clone of `source` straight to `self`, a variant at a
+    /// time. `*self = source.clone()` makes the clone first and then copies
+    /// it whole, and that copy reads what the clone wrote in smaller
+    /// pieces, which the processor can't forward from its stores.
+    #[inline(always)]
+    fn clone_from(&mut self, source: &Self) {
+        match source {
+            Self::Int(n) => *self = Self::Int(*n),
+            Self::Float(f) => *self = Self::Float(*f),
+            Self::Number(n) => *self = Self::Number(Rc::clone(n)),
+            Self::Bool(b) => *self = Self::Bool(*b),
+            Self::None => *self = Self::None,
+            Self::Object(o) => *self = Self::Object(Rc::clone(o)),
+            Self::Cell(c) => *self = Self::Cell(Rc::clone(c)),
         }
     }
 }
