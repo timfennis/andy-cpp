@@ -4,11 +4,11 @@
 0002  LoadUnit r0
 0003  Halt r0
 
-== #1 f (registers: 5) ==
+== #1 f (registers: 6) ==
 0000  GetIterator r3, r0
-0001  IterNext r3, r4, +3                  -> 0005
-0002  Unpack r4, r1, 2
-0003  Closure r4, c0                       <fn #2 <lambda>> captures r1, r2
+0001  IterNext r3, r5, +3                  -> 0005
+0002  Unpack r5, r1, 2
+0003  Closure r5, c0                       <fn #2 <lambda>> captures r1, r2
 0004  Jump -4                              -> 0001
 0005  LoadUnit r3
 0006  Return r3

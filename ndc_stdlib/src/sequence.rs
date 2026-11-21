@@ -113,31 +113,15 @@ mod inner {
                 Object::Deque(d) => d.borrow().contains(elem),
                 Object::MinHeap(h) => h.borrow().iter().any(|v| v.0.0 == *elem),
                 Object::MaxHeap(h) => h.borrow().iter().any(|v| v.0 == *elem),
-                Object::Iterator(i) => {
-                    {
-                        let iter = i.borrow();
-                        if let Some((start, end, inclusive)) = iter.range_bounds() {
-                            let &Value::Int(n) = elem else { return false };
-                            return if inclusive {
-                                n >= start && n <= end
-                            } else {
-                                n >= start && n < end
-                            };
-                        }
-                        if let Some(start) = iter.unbounded_range_start() {
-                            let &Value::Int(n) = elem else { return false };
-                            return n >= start;
-                        }
+                Object::Range(range) => matches!(*elem, Value::Int(n) if range.contains(n)),
+                Object::RangeFrom(start) => matches!(*elem, Value::Int(n) if n >= *start),
+                Object::Iterator(i) => loop {
+                    match i.borrow_mut().next() {
+                        Some(v) if v == *elem => return true,
+                        Some(_) => {}
+                        None => return false,
                     }
-                    // Finite non-range iterator — linear scan
-                    loop {
-                        match i.borrow_mut().next() {
-                            Some(v) if v == *elem => return true,
-                            Some(_) => {}
-                            None => return false,
-                        }
-                    }
-                }
+                },
                 _ => false,
             },
             _ => false,
@@ -384,6 +368,7 @@ mod inner {
     /// heap, or a string, for which it's the number of UTF-8 characters. A tuple has a `len` of its
     /// own. An iterator's length isn't known without reading it.
     #[function(signature = "<T>([T]) -> Int")]
+    #[function(signature = "(Range) -> Int")]
     #[function(signature = "(String) -> Int")]
     #[function(signature = "<K, V>(%{K: V}) -> Int")]
     #[function(signature = "<T>(Deque<T>) -> Int")]
@@ -403,6 +388,11 @@ mod inner {
             Object::Map { entries, .. } => entries.borrow().len(),
             Object::MinHeap(h) => h.borrow().len(),
             Object::MaxHeap(h) => h.borrow().len(),
+            Object::Range(range) => {
+                return i64::try_from(range.len())
+                    .ok()
+                    .ok_or_else(|| anyhow!("{range} has more elements than an Int can count"));
+            }
             _ => {
                 return Err(anyhow!(
                     "cannot determine the length of {}",

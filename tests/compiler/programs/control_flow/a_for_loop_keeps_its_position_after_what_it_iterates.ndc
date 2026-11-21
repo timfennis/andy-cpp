@@ -1,0 +1,12 @@
+// A `for` loop keeps what it goes over in one temporary and its position in
+// the next: over the local `xs`, `GetIterator r3, r0` copies the list into
+// `r3` and starts the position in `r4` at 0; over the list a call makes, the
+// list's own temporary is the first of the two. `IterNext` reads each element
+// straight into the loop variable's register.
+// compile: stdlib
+fn f(xs: [Int]) -> Int {
+    let total = 0;
+    for x in xs { total += x; }
+    for y in xs.sorted { total += y; }
+    total
+}

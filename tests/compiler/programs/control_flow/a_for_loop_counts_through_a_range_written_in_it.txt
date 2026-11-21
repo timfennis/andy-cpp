@@ -1,0 +1,35 @@
+== <script> (registers: 2, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 f>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  Halt r0
+
+== #1 f (registers: 7) ==
+0000  LoadK r1, k0                         0
+0001  LoadK r4, k1                         0
+0002  Copy r5, r0
+0003  ForRange r4
+0004  ForRangeNext r4, r2, +2              -> 0007
+0005  AddInt r1, r1, r2
+0006  Jump -3                              -> 0004
+0007  LoadK r4, k2                         1
+0008  Copy r5, r0
+0009  ForRange r4, inclusive
+0010  ForRangeNext r4, r2, +2              -> 0013
+0011  AddInt r1, r1, r2
+0012  Jump -3                              -> 0010
+0013  LoadK r4, k3                         0
+0014  MakeRange r2, r4, r0
+0015  Copy r4, r2
+0016  ForRange r4
+0017  ForRangeNext r4, r3, +2              -> 0020
+0018  AddInt r1, r1, r3
+0019  Jump -3                              -> 0017
+0020  Copy r4, r0
+0021  LoadK r5, k4                         9223372036854775807
+0022  ForRange r4, inclusive
+0023  ForRangeNext r4, r3, +3              -> 0027
+0024  AddInt r1, r1, r3
+0025  Jump +1                              -> 0027
+0026  Jump -4                              -> 0023
+0027  Return r1

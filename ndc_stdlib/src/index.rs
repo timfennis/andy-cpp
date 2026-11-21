@@ -66,11 +66,14 @@ fn register_get(env: &mut FunctionRegistry<NativeSpec>) {
     ));
 
     for signature in [
-        "<T>([T], Iterator<Int>) -> [T]",
+        "<T>([T], Range) -> [T]",
+        "<T>([T], RangeFrom) -> [T]",
         "(String, Int) -> String",
-        "(String, Iterator<Int>) -> String",
+        "(String, Range) -> String",
+        "(String, RangeFrom) -> String",
         "<T>(Deque<T>, Int) -> T",
-        "<T>(Deque<T>, Iterator<Int>) -> [T]",
+        "<T>(Deque<T>, Range) -> [T]",
+        "<T>(Deque<T>, RangeFrom) -> [T]",
     ] {
         env.declare_global_fn(NativeSpec::with_signature(
             "[]",
@@ -112,14 +115,23 @@ fn register_set(env: &mut FunctionRegistry<NativeSpec>) {
     ));
 
     // A slice by a range of indices.
-    env.declare_global_fn(NativeSpec::with_signature(
-        "[]=",
-        doc,
-        "<T>([T], Iterator<Int>, Iterable<T>)",
-        make_set_func,
-    ));
+    for signature in [
+        "<T>([T], Range, Iterable<T>)",
+        "<T>([T], RangeFrom, Iterable<T>)",
+    ] {
+        env.declare_global_fn(NativeSpec::with_signature(
+            "[]=",
+            doc,
+            signature,
+            make_set_func,
+        ));
+    }
 
-    for signature in ["(String, Int, String)", "(String, Iterator<Int>, String)"] {
+    for signature in [
+        "(String, Int, String)",
+        "(String, Range, String)",
+        "(String, RangeFrom, String)",
+    ] {
         env.declare_global_fn(NativeSpec::with_signature(
             "[]=",
             doc,
@@ -197,36 +209,34 @@ fn extract_vm_offset(
     container: &Value,
     size: usize,
 ) -> Result<VmOffset, VmError> {
-    if let Value::Object(obj) = index_value
-        && let Object::Iterator(iter) = obj.as_ref()
-    {
-        let iter_ref = iter.borrow();
-        if let Some((start, end, inclusive)) = iter_ref.range_bounds() {
-            // Detect reversal from the unclamped endpoints, so an out-of-range
-            // reversed range can't collapse to equality once clamped (e.g.
-            // `6..=5` on a 5-element string would otherwise clamp both ends to
-            // 5 and silently yield an empty slice instead of an error).
-            let from_unclamped = unclamped_slice_index(start, size);
-            let end_unclamped = unclamped_slice_index(end, size);
-            if end_unclamped < from_unclamped {
-                return Err(VmError::native(format!(
-                    "{from_unclamped}..{end_unclamped} out of bounds"
-                )));
+    if let Value::Object(obj) = index_value {
+        match obj.as_ref() {
+            Object::Range(range) => {
+                // Detect reversal from the unclamped endpoints, so an out-of-range
+                // reversed range can't collapse to equality once clamped (e.g.
+                // `6..=5` on a 5-element string would otherwise clamp both ends to
+                // 5 and silently yield an empty slice instead of an error).
+                let from_unclamped = unclamped_slice_index(range.start, size);
+                let end_unclamped = unclamped_slice_index(range.end, size);
+                if end_unclamped < from_unclamped {
+                    return Err(VmError::native(format!(
+                        "{from_unclamped}..{end_unclamped} out of bounds"
+                    )));
+                }
+                let from_idx = slice_index(range.start, size);
+                let to_idx = slice_index(range.end, size);
+                let to_idx = if range.inclusive {
+                    (to_idx + 1).min(size)
+                } else {
+                    to_idx
+                };
+                return Ok(VmOffset::Range(from_idx, to_idx));
             }
-            let from_idx = slice_index(start, size);
-            let to_idx = slice_index(end, size);
-            let to_idx = if inclusive {
-                (to_idx + 1).min(size)
-            } else {
-                to_idx
-            };
-            return Ok(VmOffset::Range(from_idx, to_idx));
+            Object::RangeFrom(start) => {
+                return Ok(VmOffset::Range(slice_index(*start, size), size));
+            }
+            _ => {}
         }
-        if let Some(start) = iter_ref.unbounded_range_start() {
-            let from_idx = slice_index(start, size);
-            return Ok(VmOffset::Range(from_idx, size));
-        }
-        return Err(VmError::native("cannot use non-range iterator as index"));
     }
     let i = match index_value {
         Value::Int(i) => *i,
@@ -267,14 +277,6 @@ fn vm_get_at_index(container: &Value, index_value: &Value, vm: &mut Vm) -> Resul
     let Object::Map { entries, default } = obj.as_ref() else {
         return vm_get_at_index_simple(container, index_value);
     };
-    if matches!(
-        index_value,
-        Value::Object(o) if matches!(o.as_ref(), Object::Iterator(_))
-    ) {
-        return Err(VmError::native(
-            "cannot use range expression as index in map",
-        ));
-    }
     if let Some(value) = entries.borrow().get(index_value) {
         return Ok(value.clone());
     }
@@ -443,12 +445,6 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
                 }
             }
             Object::Map { entries, .. } => {
-                if matches!(
-                    index_value,
-                    Value::Object(o) if matches!(o.as_ref(), Object::Iterator(_))
-                ) {
-                    return Err(VmError::native("cannot use range expression as index"));
-                }
                 entries.borrow_mut().insert(index_value.clone(), rhs);
             }
             _ => {

@@ -210,14 +210,29 @@ pub enum Instr {
     /// Puts `value` under `key` in the map in `map`, leaving `None` in both,
     /// which are other registers.
     MapInsert { map: Reg, key: Reg, value: Reg },
-    /// `dst` = an iterator over the value in `src`: the value itself if
-    /// it's an iterator, and one over its elements if it's a list, tuple,
-    /// deque, string, map or heap.
+    /// `dst` = what `IterNext` iterates over the value in `src` with, and
+    /// the register after `dst` = `0`, the position in it: a list or tuple
+    /// itself, which is iterated over in place, an iterator itself, and an
+    /// iterator over its elements for a deque, string, map or heap.
     GetIterator { dst: Reg, src: Reg },
-    /// `dst` = the next value of the iterator in `iter`, or if it has none
-    /// left, goes `offset` instructions on. An offset of [`FAR`] is in the
-    /// chunk's far jumps.
+    /// `dst` = the next value of what `GetIterator` put in `iter`, or if it
+    /// has none left, goes `offset` instructions on. Of a list or tuple,
+    /// that's the element at the position in the register after `iter`,
+    /// which goes up by one, so a list that grows while it's iterated over
+    /// gives the new elements too. `dst` is neither of those registers. An
+    /// offset of [`FAR`] is in the chunk's far jumps.
     IterNext { iter: Reg, dst: Reg, offset: i16 },
+    /// Starts counting through the range from the `Int` in `counter` to the
+    /// `Int` in the register after it, which it includes if `inclusive`:
+    /// `for i in 0..n`, or through the `Range` or `RangeFrom` in `counter`:
+    /// `for i in r`. Afterwards the register after `counter` holds the last
+    /// value, and `counter` the next one, or `None` if there is none.
+    ForRange { counter: Reg, inclusive: bool },
+    /// `dst` = the next value of the range [`Instr::ForRange`] started in
+    /// `counter`, or if it has none left, goes `offset` instructions on.
+    /// `dst` is neither of its registers. An offset of [`FAR`] is in the
+    /// chunk's far jumps.
+    ForRangeNext { counter: Reg, dst: Reg, offset: i16 },
     /// The `len` registers from `base` on = the elements of the value in
     /// `src`, which has to have that many: `(a, b) = pair`.
     Unpack { src: Reg, base: Reg, len: u16 },
@@ -428,6 +443,8 @@ impl Instr {
             Self::CheckType { .. } => "CheckType",
             Self::TryCast { .. } => "TryCast",
             Self::IterNext { .. } => "IterNext",
+            Self::ForRange { .. } => "ForRange",
+            Self::ForRangeNext { .. } => "ForRangeNext",
             Self::Unpack { .. } => "Unpack",
             Self::Return { .. } => "Return",
             Self::Halt { .. } => "Halt",
@@ -454,7 +471,8 @@ impl Instr {
             | Self::JumpIfNotGreaterEqualI { offset, .. }
             | Self::JumpIfNotEqualI { offset, .. }
             | Self::JumpIfNotNotEqualI { offset, .. }
-            | Self::IterNext { offset, .. } => Some(i32::from(offset)),
+            | Self::IterNext { offset, .. }
+            | Self::ForRangeNext { offset, .. } => Some(i32::from(offset)),
             _ => None,
         }
     }
@@ -534,6 +552,11 @@ impl Instr {
                 Self::JumpIfNotNotEqualI { left, imm, offset }
             }
             Self::IterNext { iter, dst, .. } => Self::IterNext { iter, dst, offset },
+            Self::ForRangeNext { counter, dst, .. } => Self::ForRangeNext {
+                counter,
+                dst,
+                offset,
+            },
             other => panic!("internal error: {} has no short jump offset", other.name()),
         }
     }
@@ -657,6 +680,15 @@ impl fmt::Display for Instr {
             Self::IterNext { iter, dst, offset } => {
                 write!(f, "{iter}, {dst}, {}", ShortOffset(offset))
             }
+            Self::ForRange { counter, inclusive } => {
+                let inclusive = if inclusive { ", inclusive" } else { "" };
+                write!(f, "{counter}{inclusive}")
+            }
+            Self::ForRangeNext {
+                counter,
+                dst,
+                offset,
+            } => write!(f, "{counter}, {dst}, {}", ShortOffset(offset)),
             Self::Unpack { src, base, len } => write!(f, "{src}, {base}, {len}"),
             Self::TupleIndex { dst, src, index } => write!(f, "{dst}, {src}, #{index}"),
             Self::ListIndex { dst, list, index } => write!(f, "{dst}, {list}, {index}"),
