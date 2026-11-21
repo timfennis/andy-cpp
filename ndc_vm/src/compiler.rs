@@ -54,6 +54,10 @@ enum Dest {
     /// Wherever is cheapest: a local variable's own register, or a new
     /// temporary.
     Any,
+    /// As [`Self::Any`], for an operand of an instruction that only reads
+    /// it, as `==` does: a string literal there is the constant itself, as
+    /// nothing can store or change it, instead of a new string.
+    Read,
 }
 
 /// Where a compiled expression left its value.
@@ -467,7 +471,7 @@ impl Compiler {
     fn place(&mut self, dest: Dest, span: Span) -> Result<Reg, CompileError> {
         match dest {
             Dest::Reg(reg) => Ok(reg),
-            Dest::Any | Dest::Discard => self.alloc_temp(span),
+            Dest::Any | Dest::Read | Dest::Discard => self.alloc_temp(span),
         }
     }
 
@@ -475,7 +479,7 @@ impl Compiler {
     /// `reg`, which [`Self::place`] gave, returns.
     fn placed(dest: Dest, reg: Reg) -> Operand {
         match dest {
-            Dest::Any => Operand::Temp(reg),
+            Dest::Any | Dest::Read => Operand::Temp(reg),
             Dest::Reg(_) | Dest::Discard => Operand::Placed,
         }
     }
@@ -498,7 +502,7 @@ impl Compiler {
     fn settle(&mut self, mark: usize, operand: Operand, dest: Dest) -> Operand {
         match operand {
             Operand::Temp(reg) => {
-                debug_assert_eq!(dest, Dest::Any);
+                debug_assert!(matches!(dest, Dest::Any | Dest::Read));
                 debug_assert_eq!(
                     reg.index(),
                     mark,
@@ -520,7 +524,7 @@ impl Compiler {
             Arg::Var { variable, span } => self.read_variable(variable, dest, span)?,
             // The register stays in use, so the value is read where it is.
             Arg::Copy(reg) | Arg::Take(reg) => match dest {
-                Dest::Any => Operand::Local(reg),
+                Dest::Any | Dest::Read => Operand::Local(reg),
                 Dest::Reg(dst) => {
                     if dst != reg {
                         self.emit(Instr::Copy { dst, src: reg }, Span::synthetic());
@@ -573,6 +577,9 @@ impl Compiler {
                 self.load_constant(value, dest, span)
             }
             Expression::StringLiteral(text) => {
+                if dest == Dest::Read {
+                    return self.load_constant(Value::string(text), dest, span);
+                }
                 if dest == Dest::Discard {
                     return Ok(Operand::Placed);
                 }
@@ -749,7 +756,7 @@ impl Compiler {
             ResolvedVar::Local { slot } => {
                 let reg = self.local(slot, span)?;
                 match dest {
-                    Dest::Any => Ok(Operand::Local(reg)),
+                    Dest::Any | Dest::Read => Ok(Operand::Local(reg)),
                     Dest::Reg(dst) => {
                         if dst != reg {
                             self.emit(Instr::Copy { dst, src: reg }, span);
@@ -907,7 +914,7 @@ impl Compiler {
         let (branch_dest, dst) = match dest {
             Dest::Discard => (Dest::Discard, None),
             Dest::Reg(reg) => (Dest::Reg(reg), None),
-            Dest::Any => {
+            Dest::Any | Dest::Read => {
                 let reg = self.alloc_temp(span)?;
                 (Dest::Reg(reg), Some(reg))
             }
@@ -1273,7 +1280,7 @@ impl Compiler {
             .expect("internal error: a cast takes one value");
         let dst = match dest {
             Dest::Reg(reg) => reg,
-            Dest::Any | Dest::Discard => self.alloc_temp(span)?,
+            Dest::Any | Dest::Read | Dest::Discard => self.alloc_temp(span)?,
         };
         self.compile_arg(value, Dest::Reg(dst))?;
         self.emit_cast(site, intrinsic == Intrinsic::TryCast, dst, span)?;
@@ -1397,7 +1404,8 @@ impl Compiler {
             }
             _ => None,
         };
-        let operands = self.compile_operands_where(arguments)?;
+        // `ListSet` reads the list and the index and takes the value.
+        let operands = self.compile_operands_where(arguments, taken.is_none())?;
         let reg = |operand: &Operand| match *operand {
             Operand::Local(reg) | Operand::Temp(reg) => reg,
             Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
@@ -1438,9 +1446,9 @@ impl Compiler {
             let [left, _] = <[_; 2]>::try_from(arguments)
                 .ok()
                 .expect("internal error: a binary op takes two operands");
-            let left = match self.compile_arg(left, Dest::Any)? {
+            let left = match self.compile_arg(left, Dest::Read)? {
                 Operand::Local(reg) | Operand::Temp(reg) => reg,
-                Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                Operand::Placed => unreachable!("internal error: Dest::Read gives a register"),
             };
             return Ok((left, Right::Immediate(imm)));
         }
@@ -1472,7 +1480,7 @@ impl Compiler {
     /// block.
     fn compile_operands(&mut self, arguments: Vec<Arg>) -> Result<Vec<Reg>, CompileError> {
         Ok(self
-            .compile_operands_where(arguments)?
+            .compile_operands_where(arguments, false)?
             .into_iter()
             .map(|operand| match operand {
                 Operand::Local(reg) | Operand::Temp(reg) => reg,
@@ -1481,13 +1489,18 @@ impl Compiler {
             .collect())
     }
 
-    /// [`Self::compile_operands`], saying of each register whether it's a
-    /// local's own, which the instruction may only read, or a temporary,
-    /// which it may take.
+    /// [`Self::compile_operands`] for an instruction that reads its
+    /// operands, or with `takes_last`, takes its last one, saying of each
+    /// register whether it's a local's own, which the instruction may only
+    /// read, or a temporary. Only the last operand of an instruction that
+    /// takes it is compiled to a temporary it may take; the others are
+    /// compiled with [`Dest::Read`].
     fn compile_operands_where(
         &mut self,
         arguments: Vec<Arg>,
+        takes_last: bool,
     ) -> Result<Vec<Operand>, CompileError> {
+        let last = arguments.len().saturating_sub(1);
         let mut assigned_later = arguments
             .iter()
             .rev()
@@ -1499,9 +1512,15 @@ impl Compiler {
             .collect::<Vec<_>>();
         assigned_later.reverse();
         let mut operands = Vec::with_capacity(arguments.len());
-        for (argument, assigned_later) in arguments.into_iter().zip(assigned_later) {
+        for (i, (argument, assigned_later)) in arguments.into_iter().zip(assigned_later).enumerate()
+        {
             let span = argument.span();
-            let reg = match self.compile_arg(argument, Dest::Any)? {
+            let dest = if takes_last && i == last {
+                Dest::Any
+            } else {
+                Dest::Read
+            };
+            let reg = match self.compile_arg(argument, dest)? {
                 Operand::Local(reg) if assigned_later => {
                     let temp = self.alloc_temp(span)?;
                     self.emit(
@@ -2097,7 +2116,7 @@ impl Compiler {
         let left_span = left.span;
         let dst = match dest {
             Dest::Reg(reg) if reg.index() >= self.locals => reg,
-            Dest::Reg(_) | Dest::Any | Dest::Discard => self.alloc_temp(left_span)?,
+            Dest::Reg(_) | Dest::Any | Dest::Read | Dest::Discard => self.alloc_temp(left_span)?,
         };
         self.compile_expr(left, Dest::Reg(dst))?;
         let end = self.builder.label();
@@ -2115,7 +2134,7 @@ impl Compiler {
         self.compile_expr(right, Dest::Reg(dst))?;
         self.builder.bind(end);
         Ok(match dest {
-            Dest::Any => Operand::Temp(dst),
+            Dest::Any | Dest::Read => Operand::Temp(dst),
             Dest::Reg(reg) if reg != dst => {
                 self.emit(Instr::Move { dst: reg, src: dst }, left_span);
                 Operand::Placed
@@ -2245,7 +2264,7 @@ impl Compiler {
     fn built(&mut self, reg: Reg, dest: Dest, span: Span) -> Operand {
         debug_assert_eq!(reg.index() + 1, self.next_temp);
         match dest {
-            Dest::Any => Operand::Temp(reg),
+            Dest::Any | Dest::Read => Operand::Temp(reg),
             Dest::Reg(dst) => {
                 self.emit(Instr::Move { dst, src: reg }, span);
                 Operand::Placed
@@ -2357,7 +2376,7 @@ impl Compiler {
         self.emit(call, span);
         self.next_temp = base.index() + 1;
         match dest {
-            Dest::Any => Ok(Operand::Temp(base)),
+            Dest::Any | Dest::Read => Ok(Operand::Temp(base)),
             Dest::Reg(dst) => {
                 self.emit(Instr::Move { dst, src: base }, span);
                 Ok(Operand::Placed)

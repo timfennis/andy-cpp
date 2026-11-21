@@ -1,0 +1,22 @@
+// A string literal that is only compared is shared between runs, and nothing
+// that changes a string in place reaches it: not the string it's compared with,
+// a list it's stored in, or a variable holding the same text.
+// expect-output: true a!
+// expect-output: true a!
+// expect-output: @! @!
+fn f() {
+    let s = "a";
+    let same = s == "a";
+    s.append("!");
+    let t = "a";
+    print(same and t == "a", s);
+}
+f();
+f();
+fn g() {
+    let xs = [""];
+    xs[0] = "@";
+    xs[0].append("!");
+    xs[0]
+}
+print(g(), g());
