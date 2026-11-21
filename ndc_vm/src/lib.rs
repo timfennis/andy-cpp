@@ -24,7 +24,7 @@ pub use vm::*;
 pub use compiler::CompileError;
 pub use error::VmError;
 pub use iterator::{
-    CombinationsIter, EnumerateIter, RepeatIter, SharedIterator, TakeIter, VmIterator,
+    CombinationsIter, EnumerateIter, RepeatIter, SharedIterator, TakeIter, ValueIter, VmIterator,
 };
 pub use value::*;
 

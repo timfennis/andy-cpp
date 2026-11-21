@@ -12,7 +12,7 @@ mod inner {
         let mut counts: HashMap<Value, i64> = HashMap::default();
 
         for item in seq
-            .try_into_iter()
+            .iter()
             .ok_or_else(|| anyhow::anyhow!("frequencies requires a sequence"))?
         {
             *counts.entry(item).or_insert(0i64) += 1;
