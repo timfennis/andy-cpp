@@ -846,9 +846,17 @@ impl Vm {
                         }
                     }
                     Instr::TupleIndex { dst, src, index } => {
-                        match tuple_element(&regs[src.index()], i64::from(index)) {
-                            Ok(element) => regs[dst.index()] = element,
-                            Err(message) => break Exit::Error(VmError::native(message)),
+                        let (src, dst, index) = (src.index(), dst.index(), i64::from(index));
+                        let result = if src == dst {
+                            tuple_element(&regs[src], index)
+                                .cloned()
+                                .map(|element| regs[dst] = element)
+                        } else {
+                            let (tuple, out) = read_and_write(regs, src, dst);
+                            tuple_element(tuple, index).map(|element| out.clone_from(element))
+                        };
+                        if let Err(message) = result {
+                            break Exit::Error(VmError::native(message));
                         }
                     }
                     Instr::ListIndex { dst, list, index } => {
@@ -1564,8 +1572,8 @@ fn try_cast_value(value: &mut Value, target: &StaticType) {
 
 /// The element of `tuple` at `index`, counting a negative index from the
 /// end: `-1` is the last element.
-#[inline(never)]
-fn tuple_element(tuple: &Value, index: i64) -> Result<Value, String> {
+#[inline(always)]
+fn tuple_element(tuple: &Value, index: i64) -> Result<&Value, String> {
     if let Value::Object(object) = tuple
         && let Object::Tuple(elements) = object.as_ref()
     {
@@ -1575,11 +1583,16 @@ fn tuple_element(tuple: &Value, index: i64) -> Result<Value, String> {
             usize::try_from(index).ok()
         };
         return match position.and_then(|position| elements.get(position)) {
-            Some(element) => Ok(element.clone()),
+            Some(element) => Ok(element),
             None => Err(tuple_index_out_of_bounds(index, elements.len())),
         };
     }
-    Err(format!("cannot index into {}", tuple.static_type()))
+    Err(cannot_index_into(tuple))
+}
+
+#[cold]
+fn cannot_index_into(value: &Value) -> String {
+    format!("cannot index into {}", value.static_type())
 }
 
 /// The analyser rejects an index written in the code that's outside the
