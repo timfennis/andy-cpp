@@ -1,0 +1,19 @@
+== <script> (registers: 2, globals: 1, natives: sorted) ==
+0000  LoadK r1, k0                         <fn #1 f>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  Halt r0
+
+== #1 f (registers: 5) ==
+0000  LoadK r1, k0                         0
+0001  GetIterator r3, r0
+0002  IterNext r3, r2, +2                  -> 0005
+0003  AddInt r1, r1, r2
+0004  Jump -3                              -> 0002
+0005  Copy r3, r0
+0006  CallNative r3, sorted, r3, 1
+0007  GetIterator r3, r3
+0008  IterNext r3, r2, +2                  -> 0011
+0009  AddInt r1, r1, r2
+0010  Jump -3                              -> 0008
+0011  Return r1

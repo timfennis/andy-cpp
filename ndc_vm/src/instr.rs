@@ -210,13 +210,17 @@ pub enum Instr {
     /// Puts `value` under `key` in the map in `map`, leaving `None` in both,
     /// which are other registers.
     MapInsert { map: Reg, key: Reg, value: Reg },
-    /// `dst` = an iterator over the value in `src`: the value itself if
-    /// it's an iterator, and one over its elements if it's a list, tuple,
-    /// deque, string, map or heap.
+    /// `dst` = what `IterNext` iterates over the value in `src` with, and
+    /// the register after `dst` = `0`, the position in it: a list or tuple
+    /// itself, which is iterated over in place, an iterator itself, and an
+    /// iterator over its elements for a deque, string, map or heap.
     GetIterator { dst: Reg, src: Reg },
-    /// `dst` = the next value of the iterator in `iter`, or if it has none
-    /// left, goes `offset` instructions on. An offset of [`FAR`] is in the
-    /// chunk's far jumps.
+    /// `dst` = the next value of what `GetIterator` put in `iter`, or if it
+    /// has none left, goes `offset` instructions on. Of a list or tuple,
+    /// that's the element at the position in the register after `iter`,
+    /// which goes up by one, so a list that grows while it's iterated over
+    /// gives the new elements too. `dst` is neither of those registers. An
+    /// offset of [`FAR`] is in the chunk's far jumps.
     IterNext { iter: Reg, dst: Reg, offset: i16 },
     /// The `len` registers from `base` on = the elements of the value in
     /// `src`, which has to have that many: `(a, b) = pair`.
