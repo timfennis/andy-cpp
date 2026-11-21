@@ -1,0 +1,6 @@
+// Assigning a list to a slice of itself panicked: the list was borrowed to
+// be changed while it was read as the new elements.
+// expect-output: [1,2,3,2,3]
+let ys = [1, 2, 3];
+ys[0..1] = ys;
+print(ys);

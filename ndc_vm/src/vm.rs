@@ -31,9 +31,7 @@ use crate::error::VmError;
 use crate::hash_map::HashMap;
 use crate::instr::{FAR, Instr, Reg, WINDOW};
 use crate::io::{InputSource, OutputSink};
-use crate::iterator::{
-    HeapIter, MapIter, RangeIter, SeqIter, SharedIterator, StringIter, UnboundedRangeIter,
-};
+use crate::iterator::ValueIter;
 use crate::memo::{MemoCache, MemoKey};
 use crate::native_op::{NativeOp, list_element, list_index_error, list_set};
 use crate::value::{
@@ -1411,7 +1409,7 @@ fn unpack_into(value: &Value, out: &mut [Value]) -> Result<(), String> {
         // A deque, heap or iterator unpacks the elements it gives, one
         // past the variables at most, as an iterator may not end.
         _ => {
-            let Some(iter) = value.clone().try_into_iter() else {
+            let Some(iter) = value.iter() else {
                 return Err(
                     "cannot unpack: expected a list, tuple, string, deque, heap or iterator"
                         .to_string(),
@@ -1495,28 +1493,16 @@ fn is_list_or_tuple(value: &Value) -> bool {
     matches!(value, Value::Object(object) if matches!(object.as_ref(), Object::List(_) | Object::Tuple(_)))
 }
 
-/// An iterator over `value`: the value itself if it's an iterator, and one
-/// over its elements if it's a list, tuple, deque, string, map or heap.
+/// An iterator over `value`: the value itself if it's an iterator, and a
+/// cursor over its elements (see [`ValueIter`]) if it's a deque, string,
+/// map, heap or range.
 #[inline(never)]
 fn iterator_of(value: &Value) -> Result<Value, String> {
-    let not_iterable = || format!("{} is not iterable", value.static_type());
-    let Value::Object(rc) = value else {
-        return Err(not_iterable());
-    };
-    let iter: SharedIterator = match rc.as_ref() {
-        Object::Iterator(_) => return Ok(value.clone()),
-        Object::List(_) | Object::Tuple(_) | Object::Deque(_) => {
-            Rc::new(RefCell::new(SeqIter::new(Rc::clone(rc))))
-        }
-        Object::String(s) => Rc::new(RefCell::new(StringIter::new(Rc::clone(s)))),
-        Object::Map { .. } => Rc::new(RefCell::new(MapIter::new(Rc::clone(rc)))),
-        Object::MinHeap(h) => Rc::new(RefCell::new(HeapIter::new_min(h))),
-        Object::MaxHeap(h) => Rc::new(RefCell::new(HeapIter::new_max(h))),
-        Object::Range(range) => Rc::new(RefCell::new(RangeIter::new(*range))),
-        Object::RangeFrom(start) => Rc::new(RefCell::new(UnboundedRangeIter::new(*start))),
-        _ => return Err(not_iterable()),
-    };
-    Ok(Value::iterator(iter))
+    match value.iter() {
+        Some(ValueIter::Shared(_)) => Ok(value.clone()),
+        Some(cursor) => Ok(Value::iterator(Rc::new(RefCell::new(cursor)))),
+        None => Err(format!("{} is not iterable", value.static_type())),
+    }
 }
 
 /// Find the broadcast-axis length for a vec call: the shared length of every

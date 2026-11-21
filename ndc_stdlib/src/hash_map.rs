@@ -187,7 +187,7 @@ mod inner {
         use ndc_vm::hash_map::HashMap;
 
         let entries: HashMap<Value, Value> = seq
-            .try_into_iter()
+            .iter()
             .ok_or_else(|| anyhow::anyhow!("set requires a sequence"))?
             .map(|v| (v, Value::unit()))
             .collect();

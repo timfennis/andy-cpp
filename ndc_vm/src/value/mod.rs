@@ -11,7 +11,7 @@ pub use range::Range;
 pub use string::VmString;
 
 use crate::hash_map::HashMap;
-use crate::iterator::SharedIterator;
+use crate::iterator::{SharedIterator, ValueIter};
 use ndc_core::StaticType;
 use ndc_core::collections::quality_hasher;
 use ndc_core::r#struct::StructInfo;
@@ -144,55 +144,6 @@ impl PartialOrd for OrdValue {
 impl Ord for OrdValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.partial_cmp(&other.0).unwrap_or(Ordering::Equal)
-    }
-}
-
-/// An iterator that yields VM [`Value`]s from any iterable object.
-///
-/// Created by [`Value::try_into_iter`]. If the caller holds the only `Rc`
-/// reference to the underlying collection it is moved out in O(1) via
-/// `Rc::unwrap_or_clone`; otherwise it is cloned first.
-pub enum ValueIter {
-    List(std::vec::IntoIter<Value>),
-    Deque(std::collections::vec_deque::IntoIter<Value>),
-    Map(std::collections::hash_map::IntoIter<Value, Value>),
-    /// The `Int`s of a range, counted without an iterator object.
-    Ints(std::ops::RangeInclusive<i64>),
-    Shared(SharedIterator),
-}
-
-impl Iterator for ValueIter {
-    type Item = Value;
-
-    fn next(&mut self) -> Option<Value> {
-        match self {
-            Self::List(i) => i.next(),
-            Self::Deque(i) => i.next(),
-            Self::Map(i) => i.next().map(|(k, v)| Value::tuple(vec![k, v])),
-            Self::Ints(i) => i.next().map(Value::Int),
-            Self::Shared(i) => i.borrow_mut().next(),
-        }
-    }
-}
-
-impl ValueIter {
-    /// An iterator that gives what this one gives from here on, separately
-    /// from it, if this one can be copied: one over a range's `Int`s, or a
-    /// shared iterator that supports
-    /// [`crate::iterator::VmIterator::deep_copy`].
-    pub fn try_clone(&self) -> Option<Self> {
-        match self {
-            Self::Ints(ints) => Some(Self::Ints(ints.clone())),
-            Self::Shared(shared) => Some(Self::Shared(shared.borrow().deep_copy()?)),
-            Self::List(_) | Self::Deque(_) | Self::Map(_) => None,
-        }
-    }
-
-    /// Whether this iterator gives its elements one at a time as it's read,
-    /// so it may not end: a range's `Int`s or a shared iterator. The others
-    /// hold all their elements already.
-    pub fn is_lazy(&self) -> bool {
-        matches!(self, Self::Ints(_) | Self::Shared(_))
     }
 }
 
@@ -626,64 +577,13 @@ impl Value {
         result
     }
 
-    /// Consume this value and produce an iterator over its elements.
-    ///
-    /// Returns `None` for non-iterable types (`Int`, `Float`, `Bool`, `None`,
-    /// functions, numbers, …).
-    ///
-    /// For `Map`, yields `(key, value)` tuples, and for a heap the elements
-    /// in the order the heap gives them, smallest first for a `MinHeap` and
-    /// largest first for a `MaxHeap`: the same behaviour as iterating them
-    /// in a for-loop.
-    ///
-    /// Uses `Rc::unwrap_or_clone` so no extra clone occurs when this value
-    /// holds the sole reference to its object.
-    pub fn try_into_iter(self) -> Option<ValueIter> {
-        let Self::Object(obj) = self else {
-            return None;
-        };
-        match Rc::unwrap_or_clone(obj) {
-            Object::List(l) => Some(ValueIter::List(l.into_inner().into_iter())),
-            Object::Tuple(t) => Some(ValueIter::List(t.into_iter())),
-            Object::Deque(d) => Some(ValueIter::Deque(d.into_inner().into_iter())),
-            Object::Iterator(i) => Some(ValueIter::Shared(i)),
-            #[expect(clippy::reversed_empty_ranges, reason = "an empty range gives no Ints")]
-            Object::Range(range) => Some(ValueIter::Ints(
-                range.bounds().map_or(1..=0, |(first, last)| first..=last),
-            )),
-            Object::RangeFrom(start) => Some(ValueIter::Ints(start..=i64::MAX)),
-            Object::String(s) => {
-                let chars: Vec<Self> = s
-                    .borrow()
-                    .chars()
-                    .map(|c| Self::string(c.to_string()))
-                    .collect();
-                Some(ValueIter::List(chars.into_iter()))
-            }
-            Object::Map { entries, .. } => Some(ValueIter::Map(entries.into_inner().into_iter())),
-            Object::MinHeap(heap) => {
-                // Sorted by `Reverse`, so the largest first.
-                let mut values: Vec<Self> = heap
-                    .into_inner()
-                    .into_sorted_vec()
-                    .into_iter()
-                    .map(|Reverse(OrdValue(value))| value)
-                    .collect();
-                values.reverse();
-                Some(ValueIter::List(values.into_iter()))
-            }
-            Object::MaxHeap(heap) => {
-                let mut values: Vec<Self> = heap
-                    .into_inner()
-                    .into_sorted_vec()
-                    .into_iter()
-                    .map(|OrdValue(value)| value)
-                    .collect();
-                values.reverse();
-                Some(ValueIter::List(values.into_iter()))
-            }
-            _ => None,
-        }
+    /// A cursor over this value's elements, or `None` if it isn't something
+    /// a `for` loop iterates over: the elements of a list, tuple or deque,
+    /// a string's characters, a map's `(key, value)` tuples, a heap's
+    /// elements in the order it gives them, a range's `Int`s, or what an
+    /// iterator gives. See [`ValueIter`].
+    pub fn iter(&self) -> Option<ValueIter> {
+        ValueIter::new(self)
     }
 
     pub fn function_prototype(&self) -> Option<&Rc<CompiledFunction>> {

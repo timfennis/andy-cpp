@@ -381,31 +381,26 @@ fn vm_set_at_index(container: &Value, index_value: &Value, rhs: Value) -> Result
     match container {
         Value::Object(obj) => match obj.as_ref() {
             Object::List(list) => {
-                let mut list = list.try_borrow_mut().map_err(|_borrow_err| {
-                    VmError::native("Mutation error: you cannot mutate a value in a list while you're iterating over this list")
-                })?;
+                let borrow_list = || {
+                    list.try_borrow_mut().map_err(|_borrow_err| {
+                        VmError::native("Mutation error: you cannot mutate a value in a list while you're iterating over this list")
+                    })
+                };
                 match extract_vm_offset(index_value, container, size)? {
                     VmOffset::Element(idx) => {
-                        list[idx] = rhs;
+                        borrow_list()?[idx] = rhs;
                     }
                     VmOffset::Range(from, to) => {
                         // Any sequence goes in a slice: a list, a tuple, a
-                        // range or another iterator.
-                        let rhs_vec = match &rhs {
-                            Value::Object(o) if matches!(o.as_ref(), Object::List(_)) => {
-                                let Object::List(l) = o.as_ref() else {
-                                    unreachable!("matched a list");
-                                };
-                                l.borrow().clone()
-                            }
-                            _ => rhs
-                                .clone()
-                                .try_into_iter()
-                                .ok_or_else(|| {
-                                    VmError::native("cannot assign non-sequence to list slice")
-                                })?
-                                .collect(),
-                        };
+                        // range or an iterator. It's read before the list is
+                        // changed, as it may be the list itself: `xs[0..1] = xs`.
+                        let rhs_vec: Vec<Value> = rhs
+                            .iter()
+                            .ok_or_else(|| {
+                                VmError::native("cannot assign non-sequence to list slice")
+                            })?
+                            .collect();
+                        let mut list = borrow_list()?;
                         let tail: Vec<Value> = list.drain(from..).collect();
                         list.extend(rhs_vec);
                         list.extend_from_slice(&tail[(to - from)..]);

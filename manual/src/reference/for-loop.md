@@ -53,3 +53,17 @@ The earlier example can also produce pairs:
 let pairs_with_even_sum = [x, y for x in 1..10, y in 1..10, if (x + y) % 2 == 0];
 print(pairs_with_even_sum[0..4]);  // [(1,1),(1,3),(1,5),(1,7)]
 ```
+
+## Changing what you loop over
+
+A loop over a list reads it as it is when it gets to each element, so elements you add during the loop are visited too:
+
+```ndc
+let xs = [1, 2, 3];
+for x in xs {
+    if x < 3 { xs.push(x * 10); }
+}
+print(xs);  // [1,2,3,10,20]
+```
+
+Functions that take a function, like `map` and `filter`, go over a list the same way. A loop that adds an element every time it gets to one never ends.
