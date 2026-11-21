@@ -1,0 +1,15 @@
+// expect-output: 2 [1,7,3] 2 [9,8] [[9,8]]
+fn f() {
+    let xs = [1, 2, 3];
+    let i = 1;
+    let read = xs[i];
+    xs[i] = 7;
+    // A list a local holds goes in the list as the same list, which the
+    // local still holds: `++=` on the element extends the local's list too.
+    let v = [9];
+    let ys = [[0]];
+    ys[0] = v;
+    ys[0] ++= [8];
+    print(read, xs, xs[i] - 5, v, ys);
+}
+f();

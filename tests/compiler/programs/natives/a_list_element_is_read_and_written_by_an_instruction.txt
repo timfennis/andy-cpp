@@ -1,0 +1,21 @@
+== <script> (registers: 2, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 f>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  Halt r0
+
+== #1 f (registers: 9) ==
+0000  ListIndex r5, r0, r1
+0001  ListIndex r4, r5, r2
+0002  ListIndex r5, r0, r1
+0003  AddIntI r6, r4, #1
+0004  ListSet r5, r2, r6
+0005  ListIndex r5, r0, r1
+0006  Copy r6, r2
+0007  ListIndex r8, r5, r6
+0008  SubIntI r7, r8, #1
+0009  ListSet r5, r6, r7
+0010  LoadK r5, k0                         0
+0011  Copy r6, r3
+0012  ListSet r0, r5, r6
+0013  Return r4

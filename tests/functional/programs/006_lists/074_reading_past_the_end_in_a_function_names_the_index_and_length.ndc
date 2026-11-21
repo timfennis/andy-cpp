@@ -1,0 +1,3 @@
+// expect-error: index 3 is out of bounds for a list of 3 elements
+fn f(xs: [Int], i: Int) { xs[i] }
+f([1, 2, 3], 3);

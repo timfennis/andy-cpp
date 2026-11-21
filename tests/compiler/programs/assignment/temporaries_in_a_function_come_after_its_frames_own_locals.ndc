@@ -1,7 +1,7 @@
 // `values` and `delta` take registers 0 and 1 of `f`'s frame. The temporaries
 // of the indexed assignment come after them: r2 holds a copy of the container,
-// r3 the index, r4 the sum, and r5 to r7 the arguments of `[]` and `[]=`, so
-// `f` has 8 registers.
+// r3 the index, r4 the sum, and r5 the element `ListIndex` reads, so `f` has 6
+// registers.
 // compile: stdlib
 fn f() {
     let values = [1];

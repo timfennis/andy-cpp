@@ -1,8 +1,8 @@
 use ndc_core::{ANY_INDEX, FunctionRegistry, StaticType};
-use ndc_vm::NativeSpec;
 use ndc_vm::Vm;
 use ndc_vm::error::VmError;
 use ndc_vm::value::{NativeFunc, Object, Value};
+use ndc_vm::{NativeOp, NativeSpec};
 use std::rc::Rc;
 
 pub fn register(env: &mut FunctionRegistry<NativeSpec>) {
@@ -24,10 +24,9 @@ fn make_get_func() -> NativeFunc {
 
 /// Allocation-free `[]` for overloads whose parameter type guarantees the
 /// container can never trigger the Map default-function callback path
-/// (List/String/Deque). Using `NativeFunc::Simple` here lets the VM
-/// pass the argument registers by slice instead of moving them into a
-/// `Vec<Value>` on every call — a real win for hot inner loops like
-/// `dists[i][j]`.
+/// (a slice of a list, a string, a deque). Using `NativeFunc::Simple` here
+/// lets the VM pass the argument registers by slice instead of moving them
+/// into a `Vec<Value>` on every call.
 fn make_get_func_simple() -> NativeFunc {
     NativeFunc::Simple(Box::new(|args: &[Value]| {
         let [container, index_value] = args else {
@@ -58,8 +57,15 @@ fn register_get(env: &mut FunctionRegistry<NativeSpec>) {
 
     // An element by its index, or a slice by a range of indices. A range of a
     // deque is a list.
-    for signature in [
+    // An element of a list, which the VM reads with its own instruction.
+    env.declare_global_fn(NativeSpec::operator_with_signature(
+        "[]",
+        doc,
         "<T>([T], Int) -> T",
+        NativeOp::ListIndex,
+    ));
+
+    for signature in [
         "<T>([T], Iterator<Int>) -> [T]",
         "(String, Int) -> String",
         "(String, Iterator<Int>) -> String",
@@ -97,15 +103,21 @@ fn register_get(env: &mut FunctionRegistry<NativeSpec>) {
 fn register_set(env: &mut FunctionRegistry<NativeSpec>) {
     let doc = "Sets an element by index. Supports negative indices and range slicing for lists and strings.";
 
-    // An element by its index, or a slice by a range of indices.
-    for signature in ["<T>([T], Int, T)", "<T>([T], Iterator<Int>, Iterable<T>)"] {
-        env.declare_global_fn(NativeSpec::with_signature(
-            "[]=",
-            doc,
-            signature,
-            make_set_func,
-        ));
-    }
+    // An element of a list, which the VM writes with its own instruction.
+    env.declare_global_fn(NativeSpec::operator_with_signature(
+        "[]=",
+        doc,
+        "<T>([T], Int, T)",
+        NativeOp::ListSet,
+    ));
+
+    // A slice by a range of indices.
+    env.declare_global_fn(NativeSpec::with_signature(
+        "[]=",
+        doc,
+        "<T>([T], Iterator<Int>, Iterable<T>)",
+        make_set_func,
+    ));
 
     for signature in ["(String, Int, String)", "(String, Iterator<Int>, String)"] {
         env.declare_global_fn(NativeSpec::with_signature(

@@ -36,7 +36,7 @@ use crate::iterator::{
     UnboundedRangeIter, VmIterator,
 };
 use crate::memo::{MemoCache, MemoKey};
-use crate::native_op::NativeOp;
+use crate::native_op::{NativeOp, list_element, list_index_error, list_set};
 use crate::value::{ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction};
 use crate::{Natives, Object, Value};
 use ndc_analysis::CaptureSource;
@@ -849,6 +849,25 @@ impl Vm {
                         match tuple_element(&regs[src.index()], i64::from(index)) {
                             Ok(element) => regs[dst.index()] = element,
                             Err(message) => break Exit::Error(VmError::native(message)),
+                        }
+                    }
+                    Instr::ListIndex { dst, list, index } => {
+                        match list_element(&regs[list.index()], &regs[index.index()]) {
+                            Some(element) => regs[dst.index()] = element,
+                            None => {
+                                break Exit::Error(list_index_error(
+                                    &regs[list.index()],
+                                    &regs[index.index()],
+                                ));
+                            }
+                        }
+                    }
+                    Instr::ListSet { list, index, value } => {
+                        let value = std::mem::replace(&mut regs[value.index()], Value::None);
+                        if let Err(error) =
+                            list_set(&regs[list.index()], &regs[index.index()], value)
+                        {
+                            break Exit::Error(error);
                         }
                     }
                     Instr::CheckType { reg, typ } => {
