@@ -49,12 +49,21 @@ pub enum Step {
 impl Lazy {
     /// The lazy sequence of the elements of `source`, or `source` itself if
     /// it's a lazy sequence already. `None` if `source` isn't something a
-    /// `for` loop iterates over.
+    /// `for` loop iterates over. An iterator is copied as it is now, so
+    /// reading the iterator later doesn't change the sequence.
     pub fn new(source: Value) -> Option<Self> {
-        if let Value::Object(object) = &source
-            && let Object::Lazy(lazy) = object.as_ref()
-        {
-            return Some(lazy.clone());
+        if let Value::Object(object) = &source {
+            match object.as_ref() {
+                Object::Lazy(lazy) => return Some(lazy.clone()),
+                Object::Iterator(iterator) => {
+                    let copy = iterator.borrow().deep_copy()?;
+                    return Some(Self {
+                        source: Value::iterator(copy),
+                        steps: Rc::from([]),
+                    });
+                }
+                _ => {}
+            }
         }
         source.iter()?;
         Some(Self {
@@ -73,12 +82,19 @@ impl Lazy {
         }
     }
 
-    /// A cursor at the start of the sequence.
+    /// A cursor at the start of the sequence. An iterator is used up by
+    /// reading it, so the cursor reads a copy of the sequence's.
     pub fn cursor(&self) -> LazyCursor {
         let source = self
             .source
             .iter()
             .expect("internal error: a lazy sequence's source is iterable");
+        let source = match source {
+            ValueIter::Shared(_) => source
+                .try_clone()
+                .expect("internal error: a lazy sequence's iterator can be copied"),
+            elements => elements,
+        };
         LazyCursor {
             source,
             stages: self.steps.iter().map(Stage::new).collect(),
