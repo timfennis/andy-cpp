@@ -16,10 +16,23 @@ printed. A program that prints something else each time, as one using random
 numbers does, is found by running the baseline twice; only its exit status is
 checked.
 
-It ends with the totals and a gate for a change that is meant to make programs
-faster: the candidate passes when both totals are at least 1.3x faster, no
-program takes more than 5% longer (and more than two milliseconds longer, which
-is noise), and none behaves differently.
+With `perf` installed, it also counts the instructions each program runs
+(`instructions:u`, the fewest of a few runs). That count hardly moves with
+where the compiler and linker happen to put the interpreter's code in memory,
+which time does: adding an arm to the dispatch loop can make an unrelated
+program 10% slower or faster by moving the hot functions onto the same
+instruction-cache lines, without running one instruction more.
+
+It ends with the totals and a gate that every change should pass, whether or
+not it's meant to make programs faster: the candidate passes when no program
+behaves differently and none runs more than 2% more instructions. A program
+that takes more than 5% longer (and more than two milliseconds longer, which
+is noise) on no more instructions is listed to check: rebuild both binaries
+with another function alignment (`RUSTFLAGS="-C
+llvm-args=-align-all-functions=6"`) or another linker, and if it's no longer
+slower there, it was where the code landed. A program whose instructions
+couldn't be counted on both binaries, as without `perf` or when a profiling
+run fails, goes by time instead: it may not take more than 5% longer.
 
 Build both binaries the same way (same toolchain, same profile) and don't build
 anything else while this runs. To compare two settings of one binary, give it
@@ -46,8 +59,9 @@ from pathlib import Path
 MEMORY_LIMIT_BYTES = 16_000_000_000
 TIMEOUT_SECONDS = 120
 MEMORY_SAMPLE_SECONDS = 0.002
-GATE_TOTAL_SPEEDUP = 1.3
 GATE_LONGEST_SLOWDOWN = 1.05
+GATE_MOST_INSTRUCTIONS = 1.02
+INSTRUCTION_RUNS = 3
 # A program that takes a few milliseconds varies by more than 5% from run to
 # run, so it gets more runs, and a difference this small is never a slowdown.
 SHORT_PROGRAM_MS = 250
@@ -75,6 +89,8 @@ class Result:
     baseline_mb: float
     candidate_mb: float
     output_compared: bool
+    baseline_instructions: int | None
+    candidate_instructions: int | None
 
     @property
     def speedup(self) -> float:
@@ -84,6 +100,18 @@ class Result:
     def too_slow(self) -> bool:
         longer = self.candidate_ms - self.baseline_ms
         return self.candidate_ms > self.baseline_ms * GATE_LONGEST_SLOWDOWN and longer > NOISE_MS
+
+    @property
+    def instruction_ratio(self) -> float | None:
+        """The candidate's instructions per instruction of the baseline."""
+        if not self.baseline_instructions or self.candidate_instructions is None:
+            return None
+        return self.candidate_instructions / self.baseline_instructions
+
+    @property
+    def more_instructions(self) -> bool:
+        ratio = self.instruction_ratio
+        return ratio is not None and ratio > GATE_MOST_INSTRUCTIONS
 
 
 @dataclass(frozen=True)
@@ -119,6 +147,43 @@ def run(binary: Binary, program: Path) -> Run:
             cpu_ms=(usage.ru_utime + usage.ru_stime) * 1000,
             peak_mb=memory.finish(),
         )
+
+
+def count_instructions(binary: Binary, program: Path) -> int | None:
+    """The instructions `program` runs in user space, the fewest of a few
+    runs, or `None` without `perf`, when it can't count them, or when a run
+    fails, as a run that stops early would count too few."""
+    perf = shutil.which("perf")
+    if perf is None:
+        return None
+    counts = []
+    for _ in range(INSTRUCTION_RUNS):
+        with tempfile.NamedTemporaryFile(mode="r") as stats:
+            try:
+                completed = subprocess.run(
+                    [perf, "stat", "--no-scale", "-x", ",", "-e", "instructions:u", "-o", stats.name, "--"]
+                    + [str(binary.path)]
+                    + [program.name],
+                    cwd=program.parent,
+                    env={**os.environ, **dict(binary.env)},
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=TIMEOUT_SECONDS,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                return None
+            if completed.returncode != 0:
+                return None
+            # A processor with two kinds of core has a line for each, which
+            # counts while the program runs on that kind. Unscaled, as `perf`
+            # would otherwise scale each count up to the whole run.
+            values = [line.split(",", 1)[0] for line in stats.read().splitlines() if "instructions" in line]
+            if not any(value.isdigit() for value in values):
+                return None
+            counts.append(sum(int(value) for value in values if value.isdigit()))
+    return min(counts)
 
 
 class PeakMemory:
@@ -219,6 +284,8 @@ def measure(name: str, program: Path, baseline: Binary, candidate: Binary, runs:
         baseline_mb=max(r.peak_mb for r in baseline_runs),
         candidate_mb=max(r.peak_mb for r in candidate_runs),
         output_compared=output_compared,
+        baseline_instructions=count_instructions(baseline, program),
+        candidate_instructions=count_instructions(candidate, program),
     )
 
 
@@ -241,22 +308,39 @@ def total_speedup(results: list[Result]) -> float:
     return sum(r.baseline_ms for r in results) / sum(r.candidate_ms for r in results)
 
 
+def instruction_change(ratio: float | None) -> str:
+    """`ratio` as a change in instructions: `+1.2%`, or `?` when not counted."""
+    return "?" if ratio is None else f"{(ratio - 1) * 100:+.1f}%"
+
+
+def total_instruction_ratio(results: list[Result]) -> float | None:
+    if any(r.instruction_ratio is None for r in results):
+        return None
+    return sum(r.candidate_instructions for r in results) / sum(r.baseline_instructions for r in results)
+
+
 def report(title: str, results: list[Result]) -> None:
     if not results:
         return
     width = max(len(r.name) for r in results)
     print(f"\n{title}")
-    print(f"{'program':<{width}}  {'baseline':>10}  {'candidate':>10}  {'speedup':>8}  {'peak memory':>17}")
+    print(
+        f"{'program':<{width}}  {'baseline':>10}  {'candidate':>10}  {'speedup':>8}  "
+        f"{'instructions':>12}  {'peak memory':>17}"
+    )
     for r in results:
         memory = f"{r.baseline_mb:.0f} -> {r.candidate_mb:.0f} MB"
         note = "" if r.output_compared else "  (output differs from run to run, not compared)"
         print(
             f"{r.name:<{width}}  {r.baseline_ms:>8.0f}ms  {r.candidate_ms:>8.0f}ms  "
-            f"{r.speedup:>7.2f}x  {memory:>17}{note}"
+            f"{r.speedup:>7.2f}x  {instruction_change(r.instruction_ratio):>12}  {memory:>17}{note}"
         )
     baseline = sum(r.baseline_ms for r in results)
     candidate = sum(r.candidate_ms for r in results)
-    print(f"{'total':<{width}}  {baseline:>8.0f}ms  {candidate:>8.0f}ms  {total_speedup(results):>7.2f}x")
+    print(
+        f"{'total':<{width}}  {baseline:>8.0f}ms  {candidate:>8.0f}ms  {total_speedup(results):>7.2f}x  "
+        f"{instruction_change(total_instruction_ratio(results)):>12}"
+    )
 
 
 def main() -> int:
@@ -336,13 +420,26 @@ def main() -> int:
         print("  nothing was measured")
         print("  FAIL")
         return 1
-    totals_pass = all(total_speedup(rows) >= GATE_TOTAL_SPEEDUP for rows in measured)
-    slower = [r.name for rows in measured for r in rows if r.too_slow]
-    print(f"  totals at least {GATE_TOTAL_SPEEDUP}x faster: {'yes' if totals_pass else 'no'}")
-    print(f"  programs taking more than 5% longer: {', '.join(slower) or 'none'}")
+    every = [r for rows in measured for r in rows]
+    # A program whose instructions were counted on both binaries goes by them;
+    # one whose weren't goes by time.
+    counted = [r for r in every if r.instruction_ratio is not None]
+    uncounted = [r for r in every if r.instruction_ratio is None]
+    more = [r.name for r in counted if r.more_instructions]
+    layout = [r.name for r in counted if r.too_slow and not r.more_instructions]
+    slower = [r.name for r in uncounted if r.too_slow]
     print(f"  programs that behave differently: {', '.join(name for name, _ in differing) or 'none'}")
-    passed = totals_pass and not slower and not differing
+    print(f"  programs running more than 2% more instructions: {', '.join(more) or 'none'}")
+    if uncounted:
+        programs = "1 program" if len(uncounted) == 1 else f"{len(uncounted)} programs"
+        print(f"  {programs} without an instruction count (perf is missing or couldn't count them), going by time")
+        print(f"  of those, taking more than 5% longer: {', '.join(slower) or 'none'}")
+    passed = not more and not slower and not differing
     print(f"  {'PASS' if passed else 'FAIL'}")
+    if layout:
+        print("\nCheck the layout")
+        print(f"  more than 5% longer on no more instructions: {', '.join(layout)}")
+        print("  rebuild both with another function alignment or linker to see whether it stays")
     return 0 if passed else 1
 
 
