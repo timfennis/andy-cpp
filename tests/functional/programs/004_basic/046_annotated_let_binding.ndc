@@ -13,7 +13,9 @@ let string_value: String = "hello";
 
 let option_value: Option<Any> = Some(3);
 let list_value: [Int] = [1, 2, 3];
-let iterator_value: Iterator<Int> = 1..10;
+let iterator_value: Iterator<Int> = (1..).take(3);
+let range_value: Range = 1..10;
+let range_from_value: RangeFrom = 1..;
 let min_heap_value: MinHeap<Any> = MinHeap();
 let max_heap_value: MaxHeap<Any> = MaxHeap();
 let deque_value: Deque<Any> = Deque();

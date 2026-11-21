@@ -15,16 +15,16 @@ Multiple trace flags can be combined in a single invocation.
 Prints every VM instruction to stderr as it is dispatched, with the registers it reads and writes and the corresponding source excerpt. For a loop that adds up `square(i)`:
 
 ```
-[VM] 0008 IterNext r2, r0, +7             for i in 1..=3 {↵    total += square(i);↵}
-[VM] 0009 GetGlobal r4, g639              total
-[VM] 0010 GetGlobal r5, g640              square
-[VM] 0011 Copy r6, r0                     i
-[VM] 0012 Call r5, 1                      square
+[VM] 0007 ForRangeNext r2, r0, +7         for i in 1..=3 {↵    total += square(i);↵}
+[VM] 0008 GetGlobal r5, g639              total
+[VM] 0009 GetGlobal r6, g640              square
+[VM] 0010 Copy r7, r0                     i
+[VM] 0011 Call r6, 1                      square
 [VM] 0000 MulInt r1, r0, r0               *
 [VM] 0001 Return r1
-[VM] 0013 AddInt r3, r4, r5               total += square(i)
-[VM] 0014 SetGlobal g639, r3              total
-[VM] 0015 Jump -8                         for i in 1..=3 {↵    total += square(i);↵}
+[VM] 0012 AddInt r4, r5, r6               total += square(i)
+[VM] 0013 SetGlobal g639, r4              total
+[VM] 0014 Jump -8                         for i in 1..=3 {↵    total += square(i);↵}
 ```
 
 `r0` is a register of the running function, `g639` a global and `+7` how far a jump goes. This is useful for understanding the exact sequence of bytecode operations your program produces; `ndc disassemble` lists the same instructions without running them.
@@ -35,12 +35,12 @@ Prints a summary table of how many times each instruction type was dispatched:
 
 ```
 --------------------------------------------------
-Instruction histogram (43 total)
+Instruction histogram (42 total)
 --------------------------------------------------
-  GetGlobal                     7  ( 16.3%)
-  SetGlobal                     5  ( 11.6%)
-  LoadK                         4  (  9.3%)
-  IterNext                      4  (  9.3%)
+  GetGlobal                     7  ( 16.7%)
+  SetGlobal                     5  ( 11.9%)
+  ForRangeNext                  4  (  9.5%)
+  LoadK                         4  (  9.5%)
   ...
 ```
 

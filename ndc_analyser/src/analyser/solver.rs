@@ -2710,7 +2710,9 @@ impl Analyser {
                 // them for a slice like `xs[0..2]`.
                 [container, index, value]
                     if let Some(element) = container.index_element_type()
-                        && let expected = if Self::index_type_is_slice(index) {
+                        && let expected = if !matches!(container, StaticType::Map { .. })
+                            && Self::index_type_is_slice(index)
+                        {
                             StaticType::List(Box::new(element))
                         } else {
                             element

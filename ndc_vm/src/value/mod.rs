@@ -1,11 +1,13 @@
 mod function;
 mod number;
 mod numeric;
+mod range;
 mod string;
 
 pub use function::*;
 pub use number::{AdvancedNumber, BinaryOperatorError, ExactFraction, NumberToFloatError};
 pub use numeric::{NumericMode, NumericRef};
+pub use range::Range;
 pub use string::VmString;
 
 use crate::hash_map::HashMap;
@@ -85,7 +87,6 @@ fn unshare_all<'v>(
 
 /// Enumerates all the different types of values that exist in the language
 /// All values should be pretty cheap to clone because the bigger ones are wrapped using Rc's
-#[derive(Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -115,6 +116,10 @@ pub enum Object {
         fields: RefCell<Vec<Value>>,
     },
     Iterator(SharedIterator),
+    /// `a..b` or `a..=b`.
+    Range(Range),
+    /// `a..`: the `Int`s from `a` on, up to the largest.
+    RangeFrom(i64),
     Deque(RefCell<VecDeque<Value>>),
     MinHeap(RefCell<BinaryHeap<Reverse<OrdValue>>>),
     MaxHeap(RefCell<BinaryHeap<OrdValue>>),
@@ -151,6 +156,8 @@ pub enum ValueIter {
     List(std::vec::IntoIter<Value>),
     Deque(std::collections::vec_deque::IntoIter<Value>),
     Map(std::collections::hash_map::IntoIter<Value, Value>),
+    /// The `Int`s of a range, counted without an iterator object.
+    Ints(std::ops::RangeInclusive<i64>),
     Shared(SharedIterator),
 }
 
@@ -162,8 +169,30 @@ impl Iterator for ValueIter {
             Self::List(i) => i.next(),
             Self::Deque(i) => i.next(),
             Self::Map(i) => i.next().map(|(k, v)| Value::tuple(vec![k, v])),
+            Self::Ints(i) => i.next().map(Value::Int),
             Self::Shared(i) => i.borrow_mut().next(),
         }
+    }
+}
+
+impl ValueIter {
+    /// An iterator that gives what this one gives from here on, separately
+    /// from it, if this one can be copied: one over a range's `Int`s, or a
+    /// shared iterator that supports
+    /// [`crate::iterator::VmIterator::deep_copy`].
+    pub fn try_clone(&self) -> Option<Self> {
+        match self {
+            Self::Ints(ints) => Some(Self::Ints(ints.clone())),
+            Self::Shared(shared) => Some(Self::Shared(shared.borrow().deep_copy()?)),
+            Self::List(_) | Self::Deque(_) | Self::Map(_) => None,
+        }
+    }
+
+    /// Whether this iterator gives its elements one at a time as it's read,
+    /// so it may not end: a range's `Int`s or a shared iterator. The others
+    /// hold all their elements already.
+    pub fn is_lazy(&self) -> bool {
+        matches!(self, Self::Ints(_) | Self::Shared(_))
     }
 }
 
@@ -192,6 +221,14 @@ impl Value {
 
     pub fn iterator(iter: SharedIterator) -> Self {
         Self::Object(Rc::new(Object::Iterator(iter)))
+    }
+
+    pub fn range(range: Range) -> Self {
+        Self::Object(Rc::new(Object::Range(range)))
+    }
+
+    pub fn range_from(start: i64) -> Self {
+        Self::Object(Rc::new(Object::RangeFrom(start)))
     }
 
     pub fn list(values: Vec<Self>) -> Self {
@@ -530,6 +567,7 @@ impl Value {
                         .iter()
                         .all(|value| value.conforms_to_cached(element, cache)),
                     Object::String(_) => StaticType::String.fits(element),
+                    Object::Range(_) | Object::RangeFrom(_) => StaticType::Int.fits(element),
                     Object::Map { entries, .. } => {
                         entries
                             .borrow()
@@ -609,6 +647,11 @@ impl Value {
             Object::Tuple(t) => Some(ValueIter::List(t.into_iter())),
             Object::Deque(d) => Some(ValueIter::Deque(d.into_inner().into_iter())),
             Object::Iterator(i) => Some(ValueIter::Shared(i)),
+            #[expect(clippy::reversed_empty_ranges, reason = "an empty range gives no Ints")]
+            Object::Range(range) => Some(ValueIter::Ints(
+                range.bounds().map_or(1..=0, |(first, last)| first..=last),
+            )),
+            Object::RangeFrom(start) => Some(ValueIter::Ints(start..=i64::MAX)),
             Object::String(s) => {
                 let chars: Vec<Self> = s
                     .borrow()
@@ -839,8 +882,8 @@ impl Object {
                 Some(iterator) => Rc::new(Self::Iterator(iterator)),
                 None => Rc::clone(object),
             },
-            // A function is shared.
-            Self::Function(_) => Rc::clone(object),
+            // A function or range is shared: neither can change.
+            Self::Function(_) | Self::Range(_) | Self::RangeFrom(_) => Rc::clone(object),
         };
         copies.insert(key, Rc::clone(&copy));
         copy
@@ -939,6 +982,8 @@ impl Object {
             }
             Self::Function(f) => f.static_type(),
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
+            Self::Range(_) => StaticType::Range,
+            Self::RangeFrom(_) => StaticType::RangeFrom,
             Self::Deque(elements) => {
                 if depth == 0 {
                     return StaticType::Deque(Box::new(StaticType::Any));
@@ -1056,6 +1101,8 @@ fn display_contents(object: &Object, f: &mut Formatter<'_>) -> fmt::Result {
             Some(n) => write!(f, "<iterator (len={n})>"),
             None => write!(f, "<iterator>"),
         },
+        Object::Range(range) => write!(f, "{range}"),
+        Object::RangeFrom(start) => write!(f, "{start}.."),
         Object::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
         Object::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
         Object::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
@@ -1109,6 +1156,8 @@ impl fmt::Debug for Object {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
             },
+            Self::Range(range) => write!(f, "{range}"),
+            Self::RangeFrom(start) => write!(f, "{start}.."),
             Self::Deque(d) => write!(f, "Deque(len={})", d.borrow().len()),
             Self::MinHeap(h) => write!(f, "MinHeap(len={})", h.borrow().len()),
             Self::MaxHeap(h) => write!(f, "MaxHeap(len={})", h.borrow().len()),
@@ -1186,6 +1235,37 @@ impl Value {
                 "comparator must return a number, got {}",
                 self.static_type()
             )),
+        }
+    }
+}
+
+impl Clone for Value {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Int(n) => Self::Int(*n),
+            Self::Float(f) => Self::Float(*f),
+            Self::Number(n) => Self::Number(Rc::clone(n)),
+            Self::Bool(b) => Self::Bool(*b),
+            Self::None => Self::None,
+            Self::Object(o) => Self::Object(Rc::clone(o)),
+            Self::Cell(c) => Self::Cell(Rc::clone(c)),
+        }
+    }
+
+    /// Writes the clone of `source` straight to `self`, a variant at a
+    /// time. `*self = source.clone()` makes the clone first and then copies
+    /// it whole, and that copy reads what the clone wrote in smaller
+    /// pieces, which the processor can't forward from its stores.
+    #[inline(always)]
+    fn clone_from(&mut self, source: &Self) {
+        match source {
+            Self::Int(n) => *self = Self::Int(*n),
+            Self::Float(f) => *self = Self::Float(*f),
+            Self::Number(n) => *self = Self::Number(Rc::clone(n)),
+            Self::Bool(b) => *self = Self::Bool(*b),
+            Self::None => *self = Self::None,
+            Self::Object(o) => *self = Self::Object(Rc::clone(o)),
+            Self::Cell(c) => *self = Self::Cell(Rc::clone(c)),
         }
     }
 }
@@ -1278,6 +1358,8 @@ impl PartialEq for Object {
                 // Compare iterators by pointer identity
                 std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
             }
+            (Self::Range(a), Self::Range(b)) => a == b,
+            (Self::RangeFrom(a), Self::RangeFrom(b)) => a == b,
             (Self::Deque(a), Self::Deque(b)) => a.borrow().eq(&*b.borrow()),
             // Heaps: pointer identity (no meaningful value equality).
             // The RefCell lives inside the Rc<Object> allocation, so comparing its
@@ -1359,6 +1441,14 @@ impl Hash for Object {
             }
             Self::MinHeap(_) => state.write_u8(13),
             Self::MaxHeap(_) => state.write_u8(14),
+            Self::Range(range) => {
+                state.write_u8(16);
+                range.hash(state);
+            }
+            Self::RangeFrom(start) => {
+                state.write_u8(17);
+                start.hash(state);
+            }
             Self::Struct { info, fields } => {
                 state.write_u8(15);
                 info.id.hash(state);
