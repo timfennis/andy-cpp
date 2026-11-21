@@ -1,6 +1,4 @@
-// Worst case for lazy: full materialization to a list.
-// Lazy adds one indirection layer per element; expect a small regression
-// or near-parity here.
+// Every tuple `enumerate` makes, made into a list.
 let xs = list(0..500_000);
 let result = xs.enumerate().list();
 print(result.len);

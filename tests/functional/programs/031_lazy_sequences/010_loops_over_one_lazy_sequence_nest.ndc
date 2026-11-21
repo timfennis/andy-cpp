@@ -1,0 +1,10 @@
+// Each loop over a lazy sequence reads it from the start, so two loops over
+// one nest, and a loop can stop early.
+// expect-output: [(1,1),(1,2),(2,1),(2,2)]
+// expect-output: 1
+let pair = [1, 2].lazy;
+print([(a, b) for a in pair, b in pair]);
+for x in (1..).map(fn(x) => x) {
+    print(x);
+    break;
+}

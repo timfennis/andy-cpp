@@ -1,0 +1,11 @@
+// What a lazy sequence makes can't be checked without making it, so a cast
+// can only make it a `Lazy<Any>`, whose elements are cast one by one.
+// `cast?` to a lazy sequence of anything else is `None`.
+let a: Any = [1, 2].lazy;
+print(cast?::<Lazy<Int>>(a));
+for x in cast::<Lazy<Any>>(a) {
+    print(cast::<Int>(x) * 10);
+}
+// expect-output: None
+// expect-output: 10
+// expect-output: 20

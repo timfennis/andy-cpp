@@ -46,7 +46,6 @@ fn value_to_json(
                     | Object::Map { .. }
                     | Object::MaxHeap(_)
                     | Object::MinHeap(_)
-                    | Object::Iterator(_)
                     | Object::Struct { .. }
             );
             if cycle_guard && !active.insert(Rc::as_ptr(obj)) {
@@ -97,17 +96,6 @@ fn object_to_json(
     match obj.as_ref() {
         Object::Some(inner) if lossy => value_to_json(inner, lossy, active),
         Object::Some(_) => bail!("cannot convert an option to JSON, unwrap it first"),
-        Object::Iterator(i) if lossy => {
-            let mut out = Vec::new();
-            let mut iter = i.borrow_mut();
-            while let Some(v) = iter.next() {
-                out.push(value_to_json(&v, lossy, active)?);
-            }
-            Ok(JsonValue::Array(out))
-        }
-        Object::Iterator(_) => {
-            bail!("cannot convert an iterator to JSON, collect it into a list first")
-        }
         Object::Range(range) if lossy => {
             let values = range.bounds().map_or(Vec::new(), |(first, last)| {
                 (first..=last).map(|n| json!(n)).collect()
@@ -118,6 +106,9 @@ fn object_to_json(
             bail!("cannot convert a range to JSON, convert it to a list first")
         }
         Object::RangeFrom(_) => bail!("cannot convert a range without an end to JSON"),
+        Object::Lazy(_) | Object::Cursor(_) | Object::LazyCursor(_) => {
+            bail!("cannot convert a lazy sequence to JSON, make it a list first")
+        }
         Object::MaxHeap(h) if lossy => {
             // Priority order: the order `pop` would produce
             let mut sorted = h.borrow().clone().into_sorted_vec();

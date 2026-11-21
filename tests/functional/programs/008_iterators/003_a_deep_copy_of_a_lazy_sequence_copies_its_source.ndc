@@ -1,0 +1,8 @@
+// A deep copy of a lazy sequence copies the value its elements come from, so
+// it doesn't see what changes in the original's.
+// expect-output: [10,20,30] [10,20]
+let xs = [1, 2];
+let tens = xs.lazy.map(fn(x) => x * 10);
+let copy = deepcopy(tens);
+xs.push(3);
+print(tens.list, copy.list);

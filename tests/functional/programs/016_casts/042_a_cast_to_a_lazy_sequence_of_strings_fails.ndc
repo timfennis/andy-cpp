@@ -1,0 +1,6 @@
+// expect-error: cannot cast Lazy<Any> to Lazy<String>
+let a: Any = [1, 2].lazy;
+let b = cast::<Lazy<String>>(a);
+for s in b {
+    print(s ++ "x");
+}

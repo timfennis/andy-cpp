@@ -100,7 +100,7 @@ impl TypeVars {
             (StaticType::Option(x), StaticType::Option(y))
             | (StaticType::Iterable(x), StaticType::Iterable(y))
             | (StaticType::List(x), StaticType::List(y))
-            | (StaticType::Iterator(x), StaticType::Iterator(y))
+            | (StaticType::Lazy(x), StaticType::Lazy(y))
             | (StaticType::MinHeap(x), StaticType::MinHeap(y))
             | (StaticType::MaxHeap(x), StaticType::MaxHeap(y))
             | (StaticType::Deque(x), StaticType::Deque(y)) => self.unify(x, y),
@@ -355,7 +355,9 @@ impl TypeVars {
             (StaticType::Var(_), _) | (_, StaticType::Var(_)) => self.unify(&parameter, &argument),
             (_, StaticType::Error) | (StaticType::Error, _) => true,
             // An `Any` takes a cast to be a sequence.
-            (StaticType::Iterable(_), StaticType::Any) => false,
+            // A lazy sequence iterates, but isn't an `Iterable`: a function
+            // that takes one may not be able to make its elements.
+            (StaticType::Iterable(_), StaticType::Any | StaticType::Lazy(_)) => false,
             (
                 StaticType::Function {
                     parameters: expected,

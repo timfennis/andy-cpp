@@ -1,0 +1,12 @@
+// A function whose parameter isn't annotated takes a lazy sequence like any
+// other, and picks the functions that take one.
+// expect-output: 3 60
+// expect-output: 3 10
+fn total(xs) {
+    let sum = 0;
+    for x in xs { sum += x; }
+    sum
+}
+fn sums(xs) => xs.sum();
+print(total([1, 2]), total([1, 2, 3].lazy.map(fn(x) => x * 10)));
+print(sums([1, 2]), sums((1..).take(4)));

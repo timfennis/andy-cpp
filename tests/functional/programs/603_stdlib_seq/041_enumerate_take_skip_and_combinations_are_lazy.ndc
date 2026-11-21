@@ -1,0 +1,16 @@
+// `enumerate`, `take`, `skip` and `combinations` pick elements without
+// calling a function, so they give a lazy sequence for any sequence, which
+// makes no list and can be read as often as needed. `repeat` with a count
+// gives a list.
+// expect-output: lazy("ab").enumerate()
+// expect-output: [(0,"a"),(1,"b")] [(0,"a"),(1,"b")]
+// expect-output: [1,2] [1,2,3] [3]
+// expect-output: [[1,2],[1,3],[2,3]] [] [[]]
+// expect-output: [7,7,7]
+let e = "ab".enumerate();
+print(e);
+print(e.list, e.list);
+let xs = [1, 2, 3];
+print(xs.take(2).list, xs.take(10).list, xs.skip(2).list);
+print(xs.combinations(2).list, [1, 2].combinations(3).list, [1].combinations(0).list);
+print(repeat(7, 3));

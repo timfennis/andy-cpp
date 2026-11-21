@@ -1,0 +1,11 @@
+// `combinations` on a lazy sequence makes each list only from the elements it
+// needs, so it works on a sequence without end, where the first element never
+// moves on, and it reads them once.
+// expect-output: [[1,2],[1,3],[2,3]]
+// expect-output: [[1,2],[1,3],[1,4],[1,5]]
+// expect-output: 3
+let made = 0;
+let three = [1, 2, 3].lazy.map(fn(x) { made += 1; x });
+print(three.combinations(2).list);
+print((1..).combinations(2).take(4).list);
+print(made);

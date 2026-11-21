@@ -49,7 +49,7 @@ print(total([1, 2, 3]), total([1, 2, 3]), calls);  // 6 6 1
 
 The arguments of a pure function have to be plain data: numbers, strings,
 booleans, `None`, and lists, tuples, maps, deques, options and structs of
-those. Functions, iterators, heaps and `Any`s aren't allowed:
+those. Functions, lazy sequences, heaps and `Any`s aren't allowed:
 
 ```ndc,fails
 pure fn apply(f: fn(Int) -> Int, x: Int) => f(x);

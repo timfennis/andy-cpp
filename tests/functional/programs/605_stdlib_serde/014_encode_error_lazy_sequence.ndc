@@ -1,0 +1,2 @@
+json_encode([1, 2, 3].lazy);
+// expect-error: cannot convert a lazy sequence to JSON

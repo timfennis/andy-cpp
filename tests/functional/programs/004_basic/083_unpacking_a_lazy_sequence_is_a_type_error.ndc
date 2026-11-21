@@ -1,0 +1,3 @@
+// A lazy sequence is unpacked once its elements are made into a list.
+// expect-error: Invalid unpacking of Lazy<Int>
+let a, b = repeat(1);

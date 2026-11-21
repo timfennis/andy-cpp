@@ -16,7 +16,7 @@ for n in 1..=100 {
 }
 ```
 
-You can combine multiple iterators in one loop:
+You can loop over several sequences in one loop:
 
 ```ndc
 let drinks = ["Coffee", "Tea", "Juice"];

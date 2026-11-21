@@ -1,6 +1,0 @@
-// expect-error: cannot cast Iterator<Any> to Iterator<String>
-let a: Any = (1..).take(2);
-let b = cast::<Iterator<String>>(a);
-for s in b {
-    print(s ++ "x");
-}

@@ -53,7 +53,7 @@ Every value is an `Any`. The other types are:
     * [`Deque<T>`](./types/deque.md): a double-ended queue
     * [`MinHeap<T>` / `MaxHeap<T>`](./types/min-max-heap.md): min/max heap
     * [`Range` / `RangeFrom`](./types/range.md): the `Int`s from one number to another, `5..100`, or from one number on, `5..`
-    * `Iterator<T>`: produces values when consumed (from functions like `enumerate` and `take`)
+    * [`Lazy<T>`](./types/lazy.md): a sequence that makes its elements when it's read, `xs.lazy.map(f)`
   * [`fn(A, B) -> C`](./types/function.md): a function taking an `A` and a `B` and returning a `C`
   * [Structs](./types/struct.md): user-defined record types, one per `struct` declaration
 
