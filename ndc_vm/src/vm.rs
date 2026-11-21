@@ -31,13 +31,12 @@ use crate::error::VmError;
 use crate::hash_map::HashMap;
 use crate::instr::{FAR, Instr, Reg, WINDOW};
 use crate::io::{InputSource, OutputSink};
-use crate::iterator::{
-    HeapIter, MapIter, RangeInclusiveIter, RangeIter, SeqIter, SharedIterator, StringIter,
-    UnboundedRangeIter, VmIterator,
-};
+use crate::iterator::ValueIter;
 use crate::memo::{MemoCache, MemoKey};
 use crate::native_op::{NativeOp, list_element, list_index_error, list_set};
-use crate::value::{ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction};
+use crate::value::{
+    ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction, Range,
+};
 use crate::{Natives, Object, Value};
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
@@ -846,9 +845,17 @@ impl Vm {
                         }
                     }
                     Instr::TupleIndex { dst, src, index } => {
-                        match tuple_element(&regs[src.index()], i64::from(index)) {
-                            Ok(element) => regs[dst.index()] = element,
-                            Err(message) => break Exit::Error(VmError::native(message)),
+                        let (src, dst, index) = (src.index(), dst.index(), i64::from(index));
+                        let result = if src == dst {
+                            tuple_element(&regs[src], index)
+                                .cloned()
+                                .map(|element| regs[dst] = element)
+                        } else {
+                            let (tuple, out) = read_and_write(regs, src, dst);
+                            tuple_element(tuple, index).map(|element| out.clone_from(element))
+                        };
+                        if let Err(message) = result {
+                            break Exit::Error(VmError::native(message));
                         }
                     }
                     Instr::ListIndex { dst, list, index } => {
@@ -880,29 +887,93 @@ impl Vm {
                     Instr::TryCast { reg, typ } => {
                         try_cast_value(&mut regs[reg.index()], &chunk.types()[typ as usize]);
                     }
-                    Instr::GetIterator { dst, src } => match iterator_of(&regs[src.index()]) {
-                        Ok(iterator) => regs[dst.index()] = iterator,
-                        Err(message) => break Exit::Error(VmError::native(message)),
-                    },
-                    Instr::IterNext { iter, dst, offset } => {
-                        let Value::Object(object) = &regs[iter.index()] else {
-                            unreachable!("internal error: IterNext's register holds an iterator");
+                    Instr::GetIterator { dst, src } => {
+                        let src = &regs[src.index()];
+                        let iterated = if is_list_or_tuple(src) {
+                            Ok(src.clone())
+                        } else {
+                            iterator_of(src)
                         };
-                        let Object::Iterator(iterator) = object.as_ref() else {
-                            unreachable!("internal error: IterNext's register holds an iterator");
-                        };
-                        let next = iterator.borrow_mut().next();
-                        match next {
-                            Some(value) => regs[dst.index()] = value,
-                            None => ip = short_jump(ip, offset, far_jumps),
+                        match iterated {
+                            Ok(iterated) => {
+                                regs[dst.index()] = iterated;
+                                regs[dst.index() + 1] = Value::Int(0);
+                            }
+                            Err(message) => break Exit::Error(VmError::native(message)),
                         }
                     }
+                    Instr::IterNext { iter, dst, offset } => {
+                        let (iter, position) = (iter.index(), iter.index() + 1);
+                        // A position is never negative.
+                        let index = match regs[position] {
+                            Value::Int(index) => index as usize,
+                            _ => unreachable!("internal error: GetIterator writes a position"),
+                        };
+                        let (iterated, out) = read_and_write(regs, iter, dst.index());
+                        let Value::Object(object) = iterated else {
+                            unreachable!("internal error: GetIterator writes an object");
+                        };
+                        // A list or tuple is read at the position after it,
+                        // which moves on; any other iterator counts itself.
+                        let (found, counted) = match object.as_ref() {
+                            Object::Iterator(iterator) => (
+                                iterator.borrow_mut().next().map(|value| *out = value),
+                                false,
+                            ),
+                            Object::Tuple(elements) => (
+                                elements.get(index).map(|element| out.clone_from(element)),
+                                true,
+                            ),
+                            Object::List(elements) => (
+                                elements
+                                    .borrow()
+                                    .get(index)
+                                    .map(|element| out.clone_from(element)),
+                                true,
+                            ),
+                            _ => unreachable!("internal error: GetIterator writes an iterable"),
+                        };
+                        if found.is_none() {
+                            ip = short_jump(ip, offset, far_jumps);
+                        } else if counted {
+                            regs[position] = Value::Int(index as i64 + 1);
+                        }
+                    }
+                    Instr::ForRange { counter, inclusive } => {
+                        if let Err(message) = start_range(regs, counter.index(), inclusive) {
+                            break Exit::Error(VmError::native(message));
+                        }
+                    }
+                    Instr::ForRangeNext {
+                        counter,
+                        dst,
+                        offset,
+                    } => match (&regs[counter.index()], &regs[counter.index() + 1]) {
+                        (&Value::Int(next), &Value::Int(last)) if next <= last => {
+                            regs[dst.index()] = Value::Int(next);
+                            regs[counter.index()] = match next.checked_add(1) {
+                                Some(after) => Value::Int(after),
+                                None => Value::None,
+                            };
+                        }
+                        _ => ip = short_jump(ip, offset, far_jumps),
+                    },
                     Instr::Unpack { src, base, len } => {
-                        // The value may be in one of the registers it's
-                        // unpacked to.
-                        let value = regs[src.index()].clone();
-                        let out = &mut regs[base.index()..base.index() + usize::from(len)];
-                        if let Err(message) = unpack_into(&value, out) {
+                        let (src, base) = (src.index(), base.index());
+                        let end = base + usize::from(len);
+                        let result = if src < base {
+                            let (below, rest) = regs.split_at_mut(base);
+                            unpack_into(&below[src], &mut rest[..end - base])
+                        } else if src >= end {
+                            let (below, rest) = regs.split_at_mut(end);
+                            unpack_into(&rest[src - end], &mut below[base..])
+                        } else {
+                            // The value is in one of the registers it's
+                            // unpacked to.
+                            let value = regs[src].clone();
+                            unpack_into(&value, &mut regs[base..end])
+                        };
+                        if let Err(message) = result {
                             break Exit::Error(VmError::native(message));
                         }
                     }
@@ -1338,7 +1409,7 @@ fn unpack_into(value: &Value, out: &mut [Value]) -> Result<(), String> {
         // A deque, heap or iterator unpacks the elements it gives, one
         // past the variables at most, as an iterator may not end.
         _ => {
-            let Some(iter) = value.clone().try_into_iter() else {
+            let Some(iter) = value.iter() else {
                 return Err(
                     "cannot unpack: expected a list, tuple, string, deque, heap or iterator"
                         .to_string(),
@@ -1363,26 +1434,75 @@ fn unpack_into(value: &Value, out: &mut [Value]) -> Result<(), String> {
     Ok(())
 }
 
-/// An iterator over `value`: the value itself if it's an iterator, and one
-/// over its elements if it's a list, tuple, deque, string, map or heap.
+/// The register `read`, to read, and the register `write`, a different one,
+/// to write.
+#[inline(always)]
+fn read_and_write(regs: &mut [Value; WINDOW], read: usize, write: usize) -> (&Value, &mut Value) {
+    if read < write {
+        let (below, rest) = regs.split_at_mut(write);
+        (&below[read], &mut rest[0])
+    } else {
+        let (below, rest) = regs.split_at_mut(read);
+        (&rest[0], &mut below[write])
+    }
+}
+
+/// Starts [`Instr::ForRange`]: turns the range in register `counter`, a
+/// `Range` or `RangeFrom`, or the range from the `Int` there to the `Int`
+/// in the one after it, which includes that end if `inclusive`, into its
+/// first value, or `None` if it has none, and its last. It runs once per
+/// loop, so it stays out of the dispatch loop's code.
+#[inline(never)]
+fn start_range(regs: &mut [Value; WINDOW], counter: usize, inclusive: bool) -> Result<(), String> {
+    if let Value::Object(object) = &regs[counter] {
+        let bounds = match object.as_ref() {
+            Object::Range(range) => range.bounds(),
+            Object::RangeFrom(start) => Some((*start, i64::MAX)),
+            _ => return Err(bad_range_bound(&regs[counter])),
+        };
+        (regs[counter], regs[counter + 1]) = match bounds {
+            Some((first, last)) => (Value::Int(first), Value::Int(last)),
+            None => (Value::None, Value::None),
+        };
+        return Ok(());
+    }
+    let (start, end) = (&regs[counter], &regs[counter + 1]);
+    let (&Value::Int(start), &Value::Int(end)) = (start, end) else {
+        let bad = if matches!(end, Value::Int(_)) {
+            start
+        } else {
+            end
+        };
+        return Err(bad_range_bound(bad));
+    };
+    let last = if inclusive {
+        Some(end)
+    } else {
+        end.checked_sub(1)
+    };
+    (regs[counter], regs[counter + 1]) = match last {
+        Some(last) => (Value::Int(start), Value::Int(last)),
+        None => (Value::None, Value::Int(end)),
+    };
+    Ok(())
+}
+
+/// Whether `value` is a list or tuple, which `IterNext` iterates over in
+/// place.
+fn is_list_or_tuple(value: &Value) -> bool {
+    matches!(value, Value::Object(object) if matches!(object.as_ref(), Object::List(_) | Object::Tuple(_)))
+}
+
+/// An iterator over `value`: the value itself if it's an iterator, and a
+/// cursor over its elements (see [`ValueIter`]) if it's a deque, string,
+/// map, heap or range.
 #[inline(never)]
 fn iterator_of(value: &Value) -> Result<Value, String> {
-    let not_iterable = || format!("{} is not iterable", value.static_type());
-    let Value::Object(rc) = value else {
-        return Err(not_iterable());
-    };
-    let iter: SharedIterator = match rc.as_ref() {
-        Object::Iterator(_) => return Ok(value.clone()),
-        Object::List(_) | Object::Tuple(_) | Object::Deque(_) => {
-            Rc::new(RefCell::new(SeqIter::new(Rc::clone(rc))))
-        }
-        Object::String(s) => Rc::new(RefCell::new(StringIter::new(Rc::clone(s)))),
-        Object::Map { .. } => Rc::new(RefCell::new(MapIter::new(Rc::clone(rc)))),
-        Object::MinHeap(h) => Rc::new(RefCell::new(HeapIter::new_min(h))),
-        Object::MaxHeap(h) => Rc::new(RefCell::new(HeapIter::new_max(h))),
-        _ => return Err(not_iterable()),
-    };
-    Ok(Value::iterator(iter))
+    match value.iter() {
+        Some(ValueIter::Shared(_)) => Ok(value.clone()),
+        Some(cursor) => Ok(Value::iterator(Rc::new(RefCell::new(cursor)))),
+        None => Err(format!("{} is not iterable", value.static_type())),
+    }
 }
 
 /// Find the broadcast-axis length for a vec call: the shared length of every
@@ -1489,12 +1609,10 @@ fn make_range(start: &Value, end: Option<&Value>, inclusive: bool) -> Result<Val
     let Value::Int(start) = *start else {
         return Err(bad_range_bound(start));
     };
-    let iter: Rc<RefCell<dyn VmIterator>> = match (inclusive, end) {
-        (_, None) => Rc::new(RefCell::new(UnboundedRangeIter::new(start))),
-        (false, Some(end)) => Rc::new(RefCell::new(RangeIter::new(start, end))),
-        (true, Some(end)) => Rc::new(RefCell::new(RangeInclusiveIter::new(start, end))),
-    };
-    Ok(Value::iterator(iter))
+    Ok(match end {
+        Some(end) => Value::range(Range::new(start, end, inclusive)),
+        None => Value::range_from(start),
+    })
 }
 
 /// Replaces `value` with `Some` of it, made the `target` as
@@ -1507,8 +1625,8 @@ fn try_cast_value(value: &mut Value, target: &StaticType) {
 
 /// The element of `tuple` at `index`, counting a negative index from the
 /// end: `-1` is the last element.
-#[inline(never)]
-fn tuple_element(tuple: &Value, index: i64) -> Result<Value, String> {
+#[inline(always)]
+fn tuple_element(tuple: &Value, index: i64) -> Result<&Value, String> {
     if let Value::Object(object) = tuple
         && let Object::Tuple(elements) = object.as_ref()
     {
@@ -1518,11 +1636,16 @@ fn tuple_element(tuple: &Value, index: i64) -> Result<Value, String> {
             usize::try_from(index).ok()
         };
         return match position.and_then(|position| elements.get(position)) {
-            Some(element) => Ok(element.clone()),
+            Some(element) => Ok(element),
             None => Err(tuple_index_out_of_bounds(index, elements.len())),
         };
     }
-    Err(format!("cannot index into {}", tuple.static_type()))
+    Err(cannot_index_into(tuple))
+}
+
+#[cold]
+fn cannot_index_into(value: &Value) -> String {
+    format!("cannot index into {}", value.static_type())
 }
 
 /// The analyser rejects an index written in the code that's outside the
@@ -2060,74 +2183,50 @@ mod tests {
         assert_eq!(error.message, "range bounds must be Int, got Bool");
     }
 
-    /// Sums the elements of a tuple with `GetIterator` and `IterNext`, the
-    /// iterator made in the tuple's register and each element read into the
-    /// iterator's.
+    /// Sums the elements of two tuples with `GetIterator` and `IterNext`,
+    /// each iterated over in its own register, with its position in the one
+    /// after it, and each element read into a register below one tuple and
+    /// above the other.
     #[test]
     fn iterating_in_the_registers_of_the_operands() {
-        let function = program(3, vec![], |b| {
-            let k = b.constant(tuple(&[1, 2, 3]));
-            emit(b, Instr::LoadK { dst: Reg(0), k });
-            emit(
-                b,
-                Instr::GetIterator {
-                    dst: Reg(0),
-                    src: Reg(0),
-                },
-            );
-            load_int(b, Reg(1), 0);
-            let start = b.label();
-            let end = b.label();
-            b.bind(start);
-            b.jump(
-                Instr::IterNext {
-                    iter: Reg(0),
-                    dst: Reg(2),
-                    offset: 0,
-                },
-                end,
-                Span::synthetic(),
-            );
-            emit(
-                b,
-                Instr::AddInt {
-                    dst: Reg(1),
-                    left: Reg(1),
-                    right: Reg(2),
-                },
-            );
-            b.jump(Instr::Jump { offset: 0 }, start, Span::synthetic());
-            b.bind(end);
-            // The last element read into the iterator's own register.
-            let k = b.constant(tuple(&[7]));
-            emit(b, Instr::LoadK { dst: Reg(2), k });
-            emit(
-                b,
-                Instr::GetIterator {
-                    dst: Reg(2),
-                    src: Reg(2),
-                },
-            );
-            b.jump(
-                Instr::IterNext {
-                    iter: Reg(2),
-                    dst: Reg(2),
-                    offset: 0,
-                },
-                start,
-                Span::synthetic(),
-            );
-            emit(
-                b,
-                Instr::MakeTuple {
-                    dst: Reg(0),
-                    base: Reg(1),
-                    len: 2,
-                },
-            );
+        let function = program(6, vec![], |b| {
+            load_int(b, Reg(0), 0);
+            for (iterated, values) in [(Reg(1), &[1, 2, 3][..]), (Reg(4), &[10, 20][..])] {
+                let k = b.constant(tuple(values));
+                emit(b, Instr::LoadK { dst: iterated, k });
+                emit(
+                    b,
+                    Instr::GetIterator {
+                        dst: iterated,
+                        src: iterated,
+                    },
+                );
+                let start = b.label();
+                let end = b.label();
+                b.bind(start);
+                b.jump(
+                    Instr::IterNext {
+                        iter: iterated,
+                        dst: Reg(3),
+                        offset: 0,
+                    },
+                    end,
+                    Span::synthetic(),
+                );
+                emit(
+                    b,
+                    Instr::AddInt {
+                        dst: Reg(0),
+                        left: Reg(0),
+                        right: Reg(3),
+                    },
+                );
+                b.jump(Instr::Jump { offset: 0 }, start, Span::synthetic());
+                b.bind(end);
+            }
             emit(b, Instr::Halt { src: Reg(0) });
         });
-        assert_eq!(run(&Natives::default(), function).unwrap(), tuple(&[6, 7]));
+        assert_eq!(run(&Natives::default(), function).unwrap(), Value::Int(36));
     }
 
     #[test]
@@ -2161,7 +2260,7 @@ mod tests {
 
     #[test]
     fn something_that_isnt_iterable() {
-        let function = program(1, vec![], |b| {
+        let function = program(2, vec![], |b| {
             load_int(b, Reg(0), 3);
             emit(
                 b,

@@ -1,0 +1,16 @@
+// A `for` loop over a range written in it doesn't make a range: the bounds go
+// to two temporaries, `ForRange` turns them into the first and the last
+// value, and `ForRangeNext` writes each value straight into the loop
+// variable's register. A range without an end counts up to the largest Int.
+// A range that isn't written in the loop, like `r`, is counted through the
+// same way: `ForRange` reads its first and last value from it.
+// compile: stdlib
+fn f(n: Int) -> Int {
+    let total = 0;
+    for i in 0..n { total += i; }
+    for i in 1..=n { total += i; }
+    let r = 0..n;
+    for i in r { total += i; }
+    for i in (n..) { total += i; break; }
+    total
+}

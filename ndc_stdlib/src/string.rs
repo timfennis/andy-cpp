@@ -7,10 +7,10 @@ type StringRepr = Rc<VmString>;
 
 use anyhow::{Context, anyhow};
 
-pub fn join_to_string(list: Value, sep: &str) -> anyhow::Result<String> {
+pub fn join_to_string(list: &Value, sep: &str) -> anyhow::Result<String> {
     use std::fmt::Write;
     let mut iter = list
-        .try_into_iter()
+        .iter()
         .ok_or_else(|| anyhow!("join requires a sequence"))?;
     match iter.next() {
         None => Ok(String::new()),
@@ -120,7 +120,7 @@ mod inner {
     /// Joins elements of the sequence into a single string using `sep` as the separator.
     #[function(signature = "<T>(Iterable<T>, String) -> String")]
     pub fn join(list: Value, sep: &str) -> anyhow::Result<String> {
-        join_to_string(list, sep)
+        join_to_string(&list, sep)
     }
 
     /// Splits the string into paragraphs, using blank lines as separators.
@@ -132,7 +132,7 @@ mod inner {
     /// Joins paragraphs into a single string, inserting blank lines between them.
     #[function(signature = "<T>(Iterable<T>) -> String")]
     pub fn unparagraphs(list: Value) -> anyhow::Result<String> {
-        join_to_string(list, "\n\n")
+        join_to_string(&list, "\n\n")
     }
 
     /// Splits the string into lines, using newline characters as separators.
@@ -144,7 +144,7 @@ mod inner {
     /// Joins lines into a single string, inserting newline characters between them.
     #[function(signature = "<T>(Iterable<T>) -> String")]
     pub fn unlines(list: Value) -> anyhow::Result<String> {
-        join_to_string(list, "\n")
+        join_to_string(&list, "\n")
     }
 
     /// Splits the string into words, using whitespace as the separator.
@@ -156,7 +156,7 @@ mod inner {
     /// Joins words into a single string, separating them with spaces.
     #[function(signature = "<T>(Iterable<T>) -> String")]
     pub fn unwords(list: Value) -> anyhow::Result<String> {
-        join_to_string(list, " ")
+        join_to_string(&list, " ")
     }
 
     /// Splits the string by whitespace into a list of substrings.

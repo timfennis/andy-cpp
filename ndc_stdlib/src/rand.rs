@@ -43,7 +43,7 @@ mod inner {
     #[function(signature = "<T>(Iterable<T>) -> [T]")]
     pub fn shuffled(list: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
-            list.try_into_iter()
+            list.iter()
                 .ok_or_else(|| anyhow::anyhow!("shuffled requires a sequence"))?
                 .collect_vec()
                 .tap_mut(|v| v.shuffle(&mut rand::rng())),

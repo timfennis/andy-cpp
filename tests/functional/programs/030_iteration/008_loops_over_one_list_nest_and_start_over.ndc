@@ -1,0 +1,45 @@
+// Loops over a list or a tuple each keep their own place in it: loops over
+// the same list nest, a loop left by `break` starts over from the first
+// element the next time, and a loop inside a comprehension inside a loop
+// goes over its tuple for each element of the outer one. A list of tuples is
+// taken apart element by element, at the top level and in a function.
+// expect-output: [(1,1),(1,2),(2,1),(2,2)]
+// expect-output: [1,1,1]
+// expect-output: [[10,20],[11,21]]
+// expect-output: 5 [(1,"a"),(2,"b")]
+// expect-output: 5 [(1,"a"),(2,"b")]
+
+let xs = [1, 2];
+print([(a, b) for a in xs, b in xs]);
+
+let firsts = [];
+for _ in (0, 1, 2) {
+    for x in xs {
+        firsts.push(x);
+        break;
+    }
+}
+print(firsts);
+
+let rows = [];
+for i in (0, 1) {
+    rows.push([t + i for t in (10, 20)]);
+}
+print(rows);
+
+let pairs = [(1, "a"), (2, "b")];
+let sum = 0;
+for n, s in pairs {
+    sum += n + len(s);
+}
+print(sum, pairs);
+
+fn in_a_function() {
+    let pairs = [(1, "a"), (2, "b")];
+    let sum = 0;
+    for (n, s) in pairs {
+        sum += n + len(s);
+    }
+    print(sum, pairs);
+}
+in_a_function();

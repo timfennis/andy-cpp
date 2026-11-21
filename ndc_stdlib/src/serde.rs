@@ -108,6 +108,16 @@ fn object_to_json(
         Object::Iterator(_) => {
             bail!("cannot convert an iterator to JSON, collect it into a list first")
         }
+        Object::Range(range) if lossy => {
+            let values = range.bounds().map_or(Vec::new(), |(first, last)| {
+                (first..=last).map(|n| json!(n)).collect()
+            });
+            Ok(JsonValue::Array(values))
+        }
+        Object::Range(_) => {
+            bail!("cannot convert a range to JSON, convert it to a list first")
+        }
+        Object::RangeFrom(_) => bail!("cannot convert a range without an end to JSON"),
         Object::MaxHeap(h) if lossy => {
             // Priority order: the order `pop` would produce
             let mut sorted = h.borrow().clone().into_sorted_vec();

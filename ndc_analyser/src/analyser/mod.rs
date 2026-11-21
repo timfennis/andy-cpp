@@ -901,7 +901,11 @@ impl Analyser {
                     self.check_write(&StaticType::Int, &typ, bound.span);
                 }
 
-                StaticType::Iterator(Box::new(StaticType::Int))
+                if end.is_some() {
+                    StaticType::Range
+                } else {
+                    StaticType::RangeFrom
+                }
             }
             Expression::StructDeclaration { name, fields } => {
                 self.analyse_struct_declaration(*id, name, fields)

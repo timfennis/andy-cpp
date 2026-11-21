@@ -1,0 +1,28 @@
+// A function like `map` or `filter` goes over a sequence the way a `for` loop
+// does: a list is read as it is when it gets to each element, so one its
+// callback adds is visited; a map's keys are fixed when it starts, and a key
+// removed before it gets there is skipped; a string is read by character.
+// expect-output: [1,2,3,10,20] [1,2,3,10,20]
+// expect-output: 1
+// expect-output: ["hh","éé","ll"]
+
+let xs = [1, 2, 3];
+let mapped = xs.map(fn(x) { if len(xs) < 5 { xs.push(x * 10); } x });
+let ys = [1, 2, 3];
+let looped = [];
+for y in ys {
+    if len(ys) < 5 { ys.push(y * 10); }
+    looped.push(y);
+}
+print(mapped, looped);
+
+let m = %{1: 1, 2: 2, 3: 3};
+let kept = m.filter(fn(kv) {
+    for other in [1, 2, 3] {
+        if other != kv[0] { m.remove(other); }
+    }
+    true
+});
+print(len(kept));
+
+print("hél".map(fn(c) => c ++ c));

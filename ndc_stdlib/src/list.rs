@@ -12,7 +12,7 @@ mod inner {
     #[function(signature = "<T>(Iterable<T>) -> [T]")]
     pub fn list(seq: Value) -> anyhow::Result<Value> {
         Ok(Value::list(
-            seq.try_into_iter()
+            seq.iter()
                 .ok_or_else(|| anyhow!("list requires a sequence"))?
                 .collect::<Vec<_>>(),
         ))

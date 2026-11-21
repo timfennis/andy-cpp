@@ -44,10 +44,10 @@ fn index_natives() -> Vec<(String, StaticType)> {
     // The stdlib's list and map overloads.
     [
         ("[]", "<T>([T], Int) -> T"),
-        ("[]", "<T>([T], Iterator<Int>) -> [T]"),
+        ("[]", "<T>([T], Range) -> [T]"),
         ("[]", "<K, V>(%{K: V}, K) -> V"),
         ("[]=", "<T>([T], Int, T)"),
-        ("[]=", "<T>([T], Iterator<Int>, Iterable<T>)"),
+        ("[]=", "<T>([T], Range, Iterable<T>)"),
         ("[]=", "<K, V>(%{K: V}, K, V)"),
         ("[]=", "(String, Any, String)"),
     ]
