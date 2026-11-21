@@ -71,7 +71,12 @@ impl ValueIter {
             }
             Object::RangeFrom(start) => Self::Ints(*start..=i64::MAX),
             Object::Iterator(iterator) => Self::Shared(Rc::clone(iterator)),
-            Object::Some(_) | Object::Function(_) | Object::Struct { .. } => return None,
+            // A lazy sequence is read with the VM, which may run functions.
+            Object::Some(_)
+            | Object::Function(_)
+            | Object::Struct { .. }
+            | Object::Lazy(_)
+            | Object::LazyCursor(_) => return None,
         })
     }
 

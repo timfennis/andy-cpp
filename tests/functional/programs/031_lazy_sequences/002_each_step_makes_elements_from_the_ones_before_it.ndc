@@ -1,0 +1,16 @@
+// The steps a lazy sequence can have, each making its elements from those of
+// the steps before it.
+// expect-output: [10,20,30]
+// expect-output: [2,4]
+// expect-output: [1,1,2,2]
+// expect-output: [(0,"a"),(1,"b")]
+// expect-output: [1,2] [3,4]
+// expect-output: [1,2] [3,1]
+let xs = [1, 2, 3, 4];
+print([1, 2, 3].lazy.map(fn(x) => x * 10).list);
+print(xs.lazy.filter(fn(x) => x % 2 == 0).list);
+print([1, 2].lazy.flat_map(fn(x) => [x, x]).list);
+print("ab".lazy.enumerate().list);
+print(xs.lazy.take(2).list, xs.lazy.skip(2).list);
+let ys = [1, 2, 3, 1];
+print(ys.lazy.take_while(fn(y) => y < 3).list, ys.lazy.skip_while(fn(y) => y < 3).list);

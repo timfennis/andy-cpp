@@ -8,6 +8,7 @@ pub mod file;
 pub mod hash_map;
 pub mod heap;
 pub mod index;
+pub mod lazy;
 pub mod list;
 pub mod math;
 pub mod sequence;
@@ -34,6 +35,7 @@ pub fn register(env: &mut FunctionRegistry<NativeSpec>) {
     hash_map::register(env);
     heap::register(env);
     index::register(env);
+    lazy::register(env);
     list::ops::register(env);
     list::register(env);
     math::register(env);

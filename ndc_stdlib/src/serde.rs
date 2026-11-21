@@ -118,6 +118,9 @@ fn object_to_json(
             bail!("cannot convert a range to JSON, convert it to a list first")
         }
         Object::RangeFrom(_) => bail!("cannot convert a range without an end to JSON"),
+        Object::Lazy(_) | Object::LazyCursor(_) => {
+            bail!("cannot convert a lazy sequence to JSON, make it a list first")
+        }
         Object::MaxHeap(h) if lossy => {
             // Priority order: the order `pop` would produce
             let mut sorted = h.borrow().clone().into_sorted_vec();

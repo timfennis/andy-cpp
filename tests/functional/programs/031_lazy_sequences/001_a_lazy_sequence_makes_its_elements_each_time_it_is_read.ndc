@@ -1,0 +1,20 @@
+// A lazy sequence is a description, which printing shows: reading it makes
+// its elements, calling the functions its steps take, and reading it again
+// makes them again. Nothing is made until it's read.
+// expect-output: lazy([1,2,3]).map(<fn double>).take(2)
+// expect-output: before
+// expect-output: double 1
+// expect-output: double 2
+// expect-output: [2,4]
+// expect-output: double 1
+// expect-output: double 2
+// expect-output: [2,4]
+fn double(x) {
+    print("double", x);
+    x * 2
+}
+let doubled = [1, 2, 3].lazy.map(double).take(2);
+print(doubled);
+print("before");
+print(doubled.list);
+print(doubled.list);

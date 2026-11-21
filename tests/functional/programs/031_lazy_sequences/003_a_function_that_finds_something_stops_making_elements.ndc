@@ -1,0 +1,18 @@
+// `find`, `any`, `all`, `none`, `first_or` and `in` make elements only until
+// they know the answer.
+// expect-output: 3 [1,2,3]
+// expect-output: true [1,2]
+// expect-output: false [1]
+// expect-output: 1 [1]
+// expect-output: true [1,2,3]
+let seen = [];
+let numbers = [1, 2, 3, 4, 5].lazy.map(fn(x) { seen.push(x); x });
+print(numbers.find(fn(x) => x == 3), seen);
+seen = [];
+print(numbers.any(fn(x) => x == 2), seen);
+seen = [];
+print(numbers.all(fn(x) => x > 1), seen);
+seen = [];
+print(numbers.first_or(0), seen);
+seen = [];
+print(3 in numbers, seen);

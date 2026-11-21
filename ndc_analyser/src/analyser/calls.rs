@@ -41,6 +41,10 @@ impl Analyser {
             && let Some(help) = crate::error::adding_a_string(types)
         {
             AnalysisError::function_not_found(name, types, span).with_help(help)
+        } else if types.iter().any(|typ| matches!(typ, StaticType::Lazy(_))) {
+            AnalysisError::function_not_found(name, types, span).with_help(
+                "A lazy sequence goes only where a `Lazy` is taken, as a function that takes a list may not be able to make its elements. Make them into a list first, as in `list(xs)`.",
+            )
         } else {
             AnalysisError::function_not_found(name, types, span).with_overloads(
                 name,

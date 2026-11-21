@@ -391,6 +391,9 @@ impl AnalysisError {
             StaticType::Iterator(_) => {
                 "`==` says two iterators are equal only when they're the same one."
             }
+            StaticType::Lazy(_) => {
+                "`==` says two lazy sequences are equal only when they're the same one."
+            }
             StaticType::MinHeap(_) | StaticType::MaxHeap(_) => {
                 "`==` says two heaps are equal only when they're the same one."
             }

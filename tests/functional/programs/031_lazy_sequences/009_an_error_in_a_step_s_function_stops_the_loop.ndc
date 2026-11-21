@@ -1,0 +1,8 @@
+// An error in a function a step calls is reported where the loop reads the
+// sequence, and nothing after it runs.
+// expect-output: 1
+// expect-error: division by zero
+for x in [1, 0].lazy.map(fn(x) => 1 / x) {
+    print(x);
+}
+print("unreachable");

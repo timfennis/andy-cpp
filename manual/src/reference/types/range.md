@@ -18,6 +18,8 @@ for n in (10..) {
 }
 ```
 
+`map`, `filter` and the like give a [lazy sequence](./lazy.md) for a range without an end.
+
 ## A range is a value
 
 Looping over a range doesn't use it up, so you can keep one in a variable and use it as often as you like:

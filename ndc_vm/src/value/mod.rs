@@ -12,6 +12,7 @@ pub use string::VmString;
 
 use crate::hash_map::HashMap;
 use crate::iterator::{SharedIterator, ValueIter};
+use crate::lazy::{Lazy, LazyCursor};
 use ndc_core::StaticType;
 use ndc_core::collections::quality_hasher;
 use ndc_core::r#struct::StructInfo;
@@ -120,6 +121,11 @@ pub enum Object {
     Range(Range),
     /// `a..`: the `Int`s from `a` on, up to the largest.
     RangeFrom(i64),
+    /// `lazy(xs)` and what the functions that take one give.
+    Lazy(Lazy),
+    /// Where a `for` loop over a lazy sequence has got to, in the loop's
+    /// register: never a value a program holds.
+    LazyCursor(Rc<RefCell<LazyCursor>>),
     Deque(RefCell<VecDeque<Value>>),
     MinHeap(RefCell<BinaryHeap<Reverse<OrdValue>>>),
     MaxHeap(RefCell<BinaryHeap<OrdValue>>),
@@ -549,6 +555,11 @@ impl Value {
                 },
                 _ => false,
             },
+            // What a lazy sequence gives can't be known without making it.
+            StaticType::Lazy(element) => {
+                matches!(element.as_ref(), StaticType::Any)
+                    && matches!(self, Self::Object(object) if matches!(object.as_ref(), Object::Lazy(_)))
+            }
             // The remaining targets are non-container types (Never, Bool,
             // numerics, String, Function, Struct, Iterator). Container values
             // conform to none of them; answering that without `static_type`
@@ -778,12 +789,18 @@ impl Object {
             Self::MinHeap(heap) => Rc::new(Self::MinHeap(RefCell::new(heap.borrow().clone()))),
             Self::MaxHeap(heap) => Rc::new(Self::MaxHeap(RefCell::new(heap.borrow().clone()))),
             // Iterator: deep_copy if supported, otherwise share the Rc.
+            Self::Lazy(lazy) => Rc::new(Self::Lazy(
+                lazy.deep_copy_source(|source| source.deep_copy_with(copies)),
+            )),
             Self::Iterator(shared) => match shared.borrow().deep_copy() {
                 Some(iterator) => Rc::new(Self::Iterator(iterator)),
                 None => Rc::clone(object),
             },
-            // A function or range is shared: neither can change.
-            Self::Function(_) | Self::Range(_) | Self::RangeFrom(_) => Rc::clone(object),
+            // A function or range is shared: neither can change. A lazy
+            // cursor is never a program's value.
+            Self::Function(_) | Self::Range(_) | Self::RangeFrom(_) | Self::LazyCursor(_) => {
+                Rc::clone(object)
+            }
         };
         copies.insert(key, Rc::clone(&copy));
         copy
@@ -882,6 +899,8 @@ impl Object {
             }
             Self::Function(f) => f.static_type(),
             Self::Iterator(_) => StaticType::Iterator(Box::new(StaticType::Any)),
+            Self::Lazy(_) => StaticType::Lazy(Box::new(StaticType::Any)),
+            Self::LazyCursor(_) => StaticType::Any,
             Self::Range(_) => StaticType::Range,
             Self::RangeFrom(_) => StaticType::RangeFrom,
             Self::Deque(elements) => {
@@ -997,6 +1016,8 @@ fn display_contents(object: &Object, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "}}")
         }
         Object::Function(func) => write!(f, "{func}"),
+        Object::Lazy(lazy) => write!(f, "{lazy}"),
+        Object::LazyCursor(_) => write!(f, "<lazy cursor>"),
         Object::Iterator(iter) => match iter.borrow().len() {
             Some(n) => write!(f, "<iterator (len={n})>"),
             None => write!(f, "<iterator>"),
@@ -1052,6 +1073,8 @@ impl fmt::Debug for Object {
                 .field("default", default)
                 .finish(),
             Self::Function(func) => write!(f, "{func:?}"),
+            Self::Lazy(lazy) => write!(f, "{lazy}"),
+            Self::LazyCursor(_) => write!(f, "<lazy cursor>"),
             Self::Iterator(iter) => match iter.borrow().len() {
                 Some(n) => write!(f, "<iterator (len={n})>"),
                 None => write!(f, "<iterator>"),
@@ -1254,6 +1277,10 @@ impl PartialEq for Object {
                     fields: b_fields,
                 },
             ) => Rc::ptr_eq(a_info, b_info) && a_fields.borrow().eq(&*b_fields.borrow()),
+            // A lazy sequence is equal only to itself, as its elements
+            // can't be compared without making them.
+            (Self::Lazy(a), Self::Lazy(b)) => std::ptr::eq(a, b),
+            (Self::LazyCursor(a), Self::LazyCursor(b)) => Rc::ptr_eq(a, b),
             (Self::Iterator(a), Self::Iterator(b)) => {
                 // Compare iterators by pointer identity
                 std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b))
@@ -1331,6 +1358,8 @@ impl Hash for Object {
                 hash_function(f, state);
             }
             Self::Iterator(_) => state.write_u8(11),
+            Self::Lazy(_) => state.write_u8(18),
+            Self::LazyCursor(_) => state.write_u8(19),
             Self::Deque(d) => {
                 state.write_u8(12);
                 let d = d.borrow();

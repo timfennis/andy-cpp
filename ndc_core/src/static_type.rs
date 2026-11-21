@@ -68,6 +68,12 @@ pub enum StaticType {
     Range,
     /// A range without an end, `a..`.
     RangeFrom,
+    /// A lazy sequence: what `lazy(xs)` makes, and the functions that take
+    /// one give. It describes how to make its elements, which a `for` loop
+    /// or a function that takes a `Lazy` does each time it reads it. It
+    /// isn't an `Iterable<T>`: a function that takes one may not be able to
+    /// run the functions the sequence calls.
+    Lazy(Box<Self>),
     MinHeap(Box<Self>),
     MaxHeap(Box<Self>),
     Deque(Box<Self>),
@@ -115,6 +121,7 @@ impl StaticType {
         "Iterator",
         "Range",
         "RangeFrom",
+        "Lazy",
         "MinHeap",
         "MaxHeap",
         "Deque",
@@ -142,6 +149,9 @@ impl StaticType {
             }
             "Iterator" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::Iterator(Box::new(elem)))
+            }
+            "Lazy" => {
+                Self::require_exactly_one_arg(name, args).map(|elem| Self::Lazy(Box::new(elem)))
             }
             "MinHeap" => {
                 Self::require_exactly_one_arg(name, args).map(|elem| Self::MinHeap(Box::new(elem)))
@@ -243,6 +253,7 @@ impl StaticType {
             Self::Iterable(t)
             | Self::List(t)
             | Self::Iterator(t)
+            | Self::Lazy(t)
             | Self::MinHeap(t)
             | Self::MaxHeap(t)
             | Self::Deque(t) => Some(t.as_ref().clone()),
@@ -324,6 +335,7 @@ impl StaticType {
             (Self::Option(a), Self::Option(p))
             | (Self::List(a), Self::List(p))
             | (Self::Iterator(a), Self::Iterator(p))
+            | (Self::Lazy(a), Self::Lazy(p))
             | (Self::MinHeap(a), Self::MinHeap(p))
             | (Self::MaxHeap(a), Self::MaxHeap(p))
             | (Self::Deque(a), Self::Deque(p)) => matches(a, p),
@@ -410,6 +422,7 @@ impl StaticType {
             Self::Iterable(t) => Self::Iterable(map(t)),
             Self::List(t) => Self::List(map(t)),
             Self::Iterator(t) => Self::Iterator(map(t)),
+            Self::Lazy(t) => Self::Lazy(map(t)),
             Self::MinHeap(t) => Self::MinHeap(map(t)),
             Self::MaxHeap(t) => Self::MaxHeap(map(t)),
             Self::Deque(t) => Self::Deque(map(t)),
@@ -457,6 +470,7 @@ impl StaticType {
             | Self::Iterable(t)
             | Self::List(t)
             | Self::Iterator(t)
+            | Self::Lazy(t)
             | Self::MinHeap(t)
             | Self::MaxHeap(t)
             | Self::Deque(t) => t.contains(test),
@@ -595,6 +609,7 @@ impl StaticType {
             (Self::Option(s), Self::Option(t))
             | (Self::List(s), Self::List(t))
             | (Self::Iterator(s), Self::Iterator(t))
+            | (Self::Lazy(s), Self::Lazy(t))
             | (Self::MinHeap(s), Self::MinHeap(t))
             | (Self::MaxHeap(s), Self::MaxHeap(t))
             | (Self::Deque(s), Self::Deque(t)) => Self::held_overlap(s, t),
@@ -640,8 +655,10 @@ impl StaticType {
     }
 
     pub fn index_element_type(&self) -> Option<Self> {
-        if let Self::Map { value, .. } = self {
-            return Some(value.as_ref().clone());
+        match self {
+            Self::Map { value, .. } => return Some(value.as_ref().clone()),
+            Self::Lazy(_) => return None,
+            _ => {}
         }
 
         self.sequence_element_type()
@@ -698,6 +715,8 @@ impl StaticType {
             | Self::Float
             | Self::Int
             | Self::Map { .. }
+            // A lazy sequence is unpacked once it's a list.
+            | Self::Lazy(_)
             | Self::Struct { .. } // for now, we won't have positional unpacking
             | Self::Never
             | Self::Unknown => None,
@@ -740,6 +759,7 @@ impl fmt::Display for StaticType {
             }
             Self::Map { key, value } => write!(f, "%{{{key}: {value}}}"),
             Self::Iterator(elem) => write!(f, "Iterator<{elem}>"),
+            Self::Lazy(elem) => write!(f, "Lazy<{elem}>"),
             Self::Range => write!(f, "Range"),
             Self::RangeFrom => write!(f, "RangeFrom"),
             Self::MinHeap(elem) => write!(f, "MinHeap<{elem}>"),

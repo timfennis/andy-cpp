@@ -798,7 +798,11 @@ fn aggregate(args: &[Value], mode: NumericMode, product: bool) -> Result<Value, 
     aggregate_values(values, mode, product)
 }
 
-fn aggregate_values<I>(mut values: I, mode: NumericMode, product: bool) -> Result<Value, VmError>
+pub(crate) fn aggregate_values<I>(
+    mut values: I,
+    mode: NumericMode,
+    product: bool,
+) -> Result<Value, VmError>
 where
     I: Iterator,
     I::Item: std::borrow::Borrow<Value>,

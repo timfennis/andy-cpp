@@ -545,6 +545,7 @@ impl Analyser {
             StaticType::Any
             | StaticType::Function { .. }
             | StaticType::Iterator(_)
+            | StaticType::Lazy(_)
             | StaticType::MinHeap(_)
             | StaticType::MaxHeap(_) => {
                 *found.borrow_mut() = Some(part.clone());

@@ -23,7 +23,7 @@ use ndc_vm::value::{Object, Value};
 use ndc_vm::{CombinationsIter, EnumerateIter, TakeIter};
 use std::cmp::Ordering;
 
-fn try_sort_by<E>(
+pub(crate) fn try_sort_by<E>(
     v: &mut [Value],
     cmp: impl Fn(&Value, &Value) -> Result<Ordering, E>,
 ) -> Result<(), E> {
@@ -47,7 +47,7 @@ fn try_sort_by<E>(
 
 /// The element of `iter` that compares `better` (`Greater` for the largest)
 /// than the others, the first of equal ones.
-fn vm_try_extreme(
+pub(crate) fn vm_try_extreme(
     mut iter: impl Iterator<Item = Value>,
     better: Ordering,
 ) -> anyhow::Result<Value> {
@@ -682,6 +682,59 @@ mod inner {
     pub fn take(seq: Value, n: usize) -> anyhow::Result<Value> {
         let iter = TakeIter::new(&seq, n).ok_or_else(|| anyhow!("take requires a sequence"))?;
         Ok(Value::iterator(iter.into_shared()))
+    }
+
+    /// Returns the elements of `seq` after the first `n`, as a list.
+    #[function(signature = "<T>(Iterable<T>, Int) -> [T]")]
+    pub fn skip(seq: Value, n: usize) -> anyhow::Result<Value> {
+        let iter = seq
+            .iter()
+            .ok_or_else(|| anyhow!("skip requires a sequence"))?;
+        Ok(Value::list(iter.skip(n).collect()))
+    }
+
+    /// Returns the elements of `seq` up to the first the `predicate` gives `false` for, as a list.
+    #[function(signature = "<T>(Iterable<T>, fn(T) -> Bool) -> [T]")]
+    pub fn take_while(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        let mut out = Vec::new();
+        for element in seq
+            .iter()
+            .ok_or_else(|| anyhow!("take_while requires a sequence"))?
+        {
+            match predicate
+                .call(std::slice::from_ref(&element))
+                .map_err(|e| anyhow!(e))?
+            {
+                Value::Bool(true) => out.push(element),
+                Value::Bool(false) => break,
+                _ => return Err(anyhow!("return value of predicate must be a boolean")),
+            }
+        }
+        Ok(Value::list(out))
+    }
+
+    /// Returns the elements of `seq` from the first the `predicate` gives `false` for on, as a list.
+    #[function(signature = "<T>(Iterable<T>, fn(T) -> Bool) -> [T]")]
+    pub fn skip_while(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        let mut iter = seq
+            .iter()
+            .ok_or_else(|| anyhow!("skip_while requires a sequence"))?;
+        let mut out = Vec::new();
+        for element in iter.by_ref() {
+            match predicate
+                .call(std::slice::from_ref(&element))
+                .map_err(|e| anyhow!(e))?
+            {
+                Value::Bool(true) => {}
+                Value::Bool(false) => {
+                    out.push(element);
+                    break;
+                }
+                _ => return Err(anyhow!("return value of predicate must be a boolean")),
+            }
+        }
+        out.extend(iter);
+        Ok(Value::list(out))
     }
 
     /// Returns the `k` sized permutations of the given sequence `seq` as a list of lists.

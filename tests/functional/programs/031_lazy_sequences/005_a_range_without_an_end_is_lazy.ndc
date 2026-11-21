@@ -1,0 +1,8 @@
+// A range without an end can't be made into a list, so `map`, `filter` and
+// the other steps give a lazy sequence for one, without `lazy`.
+// expect-output: [1,4,9]
+// expect-output: 12
+// expect-output: [(0,5),(1,6)]
+print((1..).map(fn(x) => x * x).take(3).list);
+print((1..).filter(fn(x) => x % 4 == 0).skip(2).first_or(0));
+print((5..).enumerate().take(2).list);

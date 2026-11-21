@@ -1,0 +1,5 @@
+// A function that takes a list or another kind of sequence doesn't take a
+// lazy sequence, as it may not be able to make its elements.
+// expect-error: A lazy sequence goes only where a `Lazy` is taken
+let numbers = [1, 2].lazy;
+print(numbers.pairwise);

@@ -257,6 +257,14 @@ enum Exit {
         slot: u16,
         args: u8,
     },
+    /// The next element of the lazy sequence whose cursor is in register
+    /// `iter`, into register `dst`, or a jump to `end` if there's none:
+    /// making it may call functions, which takes the VM.
+    LazyNext {
+        iter: usize,
+        dst: usize,
+        end: usize,
+    },
     Return {
         src: Reg,
     },
@@ -931,6 +939,13 @@ impl Vm {
                                     .map(|element| out.clone_from(element)),
                                 true,
                             ),
+                            Object::LazyCursor(_) => {
+                                break Exit::LazyNext {
+                                    iter,
+                                    dst: dst.index(),
+                                    end: short_jump(ip, offset, far_jumps),
+                                };
+                            }
                             _ => unreachable!("internal error: GetIterator writes an iterable"),
                         };
                         if found.is_none() {
@@ -1007,6 +1022,7 @@ impl Vm {
                     self.run_native(&native, base + first.index(), usize::from(args))
                         .map(|value| self.stack[base + dst.index()] = value)
                 }
+                Exit::LazyNext { iter, dst, end } => self.lazy_next(base + iter, base + dst, end),
                 Exit::Return { src } => {
                     let result = self.return_from_call(base, src);
                     if result.is_ok() && self.frames.len() == target_depth {
@@ -1032,6 +1048,31 @@ impl Vm {
                 return Err(error);
             }
         }
+    }
+
+    /// Makes the next element of the lazy sequence whose cursor is at `iter`
+    /// in the stack and puts it at `dst`, or if there's none, sends the frame
+    /// on top to `end`.
+    #[inline(never)]
+    fn lazy_next(&mut self, iter: usize, dst: usize, end: usize) -> Result<(), VmError> {
+        let cursor = match &self.stack[iter] {
+            Value::Object(object) => match object.as_ref() {
+                Object::LazyCursor(cursor) => Rc::clone(cursor),
+                _ => unreachable!("internal error: LazyNext's register holds a lazy cursor"),
+            },
+            _ => unreachable!("internal error: LazyNext's register holds a lazy cursor"),
+        };
+        let next = cursor.borrow_mut().next(self)?;
+        match next {
+            Some(value) => self.stack[dst] = value,
+            None => {
+                self.frames
+                    .last_mut()
+                    .expect("internal error: a running VM has a frame")
+                    .ip = end as u32;
+            }
+        }
+        Ok(())
     }
 
     /// Ends the call whose frame is on top, which starts at `base`, giving
@@ -1493,11 +1534,17 @@ fn is_list_or_tuple(value: &Value) -> bool {
     matches!(value, Value::Object(object) if matches!(object.as_ref(), Object::List(_) | Object::Tuple(_)))
 }
 
-/// An iterator over `value`: the value itself if it's an iterator, and a
-/// cursor over its elements (see [`ValueIter`]) if it's a deque, string,
-/// map, heap or range.
+/// An iterator over `value`: the value itself if it's an iterator, a cursor
+/// over its elements (see [`ValueIter`]) if it's a deque, string, map, heap
+/// or range, and a cursor at its start if it's a lazy sequence.
 #[inline(never)]
 fn iterator_of(value: &Value) -> Result<Value, String> {
+    if let Value::Object(object) = value
+        && let Object::Lazy(lazy) = object.as_ref()
+    {
+        let cursor = Rc::new(RefCell::new(lazy.cursor()));
+        return Ok(Value::Object(Rc::new(Object::LazyCursor(cursor))));
+    }
     match value.iter() {
         Some(ValueIter::Shared(_)) => Ok(value.clone()),
         Some(cursor) => Ok(Value::iterator(Rc::new(RefCell::new(cursor)))),
