@@ -30,8 +30,9 @@ that takes more than 5% longer (and more than two milliseconds longer, which
 is noise) on no more instructions is listed to check: rebuild both binaries
 with another function alignment (`RUSTFLAGS="-C
 llvm-args=-align-all-functions=6"`) or another linker, and if it's no longer
-slower there, it was where the code landed. Without `perf`, the gate goes by
-time: no program may take more than 5% longer.
+slower there, it was where the code landed. A program whose instructions
+couldn't be counted on both binaries, as without `perf` or when a profiling
+run fails, goes by time instead: it may not take more than 5% longer.
 
 Build both binaries the same way (same toolchain, same profile) and don't build
 anything else while this runs. To compare two settings of one binary, give it
@@ -150,7 +151,8 @@ def run(binary: Binary, program: Path) -> Run:
 
 def count_instructions(binary: Binary, program: Path) -> int | None:
     """The instructions `program` runs in user space, the fewest of a few
-    runs, or `None` without `perf` or when it can't count them."""
+    runs, or `None` without `perf`, when it can't count them, or when a run
+    fails, as a run that stops early would count too few."""
     perf = shutil.which("perf")
     if perf is None:
         return None
@@ -158,7 +160,7 @@ def count_instructions(binary: Binary, program: Path) -> int | None:
     for _ in range(INSTRUCTION_RUNS):
         with tempfile.NamedTemporaryFile(mode="r") as stats:
             try:
-                subprocess.run(
+                completed = subprocess.run(
                     [perf, "stat", "--no-scale", "-x", ",", "-e", "instructions:u", "-o", stats.name, "--"]
                     + [str(binary.path)]
                     + [program.name],
@@ -171,6 +173,8 @@ def count_instructions(binary: Binary, program: Path) -> int | None:
                     check=False,
                 )
             except subprocess.TimeoutExpired:
+                return None
+            if completed.returncode != 0:
                 return None
             # A processor with two kinds of core has a line for each, which
             # counts while the program runs on that kind. Unscaled, as `perf`
@@ -417,19 +421,20 @@ def main() -> int:
         print("  FAIL")
         return 1
     every = [r for rows in measured for r in rows]
-    counted = all(r.instruction_ratio is not None for r in every)
+    # A program whose instructions were counted on both binaries goes by them;
+    # one whose weren't goes by time.
+    counted = [r for r in every if r.instruction_ratio is not None]
+    uncounted = [r for r in every if r.instruction_ratio is None]
+    more = [r.name for r in counted if r.more_instructions]
+    layout = [r.name for r in counted if r.too_slow and not r.more_instructions]
+    slower = [r.name for r in uncounted if r.too_slow]
     print(f"  programs that behave differently: {', '.join(name for name, _ in differing) or 'none'}")
-    if counted:
-        more = [r.name for r in every if r.more_instructions]
-        layout = [r.name for r in every if r.too_slow and not r.more_instructions]
-        print(f"  programs running more than 2% more instructions: {', '.join(more) or 'none'}")
-        passed = not more and not differing
-    else:
-        print("  instructions not counted (perf is missing or can't count them), so going by time")
-        slower = [r.name for r in every if r.too_slow]
-        layout = []
-        print(f"  programs taking more than 5% longer: {', '.join(slower) or 'none'}")
-        passed = not slower and not differing
+    print(f"  programs running more than 2% more instructions: {', '.join(more) or 'none'}")
+    if uncounted:
+        programs = "1 program" if len(uncounted) == 1 else f"{len(uncounted)} programs"
+        print(f"  {programs} without an instruction count (perf is missing or couldn't count them), going by time")
+        print(f"  of those, taking more than 5% longer: {', '.join(slower) or 'none'}")
+    passed = not more and not slower and not differing
     print(f"  {'PASS' if passed else 'FAIL'}")
     if layout:
         print("\nCheck the layout")
