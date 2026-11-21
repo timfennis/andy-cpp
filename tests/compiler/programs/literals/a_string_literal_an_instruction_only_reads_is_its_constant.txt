@@ -1,0 +1,23 @@
+== <script> (registers: 2, globals: 1) ==
+0000  LoadK r1, k0                         <fn #1 f>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  Halt r0
+
+== #1 f (registers: 7) ==
+0000  MakeString r0, k0                    "a"
+0001  MakeString r5, k1                    "b"
+0002  MakeList r1, r5, 1
+0003  LoadK r5, k2                         "@"
+0004  JumpIfNotEqual r0, r5, +2            -> 0007
+0005  LoadK r2, k3                         1
+0006  Jump +1                              -> 0008
+0007  LoadK r2, k4                         2
+0008  LoadK r5, k5                         "#"
+0009  NotEqual r3, r0, r5
+0010  LoadK r5, k6                         0
+0011  MakeString r6, k7                    "@"
+0012  ListSet r1, r5, r6
+0013  MakeString r4, k8                    "@"
+0014  LoadUnit r5
+0015  Return r5

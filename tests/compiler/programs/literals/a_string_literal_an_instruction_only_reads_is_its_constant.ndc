@@ -1,0 +1,13 @@
+// A string literal that an instruction only reads, as `==` and `!=` do, is its
+// constant itself (`LoadK`): nothing can store or change it there. Where the
+// string can be kept, as the value `ListSet` puts in the list and a variable's
+// value, the literal makes a new string (`MakeString`).
+// compile: stdlib
+fn f() {
+    let c = "a";
+    let xs = ["b"];
+    let at = if c == "@" { 1 } else { 2 };
+    let different = c != "#";
+    xs[0] = "@";
+    let x = "@";
+}
