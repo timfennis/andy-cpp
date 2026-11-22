@@ -75,16 +75,13 @@ pub fn serve(configure: Configure) -> Result<(), Error> {
             message: "server initialized".to_string(),
         },
     );
-    server.run()?;
-
-    // Dropping the server closes the job queue, which ends the worker, and the
-    // connection, which ends the writer thread.
-    drop(server);
-    worker
-        .join()
-        .map_err(|_panic| "the analysis thread panicked".to_string())?;
-    io_threads.join()?;
-    Ok(())
+    // The server doesn't wait for the analysis thread, or a large document's
+    // analysis could hold up the exit for seconds, nor for the writer thread,
+    // which the analysis thread keeps open: the client has had the answer to
+    // `shutdown` by the time it sends `exit`, and the threads end with the
+    // process.
+    drop((worker, io_threads));
+    server.run()
 }
 
 /// What the server can do, as it tells the client in `initialize`.
@@ -145,19 +142,26 @@ struct Job {
 // The main thread handles messages in order. An edit updates the document's
 // source and `version` right away, so completion (triggered by `.`) always sees
 // the latest text, then queues the text for the analysis thread. That thread
-// analyses every text in order, off the lock. It commits an analysis that
-// parsed even when a later edit has superseded it, as the last good one: the
-// completion caches (`variable_types` by name, `expression_types` by end
-// offset) work from it while the current text doesn't parse (`x.`, just after
-// typing the dot), mapping the cursor back into the text it was of, and
+// analyses off the lock. When it's free it takes everything queued since it
+// last looked, and of each document analyses only the newest text: while it's
+// keeping up that's every text, and when it falls behind it skips to the
+// newest instead of building a backlog. If the newest text doesn't parse (`x.`,
+// just after typing the dot), it also analyses the newest skipped text that
+// does, so completion keeps what the last text that parsed worked out.
+//
+// It commits an analysis that parsed even when a later edit has superseded
+// it, as the last good one: the completion caches (`variable_types` by name,
+// `expression_types` by end offset) work from it while the current text
+// doesn't parse, mapping the cursor back into the text it was of, and
 // `analysis_matches_source` stays false, so the AST-backed features (hover,
-// go-to-def, symbols, inlay hints) never map its spans onto edited text. As the
-// thread goes in order, a commit never replaces a newer analysis. It publishes
-// diagnostics only for the current text. It holds the lock across the commit
-// and the publish, as `didClose` does across its removal and its publish, so a
-// close can't slip in between and leave stale diagnostics on a closed file.
+// go-to-def, symbols, inlay hints) never map its spans onto edited text. Each
+// text it commits is newer than any it committed before, so a commit never
+// replaces a newer analysis. It publishes diagnostics only for the current
+// text. It holds the lock across the commit and the publish, as `didClose`
+// does across its removal and its publish, so a close can't slip in between
+// and leave stale diagnostics on a closed file.
 
-/// Analyses the texts queued on `queue`, in order, until the queue closes.
+/// Analyses the texts queued on `queue` until the queue closes.
 fn analyse_jobs(
     queue: &mpsc::Receiver<Job>,
     documents: &Documents,
@@ -165,15 +169,80 @@ fn analyse_jobs(
     configure: Configure,
     refresh_inlay_hints: bool,
 ) {
-    let mut refreshes = 0;
-    for job in queue {
+    let mut worker = Worker {
+        documents,
+        sender,
+        configure,
+        refresh_inlay_hints,
+        refreshes: 0,
+    };
+    while let Ok(first) = queue.recv() {
+        // What came in since the last look, by opening of a document, oldest first.
+        let mut queued: Vec<Vec<Job>> = Vec::new();
+        for job in std::iter::once(first).chain(queue.try_iter()) {
+            let same =
+                |texts: &&mut Vec<Job>| texts[0].uri == job.uri && texts[0].opening == job.opening;
+            match queued.iter_mut().find(same) {
+                Some(texts) => texts.push(job),
+                None => queued.push(vec![job]),
+            }
+        }
+        for texts in queued {
+            worker.catch_up(texts);
+        }
+    }
+}
+
+/// The analysis thread's state.
+struct Worker<'a> {
+    documents: &'a Documents,
+    sender: &'a crossbeam_channel::Sender<Message>,
+    configure: Configure,
+    refresh_inlay_hints: bool,
+    /// The number of inlay hint refreshes sent, which numbers each one.
+    refreshes: u64,
+}
+
+impl Worker<'_> {
+    /// Analyses the newest of `texts`, the texts of one opening of a document
+    /// in the order they came in, and if it doesn't parse, the newest of the
+    /// others that does.
+    fn catch_up(&mut self, mut texts: Vec<Job>) {
+        let Some(newest) = texts.pop() else {
+            return;
+        };
+        let open = self
+            .documents
+            .read()
+            .get(&newest.uri)
+            .is_some_and(|open| open.opening == newest.opening);
+        if !open {
+            return;
+        }
+        // An analysis of a text that doesn't parse stops at the parser, so it
+        // costs next to nothing: analyse the last text that parsed first, as
+        // that's what a completion right after the dot waits for.
+        if !document::parses(&newest.text)
+            && let Some(last_good) = texts
+                .into_iter()
+                .rev()
+                .find(|job| document::parses(&job.text))
+        {
+            self.analyse(last_good, false);
+        }
+        self.analyse(newest, true);
+    }
+
+    /// Analyses `job`'s text and commits what it works out, and publishes its
+    /// diagnostics if `publish` and it's the current text.
+    fn analyse(&mut self, job: Job, publish: bool) {
         // A bug in the analyser mustn't end this thread, or diagnostics would
         // stop for the rest of the session: skip the text instead.
-        let Ok((diagnostics, analysed)) =
-            panic::catch_unwind(AssertUnwindSafe(|| document::analyse(configure, &job.text)))
-        else {
+        let Ok((diagnostics, analysed)) = panic::catch_unwind(AssertUnwindSafe(|| {
+            document::analyse(self.configure, &job.text)
+        })) else {
             notify::<LogMessage>(
-                sender,
+                self.sender,
                 LogMessageParams {
                     typ: MessageType::ERROR,
                     message: format!(
@@ -183,31 +252,31 @@ fn analyse_jobs(
                     ),
                 },
             );
-            continue;
+            return;
         };
 
-        let mut docs = documents.write();
+        let mut docs = self.documents.write();
         let Some(open) = docs.get_mut(&job.uri) else {
-            continue;
+            return;
         };
         // The text of an earlier opening of the document is no text of this one.
         if open.opening != job.opening {
-            continue;
+            return;
         }
         let current = open.version == job.version;
         // On parse failure, keep the last good AST.
         if let Some(analysed) = analysed {
             open.state.set_analysis_of(job.text, analysed);
         }
-        if current {
-            if refresh_inlay_hints && open.state.analysis_matches_source {
-                refreshes += 1;
-                let id = RequestId::from(format!("inlay-hint-refresh-{refreshes}"));
+        if publish && current {
+            if self.refresh_inlay_hints && open.state.analysis_matches_source {
+                self.refreshes += 1;
+                let id = RequestId::from(format!("inlay-hint-refresh-{}", self.refreshes));
                 let request = Request::new(id, InlayHintRefreshRequest::METHOD.to_string(), ());
                 // The send fails only once the client has gone.
-                let _ = sender.send(request.into());
+                let _ = self.sender.send(request.into());
             }
-            publish_diagnostics(sender, job.uri, diagnostics, Some(job.version));
+            publish_diagnostics(self.sender, job.uri, diagnostics, Some(job.version));
         }
     }
 }
@@ -500,12 +569,20 @@ mod tests {
     /// Runs the analysis thread's loop over the texts `texts` of one document
     /// that came in before it got to any of them, and returns the document.
     fn analyse_in_turn(texts: &[&str]) -> (OpenDocument, Vec<Message>) {
-        analyse_in_turn_refreshing(texts, false)
+        analyse_with(texts, false, ndc_stdlib::register)
     }
 
     fn analyse_in_turn_refreshing(
         texts: &[&str],
         refresh_inlay_hints: bool,
+    ) -> (OpenDocument, Vec<Message>) {
+        analyse_with(texts, refresh_inlay_hints, ndc_stdlib::register)
+    }
+
+    fn analyse_with(
+        texts: &[&str],
+        refresh_inlay_hints: bool,
+        configure: Configure,
     ) -> (OpenDocument, Vec<Message>) {
         let uri = Uri::from_str("file:///t.ndc").expect("a valid uri");
         let documents = Documents::default();
@@ -529,13 +606,7 @@ mod tests {
         }
         drop(jobs);
         let (sender, messages) = crossbeam_channel::unbounded();
-        analyse_jobs(
-            &queue,
-            &documents,
-            &sender,
-            ndc_stdlib::register,
-            refresh_inlay_hints,
-        );
+        analyse_jobs(&queue, &documents, &sender, configure, refresh_inlay_hints);
         let open = documents.write().remove(&uri).expect("the document");
         (open, messages.try_iter().collect())
     }
@@ -582,5 +653,59 @@ mod tests {
     fn inlay_hints_are_not_refreshed_for_a_client_that_cannot() {
         let (_, messages) = analyse_in_turn(&["let x = 1;"]);
         assert_eq!(refreshes(&messages), 0);
+    }
+
+    // Each analysis configures one interpreter, so a `Configure` that counts
+    // its calls counts the analyses. Each test has its own, as tests run at
+    // the same time.
+    macro_rules! counting_configure {
+        ($name:ident, $count:ident) => {
+            static $count: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            fn $name(registry: &mut ndc_core::FunctionRegistry<ndc_interpreter::NativeSpec>) {
+                $count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                ndc_stdlib::register(registry);
+            }
+        };
+    }
+
+    #[test]
+    fn a_burst_of_edits_is_analysed_once() {
+        counting_configure!(configure, ANALYSES);
+        let (open, messages) = analyse_with(
+            &["let x = 1;", "let x = 12;", "let x = 123;"],
+            false,
+            configure,
+        );
+        assert_eq!(ANALYSES.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert!(open.state.analysis_matches_source);
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn a_burst_ending_in_a_text_that_does_not_parse_also_analyses_the_newest_that_does() {
+        counting_configure!(configure, ANALYSES);
+        let texts = [
+            "let words = [\"a\"];\n",
+            "let words = [\"a\"];\nwords.len();",
+            "let words = [\"a\"];\nwords.len();\nwords.",
+        ];
+        let (open, messages) = analyse_with(&texts, false, configure);
+        assert_eq!(ANALYSES.load(std::sync::atomic::Ordering::Relaxed), 2);
+        assert!(!open.state.analysis_matches_source);
+        assert!(open.state.variable_types.contains_key("words"));
+        // Only the current text's diagnostics are published.
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[test]
+    fn a_burst_in_which_nothing_parses_is_analysed_once() {
+        counting_configure!(configure, ANALYSES);
+        let (open, _) = analyse_with(
+            &["let x = 1 +;", "let x = 1 + ;", "let x = 1 +  ;"],
+            false,
+            configure,
+        );
+        assert_eq!(ANALYSES.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert!(!open.state.analysis_matches_source);
     }
 }
