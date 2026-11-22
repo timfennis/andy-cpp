@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 use std::panic::{self, AssertUnwindSafe};
 
-use ls_types::{Diagnostic, Position, Range, TextEdit};
+use ls_types::{Diagnostic, DocumentHighlight, DocumentHighlightKind, Position, Range, TextEdit};
 use ndc_core::collections::HashMap;
 use ndc_lexer::{Lexer, SourceId, Span, Token};
 
@@ -16,14 +16,6 @@ use crate::names::{Name, Refers};
 use crate::resolved::Definition;
 use crate::scope_resolve::{DeclKind, collect_declarations, file_scope, is_visible};
 use crate::state::DocumentState;
-
-/// One place a name is written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Occurrence {
-    pub range: Range,
-    /// Whether it declares or assigns rather than reads.
-    pub write: bool,
-}
 
 /// Why a rename of a text that isn't analysed can't be done.
 pub const NOT_ANALYSED: &str =
@@ -49,15 +41,19 @@ pub fn references(
 
 /// Every place the name under the cursor's declarations are named,
 /// declarations included, each as a read or a write.
-pub fn highlights(state: &DocumentState, position: Position) -> Vec<Occurrence> {
+pub fn highlights(state: &DocumentState, position: Position) -> Vec<DocumentHighlight> {
     let Some(targets) = targets_at(state, position) else {
         return Vec::new();
     };
     occurrences(state, &Meanings::new(state), &targets)
         .into_iter()
-        .map(|name| Occurrence {
+        .map(|name| DocumentHighlight {
             range: state.line_index.range(&state.source, name.span),
-            write: name.write,
+            kind: Some(if name.write {
+                DocumentHighlightKind::WRITE
+            } else {
+                DocumentHighlightKind::READ
+            }),
         })
         .collect()
 }
@@ -90,6 +86,41 @@ pub fn rename(
     position: Position,
     new_name: &str,
 ) -> Result<Option<Vec<TextEdit>>, String> {
+    match plan_rename(state, builtins, position, new_name)? {
+        Some(plan) => plan.check(configure).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// A rename worked out on a document's analysis, which [`Self::check`]
+/// still has to check by analysing the program and the renamed program. It
+/// holds what that needs, so the check doesn't need the document.
+pub struct PlannedRename {
+    /// The program's text.
+    source: String,
+    /// Where the renamed names are, in the order they're written.
+    spans: Vec<Span>,
+    new_name: String,
+    edits: Vec<TextEdit>,
+}
+
+impl PlannedRename {
+    /// The edits, if analysing the renamed program finds every name meaning
+    /// the same declarations as before and no error the program didn't have.
+    pub fn check(self, configure: Configure) -> Result<Vec<TextEdit>, String> {
+        check_renamed(configure, &self.source, &self.spans, &self.new_name)?;
+        Ok(self.edits)
+    }
+}
+
+/// [`rename`] up to the analysis of the renamed program: everything it can
+/// tell from the document's analysis, quickly.
+pub fn plan_rename(
+    state: &DocumentState,
+    builtins: &[FunctionInfo],
+    position: Position,
+    new_name: &str,
+) -> Result<Option<PlannedRename>, String> {
     let Some(offset) = state.line_index.offset(&state.source, position) else {
         return Ok(None);
     };
@@ -115,17 +146,19 @@ pub fn rename(
     }
     let occurrences = occurrences(state, &meanings, &targets);
     check_conflicts(state, &targets, &occurrences, new_name)?;
-    check_renamed(state, &meanings, configure, &occurrences, new_name)?;
 
-    Ok(Some(
-        occurrences
+    Ok(Some(PlannedRename {
+        source: state.source.clone(),
+        spans: occurrences.iter().map(|name| name.span).collect(),
+        new_name: new_name.to_string(),
+        edits: occurrences
             .iter()
             .map(|name| TextEdit {
                 range: state.line_index.range(&state.source, name.span),
                 new_text: new_name.to_string(),
             })
             .collect(),
-    ))
+    }))
 }
 
 /// What the name under the cursor refers to, if it refers to something the
@@ -283,10 +316,9 @@ fn check_conflicts(
 /// doesn't. That covers what [`check_conflicts`] can't see: overloads, the
 /// built-ins and a struct's field getters joining a call's candidates.
 fn check_renamed(
-    state: &DocumentState,
-    meanings: &Meanings<'_>,
     configure: Configure,
-    occurrences: &[Name],
+    source: &str,
+    occurrences: &[Span],
     new_name: &str,
 ) -> Result<(), String> {
     let changes = || {
@@ -295,21 +327,27 @@ fn check_renamed(
         ))
     };
 
-    let mut renamed = state.source.clone();
-    for name in occurrences.iter().rev() {
-        renamed.replace_range(name.span.offset()..name.span.end(), new_name);
+    let mut renamed = source.to_string();
+    for span in occurrences.iter().rev() {
+        renamed.replace_range(span.offset()..span.end(), new_name);
     }
     // Where an offset in the program is in the renamed program.
     let moved = |offset: usize| -> usize {
-        let before = occurrences
-            .iter()
-            .filter(|name| name.span.offset() < offset);
-        before.fold(offset, |offset, name| {
-            offset + new_name.len() - (name.span.end() - name.span.offset())
+        let before = occurrences.iter().filter(|span| span.offset() < offset);
+        before.fold(offset, |offset, span| {
+            offset + new_name.len() - (span.end() - span.offset())
         })
     };
 
-    let (diagnostics, _) = analyse(configure, &state.source)?;
+    // Both programs are analysed here, so the check needs nothing of the
+    // document's state and can run without holding it.
+    let (diagnostics, analysed) = analyse(configure, source)?;
+    let Some(analysed) = analysed else {
+        return Err(NOT_ANALYSED.to_string());
+    };
+    let mut state = DocumentState::from_source(source.to_string());
+    state.set_analysis(analysed);
+    let meanings = Meanings::new(&state);
     let (renamed_diagnostics, analysed) = analyse(configure, &renamed)?;
     if !no_new_errors(&diagnostics, &renamed_diagnostics) {
         return changes();
@@ -334,7 +372,7 @@ fn check_renamed(
         else {
             return changes();
         };
-        let before: BTreeSet<usize> = declared_at(state, meanings.of(name))
+        let before: BTreeSet<usize> = declared_at(&state, meanings.of(name))
             .into_iter()
             .map(&moved)
             .collect();
