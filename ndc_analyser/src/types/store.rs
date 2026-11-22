@@ -144,6 +144,7 @@ impl TypeVars {
     /// [`Self::leave_level`] belong to it.
     pub(crate) fn enter_level(&mut self) {
         self.level += 1;
+        self.open_body_literals();
     }
 
     /// Ends the body [`Self::enter_level`] started. The variables it made
@@ -262,7 +263,7 @@ impl TypeVars {
                     let joined = self.bounds[other.0 as usize].then(&kept);
                     let old = std::mem::replace(&mut self.bounds[other.0 as usize], joined);
                     self.undo.push(Undo::Bounds(other, old));
-                    self.literals.push(other);
+                    self.list_literal(other);
                 }
                 // The values of two literals have to have a type in common:
                 // `["s"]` and `[1]` can't be one literal's type.
@@ -300,6 +301,8 @@ impl TypeVars {
         let tried = try_it(context);
         if tried.is_none() {
             vars(context).rollback(snapshot);
+        } else {
+            vars(context).keep(snapshot);
         }
         tried
     }
@@ -329,7 +332,8 @@ impl TypeVars {
     }
 
     /// The current state, to [`Self::rollback`] to later.
-    pub(super) fn snapshot(&self) -> Snapshot {
+    pub(super) fn snapshot(&mut self) -> Snapshot {
+        self.open_snapshots += 1;
         Snapshot {
             vars: self.solutions.len(),
             trail: self.trail.len(),
@@ -340,6 +344,7 @@ impl TypeVars {
     /// Unsettles what was settled since `snapshot`, and forgets the variables
     /// made since.
     pub(super) fn rollback(&mut self, snapshot: Snapshot) {
+        self.open_snapshots -= 1;
         for var in self.trail.drain(snapshot.trail..) {
             self.solutions[var.0 as usize] = None;
         }
@@ -361,6 +366,11 @@ impl TypeVars {
         self.levels.truncate(snapshot.vars);
         self.bounds.truncate(snapshot.vars);
         self.contents.retain(|var| (var.0 as usize) < snapshot.vars);
+    }
+
+    /// Keeps what was settled since `snapshot`.
+    fn keep(&mut self, _: Snapshot) {
+        self.open_snapshots -= 1;
     }
 
     /// The unsettled variables in `typ`, each once, outermost first.

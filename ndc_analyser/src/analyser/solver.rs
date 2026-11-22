@@ -8,7 +8,7 @@ use super::function_values::{Choice, FunctionValue};
 use super::generics::redefinable_parameters;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads, ResolvedCall, is_strictly_more_specific};
-use crate::types::{LiteralsFrom, TypeVars};
+use crate::types::{Listed, TypeVars};
 use itertools::Itertools;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::collections::HashSet;
@@ -803,7 +803,7 @@ impl Analyser {
         loop {
             // A literal takes its default before anything else's is applied,
             // as a call its type would settle may be waiting for it.
-            if self.default_literals(LiteralsFrom::default(), |_, var| var.0 as usize >= first) {
+            if self.default_literals(Listed::InBatch, |_, var| var.0 as usize >= first) {
                 unchecked.extend(self.waiting.keys().copied());
             }
             // A branch's default may settle what a call returns, as the
@@ -917,8 +917,38 @@ impl Analyser {
             }
         }
         if !literals.is_empty() {
-            self.default_literals(LiteralsFrom::default(), |_, var| literals.contains(&var));
+            self.default_literals(Listed::InBatch, |_, var| literals.contains(&var));
             self.solve_waiting();
+        }
+    }
+
+    /// Checks that the literals listed in `which` are all those of the
+    /// batch's that `belongs` says to settle, with all their holders: what
+    /// [`Self::default_literals`] relies on to look at fewer.
+    #[cfg(debug_assertions)]
+    fn check_listed(&mut self, which: Listed, belongs: &impl Fn(&TypeVars, TypeVar) -> bool) {
+        if which == Listed::InBatch {
+            return;
+        }
+        let listed = self.vars.unsettled_literals(which, belongs);
+        let all = self.vars.unsettled_literals(Listed::InBatch, belongs);
+        assert_eq!(listed, all, "a literal to settle wasn't listed in the body");
+        let listed_holders = self.vars.holders(which);
+        let all_holders = self.vars.holders(Listed::InBatch);
+        for var in all {
+            let holders_of = |holders: &ndc_core::collections::HashMap<TypeVar, Vec<TypeVar>>| {
+                holders
+                    .get(&var)
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .collect::<HashSet<_>>()
+            };
+            assert_eq!(
+                holders_of(&listed_holders),
+                holders_of(&all_holders),
+                "a literal holding {var:?} wasn't listed in the body"
+            );
         }
     }
 
@@ -926,18 +956,21 @@ impl Analyser {
     /// settled, and returns whether it settled any. Each takes its first
     /// default, which depends only on the literal, never on the calls
     /// waiting on it: `1` is an Int, and `[1, 2.5]` holds Floats.
-    /// Only literals listed since `from` are looked at, which has to take in
-    /// all that `belongs` says to settle and every literal holding one.
+    /// Only literals listed in `which` are looked at, which has to take in
+    /// all that `belongs` says to settle and every literal holding one; a
+    /// debug build checks that against all the batch's.
     pub(super) fn default_literals(
         &mut self,
-        from: LiteralsFrom,
+        which: Listed,
         belongs: impl Fn(&TypeVars, TypeVar) -> bool,
     ) -> bool {
         let mut settled_any = false;
         loop {
             let mut progress = false;
-            let holders = self.vars.holders(from);
-            for var in self.vars.unsettled_literals(from, &belongs) {
+            #[cfg(debug_assertions)]
+            self.check_listed(which, &belongs);
+            let holders = self.vars.holders(which);
+            for var in self.vars.unsettled_literals(which, &belongs) {
                 if !self.vars.is_literal(var) {
                     continue;
                 }
@@ -978,7 +1011,7 @@ impl Analyser {
                 // What's left holds literals that aren't these to settle,
                 // like `n` in `let n = 1; fn f() { [n] }`, and is what they
                 // are: a list of whatever `n` is.
-                let left = self.vars.unsettled_literals(from, &belongs);
+                let left = self.vars.unsettled_literals(which, &belongs);
                 if left.is_empty() {
                     return settled_any;
                 }

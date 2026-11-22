@@ -103,7 +103,6 @@ impl Analyser {
         }
         let first_use = self.uses.len();
         let first_cast = self.casts.len();
-        let first_literal = self.vars.literals_from_now();
         let annotations = parameters
             .iter()
             .map(|param| self.lower_annotation(param.annotation.as_ref()))
@@ -251,7 +250,6 @@ impl Analyser {
                         uses: first_use,
                         functions: first_function,
                         casts: first_cast,
-                        literals: first_literal,
                     },
                 );
                 self.check_type_parameters(symbol, type_parameters, &declared_type_parameters);

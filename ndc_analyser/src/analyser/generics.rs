@@ -10,7 +10,7 @@ use super::instances::{Cast, Scheme};
 use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
-use crate::types::{LiteralsFrom, TypeVars};
+use crate::types::{Listed, TypeVars};
 use ndc_core::collections::HashSet;
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
@@ -36,8 +36,6 @@ pub(super) struct BodyStart {
     pub(super) functions: usize,
     /// The number of casts.
     pub(super) casts: usize,
-    /// The point in the list of literals' types.
-    pub(super) literals: LiteralsFrom,
 }
 
 /// A type parameter a function declares, as `T` in `fn f<T>(x: T)`: the
@@ -80,17 +78,15 @@ impl Analyser {
             uses: first_use,
             functions: first_function,
             casts: first_cast,
-            literals: first_literal,
         } = start;
         self.solve_waiting();
-        // A generalizable literal belongs to the body, so the body made it,
-        // and it was listed when it got its bound. So was any literal that
-        // holds one: a literal from outside holds it only through a bound
-        // it got in the body, as settling an outer variable as one of the
-        // body's would make that one belong outside. Looking only at the
-        // literals listed since the body started keeps declaring a function
-        // from taking longer the more literals the code before it has.
-        self.default_literals(first_literal, TypeVars::is_generalizable);
+        // A generalizable literal belongs to the body, so the body made it
+        // and it was listed in the body's list, as was any literal holding
+        // one: see `TypeVars::list_literal`. Looking only at those keeps
+        // declaring a function from taking longer the more literals the code
+        // before it has.
+        self.default_literals(Listed::InBody, TypeVars::is_generalizable);
+        self.vars.close_body_literals();
         let connected = self.reached_from_signature(signature);
         self.settle_ambiguous(signature, &connected);
         self.merge_copies();

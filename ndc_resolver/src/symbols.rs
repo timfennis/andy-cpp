@@ -1,9 +1,12 @@
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct SymbolId(usize);
 
+use std::rc::Rc;
+
 #[derive(Debug, Clone)]
 struct Symbol {
-    name: String,
+    /// Shared with the scope that binds it, which indexes its bindings by name.
+    name: Rc<str>,
     kind: BindingKind,
 }
 
@@ -14,12 +17,20 @@ pub struct SymbolTable {
 
 impl SymbolTable {
     pub fn declare(&mut self, name: String, kind: BindingKind) -> SymbolId {
-        self.symbols.push(Symbol { name, kind });
+        self.symbols.push(Symbol {
+            name: name.into(),
+            kind,
+        });
         SymbolId(self.symbols.len() - 1)
     }
 
     pub fn name(&self, id: SymbolId) -> &str {
         &self.symbols[id.0].name
+    }
+
+    /// The name of `id`, to keep alongside it without a copy.
+    pub(crate) fn shared_name(&self, id: SymbolId) -> Rc<str> {
+        Rc::clone(&self.symbols[id.0].name)
     }
 
     pub fn kind(&self, id: SymbolId) -> BindingKind {
