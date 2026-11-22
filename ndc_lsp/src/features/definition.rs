@@ -3,7 +3,9 @@ use ndc_lexer::Span;
 
 use crate::names::{Name, Refers};
 use crate::resolved::Definition;
-use crate::scope_resolve::{DeclKind, collect_declarations, file_scope, is_visible};
+use std::cell::OnceCell;
+
+use crate::scope_resolve::{Decl, DeclKind, collect_declarations, file_scope, is_visible};
 use crate::state::DocumentState;
 
 /// The name the cursor at `offset` is on, and what it refers to: what the
@@ -13,20 +15,64 @@ use crate::state::DocumentState;
 /// means none. A declaration's own name means what it declares.
 pub fn definitions_at(state: &DocumentState, offset: usize) -> Option<(Name, Vec<Definition>)> {
     let name = *state.names.at(offset)?;
-    Some((name, meaning(state, &name)))
+    Some((name, Meanings::new(state).of(&name)))
 }
 
-/// What `name` refers to; see [`definitions_at`].
-pub fn meaning(state: &DocumentState, name: &Name) -> Vec<Definition> {
-    match name.refers {
-        Refers::Declaration(definition) => vec![definition],
-        Refers::Node(node) => match state.resolved.definitions_of(node) {
-            Some(definitions) => definitions.to_vec(),
-            // The resolver stops a statement at an unknown name, so a name
-            // after one, as `total` in `print(missing, total)`, is found by
-            // its scope.
-            None => in_scope(state, name).into_iter().collect(),
-        },
+/// What the names of one document refer to; see [`definitions_at`]. Keeps
+/// what it works out about scopes, so asking about every name stays cheap.
+pub struct Meanings<'a> {
+    state: &'a DocumentState,
+    /// Every declaration with where it's visible, made the first time a name
+    /// the resolver didn't get to needs it.
+    declarations: OnceCell<Vec<Decl>>,
+}
+
+impl<'a> Meanings<'a> {
+    pub fn new(state: &'a DocumentState) -> Self {
+        Self {
+            state,
+            declarations: OnceCell::new(),
+        }
+    }
+
+    /// What `name` refers to.
+    pub fn of(&self, name: &Name) -> Vec<Definition> {
+        match name.refers {
+            Refers::Declaration(definition) => vec![definition],
+            Refers::Node(node) => match self.state.resolved.definitions_of(node) {
+                Some(definitions) => definitions.to_vec(),
+                // The resolver stops a statement at an unknown name, so a name
+                // after one, as `total` in `print(missing, total)`, is found
+                // by its scope.
+                None => self.in_scope(name).into_iter().collect(),
+            },
+        }
+    }
+
+    /// The declaration of `name` visible where it's written, in the
+    /// innermost scope, the latest there.
+    fn in_scope(&self, name: &Name) -> Option<Definition> {
+        let state = self.state;
+        let text = state.source.get(name.span.offset()..name.span.end())?;
+        let declarations = self.declarations.get_or_init(|| match state.ast.first() {
+            Some(first) => collect_declarations(
+                &state.ast,
+                file_scope(first.span.source_id(), state.source.len()),
+            ),
+            None => Vec::new(),
+        });
+        let scope_len = |span: Span| span.end() - span.offset();
+        declarations
+            .iter()
+            .filter(|decl| decl.name == text && is_visible(decl, name.span.offset()))
+            .map(|decl| {
+                let (DeclKind::Variable(id) | DeclKind::Function(id) | DeclKind::Struct(id)) =
+                    decl.kind;
+                (scope_len(decl.scope_span), decl.visible_from, id)
+            })
+            // Innermost scope first, then the latest declaration in it.
+            .min_by_key(|&(len, from, _)| (len, std::cmp::Reverse(from)))
+            .map(|(_, _, id)| Definition::Node(id))
     }
 }
 
@@ -47,26 +93,6 @@ pub fn goto_definition(state: &DocumentState, position: Position) -> Vec<Range> 
         .into_iter()
         .map(|span| state.line_index.range(&state.source, span))
         .collect()
-}
-
-/// The declaration of `name` visible where it's written, in the innermost
-/// scope, the latest there.
-fn in_scope(state: &DocumentState, name: &Name) -> Option<Definition> {
-    let text = state.source.get(name.span.offset()..name.span.end())?;
-    let first = state.ast.first()?;
-    let scope = file_scope(first.span.source_id(), state.source.len());
-    let scope_len = |span: Span| span.end() - span.offset();
-    collect_declarations(&state.ast, scope)
-        .into_iter()
-        .filter(|decl| decl.name == text && is_visible(decl, name.span.offset()))
-        .map(|decl| {
-            let (DeclKind::Variable(id) | DeclKind::Function(id) | DeclKind::Struct(id)) =
-                decl.kind;
-            (scope_len(decl.scope_span), decl.visible_from, id)
-        })
-        // Innermost scope first, then the latest declaration in it.
-        .min_by_key(|&(len, from, _)| (len, std::cmp::Reverse(from)))
-        .map(|(_, _, id)| Definition::Node(id))
 }
 
 #[cfg(test)]

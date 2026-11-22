@@ -43,11 +43,22 @@ impl Resolved {
         };
 
         // In the body of a generic function, each instance picks its own.
-        let own = [&picks.bindings, &picks.getters, &picks.setters];
-        let instances = picks
-            .instances
-            .values()
-            .flat_map(|instance| [&instance.bindings, &instance.getters, &instance.setters]);
+        // The function an augmented assignment like `x f= y` calls is keyed by
+        // the assignment.
+        let own = [
+            &picks.bindings,
+            &picks.getters,
+            &picks.setters,
+            &picks.augmented_assignments,
+        ];
+        let instances = picks.instances.values().flat_map(|instance| {
+            [
+                &instance.bindings,
+                &instance.getters,
+                &instance.setters,
+                &instance.augmented_assignments,
+            ]
+        });
         for table in own.into_iter().chain(instances) {
             for (&node, binding) in table {
                 match binding {

@@ -172,22 +172,22 @@ impl Document {
             .collect()
     }
 
-    /// The range of the name under `position`, if it can be renamed; an
-    /// error says why it can't.
+    /// The range of the name under `position`, if it can be renamed, and
+    /// `None` when it isn't on a name; an error says why it can't be.
     pub fn prepare_rename(&self, position: Position) -> Result<Option<Range>, String> {
-        match self.analysed() {
-            Some(state) => references::prepare_rename(state, position),
-            None => Ok(None),
-        }
+        let state = self.analysed().ok_or(references::NOT_ANALYSED)?;
+        references::prepare_rename(state, position)
     }
 
-    /// The edits that rename the name under `position` to `new_name`; an
-    /// error says why it can't be.
-    pub fn rename(&self, position: Position, new_name: &str) -> Result<Vec<TextEdit>, String> {
-        match self.analysed() {
-            Some(state) => references::rename(state, self.configure, position, new_name),
-            None => Ok(Vec::new()),
-        }
+    /// The edits that rename the name under `position` to `new_name`, and
+    /// `None` when it isn't on a name; an error says why it can't be.
+    pub fn rename(
+        &self,
+        position: Position,
+        new_name: &str,
+    ) -> Result<Option<Vec<TextEdit>>, String> {
+        let state = self.analysed().ok_or(references::NOT_ANALYSED)?;
+        references::rename(state, self.configure, &self.functions, position, new_name)
     }
 
     /// The state, if its analysis is of the current text.

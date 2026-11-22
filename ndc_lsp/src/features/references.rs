@@ -2,11 +2,16 @@
 //! the same declaration as the name under the cursor. A program is one file,
 //! so references and highlights are the same places shown two ways.
 
-use ls_types::{Position, Range, TextEdit};
+use std::collections::BTreeSet;
+use std::panic::{self, AssertUnwindSafe};
+
+use ls_types::{Diagnostic, Position, Range, TextEdit};
+use ndc_core::collections::HashMap;
 use ndc_lexer::{Lexer, SourceId, Span, Token};
 
-use crate::document::{self, Configure};
-use crate::features::definition::{definitions_at, meaning};
+use crate::document::{self, Analysed, Configure};
+use crate::features::completion::FunctionInfo;
+use crate::features::definition::{Meanings, definitions_at};
 use crate::names::{Name, Refers};
 use crate::resolved::Definition;
 use crate::scope_resolve::{DeclKind, collect_declarations, file_scope, is_visible};
@@ -20,6 +25,10 @@ pub struct Occurrence {
     pub write: bool,
 }
 
+/// Why a rename of a text that isn't analysed can't be done.
+pub const NOT_ANALYSED: &str =
+    "the program has changed since it was last analysed, or doesn't parse";
+
 /// Every place the name under the cursor's declarations are named, in the
 /// order they're written, with the declarations themselves only if
 /// `include_declaration`.
@@ -31,7 +40,7 @@ pub fn references(
     let Some(targets) = targets_at(state, position) else {
         return Vec::new();
     };
-    occurrences(state, &targets)
+    occurrences(state, &Meanings::new(state), &targets)
         .into_iter()
         .filter(|name| include_declaration || !declares(name, &targets))
         .map(|name| state.line_index.range(&state.source, name.span))
@@ -44,7 +53,7 @@ pub fn highlights(state: &DocumentState, position: Position) -> Vec<Occurrence> 
     let Some(targets) = targets_at(state, position) else {
         return Vec::new();
     };
-    occurrences(state, &targets)
+    occurrences(state, &Meanings::new(state), &targets)
         .into_iter()
         .map(|name| Occurrence {
             range: state.line_index.range(&state.source, name.span),
@@ -68,52 +77,55 @@ pub fn prepare_rename(state: &DocumentState, position: Position) -> Result<Optio
 }
 
 /// The edits that rename the name under the cursor, and every other name
-/// that means the same declarations, to `new_name`. Fails rather than change
-/// what a name in the program means: when `new_name` isn't a name, when it
-/// would hide another declaration or be hidden by one, and when the renamed
-/// program has errors the program doesn't.
+/// that means the same declarations, to `new_name`; `Ok(None)` when the
+/// cursor isn't on a name. Fails rather than change what a name in the
+/// program means: when `new_name` isn't a name or is a built-in's, when it
+/// would hide another declaration or be hidden by one, and in the end
+/// whenever analysing the renamed program finds a name that means something
+/// else than it did, or an error the program didn't have.
 pub fn rename(
     state: &DocumentState,
     configure: Configure,
+    builtins: &[FunctionInfo],
     position: Position,
     new_name: &str,
-) -> Result<Vec<TextEdit>, String> {
+) -> Result<Option<Vec<TextEdit>>, String> {
     let Some(offset) = state.line_index.offset(&state.source, position) else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     let Some((_, targets)) = definitions_at(state, offset) else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     renameable(state, &targets)?;
     if !is_name(new_name) {
         return Err(format!("`{new_name}` isn't a name"));
     }
-    let targets = together(state, targets);
-    let occurrences = occurrences(state, &targets);
-    check_conflicts(state, &targets, &occurrences, new_name)?;
-
-    let edits: Vec<TextEdit> = occurrences
+    let meanings = Meanings::new(state);
+    let targets = together(state, &meanings, targets);
+    // A function, a struct's constructor or a field's getter joins the
+    // built-ins of its name as a candidate for a call, which can then pick
+    // the built-in, and the analyser has had trouble with programs that do
+    // that. A variable can have a built-in's name (`let sum = 0`).
+    let declares_function = state
+        .names
         .iter()
-        .map(|name| TextEdit {
-            range: state.line_index.range(&state.source, name.span),
-            new_text: new_name.to_string(),
-        })
-        .collect();
+        .any(|name| matches!(name.refers, Refers::Declaration(d) if targets.contains(&d)));
+    if declares_function && builtins.iter().any(|function| function.name == new_name) {
+        return Err(format!("`{new_name}` is the name of a built-in"));
+    }
+    let occurrences = occurrences(state, &meanings, &targets);
+    check_conflicts(state, &targets, &occurrences, new_name)?;
+    check_renamed(state, &meanings, configure, &occurrences, new_name)?;
 
-    // A last check that nothing the conflict checks missed broke: the
-    // renamed program has no errors the program doesn't.
-    let mut renamed = state.source.clone();
-    for name in occurrences.iter().rev() {
-        renamed.replace_range(name.span.offset()..name.span.end(), new_name);
-    }
-    let before = document::analyse(configure, &state.source).0.len();
-    let after = document::analyse(configure, &renamed).0.len();
-    if after > before {
-        return Err(format!(
-            "renaming to `{new_name}` would change what the program means"
-        ));
-    }
-    Ok(edits)
+    Ok(Some(
+        occurrences
+            .iter()
+            .map(|name| TextEdit {
+                range: state.line_index.range(&state.source, name.span),
+                new_text: new_name.to_string(),
+            })
+            .collect(),
+    ))
 }
 
 /// What the name under the cursor refers to, if it refers to something the
@@ -125,11 +137,15 @@ fn targets_at(state: &DocumentState, position: Position) -> Option<Vec<Definitio
 }
 
 /// Every name that means one of `targets`, in the order they're written.
-fn occurrences(state: &DocumentState, targets: &[Definition]) -> Vec<Name> {
+fn occurrences(
+    state: &DocumentState,
+    meanings: &Meanings<'_>,
+    targets: &[Definition],
+) -> Vec<Name> {
     state
         .names
         .iter()
-        .filter(|name| meaning(state, name).iter().any(|d| targets.contains(d)))
+        .filter(|name| meanings.of(name).iter().any(|d| targets.contains(d)))
         .copied()
         .collect()
 }
@@ -162,11 +178,15 @@ fn renameable(state: &DocumentState, targets: &[Definition]) -> Result<(), Strin
 /// `targets`, with every declaration a name means along with one of them:
 /// a call in a generic function that picks either of two overloads makes
 /// renaming one rename both.
-fn together(state: &DocumentState, mut targets: Vec<Definition>) -> Vec<Definition> {
+fn together(
+    state: &DocumentState,
+    meanings: &Meanings<'_>,
+    mut targets: Vec<Definition>,
+) -> Vec<Definition> {
     loop {
         let before = targets.len();
         for name in state.names.iter() {
-            let means = meaning(state, name);
+            let means = meanings.of(name);
             if means.iter().any(|d| targets.contains(d)) {
                 for definition in means {
                     if !targets.contains(&definition) {
@@ -190,7 +210,9 @@ fn is_name(text: &str) -> bool {
     )
 }
 
-/// Why renaming `targets` to `new_name` would change what a name means.
+/// Why renaming `targets` to `new_name` would change what a name means, as
+/// far as the scopes of the program's own declarations tell. Quick, and says
+/// what clashes; [`check_renamed`] has the last word.
 fn check_conflicts(
     state: &DocumentState,
     targets: &[Definition],
@@ -255,6 +277,103 @@ fn check_conflicts(
     Ok(())
 }
 
+/// Analyses the program with `occurrences` renamed to `new_name`, and fails
+/// unless every name in it means the same declarations as before, the
+/// renamed ones the renamed declarations, and it has no error the program
+/// doesn't. That covers what [`check_conflicts`] can't see: overloads, the
+/// built-ins and a struct's field getters joining a call's candidates.
+fn check_renamed(
+    state: &DocumentState,
+    meanings: &Meanings<'_>,
+    configure: Configure,
+    occurrences: &[Name],
+    new_name: &str,
+) -> Result<(), String> {
+    let changes = || {
+        Err(format!(
+            "renaming to `{new_name}` would change what the program means"
+        ))
+    };
+
+    let mut renamed = state.source.clone();
+    for name in occurrences.iter().rev() {
+        renamed.replace_range(name.span.offset()..name.span.end(), new_name);
+    }
+    // Where an offset in the program is in the renamed program.
+    let moved = |offset: usize| -> usize {
+        let before = occurrences
+            .iter()
+            .filter(|name| name.span.offset() < offset);
+        before.fold(offset, |offset, name| {
+            offset + new_name.len() - (name.span.end() - name.span.offset())
+        })
+    };
+
+    let (diagnostics, _) = analyse(configure, &state.source)?;
+    let (renamed_diagnostics, analysed) = analyse(configure, &renamed)?;
+    if !no_new_errors(&diagnostics, &renamed_diagnostics) {
+        return changes();
+    }
+    let Some(analysed) = analysed else {
+        return changes();
+    };
+    let mut after = DocumentState::from_source(renamed);
+    after.set_analysis(analysed);
+    let after_meanings = Meanings::new(&after);
+
+    let declared_at = |state: &DocumentState, definitions: Vec<Definition>| -> BTreeSet<usize> {
+        definitions
+            .into_iter()
+            .filter_map(|definition| state.names.declaration(definition))
+            .map(|span| span.offset())
+            .collect()
+    };
+    for name in state.names.iter() {
+        let offset = moved(name.span.offset());
+        let Some(renamed_name) = after.names.at(offset).filter(|n| n.span.offset() == offset)
+        else {
+            return changes();
+        };
+        let before: BTreeSet<usize> = declared_at(state, meanings.of(name))
+            .into_iter()
+            .map(&moved)
+            .collect();
+        let now = declared_at(&after, after_meanings.of(renamed_name));
+        if before != now {
+            return changes();
+        }
+    }
+    Ok(())
+}
+
+/// Analyses `text`, turning a panic of the analyser into a refusal.
+fn analyse(
+    configure: Configure,
+    text: &str,
+) -> Result<(Vec<Diagnostic>, Option<Analysed>), String> {
+    panic::catch_unwind(AssertUnwindSafe(|| document::analyse(configure, text)))
+        .map_err(|_panic| "the analyser failed on the renamed program".to_string())
+}
+
+/// Whether every error in `after` is one of `before`'s, by message.
+fn no_new_errors(before: &[Diagnostic], after: &[Diagnostic]) -> bool {
+    let mut counts: HashMap<&str, usize> = HashMap::default();
+    for diagnostic in before {
+        *counts.entry(diagnostic.message.as_str()).or_default() += 1;
+    }
+    after.iter().all(|diagnostic| {
+        counts
+            .get_mut(diagnostic.message.as_str())
+            .is_some_and(|count| match count.checked_sub(1) {
+                Some(left) => {
+                    *count = left;
+                    true
+                }
+                None => false,
+            })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use ls_types::DocumentHighlightKind;
@@ -283,7 +402,7 @@ mod tests {
 
     fn renamed(text: &str, new_name: &str) -> Result<String, String> {
         let (document, position, text) = at(text);
-        let edits = document.rename(position, new_name)?;
+        let edits = document.rename(position, new_name)?.expect("on a name");
         let index = LineIndex::new(&text);
         let mut edits: Vec<_> = edits
             .into_iter()
@@ -439,5 +558,49 @@ mod tests {
             .expect("renameable")
             .expect("on a name");
         assert_eq!(located(&text, &[range]), [(1, "total".into())]);
+    }
+
+    #[test]
+    fn a_field_whose_getter_would_take_a_call_over_is_not_renamed() {
+        // The getter `print(P)` would win `print(p)`.
+        assert!(renamed("struct P { x$0: Int }\nlet p = P(1);\nprint(p);", "print").is_err());
+        // The getter `y(P)` would win `y(p)` over the function `y`.
+        let text = "struct P { x$0: Int }\nlet p = P(1);\nfn y(q) { \"fn\" }\nprint(y(p));";
+        assert!(renamed(text, "y").is_err());
+    }
+
+    #[test]
+    fn a_built_ins_name_is_not_taken() {
+        let text = "fn count$0(m: %{Int: Int}) => 1;\nprint(count(%{: 1}));";
+        assert_eq!(
+            renamed(text, "len"),
+            Err("`len` is the name of a built-in".to_string())
+        );
+    }
+
+    #[test]
+    fn the_function_an_augmented_assignment_calls_is_one_of_its_names() {
+        let text = "fn multiply$0(a, b) { a * b }\nlet x = 5;\nx multiply= 10;\nprint(x);";
+        let (document, position, plain) = at(text);
+        let found = located(&plain, &document.references(position, false));
+        assert_eq!(found, [(2, "multiply".into())]);
+        assert_eq!(
+            renamed(text, "times").as_deref(),
+            Ok("fn times(a, b) { a * b }\nlet x = 5;\nx times= 10;\nprint(x);")
+        );
+    }
+
+    #[test]
+    fn a_rename_that_swaps_one_error_for_another_is_refused() {
+        // The program has an error already; the renamed one has another.
+        let text = "fn f<T$0>(a: T) { cast::<Int>(2.5) }\nprint(f(1.5));";
+        assert!(renamed(text, "Int").is_err());
+    }
+
+    #[test]
+    fn renaming_where_there_is_no_name_does_nothing() {
+        let (document, position, _) = at("let x = 1;$0\n");
+        assert_eq!(document.rename(position, "y"), Ok(None));
+        assert_eq!(document.prepare_rename(position), Ok(None));
     }
 }

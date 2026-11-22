@@ -28,8 +28,10 @@ use ls_types::{
     TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 use ls_types::{
-    DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams, PrepareRenameResponse,
-    ReferenceParams, RenameOptions, RenameParams, TextDocumentPositionParams, WorkspaceEdit,
+    DocumentChanges, DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams,
+    InitializeResult, OptionalVersionedTextDocumentIdentifier, PrepareRenameResponse,
+    ReferenceParams, RenameOptions, RenameParams, TextDocumentEdit, TextDocumentPositionParams,
+    WorkspaceEdit,
 };
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 
@@ -43,8 +45,16 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 /// Serves the language server over stdin and stdout until the client exits.
 pub fn serve(configure: Configure) -> Result<(), Error> {
     let (connection, io_threads) = Connection::stdio();
-    let params: InitializeParams =
-        serde_json::from_value(connection.initialize(serde_json::to_value(capabilities())?)?)?;
+    // What the server offers depends on what the client can take, so the
+    // client's capabilities come first.
+    let (id, params) = connection.initialize_start()?;
+    let params: InitializeParams = serde_json::from_value(params)?;
+    let client = Client::of(&params);
+    let initialize_result = InitializeResult {
+        capabilities: capabilities(&client),
+        ..Default::default()
+    };
+    connection.initialize_finish(id, serde_json::to_value(initialize_result)?)?;
     // An inlay hint request that comes in before the analysis of its text has
     // nothing to answer with, so the client is told to ask again once there is.
     let refresh_inlay_hints = params
@@ -73,6 +83,7 @@ pub fn serve(configure: Configure) -> Result<(), Error> {
         openings: Cell::new(0),
         functions: FunctionInfo::collect(&document::interpreter(configure)),
         configure,
+        versioned_edits: client.versioned_edits,
     };
     notify::<LogMessage>(
         &server.connection.sender,
@@ -90,8 +101,38 @@ pub fn serve(configure: Configure) -> Result<(), Error> {
     server.run()
 }
 
+/// What the client can take, as far as the server answers differently.
+struct Client {
+    /// Whether it asks whether a name can be renamed before it asks for the
+    /// new name (`prepareRename`).
+    prepares_rename: bool,
+    /// Whether it takes edits tied to a version of a document, so it can
+    /// reject an edit made for an older text.
+    versioned_edits: bool,
+}
+
+impl Client {
+    fn of(params: &InitializeParams) -> Self {
+        let capabilities = &params.capabilities;
+        Self {
+            prepares_rename: capabilities
+                .text_document
+                .as_ref()
+                .and_then(|text_document| text_document.rename.as_ref())
+                .and_then(|rename| rename.prepare_support)
+                .unwrap_or(false),
+            versioned_edits: capabilities
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.workspace_edit.as_ref())
+                .and_then(|edit| edit.document_changes)
+                .unwrap_or(false),
+        }
+    }
+}
+
 /// What the server can do, as it tells the client in `initialize`.
-fn capabilities() -> ServerCapabilities {
+fn capabilities(client: &Client) -> ServerCapabilities {
     ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         completion_provider: Some(CompletionOptions {
@@ -105,10 +146,14 @@ fn capabilities() -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         document_highlight_provider: Some(OneOf::Left(true)),
-        rename_provider: Some(OneOf::Right(RenameOptions {
-            prepare_provider: Some(true),
-            work_done_progress_options: Default::default(),
-        })),
+        rename_provider: Some(if client.prepares_rename {
+            OneOf::Right(RenameOptions {
+                prepare_provider: Some(true),
+                work_done_progress_options: Default::default(),
+            })
+        } else {
+            OneOf::Left(true)
+        }),
         ..Default::default()
     }
 }
@@ -327,6 +372,8 @@ struct Server {
     functions: Vec<FunctionInfo>,
     /// The registered functions, for rename, which analyses the renamed text.
     configure: Configure,
+    /// Whether the client takes edits tied to a version of a document.
+    versioned_edits: bool,
 }
 
 impl Server {
@@ -525,25 +572,47 @@ impl Server {
             .with_analysed(&params.text_document.uri, |state| {
                 references::prepare_rename(state, params.position)
             })
-            .transpose()?
-            .flatten();
+            .ok_or(references::NOT_ANALYSED)??;
         Ok(range.map(PrepareRenameResponse::Range))
     }
 
     fn rename(&self, params: &RenameParams) -> Result<Option<WorkspaceEdit>, String> {
         let position = &params.text_document_position;
         let uri = &position.text_document.uri;
-        let Some(edits) = self.with_analysed(uri, |state| {
-            references::rename(state, self.configure, position.position, &params.new_name)
-        }) else {
-            return Err("the program has changed since it was last analysed".to_string());
+        let docs = self.documents.read();
+        let open = docs
+            .get(uri)
+            .filter(|open| open.state.analysis_matches_source)
+            .ok_or(references::NOT_ANALYSED)?;
+        let Some(edits) = references::rename(
+            &open.state,
+            self.configure,
+            &self.functions,
+            position.position,
+            &params.new_name,
+        )?
+        else {
+            return Ok(None);
         };
-        let edits = edits?;
-        let changes = std::iter::once((uri.clone(), edits)).collect();
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            ..Default::default()
-        }))
+        // An edit tied to the version it was made for can't land on newer text.
+        let edit = if self.versioned_edits {
+            WorkspaceEdit {
+                document_changes: Some(DocumentChanges::Edits(vec![TextDocumentEdit {
+                    text_document: OptionalVersionedTextDocumentIdentifier {
+                        uri: uri.clone(),
+                        version: Some(open.version),
+                    },
+                    edits: edits.into_iter().map(OneOf::Left).collect(),
+                }])),
+                ..Default::default()
+            }
+        } else {
+            WorkspaceEdit {
+                changes: Some(std::iter::once((uri.clone(), edits)).collect()),
+                ..Default::default()
+            }
+        };
+        Ok(Some(edit))
     }
 
     fn goto_definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {

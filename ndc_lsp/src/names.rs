@@ -17,7 +17,8 @@ use crate::resolved::Definition;
 pub enum Refers {
     /// A name the resolver and the analyser resolve, by its node: an
     /// identifier, a member access or member target, an assignment target, a
-    /// binding pattern or a name in a type annotation.
+    /// binding pattern, a name in a type annotation, or the function an
+    /// augmented assignment calls (`f` in `x f= y`, by the assignment).
     Node(NodeId),
     /// The name a declaration gives a function, a struct, a field or a type
     /// parameter, which only declares.
@@ -62,12 +63,13 @@ impl Names {
 
     /// The name the cursor at `offset` is on: inside it, or just after it.
     pub fn at(&self, offset: usize) -> Option<&Name> {
-        let inside = |name: &&Name| name.span.offset() <= offset && offset < name.span.end();
-        let after = |name: &&Name| name.span.end() == offset;
-        self.names
-            .iter()
-            .find(inside)
-            .or_else(|| self.names.iter().find(after))
+        // The names are in order and don't overlap: the one starting at or
+        // before `offset` contains it, or ends where it is.
+        let next = self
+            .names
+            .partition_point(|name| name.span.offset() <= offset);
+        let name = self.names.get(next.checked_sub(1)?)?;
+        (offset <= name.span.end()).then_some(name)
     }
 
     /// Where the name `definition` declares is.
@@ -174,8 +176,12 @@ impl Collector {
                     }
                 }
             }
-            Expression::Assignment { l_value, .. } | Expression::OpAssignment { l_value, .. } => {
+            Expression::Assignment { l_value, .. } => self.target(l_value),
+            Expression::OpAssignment { l_value, .. } => {
                 self.target(l_value);
+                if let Some(span) = self.augmented_name(expr.span) {
+                    self.name(Refers::Node(expr.id), span, false);
+                }
             }
             _ => {}
         }
@@ -257,6 +263,29 @@ impl Collector {
                 }
             }
         }
+    }
+
+    /// The function an augmented assignment in `within` calls, if it's named:
+    /// `f` in `x f= y`, which the AST keeps only as text.
+    fn augmented_name(&self, within: Span) -> Option<Span> {
+        let start = self
+            .tokens
+            .partition_point(|token| token.span.offset() < within.offset());
+        self.tokens[start..]
+            .iter()
+            .take_while(|token| token.span.offset() < within.end())
+            .find_map(|token| match &token.token {
+                // The token covers the `=` too.
+                Token::OpAssign(inner) => match &inner.token {
+                    Token::Identifier(name) => Some(Span::new(
+                        inner.span.source_id(),
+                        inner.span.offset(),
+                        name.len(),
+                    )),
+                    _ => None,
+                },
+                _ => None,
+            })
     }
 
     /// The identifier right after the first `keyword` in `within`: the name
