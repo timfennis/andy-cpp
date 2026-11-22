@@ -11,14 +11,29 @@
 //! Issue #254 tracks moving go-to-definition onto the resolver's symbols;
 //! completion's visibility enumeration is a pure structural query that stays.
 
+use ndc_core::NodeId;
 use ndc_lexer::{SourceId, Span};
 use ndc_parser::{
     BindingPattern, BindingPatternLocation, Expression, ExpressionLocation, ForBody, ForIteration,
 };
 
+/// What a declaration declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclKind {
+    /// A name a binding pattern declares: a `let`, a parameter or a loop
+    /// variable.
+    Variable,
+    /// A named function, keyed in the analysis by its declaration.
+    Function(NodeId),
+    /// A struct's constructor and field accessors, keyed in the analysis by
+    /// its declaration.
+    Struct(NodeId),
+}
+
 /// A declaration discovered while walking the AST.
 pub struct Decl {
     pub name: String,
+    pub kind: DeclKind,
     /// Span of the declared name — the go-to-definition target.
     pub name_span: Span,
     /// Region of source in which this binding is visible.
@@ -85,6 +100,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
                 // whole-declaration span); the follow-up adds `name_span`.
                 out.push(Decl {
                     name: name.clone(),
+                    kind: DeclKind::Function(expr.id),
                     name_span: expr.span,
                     scope_span: scope,
                     visible_from: expr.span.offset(),
@@ -142,6 +158,7 @@ fn collect(expr: &ExpressionLocation, scope: Span, out: &mut Vec<Decl>) {
             // only the whole-declaration span).
             out.push(Decl {
                 name: name.clone(),
+                kind: DeclKind::Struct(expr.id),
                 name_span: expr.span,
                 scope_span: scope,
                 visible_from: expr.span.offset(),
@@ -166,6 +183,7 @@ fn push_pattern(
             identifier, span, ..
         } => out.push(Decl {
             name: identifier.clone(),
+            kind: DeclKind::Variable,
             name_span: *span,
             scope_span: scope,
             visible_from,
