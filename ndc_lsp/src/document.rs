@@ -111,56 +111,38 @@ impl Document {
 
     #[must_use]
     pub fn hover(&self, position: Position) -> Option<Hover> {
-        self.analysed()
-            .and_then(|state| hover::hover(state, position, &self.functions))
+        hover::hover(&self.state, position, &self.functions)
     }
 
     #[must_use]
     pub fn inlay_hints(&self) -> Vec<InlayHint> {
-        self.analysed().map_or_else(Vec::new, |state| {
-            inlay_hints::collect(
-                &state.ast,
-                &state.analysis,
-                &state.source,
-                &state.line_index,
-            )
-        })
+        inlay_hints::collect(&self.state)
     }
 
     #[must_use]
     pub fn symbols(&self) -> Vec<DocumentSymbol> {
-        self.analysed().map_or_else(Vec::new, |state| {
-            symbols::document_symbols(
-                &state.ast,
-                &state.analysis,
-                &state.source,
-                &state.line_index,
-            )
-        })
+        symbols::document_symbols(&self.state)
     }
 
     /// Where the name under `position` is declared: usually one place, but a
     /// name in a generic function's body can have one for each instance.
     #[must_use]
     pub fn definition(&self, position: Position) -> Vec<Range> {
-        self.analysed()
-            .map_or_default(|state| definition::goto_definition(state, position))
+        definition::goto_definition(&self.state, position)
     }
 
     /// Every place the declarations of the name under `position` are named,
     /// with the declarations themselves if `include_declaration`.
     #[must_use]
     pub fn references(&self, position: Position, include_declaration: bool) -> Vec<Range> {
-        self.analysed()
-            .map_or_default(|state| references::references(state, position, include_declaration))
+        references::references(&self.state, position, include_declaration)
     }
 
     /// The places to highlight while the cursor is on the name at
     /// `position`: every name that means the same declarations.
     #[must_use]
     pub fn highlights(&self, position: Position) -> Vec<DocumentHighlight> {
-        self.analysed()
-            .map_or_default(|state| references::highlights(state, position))
+        references::highlights(&self.state, position)
     }
 
     /// The range of the name under `position`, if it can be renamed, and
@@ -189,10 +171,11 @@ impl Document {
     }
 
     /// A token for each name whose kind is known, encoded as the protocol
-    /// wants them; none while the analysis isn't of the current text.
+    /// wants them. While the text has changed since the last analysis, the
+    /// names outside what changed keep theirs.
     #[must_use]
     pub fn semantic_tokens(&self) -> Vec<ls_types::SemanticToken> {
-        self.analysed().map_or_default(semantic_tokens::tokens)
+        semantic_tokens::tokens(&self.state)
     }
 
     /// The parameters of the call being written at `position`. Like
@@ -203,18 +186,16 @@ impl Document {
         signature_help::signature_help(&self.state, &self.functions, position)
     }
 
-    /// What can be folded; nothing while the analysis isn't of the
-    /// current text.
+    /// What can be folded.
     #[must_use]
     pub fn folding_ranges(&self) -> Vec<ls_types::FoldingRange> {
-        self.analysed().map_or_default(ranges::folding_ranges)
+        ranges::folding_ranges(&self.state)
     }
 
     /// What expanding the selection at each of `positions` grows to.
     #[must_use]
     pub fn selection_ranges(&self, positions: &[Position]) -> Vec<ls_types::SelectionRange> {
-        self.analysed()
-            .map_or_default(|state| ranges::selection_ranges(state, positions))
+        ranges::selection_ranges(&self.state, positions)
     }
 
     /// The edit that formats the text, none if it's formatted already; an
@@ -285,13 +266,48 @@ mod tests {
     }
 
     #[test]
-    fn features_that_need_the_ast_answer_nothing_for_text_that_does_not_parse() {
+    fn while_the_text_does_not_parse_the_features_answer_outside_what_changed() {
         let mut document = Document::new(ndc_stdlib::register);
         document.set_text("let total = 5;\ntotal + 1;");
         document.set_text("let total = 5;\ntotal +");
-        assert!(document.hover(Position::new(1, 2)).is_none());
-        assert!(document.definition(Position::new(1, 2)).is_empty());
-        assert!(document.inlay_hints().is_empty());
-        assert!(document.symbols().is_empty());
+        assert!(document.hover(Position::new(1, 2)).is_some());
+        let ranges = document.definition(Position::new(1, 2));
+        assert_eq!(
+            ranges.first().map(|range| range.start),
+            Some(Position::new(0, 4))
+        );
+        assert!(!document.inlay_hints().is_empty());
+        assert!(!document.symbols().is_empty());
+        assert!(!document.semantic_tokens().is_empty());
+    }
+
+    #[test]
+    fn answers_move_with_the_text_written_before_them() {
+        let mut document = Document::new(ndc_stdlib::register);
+        document.set_text("let total = 5;\nprint(total);\n");
+        // A line being written above, which doesn't parse yet.
+        document.set_text("let first = [\nlet total = 5;\nprint(total);\n");
+        let ranges = document.definition(Position::new(2, 7));
+        assert_eq!(
+            ranges.first().map(|range| (range.start, range.end)),
+            Some((Position::new(1, 4), Position::new(1, 9)))
+        );
+        let hint = document.inlay_hints().into_iter().next().expect("a hint");
+        assert_eq!(hint.position, Position::new(1, 9));
+    }
+
+    #[test]
+    fn a_name_that_changed_since_the_analysis_has_no_answer() {
+        let mut document = Document::new(ndc_stdlib::register);
+        document.set_text("let total = 5;\nprint(total);\n");
+        // `total` became `totXal`, and the text no longer parses.
+        document.set_text("let total = 5;\nprint(totXal);\nprint(");
+        assert!(document.hover(Position::new(1, 8)).is_none());
+        assert!(document.definition(Position::new(1, 8)).is_empty());
+        // `print` before it still answers.
+        assert!(document.hover(Position::new(1, 2)).is_some());
+        // The references of `total` leave out the one that changed.
+        let references = document.references(Position::new(0, 5), true);
+        assert_eq!(references.len(), 1, "{references:?}");
     }
 }

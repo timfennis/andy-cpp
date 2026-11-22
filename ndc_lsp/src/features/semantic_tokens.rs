@@ -4,7 +4,9 @@
 //! shadowing `len` is a variable, not the built-in. The grammar still colours
 //! everything else: keywords, strings, numbers and comments.
 
-use ls_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend};
+use ls_types::{
+    Range, SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
+};
 
 use crate::features::definition::Meanings;
 use crate::names::{Declares, Name, Place, Refers};
@@ -48,7 +50,7 @@ pub fn tokens(state: &DocumentState) -> Vec<SemanticToken> {
     let mut tokens = Vec::new();
     let (mut line, mut start) = (0, 0);
     for name in state.names.iter() {
-        let text = &state.source[name.span.offset()..name.span.end()];
+        let text = &state.analysed_text()[name.span.offset()..name.span.end()];
         // An operator is a name the analysis resolves too, as `*` in
         // `x * 2`, but the grammar colours operators.
         if !text.starts_with(|c: char| c.is_alphabetic() || c == '_') {
@@ -57,7 +59,13 @@ pub fn tokens(state: &DocumentState) -> Vec<SemanticToken> {
         let Some((token_type, modifiers)) = classify(state, &meanings, name) else {
             continue;
         };
-        let position = state.line_index.position(&state.source, name.span.offset());
+        // A name that changed since the analysis is left to the grammar.
+        let Some(Range {
+            start: position, ..
+        }) = state.name_range(name.span)
+        else {
+            continue;
+        };
         let delta_line = position.line - line;
         let delta_start = if delta_line == 0 {
             position.character - start

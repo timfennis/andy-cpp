@@ -15,6 +15,8 @@ use crate::state::DocumentState;
 /// means none. A declaration's own name means what it declares.
 pub fn definitions_at(state: &DocumentState, offset: usize) -> Option<(Name, Vec<Definition>)> {
     let name = *state.names.at(offset)?;
+    // A name edited since the analysis may mean something else now.
+    state.name_range(name.span)?;
     Some((name, Meanings::new(state).of(&name)))
 }
 
@@ -53,11 +55,13 @@ impl<'a> Meanings<'a> {
     /// innermost scope, the latest there.
     fn in_scope(&self, name: &Name) -> Option<Definition> {
         let state = self.state;
-        let text = state.source.get(name.span.offset()..name.span.end())?;
+        let text = state
+            .analysed_text()
+            .get(name.span.offset()..name.span.end())?;
         let declarations = self.declarations.get_or_init(|| match state.ast.first() {
             Some(first) => collect_declarations(
                 &state.ast,
-                file_scope(first.span.source_id(), state.source.len()),
+                file_scope(first.span.source_id(), state.analysed_len()),
             ),
             None => Vec::new(),
         });
@@ -78,7 +82,7 @@ impl<'a> Meanings<'a> {
 
 /// Where the name under the cursor is declared, in the order they appear.
 pub fn goto_definition(state: &DocumentState, position: Position) -> Vec<Range> {
-    let Some(offset) = state.line_index.offset(&state.source, position) else {
+    let Some(offset) = state.offset_at(position) else {
         return Vec::new();
     };
     let Some((_, definitions)) = definitions_at(state, offset) else {
@@ -91,7 +95,7 @@ pub fn goto_definition(state: &DocumentState, position: Position) -> Vec<Range> 
     spans.sort_by_key(|span| span.offset());
     spans
         .into_iter()
-        .map(|span| state.line_index.range(&state.source, span))
+        .filter_map(|span| state.name_range(span))
         .collect()
 }
 

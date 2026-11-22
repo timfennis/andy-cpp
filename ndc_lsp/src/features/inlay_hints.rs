@@ -2,9 +2,8 @@ use ls_types::{InlayHint, InlayHintKind, InlayHintLabel};
 use ndc_analysis::Analysis;
 use ndc_core::NodeId;
 use ndc_lexer::Span;
-use ndc_parser::ExpressionLocation;
 
-use crate::util::LineIndex;
+use crate::state::DocumentState;
 use crate::visitor::{AstVisitor, walk_ast};
 
 /// Collect inlay type hints from an analysed AST.
@@ -13,25 +12,20 @@ use crate::visitor::{AstVisitor, walk_ast};
 /// AST. Only unannotated declarations and inferred return types get a hint, and
 /// only when their type has no error in it: the error is reported where it
 /// happened, and the type would only show its failed parts as `Any`.
-pub fn collect(
-    expressions: &[ExpressionLocation],
-    analysis: &Analysis,
-    text: &str,
-    line_index: &LineIndex,
-) -> Vec<InlayHint> {
+/// While the text has changed since the analysis, a hint where it changed
+/// is left out.
+pub fn collect(state: &DocumentState) -> Vec<InlayHint> {
     let mut collector = HintCollector {
-        text,
-        line_index,
-        analysis,
+        state,
+        analysis: &state.analysis,
         hints: Vec::new(),
     };
-    walk_ast(&mut collector, expressions);
+    walk_ast(&mut collector, &state.ast);
     collector.hints
 }
 
 struct HintCollector<'a> {
-    text: &'a str,
-    line_index: &'a LineIndex,
+    state: &'a DocumentState,
     analysis: &'a Analysis,
     hints: Vec<InlayHint>,
 }
@@ -47,9 +41,11 @@ impl AstVisitor for HintCollector<'_> {
         if let Some(typ) = self.analysis.variable_types.get(&node)
             && !has_annotation
             && !typ.has_errors()
+            && self.state.name_range(span).is_some()
+            && let Some(position) = self.state.position_of(span.end())
         {
             self.hints.push(InlayHint {
-                position: self.line_index.position(self.text, span.end()),
+                position,
                 label: InlayHintLabel::String(format!(": {typ}")),
                 kind: Some(InlayHintKind::TYPE),
                 text_edits: None,
@@ -72,9 +68,10 @@ impl AstVisitor for HintCollector<'_> {
         if !has_return_annotation
             && let Some(rt) = self.analysis.inferred_return_types.get(&node_id)
             && !rt.has_errors()
+            && let Some(position) = self.state.position_of(parameters_span.end())
         {
             self.hints.push(InlayHint {
-                position: self.line_index.position(self.text, parameters_span.end()),
+                position,
                 label: InlayHintLabel::String(format!(" -> {rt}")),
                 kind: Some(InlayHintKind::TYPE),
                 text_edits: None,
@@ -90,16 +87,9 @@ impl AstVisitor for HintCollector<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndc_interpreter::Interpreter;
 
     fn collect_hints(source: &str) -> Vec<InlayHint> {
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
-        let (expressions, result) = interpreter
-            .analyse_str(source)
-            .expect("analysis should succeed");
-        let line_index = LineIndex::new(source);
-        collect(&expressions, &result.analysis, source, &line_index)
+        collect(&DocumentState::analysed(source))
     }
 
     fn has_label(hints: &[InlayHint], pred: impl Fn(&str) -> bool) -> bool {

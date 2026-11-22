@@ -247,9 +247,9 @@ struct Job {
 // It commits an analysis that parsed even when a later edit has superseded
 // it, as the last good one: the completion caches (`variable_types` by name,
 // `expression_types` by end offset) work from it while the current text
-// doesn't parse, mapping the cursor back into the text it was of, and
-// `analysis_matches_source` stays false, so the AST-backed features (hover,
-// go-to-def, symbols, inlay hints) never map its spans onto edited text. Each
+// doesn't parse, mapping the cursor back into the text it was of, and the
+// AST-backed features (hover, go-to-def, symbols, inlay hints, …) answer from
+// it outside what changed since, through the mapping in `DocumentState`. Each
 // text it commits is newer than any it committed before, so a commit never
 // replaces a newer analysis. It publishes diagnostics only for the current
 // text. It holds the lock across the commit and the publish, as `didClose`
@@ -537,20 +537,7 @@ impl Server {
     }
 
     fn inlay_hint(&self, params: &InlayHintParams) -> Option<Vec<InlayHint>> {
-        let docs = self.documents.read();
-        docs.get(&params.text_document.uri)
-            .map(|open| &open.state)
-            .map(|state| {
-                if !state.analysis_matches_source {
-                    return Vec::new();
-                }
-                inlay_hints::collect(
-                    &state.ast,
-                    &state.analysis,
-                    &state.source,
-                    &state.line_index,
-                )
-            })
+        self.with_state(&params.text_document.uri, inlay_hints::collect)
     }
 
     fn hover(&self, params: &HoverParams) -> Option<Hover> {
@@ -558,13 +545,20 @@ impl Server {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         docs.get(uri)
-            .map(|open| &open.state)
-            .filter(|state| state.analysis_matches_source)
-            .and_then(|state| hover::hover(state, position, &self.functions))
+            .and_then(|open| hover::hover(&open.state, position, &self.functions))
     }
 
-    /// Runs `feature` on the analysed state of the document at `uri`, if its
-    /// analysis is of the current text.
+    /// Runs `feature` on the state of the document at `uri`, if it's open.
+    /// The AST-backed features answer from the last analysis even while the
+    /// text has changed since, outside what changed: see
+    /// [`DocumentState::range_of`].
+    fn with_state<T>(&self, uri: &Uri, feature: impl FnOnce(&DocumentState) -> T) -> Option<T> {
+        let docs = self.documents.read();
+        docs.get(uri).map(|open| feature(&open.state))
+    }
+
+    /// Runs `feature` on the state of the document at `uri`, if its analysis
+    /// is of the current text, as rename needs.
     fn with_analysed<T>(&self, uri: &Uri, feature: impl FnOnce(&DocumentState) -> T) -> Option<T> {
         let docs = self.documents.read();
         docs.get(uri)
@@ -585,7 +579,7 @@ impl Server {
     fn references(&self, params: &ReferenceParams) -> Option<Vec<Location>> {
         let position = &params.text_document_position;
         let uri = &position.text_document.uri;
-        let ranges = self.with_analysed(uri, |state| {
+        let ranges = self.with_state(uri, |state| {
             references::references(state, position.position, params.context.include_declaration)
         })?;
         Some(
@@ -604,7 +598,7 @@ impl Server {
         params: &DocumentHighlightParams,
     ) -> Option<Vec<DocumentHighlight>> {
         let position = &params.text_document_position_params;
-        self.with_analysed(&position.text_document.uri, |state| {
+        self.with_state(&position.text_document.uri, |state| {
             references::highlights(state, position.position)
         })
     }
@@ -684,7 +678,7 @@ impl Server {
         &self,
         params: &FoldingRangeParams,
     ) -> Result<Option<Vec<FoldingRange>>, Refusal> {
-        self.with_current(&params.text_document.uri, ranges::folding_ranges)
+        Ok(self.with_state(&params.text_document.uri, ranges::folding_ranges))
     }
 
     /// What expanding the selection grows to; see [`Self::folding_ranges`].
@@ -692,38 +686,19 @@ impl Server {
         &self,
         params: &SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>, Refusal> {
-        self.with_current(&params.text_document.uri, |state| {
+        Ok(self.with_state(&params.text_document.uri, |state| {
             ranges::selection_ranges(state, &params.positions)
-        })
-    }
-
-    /// Runs `feature` on the document at `uri`, `None` if it isn't open,
-    /// and tells the client the content changed while its text has changed
-    /// since the last analysis.
-    fn with_current<T>(
-        &self,
-        uri: &Uri,
-        feature: impl FnOnce(&DocumentState) -> T,
-    ) -> Result<Option<T>, Refusal> {
-        let docs = self.documents.read();
-        let Some(open) = docs.get(uri) else {
-            return Ok(None);
-        };
-        if !open.state.analysis_matches_source {
-            return Err(Refusal::content_modified());
-        }
-        Ok(Some(feature(&open.state)))
+        }))
     }
 
     /// The document's semantic tokens. While its text has changed since the
-    /// last analysis, the client is told the content was modified, so it
-    /// keeps the tokens it has; it's asked to refresh once the text is
-    /// analysed, if it can be.
+    /// last analysis, the names outside what changed keep theirs, and a
+    /// client that can is asked to refresh once the text is analysed.
     fn semantic_tokens(
         &self,
         params: &SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>, Refusal> {
-        let data = self.with_current(&params.text_document.uri, semantic_tokens::tokens)?;
+        let data = self.with_state(&params.text_document.uri, semantic_tokens::tokens);
         Ok(data.map(|data| {
             SemanticTokensResult::Tokens(SemanticTokens {
                 result_id: None,
@@ -736,10 +711,7 @@ impl Server {
         let docs = self.documents.read();
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let state = docs
-            .get(uri)
-            .map(|open| &open.state)
-            .filter(|state| state.analysis_matches_source)?;
+        let state = &docs.get(uri)?.state;
         let locations: Vec<Location> = definition::goto_definition(state, position)
             .into_iter()
             .map(|range| Location {
@@ -757,16 +729,7 @@ impl Server {
     fn document_symbol(&self, params: &DocumentSymbolParams) -> Option<DocumentSymbolResponse> {
         let docs = self.documents.read();
         docs.get(&params.text_document.uri)
-            .map(|open| &open.state)
-            .filter(|state| state.analysis_matches_source)
-            .map(|state| {
-                DocumentSymbolResponse::Nested(symbols::document_symbols(
-                    &state.ast,
-                    &state.analysis,
-                    &state.source,
-                    &state.line_index,
-                ))
-            })
+            .map(|open| DocumentSymbolResponse::Nested(symbols::document_symbols(&open.state)))
     }
 
     fn completion(&self, params: &CompletionParams) -> Option<CompletionResponse> {
@@ -785,17 +748,6 @@ impl Server {
 struct Refusal {
     code: ErrorCode,
     message: String,
-}
-
-impl Refusal {
-    /// The document changed since what the request needs was worked out, so
-    /// the client should keep what it has: see [`Server::semantic_tokens`].
-    fn content_modified() -> Self {
-        Self {
-            code: ErrorCode::ContentModified,
-            message: "the document has changed since it was last analysed".to_string(),
-        }
-    }
 }
 
 /// A refusal the client shows, as a rename that would change what the

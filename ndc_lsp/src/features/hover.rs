@@ -20,7 +20,7 @@ pub fn hover(
     position: Position,
     functions: &[FunctionInfo],
 ) -> Option<Hover> {
-    let offset = state.line_index.offset(&state.source, position)?;
+    let offset = state.offset_at(position)?;
 
     // A declaration's name is an lvalue, not an expression node, so check those
     // first — they are more specific than the enclosing declaration expression.
@@ -30,7 +30,7 @@ pub fn hover(
         if typ.has_errors() {
             return None;
         }
-        return Some(markup(state, span, format!("```ndc\n{typ}\n```")));
+        return markup(state, span, format!("```ndc\n{typ}\n```"));
     }
 
     let node = node_at_offset(&state.ast, offset)?;
@@ -42,7 +42,7 @@ pub fn hover(
         _ => type_hover(state, node.id),
     }?;
 
-    Some(markup(state, node.span, markdown))
+    markup(state, node.span, markdown)
 }
 
 /// The functions the identifier `id` refers to: the overload it picked, or
@@ -101,14 +101,16 @@ fn native_hover(overloads: &[Callee], functions: &[FunctionInfo]) -> Option<Stri
     (!markdown.is_empty()).then(|| markdown.join("\n\n---\n\n"))
 }
 
-fn markup(state: &DocumentState, span: Span, value: String) -> Hover {
-    Hover {
+/// The hover of what's at `span`, unless it changed since the analysis, as
+/// what it says may then not be so any more.
+fn markup(state: &DocumentState, span: Span, value: String) -> Option<Hover> {
+    Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
             value,
         }),
-        range: Some(state.line_index.range(&state.source, span)),
-    }
+        range: Some(state.name_range(span)?),
+    })
 }
 
 /// Find the declaration identifier whose span contains `offset`, returning its
