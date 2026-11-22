@@ -237,7 +237,7 @@ fn declared_functions(state: &DocumentState, position: Position) -> Vec<Function
         return Vec::new();
     };
     let offset = state.analysed_offset(offset);
-    let scope = file_scope(first.span.source_id(), state.source.len());
+    let scope = file_scope(first.span.source_id(), state.analysed_len());
     collect_declarations(&state.ast, scope)
         .iter()
         .filter(|decl| is_visible(decl, offset))
@@ -755,6 +755,16 @@ mod tests {
         fn a_dot_typed_at_the_end_of_a_block_offers_the_blocks_functions() {
             let before = "fn main() {\n  fn double(x: Int) { x * 2 }\n  let n = 5;\n}\n";
             let after = "fn main() {\n  fn double(x: Int) { x * 2 }\n  let n = 5;\n  n.$0}\n";
+            assert!(item(&completions(&[before, after]), "double").is_some());
+        }
+
+        #[test]
+        fn a_dot_after_text_was_deleted_earlier_offers_the_files_functions() {
+            let before =
+                "let unused = [1, 2, 3, 4, 5, 6];\nfn double(x: Int) { x * 2 }\nlet n = 5;\n";
+            // Deleting the list's end breaks the parse and shortens the text
+            // by more than was typed, so the cursor lands past its new length.
+            let after = "let unused = [1, 2, 3;\nfn double(x: Int) { x * 2 }\nlet n = 5;\nn.$0";
             assert!(item(&completions(&[before, after]), "double").is_some());
         }
     }

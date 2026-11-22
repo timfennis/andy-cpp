@@ -105,6 +105,11 @@ impl DocumentState {
         self.analysis_matches_source = true;
     }
 
+    /// The length of the text the AST was parsed from.
+    pub fn analysed_len(&self) -> usize {
+        self.analysed_source.len()
+    }
+
     /// Where `offset` in `source` was in the text the AST was parsed from,
     /// taking everything between the first and the last byte that changed as
     /// one edit. An offset before the edit stays, one after it moves with the
