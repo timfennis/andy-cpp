@@ -29,14 +29,13 @@ use ls_types::{
     TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 use ls_types::{
-    DocumentChanges, DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind,
-    DocumentHighlightParams, FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability,
-    InitializeResult, OptionalVersionedTextDocumentIdentifier, PrepareRenameResponse,
-    ReferenceParams, RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
-    SelectionRangeProviderCapability, SemanticTokens, SemanticTokensFullOptions,
-    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentEdit, TextDocumentPositionParams, TextEdit, WorkspaceEdit,
+    DocumentChanges, DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams,
+    FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability, InitializeResult,
+    OptionalVersionedTextDocumentIdentifier, PrepareRenameResponse, ReferenceParams, RenameOptions,
+    RenameParams, SelectionRange, SelectionRangeParams, SelectionRangeProviderCapability,
+    SemanticTokens, SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams,
+    SemanticTokensResult, SemanticTokensServerCapabilities, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, TextDocumentEdit, TextDocumentPositionParams, TextEdit, WorkspaceEdit,
 };
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 
@@ -605,22 +604,9 @@ impl Server {
         params: &DocumentHighlightParams,
     ) -> Option<Vec<DocumentHighlight>> {
         let position = &params.text_document_position_params;
-        let occurrences = self.with_analysed(&position.text_document.uri, |state| {
+        self.with_analysed(&position.text_document.uri, |state| {
             references::highlights(state, position.position)
-        })?;
-        Some(
-            occurrences
-                .into_iter()
-                .map(|occurrence| DocumentHighlight {
-                    range: occurrence.range,
-                    kind: Some(if occurrence.write {
-                        DocumentHighlightKind::WRITE
-                    } else {
-                        DocumentHighlightKind::READ
-                    }),
-                })
-                .collect(),
-        )
+        })
     }
 
     fn prepare_rename(
@@ -638,28 +624,33 @@ impl Server {
     fn rename(&self, params: &RenameParams) -> Result<Option<WorkspaceEdit>, Refusal> {
         let position = &params.text_document_position;
         let uri = &position.text_document.uri;
-        let docs = self.documents.read();
-        let open = docs
-            .get(uri)
-            .filter(|open| open.state.analysis_matches_source)
-            .ok_or(references::NOT_ANALYSED)?;
-        let Some(edits) = references::rename(
-            &open.state,
-            self.configure,
-            &self.functions,
-            position.position,
-            &params.new_name,
-        )?
-        else {
+        // Planned under the lock, and checked, which analyses the program
+        // twice, without it, so the analysis thread isn't held up meanwhile.
+        let (plan, version) = {
+            let docs = self.documents.read();
+            let open = docs
+                .get(uri)
+                .filter(|open| open.state.analysis_matches_source)
+                .ok_or(references::NOT_ANALYSED)?;
+            let plan = references::plan_rename(
+                &open.state,
+                &self.functions,
+                position.position,
+                &params.new_name,
+            )?;
+            (plan, open.version)
+        };
+        let Some(plan) = plan else {
             return Ok(None);
         };
+        let edits = plan.check(self.configure)?;
         // An edit tied to the version it was made for can't land on newer text.
         let edit = if self.versioned_edits {
             WorkspaceEdit {
                 document_changes: Some(DocumentChanges::Edits(vec![TextDocumentEdit {
                     text_document: OptionalVersionedTextDocumentIdentifier {
                         uri: uri.clone(),
-                        version: Some(open.version),
+                        version: Some(version),
                     },
                     edits: edits.into_iter().map(OneOf::Left).collect(),
                 }])),

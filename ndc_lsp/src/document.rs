@@ -1,6 +1,6 @@
 use ls_types::{
-    CompletionResponse, Diagnostic, DocumentHighlight, DocumentHighlightKind, DocumentSymbol,
-    Hover, InlayHint, Position, Range, TextEdit,
+    CompletionResponse, Diagnostic, DocumentHighlight, DocumentSymbol, Hover, InlayHint, Position,
+    Range, TextEdit,
 };
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
@@ -159,20 +159,8 @@ impl Document {
     /// `position`: every name that means the same declarations.
     #[must_use]
     pub fn highlights(&self, position: Position) -> Vec<DocumentHighlight> {
-        let occurrences = self
-            .analysed()
-            .map_or_default(|state| references::highlights(state, position));
-        occurrences
-            .into_iter()
-            .map(|occurrence| DocumentHighlight {
-                range: occurrence.range,
-                kind: Some(if occurrence.write {
-                    DocumentHighlightKind::WRITE
-                } else {
-                    DocumentHighlightKind::READ
-                }),
-            })
-            .collect()
+        self.analysed()
+            .map_or_default(|state| references::highlights(state, position))
     }
 
     /// The range of the name under `position`, if it can be renamed, and
