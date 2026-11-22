@@ -11,8 +11,8 @@ use std::thread;
 use ndc_core::collections::HashMap;
 
 use ls_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, LogMessage,
-    PublishDiagnostics,
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, LogMessage,
+    Notification as _, PublishDiagnostics,
 };
 use ls_types::request::{
     Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest, InlayHintRequest,
@@ -234,6 +234,11 @@ impl Server {
                         return Ok(());
                     }
                     self.handle_request(request);
+                }
+                // The spec has a server that's told to exit before it's told
+                // to shut down exit with an error.
+                Message::Notification(notification) if notification.method == Exit::METHOD => {
+                    return Err("told to exit without a shutdown request first".into());
                 }
                 Message::Notification(notification) => self.handle_notification(notification),
                 Message::Response(_) => {}
