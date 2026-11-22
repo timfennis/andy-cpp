@@ -2,6 +2,7 @@
 //! that answers requests on the main thread, and one worker thread that
 //! analyses documents, so a slow analysis never holds up completion or hover.
 
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::mpsc;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
@@ -10,7 +11,7 @@ use ndc_core::collections::HashMap;
 
 use ls_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, LogMessage,
-    Notification as _, PublishDiagnostics,
+    PublishDiagnostics,
 };
 use ls_types::request::{
     Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest, InlayHintRequest,
@@ -53,10 +54,13 @@ pub fn serve(configure: Configure) -> Result<(), Error> {
         jobs,
         functions: FunctionInfo::collect(&document::interpreter(configure)),
     };
-    server.notify::<LogMessage>(LogMessageParams {
-        typ: MessageType::INFO,
-        message: "server initialized".to_string(),
-    });
+    notify::<LogMessage>(
+        &server.connection.sender,
+        LogMessageParams {
+            typ: MessageType::INFO,
+            message: "server initialized".to_string(),
+        },
+    );
     server.run()?;
 
     // Dropping the server closes the job queue, which ends the worker, and the
@@ -150,13 +154,32 @@ fn analyse_jobs(
             latest.insert(job.uri.clone(), job);
         }
         for job in latest.into_values() {
-            let (diagnostics, analysed) = document::analyse(configure, &job.text);
+            // A bug in the analyser mustn't end this thread, or diagnostics
+            // would stop for the rest of the session: skip the text instead.
+            let Ok((diagnostics, analysed)) =
+                panic::catch_unwind(AssertUnwindSafe(|| document::analyse(configure, &job.text)))
+            else {
+                notify::<LogMessage>(
+                    sender,
+                    LogMessageParams {
+                        typ: MessageType::ERROR,
+                        message: format!(
+                            "the analyser panicked on version {} of {}",
+                            job.version,
+                            job.uri.as_str()
+                        ),
+                    },
+                );
+                continue;
+            };
 
             let mut docs = documents.write();
             let Some(open) = docs.get_mut(&job.uri) else {
                 continue;
             };
-            if open.version != job.version {
+            // A reopened document starts its versions over, so the version
+            // alone could match a job queued before the close.
+            if open.version != job.version || open.state.source != job.text {
                 continue;
             }
             // On success, commit in place (keeps the current source/line_index).
@@ -181,8 +204,15 @@ fn publish_diagnostics(
         diagnostics,
         version,
     };
+    notify::<PublishDiagnostics>(sender, params);
+}
+
+fn notify<N: ls_types::notification::Notification>(
+    sender: &crossbeam_channel::Sender<Message>,
+    params: N::Params,
+) {
     // The send fails only once the client has gone, and then nobody's listening.
-    let _ = sender.send(Notification::new(PublishDiagnostics::METHOD.to_string(), params).into());
+    let _ = sender.send(Notification::new(N::METHOD.to_string(), params).into());
 }
 
 struct Server {
@@ -236,13 +266,6 @@ impl Server {
         .on::<DidOpenTextDocument>(Self::did_open)
         .on::<DidChangeTextDocument>(Self::did_change)
         .on::<DidCloseTextDocument>(Self::did_close);
-    }
-
-    fn notify<N: ls_types::notification::Notification>(&self, params: N::Params) {
-        let _ = self
-            .connection
-            .sender
-            .send(Notification::new(N::METHOD.to_string(), params).into());
     }
 
     /// Updates the document's source and version right away, then queues the
