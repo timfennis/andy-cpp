@@ -17,7 +17,7 @@ use ls_types::notification::{
 use ls_types::request::{
     Completion, DocumentHighlightRequest, DocumentSymbolRequest, Formatting, GotoDefinition,
     HoverRequest, InlayHintRefreshRequest, InlayHintRequest, PrepareRenameRequest, References,
-    Rename, Request as _, SemanticTokensFullRequest, SemanticTokensRefresh,
+    Rename, Request as _, SemanticTokensFullRequest, SemanticTokensRefresh, SignatureHelpRequest,
 };
 use ls_types::{
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
@@ -32,15 +32,16 @@ use ls_types::{
     DocumentHighlightParams, InitializeResult, OptionalVersionedTextDocumentIdentifier,
     PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SemanticTokens,
     SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, TextDocumentEdit, TextDocumentPositionParams, TextEdit,
-    WorkspaceEdit,
+    SemanticTokensServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    TextDocumentEdit, TextDocumentPositionParams, TextEdit, WorkspaceEdit,
 };
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 
 use crate::document::{self, Configure};
 use crate::features::completion::FunctionInfo;
 use crate::features::{
-    completion, definition, formatting, hover, inlay_hints, references, semantic_tokens, symbols,
+    completion, definition, formatting, hover, inlay_hints, references, semantic_tokens,
+    signature_help, symbols,
 };
 use crate::state::DocumentState;
 
@@ -167,6 +168,10 @@ fn capabilities(client: &Client) -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         document_formatting_provider: Some(OneOf::Left(true)),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+            ..Default::default()
+        }),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             SemanticTokensOptions {
                 legend: semantic_tokens::legend(),
@@ -446,6 +451,7 @@ impl Server {
         .on::<DocumentSymbolRequest>(Self::document_symbol)
         .on::<InlayHintRequest>(Self::inlay_hint)
         .on::<References>(Self::references)
+        .on::<SignatureHelpRequest>(Self::signature_help)
         .on::<DocumentHighlightRequest>(Self::document_highlight)
         .on_fallible::<PrepareRenameRequest>(Self::prepare_rename)
         .on_fallible::<Rename>(Self::rename)
@@ -559,6 +565,15 @@ impl Server {
             .map(|open| &open.state)
             .filter(|state| state.analysis_matches_source)
             .map(feature)
+    }
+
+    /// The parameters of the call being written. Like completion, it answers
+    /// while the text doesn't parse, which it mostly doesn't mid-call.
+    fn signature_help(&self, params: &SignatureHelpParams) -> Option<SignatureHelp> {
+        let docs = self.documents.read();
+        let position = &params.text_document_position_params;
+        let open = docs.get(&position.text_document.uri)?;
+        signature_help::signature_help(&open.state, &self.functions, position.position)
     }
 
     fn references(&self, params: &ReferenceParams) -> Option<Vec<Location>> {
