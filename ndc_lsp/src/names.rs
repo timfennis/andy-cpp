@@ -32,6 +32,30 @@ pub struct Name {
     pub span: Span,
     /// Whether it declares or assigns rather than reads.
     pub write: bool,
+    pub place: Place,
+}
+
+/// Where a name is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// In code: a value, a function or a declaration.
+    Code,
+    /// In a type annotation, as `Int` in `let x: Int`.
+    Type,
+    /// After a dot, reading or writing a field: `x` in `p.x`.
+    Member,
+}
+
+/// What a declaration declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Declares {
+    Function,
+    /// A struct: its type and its constructor.
+    Struct,
+    Field,
+    TypeParameter,
+    Parameter,
+    Variable,
 }
 
 /// The names of one analysed text.
@@ -41,6 +65,8 @@ pub struct Names {
     names: Vec<Name>,
     /// The name each declaration declares.
     declarations: HashMap<Definition, Span>,
+    /// What each declaration declares.
+    kinds: HashMap<Definition, Declares>,
 }
 
 impl Names {
@@ -77,6 +103,11 @@ impl Names {
         self.declarations.get(&definition).copied()
     }
 
+    /// What `definition` declares.
+    pub fn kind(&self, definition: Definition) -> Option<Declares> {
+        self.kinds.get(&definition).copied()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Name> {
         self.names.iter()
     }
@@ -90,14 +121,25 @@ struct Collector {
 
 impl Collector {
     fn name(&mut self, refers: Refers, span: Span, write: bool) {
+        self.placed(refers, span, write, Place::Code);
+    }
+
+    fn placed(&mut self, refers: Refers, span: Span, write: bool, place: Place) {
         self.names.names.push(Name {
             refers,
             span,
             write,
+            place,
         });
         if let Refers::Declaration(definition) = refers {
             self.names.declarations.insert(definition, span);
         }
+    }
+
+    /// The name a declaration gives what it declares.
+    fn declares(&mut self, definition: Definition, span: Span, kind: Declares) {
+        self.name(Refers::Declaration(definition), span, true);
+        self.names.kinds.insert(definition, kind);
     }
 
     fn expression(&mut self, expr: &ExpressionLocation) {
@@ -113,14 +155,14 @@ impl Collector {
                 }
             }
             Expression::MemberAccess { member_span, .. } => {
-                self.name(Refers::Node(expr.id), *member_span, false);
+                self.placed(Refers::Node(expr.id), *member_span, false, Place::Member);
             }
             Expression::VariableDeclaration {
                 l_value,
                 annotated_type,
                 ..
             } => {
-                self.pattern(l_value);
+                self.pattern(l_value, Declares::Variable);
                 if let Some(annotation) = annotated_type {
                     self.type_names(annotation);
                 }
@@ -135,14 +177,14 @@ impl Collector {
                 if name.is_some()
                     && let Some(span) = self.name_after(&Token::Fn, expr.span)
                 {
-                    self.name(Refers::Declaration(Definition::Node(expr.id)), span, true);
+                    self.declares(Definition::Node(expr.id), span, Declares::Function);
                 }
                 for parameter in type_parameters {
                     let definition = Definition::Node(parameter.id);
-                    self.name(Refers::Declaration(definition), parameter.span, true);
+                    self.declares(definition, parameter.span, Declares::TypeParameter);
                 }
                 for parameter in parameters {
-                    self.pattern(&parameter.lvalue);
+                    self.pattern(&parameter.lvalue, Declares::Parameter);
                     if let Some(annotation) = &parameter.annotation {
                         self.type_names(annotation);
                     }
@@ -153,7 +195,7 @@ impl Collector {
             }
             Expression::StructDeclaration { fields, .. } => {
                 if let Some(span) = self.name_after(&Token::Struct, expr.span) {
-                    self.name(Refers::Declaration(Definition::Node(expr.id)), span, true);
+                    self.declares(Definition::Node(expr.id), span, Declares::Struct);
                 }
                 for (index, field) in fields.iter().enumerate() {
                     let definition = Definition::Field {
@@ -165,14 +207,14 @@ impl Collector {
                         field.span.offset(),
                         field.identifier.len(),
                     );
-                    self.name(Refers::Declaration(definition), span, true);
+                    self.declares(definition, span, Declares::Field);
                     self.type_names(&field.annotation);
                 }
             }
             Expression::For { iterations, .. } => {
                 for iteration in iterations {
                     if let ForIteration::Iteration { l_value, .. } = iteration {
-                        self.pattern(l_value);
+                        self.pattern(l_value, Declares::Variable);
                     }
                 }
             }
@@ -190,17 +232,20 @@ impl Collector {
         }
     }
 
-    fn pattern(&mut self, pattern: &BindingPatternLocation) {
+    /// The names a binding pattern declares, each a `kind`: a parameter or
+    /// a variable. A pattern is a name the analysis resolves (to itself), and
+    /// a declaration too.
+    fn pattern(&mut self, pattern: &BindingPatternLocation, kind: Declares) {
         match &pattern.pattern {
             BindingPattern::Identifier { span, .. } => {
                 self.name(Refers::Node(pattern.id), *span, true);
-                self.names
-                    .declarations
-                    .insert(Definition::Node(pattern.id), *span);
+                let definition = Definition::Node(pattern.id);
+                self.names.declarations.insert(definition, *span);
+                self.names.kinds.insert(definition, kind);
             }
             BindingPattern::Sequence(patterns) => {
                 for pattern in patterns {
-                    self.pattern(pattern);
+                    self.pattern(pattern, kind);
                 }
             }
         }
@@ -212,7 +257,7 @@ impl Collector {
                 self.name(Refers::Node(target.id), *span, true);
             }
             AssignmentTarget::Member { member_span, .. } => {
-                self.name(Refers::Node(target.id), *member_span, true);
+                self.placed(Refers::Node(target.id), *member_span, true, Place::Member);
             }
             AssignmentTarget::Sequence(targets) => {
                 for target in targets {
@@ -233,7 +278,7 @@ impl Collector {
                 span,
             } => {
                 let name_span = Span::new(span.source_id(), span.offset(), name.len());
-                self.name(Refers::Node(*id), name_span, false);
+                self.placed(Refers::Node(*id), name_span, false, Place::Type);
                 for arg in args {
                     self.type_names(arg);
                 }
