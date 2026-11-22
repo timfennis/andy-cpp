@@ -2,7 +2,7 @@
 //! editor tooling to read. The parser's output is syntax; everything decided
 //! about it after parsing belongs here.
 
-use ndc_core::collections::HashMap;
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::r#struct::StructInfo;
 use ndc_core::{Intrinsic, NodeId, StaticType};
 
@@ -58,6 +58,15 @@ pub struct Analysis {
     /// is checked even then, as the check is what copies a container
     /// something else holds.
     pub cast_checks: HashMap<NodeId, Option<StaticType>>,
+    /// The sequences of the `for` loops and comprehensions that are sets,
+    /// keyed by the sequence's expression: a set iterates as its keys, which
+    /// the loop takes from it.
+    pub iterated_sets: HashSet<NodeId>,
+    /// The positions of the arguments of each call that are sets passed
+    /// where a native takes any kind of sequence, an `Iterable<T>`, keyed by
+    /// the call's site as [`Self::bindings`] and the other pick tables are:
+    /// the native gets the set's keys.
+    pub set_arguments: HashMap<NodeId, Vec<usize>>,
     /// How many local slots each function's own variables use, parameters
     /// first, keyed by its declaration. The compiler places its temporaries
     /// after them.
@@ -102,6 +111,11 @@ pub struct Instance {
     /// As [`Analysis::cast_checks`], for the casts in the instance's body,
     /// which its types may already prove.
     pub cast_checks: HashMap<NodeId, Option<StaticType>>,
+    /// As [`Analysis::iterated_sets`], for the loops in the instance's body
+    /// whose sequences its types make sets.
+    pub iterated_sets: HashSet<NodeId>,
+    /// As [`Analysis::set_arguments`], for the calls in the instance's body.
+    pub set_arguments: HashMap<NodeId, Vec<usize>>,
 }
 
 impl Analysis {
@@ -126,6 +140,8 @@ impl Analysis {
             augmented_assignments,
             structs,
             cast_checks,
+            iterated_sets,
+            set_arguments,
             frame_sizes,
             top_level_frame_size,
             global_count,
@@ -144,6 +160,8 @@ impl Analysis {
         self.augmented_assignments.extend(augmented_assignments);
         self.structs.extend(structs);
         self.cast_checks.extend(cast_checks);
+        self.iterated_sets.extend(iterated_sets);
+        self.set_arguments.extend(set_arguments);
         self.frame_sizes.extend(frame_sizes);
         self.top_level_frame_size = top_level_frame_size;
         self.global_count = global_count;

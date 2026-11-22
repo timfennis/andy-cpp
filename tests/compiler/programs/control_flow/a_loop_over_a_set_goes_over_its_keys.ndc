@@ -1,0 +1,11 @@
+// A set iterates as its keys: `Keys` makes a list of them in the iterator's
+// register, over the local `s` or the set a call makes, which the loop goes
+// over as over any list. A set passed to a native that takes any kind of
+// sequence is made its keys in the argument's register, as `sum`'s here.
+// compile: stdlib
+fn f(s: %{Int}) -> Int {
+    let total = 0;
+    for x in s { total += x; }
+    for y in s | %{1} { total += y; }
+    total + s.sum()
+}

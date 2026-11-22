@@ -159,6 +159,10 @@ pub(crate) struct TypeVars {
     /// The variables made as what an empty `[]`, `%{}` or `None` holds, in
     /// the order they were made: see [`Self::fresh_contents`].
     contents: Vec<TypeVar>,
+    /// The variables a function's body has for the type parameters it
+    /// declares, as `V` in `fn f<K, V>(m: %{K: V})`, and those they were
+    /// made the same as: see [`Self::mark_type_parameter`].
+    type_parameters: HashSet<TypeVar>,
 }
 
 /// Two values of a literal that share no type, as `1` and `"a"` in `[1,

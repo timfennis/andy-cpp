@@ -25,7 +25,7 @@ use assignments::DeferredWrite;
 use declarations::FunctionDeclaration;
 pub use generics::tied_natives;
 use instances::{Cast, GenericUse, Pending, Scheme};
-use solver::{Constraint, EarlyPick, Origin, Waiting};
+use solver::{Constraint, EarlyPick, Iterated, Origin, Waiting};
 #[cfg(test)]
 mod tests;
 
@@ -949,7 +949,11 @@ impl Analyser {
                 let sequence_type = self.analyse_expr(sequence);
                 self.settle_number_literals(&sequence_type);
 
-                let found_type = self.constrain_iteration(sequence_type, sequence_span);
+                let found_type = self.constrain_iteration(
+                    sequence_type,
+                    sequence_span,
+                    Iterated::Loop(sequence.id),
+                );
 
                 self.loops.push(false);
                 // A `for` binder has no type annotation.

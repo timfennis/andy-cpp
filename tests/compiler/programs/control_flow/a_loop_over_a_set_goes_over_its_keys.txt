@@ -1,0 +1,27 @@
+== <script> (registers: 2, globals: 1, natives: sum, |) ==
+0000  LoadK r1, k0                         <fn #1 f>
+0001  SetGlobal g0, r1
+0002  LoadUnit r0
+0003  Halt r0
+
+== #1 f (registers: 7) ==
+0000  LoadK r1, k0                         0
+0001  Keys r3, r0
+0002  GetIterator r3, r3
+0003  IterNext r3, r2, +2                  -> 0006
+0004  AddInt r1, r1, r2
+0005  Jump -3                              -> 0003
+0006  Copy r3, r0
+0007  LoadK r5, k1                         1
+0008  LoadUnit r6
+0009  MakeMap r4, r5, 1
+0010  CallNative r3, |, r3, 2
+0011  Keys r3, r3
+0012  GetIterator r3, r3
+0013  IterNext r3, r2, +2                  -> 0016
+0014  AddInt r1, r1, r2
+0015  Jump -3                              -> 0013
+0016  Keys r3, r0
+0017  CallNative r3, sum, r3, 1
+0018  AddInt r3, r1, r3
+0019  Return r3

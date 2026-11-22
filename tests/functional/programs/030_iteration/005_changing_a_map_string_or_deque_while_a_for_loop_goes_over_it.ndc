@@ -22,7 +22,7 @@ print(keys.sorted, m.len());
 
 let shrinking = %{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 let visited = [];
-for k, _ in shrinking {
+for k in shrinking {
     visited.push(k);
     for other in 2..10 {
         shrinking.remove(other);

@@ -19,6 +19,8 @@ pub(super) enum Undo {
     MarkedJoin(TypeVar),
     /// An `Any` was expected of the join whose type the variable is.
     ExpectedAny,
+    /// The variable was marked as a declared type parameter.
+    MarkedTypeParameter(TypeVar),
 }
 
 /// The state of the variables at one point, which [`TypeVars::rollback`]
@@ -110,6 +112,23 @@ impl TypeVars {
         {
             self.undo.push(Undo::MarkedJoin(var));
         }
+    }
+
+    /// Marks `typ`, the variable a function's body has for a type parameter
+    /// it declares, as one. A map whose values are of that type isn't known
+    /// to be a set: `fn f<K, V>(m: %{K: V})` iterates `m` as (key, value)
+    /// pairs whatever `V` is, as its type says. A variable it's made the
+    /// same as is one too: see [`Self::settle`].
+    pub(crate) fn mark_type_parameter(&mut self, typ: &StaticType) {
+        if let StaticType::Var(var) = self.shallow(typ) {
+            self.type_parameters.insert(var);
+        }
+    }
+
+    /// Whether the resolved type `typ` is a variable a function's body has
+    /// for a type parameter it declares.
+    pub(crate) fn is_type_parameter(&self, typ: &StaticType) -> bool {
+        matches!(typ, StaticType::Var(var) if self.type_parameters.contains(var))
     }
 
     /// The variables `typ` is, through what each is settled as.
@@ -232,6 +251,14 @@ impl TypeVars {
             self.lower(&typ, level);
         }
         let shallow = self.shallow(&typ);
+        // A type parameter made the same as another variable is that
+        // variable now, which stands for the type parameter.
+        if let StaticType::Var(other) = shallow
+            && self.type_parameters.contains(&var)
+            && self.type_parameters.insert(other)
+        {
+            self.undo.push(Undo::MarkedTypeParameter(other));
+        }
         self.solutions[var.0 as usize] = Some(typ);
         self.trail.push(var);
         let bounds = self.bounds[var.0 as usize].clone();
@@ -358,6 +385,9 @@ impl TypeVars {
                 }
                 Undo::ExpectedAny => {
                     self.expects_any.pop();
+                }
+                Undo::MarkedTypeParameter(var) => {
+                    self.type_parameters.remove(&var);
                 }
             }
         }

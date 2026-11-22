@@ -909,6 +909,9 @@ impl Vm {
                             Err(message) => break Exit::Error(VmError::native(message)),
                         }
                     }
+                    Instr::Keys { dst, src } => {
+                        regs[dst.index()] = keys_of(&regs[src.index()]);
+                    }
                     Instr::IterNext { iter, dst, offset } => {
                         let (iter, position) = (iter.index(), iter.index() + 1);
                         // A position is never negative.
@@ -1550,6 +1553,19 @@ fn iterator_of(value: &Value) -> Result<Value, String> {
         }
         _ => Err(format!("{} is not iterable", value.static_type())),
     }
+}
+
+/// A list of the keys of `value`, a map: what a set iterates as.
+#[inline(never)]
+fn keys_of(value: &Value) -> Value {
+    let Value::Object(object) = value else {
+        unreachable!("internal error: the analyser takes the keys of a set");
+    };
+    let Object::Map { entries, .. } = object.as_ref() else {
+        unreachable!("internal error: the analyser takes the keys of a set");
+    };
+    let keys = entries.borrow().keys().cloned().collect::<Vec<_>>();
+    Value::Object(Rc::new(Object::list(keys)))
 }
 
 /// Find the broadcast-axis length for a vec call: the shared length of every

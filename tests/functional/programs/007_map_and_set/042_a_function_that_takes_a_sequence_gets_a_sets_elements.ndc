@@ -1,0 +1,21 @@
+// The functions that take any kind of sequence get a set's elements.
+// expect-output: 6
+// expect-output: [1,2,3]
+// expect-output: true
+// expect-output: false
+// expect-output: [20,30]
+// expect-output: [2,3]
+// expect-output: 3
+// expect-output: [2,4,6]
+// expect-output: [1,2,3]
+
+let s = %{1, 2, 3};
+print(s.sum());
+print(s.sorted());
+print(s.any(fn(x) => x == 1));
+print(s.all(fn(x) => x > 1));
+print(s.map(fn(x) => x * 10).filter(fn(x) => x > 10).sorted());
+print(s.filter(fn(x) => x > 1).sorted());
+print(s.max());
+print(s.lazy.map(fn(x) => x * 2).sorted());
+print([s].flat_map(fn(x) => x.keys()).sorted());

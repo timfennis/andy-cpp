@@ -1,0 +1,29 @@
+// A set iterates as its elements, not as (element, ()) pairs: in a `for`
+// loop, a comprehension, and a map whose values are written as `()`, which is
+// a set too. A map still iterates as (key, value) pairs.
+// expect-output: 6
+// expect-output: [1,4,9]
+// expect-output: %{2,3,4}
+// expect-output: [(1,2),(3,4)]
+// expect-output: [1,2]
+// expect-output: [("a",1),("b",2)]
+// expect-output: [5,7]
+
+let total = 0;
+for x in %{1, 2, 3} {
+    total += x;
+}
+print(total);
+
+print([x * x for x in %{1, 2, 3}].sorted());
+print(%{x + 1 for x in %{1, 2, 3}});
+print([pair for pair in %{(1, 2), (3, 4)}].sorted());
+print([x for x in %{1: (), 2: ()}].sorted());
+print([kv for kv in %{"a": 1, "b": 2}].sorted());
+
+// A set that starts empty iterates as what is put in it later.
+let seen = %{};
+let later = fn() => [x for x in seen].sorted();
+seen.insert(5);
+seen.insert(7);
+print(later());

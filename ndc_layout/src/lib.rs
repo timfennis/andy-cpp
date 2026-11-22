@@ -10,7 +10,7 @@
 use ndc_analysis::{
     Analysis, Binding, Callee, CaptureSource, DeclaredStruct, FieldAccessors, Instance, ResolvedVar,
 };
-use ndc_core::collections::HashMap;
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::r#struct::StructInfo;
 use ndc_core::{NodeId, StaticType};
 use ndc_resolver::{NameResolver, ScopeId, ScopeKind, SymbolId};
@@ -32,6 +32,10 @@ pub struct Picks {
     pub augmented_assignments: HashMap<NodeId, Binding<SymbolId>>,
     /// For [`Analysis::cast_checks`].
     pub cast_checks: HashMap<NodeId, Option<StaticType>>,
+    /// For [`Analysis::iterated_sets`].
+    pub iterated_sets: HashSet<NodeId>,
+    /// For [`Analysis::set_arguments`].
+    pub set_arguments: HashMap<NodeId, Vec<usize>>,
     /// For [`Analysis::variables`].
     pub variables: HashMap<NodeId, SymbolId>,
     /// Each struct declaration's struct, for [`Analysis::structs`], which also
@@ -56,6 +60,10 @@ pub struct InstancePicks {
     pub function_types: HashMap<NodeId, StaticType>,
     /// As [`Analysis::cast_checks`], for the casts in the instance's body.
     pub cast_checks: HashMap<NodeId, Option<StaticType>>,
+    /// As [`Analysis::iterated_sets`], for the loops in the instance's body.
+    pub iterated_sets: HashSet<NodeId>,
+    /// As [`Analysis::set_arguments`], for the calls in the instance's body.
+    pub set_arguments: HashMap<NodeId, Vec<usize>>,
 }
 
 impl InstancePicks {
@@ -68,6 +76,8 @@ impl InstancePicks {
             augmented_assignments: HashMap::default(),
             function_types: HashMap::default(),
             cast_checks: HashMap::default(),
+            iterated_sets: HashSet::default(),
+            set_arguments: HashMap::default(),
         }
     }
 }
@@ -180,6 +190,8 @@ impl<'a> Layout<'a> {
                     .collect(),
                 function_types: picks.function_types.clone(),
                 cast_checks: picks.cast_checks.clone(),
+                iterated_sets: picks.iterated_sets.clone(),
+                set_arguments: picks.set_arguments.clone(),
             };
             analysis
                 .instances
@@ -204,6 +216,15 @@ impl<'a> Layout<'a> {
                 .cast_checks
                 .iter()
                 .map(|(&node, typ)| (node, typ.clone())),
+        );
+        analysis
+            .iterated_sets
+            .extend(picks.iterated_sets.iter().copied());
+        analysis.set_arguments.extend(
+            picks
+                .set_arguments
+                .iter()
+                .map(|(&node, positions)| (node, positions.clone())),
         );
         // A declaration is in the frame it is made in, so only an assignment
         // target can be a use from a function further in.

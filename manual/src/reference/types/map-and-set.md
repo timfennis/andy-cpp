@@ -94,6 +94,16 @@ for (k, v) in m {
 }
 ```
 
+A set iterates as its elements, and so do the functions that take any kind of sequence:
+
+```ndc
+let primes = %{2, 3, 5};
+for p in primes {
+    print(p);
+}
+print(primes.sum());  // 10
+```
+
 **Iteration order is unspecified.** Maps are hash-based, so keys may appear in any order.
 
 **Keys are snapshotted at the start of the loop.** A key added to the map during the loop isn't visited, and a key removed before the loop gets to it is skipped. Values read during iteration do reflect changes to existing keys. Functions that take a function, like `map` and `filter`, go over a map the same way.

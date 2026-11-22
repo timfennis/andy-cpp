@@ -121,6 +121,9 @@ enum Arg {
         args: Vec<Reg>,
         span: Span,
     },
+    /// A list of the keys of the set the argument is: what a set passed
+    /// where a native takes any kind of sequence iterates as.
+    Keys(Box<Self>),
 }
 
 /// The target of an assignment with an operator, with the parts it's read
@@ -163,6 +166,7 @@ impl Arg {
             Self::Expr(expression) => expression.span,
             Self::Var { span, .. } | Self::Read { span, .. } => *span,
             Self::Copy(_) | Self::Take(_) => Span::synthetic(),
+            Self::Keys(set) => set.span(),
         }
     }
 
@@ -171,6 +175,7 @@ impl Arg {
     fn may_assign(&self) -> bool {
         match self {
             Self::Expr(expression) => may_assign(expression),
+            Self::Keys(set) => set.may_assign(),
             Self::Var { .. } | Self::Copy(_) | Self::Take(_) | Self::Read { .. } => false,
         }
     }
@@ -537,8 +542,52 @@ impl Compiler {
                 let args = args.into_iter().map(Arg::Copy).collect();
                 self.compile_binding_call(&getter, args, dest, span)?
             }
+            // `Keys` only reads the set, so a variable's set is read where
+            // it is, and the keys go in a register of the argument's own.
+            Arg::Keys(set) => {
+                let span = set.span();
+                let src = match self.compile_arg(*set, Dest::Any)? {
+                    Operand::Local(reg) | Operand::Temp(reg) => reg,
+                    Operand::Placed => unreachable!("internal error: Dest::Any gives a register"),
+                };
+                // `Keys` reads the set before it writes `dst`.
+                self.next_temp = mark;
+                let dst = self.place(dest, span)?;
+                self.emit(Instr::Keys { dst, src }, span);
+                return Ok(Self::placed(dest, dst));
+            }
         };
         Ok(self.settle(mark, operand, dest))
+    }
+
+    /// `arguments` with each the analyser found to be a set passed where a
+    /// native at `site` takes any kind of sequence made the set's keys.
+    fn with_set_keys(&self, site: NodeId, arguments: Vec<Arg>) -> Vec<Arg> {
+        let Some(positions) = self
+            .instance_pick(|instance| instance.set_arguments.get(&site))
+            .or_else(|| self.analysis.set_arguments.get(&site))
+        else {
+            return arguments;
+        };
+        arguments
+            .into_iter()
+            .enumerate()
+            .map(|(position, argument)| {
+                if positions.contains(&position) {
+                    Arg::Keys(Box::new(argument))
+                } else {
+                    argument
+                }
+            })
+            .collect()
+    }
+
+    /// Whether the analyser found the sequence of the loop at `sequence` to
+    /// be a set, which the loop goes over the keys of.
+    fn iterates_set(&self, sequence: NodeId) -> bool {
+        self.instance_pick(|instance| instance.iterated_sets.get(&sequence))
+            .is_some()
+            || self.analysis.iterated_sets.contains(&sequence)
     }
 
     fn compile_expr_inner(
@@ -695,7 +744,8 @@ impl Compiler {
                 let getter = self
                     .getter(id)
                     .expect("internal error: every member access is analysed before it's compiled");
-                self.compile_binding_call(&getter, vec![Arg::Expr(*receiver)], dest, member_span)
+                let arguments = self.with_set_keys(id, vec![Arg::Expr(*receiver)]);
+                self.compile_binding_call(&getter, arguments, dest, member_span)
             }
             Expression::Tuple { values } => self.compile_tuple(values, dest, span),
             Expression::List { values } => self.compile_list(values, dest, span),
@@ -1105,7 +1155,8 @@ impl Compiler {
                     span,
                 );
             }
-            return self.compile_binding_call(&binding, exprs(arguments), dest, span);
+            let arguments = self.with_set_keys(function.id, exprs(arguments));
+            return self.compile_binding_call(&binding, arguments, dest, span);
         }
         let base = self.alloc_temp(span)?;
         self.compile_expr(function, Dest::Reg(base))?;
@@ -1696,6 +1747,7 @@ impl Compiler {
             } => {
                 let setter = self.setter(target.id);
                 let args = vec![Arg::Expr(*container), Arg::Expr(*index), Arg::Expr(value)];
+                let args = self.with_set_keys(target.id, args);
                 return self.compile_binding_call(&setter, args, dest, span);
             }
             AssignmentTarget::Member {
@@ -1751,6 +1803,7 @@ impl Compiler {
                 AssignmentTarget::Index { value, index } => {
                     let setter = self.setter(target.id);
                     let args = vec![Arg::Expr(*value), Arg::Expr(*index), Arg::Take(element)];
+                    let args = self.with_set_keys(target.id, args);
                     self.compile_binding_call(&setter, args, Dest::Discard, span)?;
                 }
                 AssignmentTarget::Sequence(targets) => {
@@ -2068,6 +2121,15 @@ impl Compiler {
                             }
                         };
                         self.alloc_temp(sequence_span)?;
+                        // A set goes over its keys, which take the
+                        // iterator's register until the iterator replaces
+                        // them.
+                        let src = if self.iterates_set(sequence.id) {
+                            self.emit(Instr::Keys { dst: iter, src }, sequence_span);
+                            iter
+                        } else {
+                            src
+                        };
                         self.emit(Instr::GetIterator { dst: iter, src }, sequence_span);
                         IterNextKind::Iterator(iter)
                     }
