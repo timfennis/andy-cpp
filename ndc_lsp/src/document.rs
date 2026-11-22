@@ -14,7 +14,7 @@ use ndc_parser::Parser;
 use crate::diagnostics;
 use crate::features::completion::FunctionInfo;
 use crate::features::{
-    completion, definition, formatting, hover, inlay_hints, references, semantic_tokens,
+    completion, definition, formatting, hover, inlay_hints, ranges, references, semantic_tokens,
     signature_help, symbols,
 };
 use crate::resolved::Resolved;
@@ -213,6 +213,20 @@ impl Document {
     #[must_use]
     pub fn signature_help(&self, position: Position) -> Option<ls_types::SignatureHelp> {
         signature_help::signature_help(&self.state, &self.functions, position)
+    }
+
+    /// What can be folded; nothing while the analysis isn't of the
+    /// current text.
+    #[must_use]
+    pub fn folding_ranges(&self) -> Vec<ls_types::FoldingRange> {
+        self.analysed().map_or_default(ranges::folding_ranges)
+    }
+
+    /// What expanding the selection at each of `positions` grows to.
+    #[must_use]
+    pub fn selection_ranges(&self, positions: &[Position]) -> Vec<ls_types::SelectionRange> {
+        self.analysed()
+            .map_or_default(|state| ranges::selection_ranges(state, positions))
     }
 
     /// The edit that formats the text, none if it's formatted already; an
