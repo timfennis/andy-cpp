@@ -1,5 +1,4 @@
 use ls_types::{DocumentSymbol, SymbolKind};
-use ndc_analysis::Analysis;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
 use ndc_parser::{
@@ -7,31 +6,24 @@ use ndc_parser::{
     TypeParameter,
 };
 
-use crate::util::LineIndex;
+use crate::resolved::Definition;
+use crate::state::DocumentState;
 
 /// Build the document outline (functions, structs and variable declarations)
 /// from the analysed AST, wherever they are declared. Declarations inside a
 /// named function's body become children of that function's symbol.
-pub fn document_symbols(
-    ast: &[ExpressionLocation],
-    analysis: &Analysis,
-    text: &str,
-    line_index: &LineIndex,
-) -> Vec<DocumentSymbol> {
+///
+/// While the text has changed since the analysis, a symbol whose name
+/// changed, or whose range ends where the text changed, is left out.
+pub fn document_symbols(state: &DocumentState) -> Vec<DocumentSymbol> {
     let mut symbols = Vec::new();
-    for expr in ast {
-        collect_symbol(expr, analysis, text, line_index, &mut symbols);
+    for expr in &state.ast {
+        collect_symbol(expr, state, &mut symbols);
     }
     symbols
 }
 
-fn collect_symbol(
-    expr: &ExpressionLocation,
-    analysis: &Analysis,
-    text: &str,
-    line_index: &LineIndex,
-    out: &mut Vec<DocumentSymbol>,
-) {
+fn collect_symbol(expr: &ExpressionLocation, state: &DocumentState, out: &mut Vec<DocumentSymbol>) {
     match &expr.expression {
         Expression::FunctionDeclaration {
             name: Some(name),
@@ -42,62 +34,64 @@ fn collect_symbol(
             ..
         } => {
             let mut children = Vec::new();
-            collect_symbol(body, analysis, text, line_index, &mut children);
+            collect_symbol(body, state, &mut children);
             // Only an annotated return type is shown; the declared function
             // type holds it as the analyser lowered it.
-            let return_type = match analysis.function_types.get(&expr.id) {
+            let return_type = match state.analysis.function_types.get(&expr.id) {
                 Some(StaticType::Function { return_type, .. }) if return_annotation.is_some() => {
                     Some(return_type.as_ref())
                 }
                 _ => None,
             };
-            out.push(make_symbol(
+            out.extend(make_symbol(
                 name.clone(),
                 Some(signature(type_parameters, parameters, return_type)),
                 SymbolKind::FUNCTION,
                 expr.span,
-                expr.span,
-                text,
-                line_index,
+                declared_name(state, Definition::Node(expr.id), expr.span),
+                state,
                 children,
             ));
         }
         // A function without a name has no symbol to list what it declares under.
         Expression::FunctionDeclaration { name: None, .. } => {}
         Expression::VariableDeclaration { l_value, value, .. } => {
-            push_pattern_symbols(l_value, expr.span, analysis, text, line_index, out);
-            collect_symbol(value, analysis, text, line_index, out);
+            push_pattern_symbols(l_value, expr.span, state, out);
+            collect_symbol(value, state, out);
         }
         Expression::StructDeclaration { name, fields, .. } => {
             let children = fields
                 .iter()
-                .map(|field| {
+                .enumerate()
+                .filter_map(|(index, field)| {
+                    let definition = Definition::Field {
+                        declaration: expr.id,
+                        index,
+                    };
                     make_symbol(
                         field.identifier.clone(),
                         Some(field.annotation.to_string()),
                         SymbolKind::FIELD,
                         field.span,
-                        field.span,
-                        text,
-                        line_index,
+                        declared_name(state, definition, field.span),
+                        state,
                         Vec::new(),
                     )
                 })
                 .collect();
-            out.push(make_symbol(
+            out.extend(make_symbol(
                 name.clone(),
                 None,
                 SymbolKind::STRUCT,
                 expr.span,
-                expr.span,
-                text,
-                line_index,
+                declared_name(state, Definition::Node(expr.id), expr.span),
+                state,
                 children,
             ));
         }
         _ => {
             for child in expr.children() {
-                collect_symbol(child, analysis, text, line_index, out);
+                collect_symbol(child, state, out);
             }
         }
     }
@@ -106,30 +100,28 @@ fn collect_symbol(
 fn push_pattern_symbols(
     pattern: &BindingPatternLocation,
     decl_span: Span,
-    analysis: &Analysis,
-    text: &str,
-    line_index: &LineIndex,
+    state: &DocumentState,
     out: &mut Vec<DocumentSymbol>,
 ) {
     match &pattern.pattern {
         BindingPattern::Identifier { identifier, span } => {
-            out.push(make_symbol(
+            out.extend(make_symbol(
                 identifier.clone(),
-                analysis
+                state
+                    .analysis
                     .variable_types
                     .get(&pattern.id)
                     .map(ToString::to_string),
                 SymbolKind::VARIABLE,
                 decl_span,
                 *span,
-                text,
-                line_index,
+                state,
                 Vec::new(),
             ));
         }
         BindingPattern::Sequence(patterns) => {
             for pattern in patterns {
-                push_pattern_symbols(pattern, decl_span, analysis, text, line_index, out);
+                push_pattern_symbols(pattern, decl_span, state, out);
             }
         }
     }
@@ -164,6 +156,11 @@ fn signature(
     }
 }
 
+/// The name `definition` declares, or else all of `whole`.
+fn declared_name(state: &DocumentState, definition: Definition, whole: Span) -> Span {
+    state.names.declaration(definition).unwrap_or(whole)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn make_symbol(
     name: String,
@@ -171,25 +168,24 @@ fn make_symbol(
     kind: SymbolKind,
     range_span: Span,
     selection_span: Span,
-    text: &str,
-    line_index: &LineIndex,
+    state: &DocumentState,
     children: Vec<DocumentSymbol>,
-) -> DocumentSymbol {
+) -> Option<DocumentSymbol> {
     #[allow(deprecated)]
-    DocumentSymbol {
+    Some(DocumentSymbol {
         name,
         detail,
         kind,
         tags: None,
         deprecated: None,
-        range: line_index.range(text, range_span),
-        selection_range: line_index.range(text, selection_span),
+        range: state.range_of(range_span)?,
+        selection_range: state.name_range(selection_span)?,
         children: if children.is_empty() {
             None
         } else {
             Some(children)
         },
-    }
+    })
 }
 
 #[cfg(test)]
@@ -199,12 +195,7 @@ mod tests {
 
     fn symbols(source: &str) -> Vec<DocumentSymbol> {
         let state = DocumentState::analysed(source);
-        document_symbols(
-            &state.ast,
-            &state.analysis,
-            &state.source,
-            &state.line_index,
-        )
+        document_symbols(&state)
     }
 
     #[test]

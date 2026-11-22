@@ -35,7 +35,7 @@ pub fn references(
     occurrences(state, &Meanings::new(state), &targets)
         .into_iter()
         .filter(|name| include_declaration || !declares(name, &targets))
-        .map(|name| state.line_index.range(&state.source, name.span))
+        .filter_map(|name| state.name_range(name.span))
         .collect()
 }
 
@@ -47,13 +47,15 @@ pub fn highlights(state: &DocumentState, position: Position) -> Vec<DocumentHigh
     };
     occurrences(state, &Meanings::new(state), &targets)
         .into_iter()
-        .map(|name| DocumentHighlight {
-            range: state.line_index.range(&state.source, name.span),
-            kind: Some(if name.write {
-                DocumentHighlightKind::WRITE
-            } else {
-                DocumentHighlightKind::READ
-            }),
+        .filter_map(|name| {
+            Some(DocumentHighlight {
+                range: state.name_range(name.span)?,
+                kind: Some(if name.write {
+                    DocumentHighlightKind::WRITE
+                } else {
+                    DocumentHighlightKind::READ
+                }),
+            })
         })
         .collect()
 }
@@ -164,7 +166,7 @@ pub fn plan_rename(
 /// What the name under the cursor refers to, if it refers to something the
 /// program declares.
 fn targets_at(state: &DocumentState, position: Position) -> Option<Vec<Definition>> {
-    let offset = state.line_index.offset(&state.source, position)?;
+    let offset = state.offset_at(position)?;
     let (_, targets) = definitions_at(state, offset)?;
     (!targets.is_empty()).then_some(targets)
 }

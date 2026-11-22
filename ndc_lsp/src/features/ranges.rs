@@ -50,11 +50,10 @@ fn folds_as_a_whole(expression: &Expression) -> bool {
 
 /// A fold of `span`, if it spans lines.
 fn fold(state: &DocumentState, span: Span, kind: Option<FoldingRangeKind>) -> Option<FoldingRange> {
-    let start = state.line_index.position(&state.source, span.offset());
-    let end = state.line_index.position(&state.source, span.end());
+    let Range { start, end } = state.range_of(span)?;
     let mut end_line = end.line;
     // `}` starting its line stays showing, so the fold reads `{ … }`.
-    let closing_starts_line = state.source[..span.end()]
+    let closing_starts_line = state.analysed_text()[..span.end()]
         .trim_end()
         .rsplit('\n')
         .next()
@@ -77,15 +76,10 @@ fn comment_runs(state: &DocumentState) -> Vec<FoldingRange> {
     let Some(first) = state.ast.first() else {
         return Vec::new();
     };
-    let comments: Vec<u32> = Lexer::new(&state.source, first.span.source_id())
+    let comments: Vec<u32> = Lexer::new(state.analysed_text(), first.span.source_id())
         .map_while(Result::ok)
         .filter(|token| matches!(token.token, Token::Comment(_)))
-        .map(|token| {
-            state
-                .line_index
-                .position(&state.source, token.span.offset())
-                .line
-        })
+        .filter_map(|token| Some(state.range_of(token.span)?.start.line))
         .collect();
     let mut runs = Vec::new();
     let mut start = 0;
@@ -121,7 +115,7 @@ fn selection_range(state: &DocumentState, position: Position) -> SelectionRange 
         range: Range::new(position, position),
         parent: None,
     };
-    let Some(offset) = state.line_index.offset(&state.source, position) else {
+    let Some(offset) = state.offset_at(position) else {
         return empty;
     };
     // Everything that holds the cursor, outermost first.
@@ -152,8 +146,12 @@ fn selection_range(state: &DocumentState, position: Position) -> SelectionRange 
     // Innermost first, each strictly larger than the one before.
     spans.sort_by_key(|span| std::cmp::Reverse(span.end() - span.offset()));
     spans.dedup_by_key(|span| (span.offset(), span.end()));
-    spans.into_iter().fold(empty, |parent, span| {
-        let range = state.line_index.range(&state.source, span);
+    // A part that changed since the analysis is left out, its parts with it.
+    let ranges: Vec<Range> = spans
+        .into_iter()
+        .map_while(|span| state.range_of(span))
+        .collect();
+    ranges.into_iter().fold(empty, |parent, range| {
         if parent.range.start == parent.range.end && parent.parent.is_none() {
             SelectionRange {
                 range,
