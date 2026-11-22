@@ -64,8 +64,8 @@ impl Analyser {
         } = function;
         let declared = name.map(|name| (name, self.resolver.declared_symbol(id)));
         let generic = declared.is_some_and(|(_, symbol)| self.is_generic_function(symbol));
+        let generic_body = generic.then(|| self.vars.enter_level());
         if generic {
-            self.vars.enter_level();
             self.declaring = declared.map(|(_, symbol)| symbol);
         }
         // Each type parameter it declares is a variable of the body's, which
@@ -226,9 +226,9 @@ impl Analyser {
                     .unwrap_or_else(|| inferred_return.clone()),
             ),
         };
-        let function_type = match declared {
-            Some((_, symbol)) if generic => {
-                self.vars.leave_level();
+        let function_type = match (declared, generic_body) {
+            (Some((_, symbol)), Some(generic_body)) => {
+                let left_body = self.vars.leave_level(generic_body);
                 self.declaring = None;
                 self.declared_in_batch.insert(symbol);
                 let flags = Generalizing {
@@ -250,6 +250,7 @@ impl Analyser {
                         uses: first_use,
                         functions: first_function,
                         casts: first_cast,
+                        literals: left_body,
                     },
                 );
                 self.check_type_parameters(symbol, type_parameters, &declared_type_parameters);

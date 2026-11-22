@@ -1,0 +1,9 @@
+// A literal whose values share no type stays one until it's stored, and a
+// generic function's body storing it settles it as what it's stored as.
+// expect-output: (1,1,[1])
+// expect-output: ("b",1,[1])
+let c = true;
+let v = if c { 1 } else { "a" };
+fn show(x) { let w: Any = v; (x, w, [w]) }
+print(show(1));
+print(show("b"));

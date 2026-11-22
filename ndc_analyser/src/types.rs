@@ -11,6 +11,7 @@ mod store;
 mod unify;
 
 pub(crate) use literals::Listed;
+pub(crate) use store::LeftBody;
 
 use store::Undo;
 use unify::Deferred;
@@ -206,18 +207,74 @@ mod tests {
         assert_eq!(vars.count(), 1);
     }
 
+    /// The literals listed in all the batch's lists that are still to settle.
+    fn unsettled(vars: &mut TypeVars) -> Vec<ndc_core::TypeVar> {
+        vars.unsettled_literals(super::Listed::InBatch, |_, _| true)
+    }
+
+    #[test]
+    fn a_body_closed_in_a_snapshot_keeps_a_literal_a_rollback_unsettles() {
+        let mut vars = TypeVars::default();
+        let body = vars.enter_level();
+        let StaticType::Var(literal) = vars.fresh_number(span()) else {
+            unreachable!("a literal's type is a variable");
+        };
+        let left = vars.leave_level(body);
+        vars.probe(|vars| {
+            assert!(vars.unify(&StaticType::Var(literal), &StaticType::Int));
+            vars.close_body_literals(left);
+        });
+        // The rollback unsettled it, so it's still a literal to settle, and
+        // still listed.
+        assert_eq!(unsettled(&mut vars), vec![literal]);
+    }
+
+    #[test]
+    fn a_body_closed_outside_a_snapshot_drops_its_settled_literals() {
+        let mut vars = TypeVars::default();
+        let body = vars.enter_level();
+        let settled = vars.fresh_number(span());
+        let StaticType::Var(open) = vars.fresh_number(span()) else {
+            unreachable!("a literal's type is a variable");
+        };
+        let left = vars.leave_level(body);
+        assert!(vars.unify(&settled, &StaticType::Int));
+        vars.close_body_literals(left);
+        assert_eq!(vars.literals, vec![vec![open]]);
+    }
+
+    #[test]
+    fn literals_are_pruned_only_with_no_body_or_snapshot_open() {
+        let mut vars = TypeVars::default();
+        for _ in 0..100 {
+            let literal = vars.fresh_number(span());
+            assert!(vars.unify(&literal, &StaticType::Int));
+        }
+        let listed = |vars: &TypeVars| vars.literals.iter().map(Vec::len).sum::<usize>();
+        vars.probe(TypeVars::prune_literals);
+        assert_eq!(listed(&vars), 100, "pruned in a snapshot");
+        let body = vars.enter_level();
+        vars.prune_literals();
+        assert_eq!(listed(&vars), 100, "pruned in a body");
+        let left = vars.leave_level(body);
+        vars.close_body_literals(left);
+        vars.prune_literals();
+        assert_eq!(listed(&vars), 0);
+    }
+
     #[test]
     fn a_rollback_takes_back_a_lowered_level() {
         let mut vars = TypeVars::default();
-        vars.enter_level();
+        let body = vars.enter_level();
         let StaticType::Var(var) = vars.fresh() else {
             unreachable!("a fresh type is a variable");
         };
-        vars.leave_level();
+        let left = vars.leave_level(body);
         vars.probe(|vars| vars.lower_to_current(&StaticType::Var(var)));
         assert!(vars.is_generalizable(var));
         vars.lower_to_current(&StaticType::Var(var));
         assert!(!vars.is_generalizable(var));
+        vars.close_body_literals(left);
     }
 
     #[test]

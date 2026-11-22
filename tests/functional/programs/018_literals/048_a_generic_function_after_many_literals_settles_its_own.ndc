@@ -1,0 +1,50 @@
+// A generic function declared after many top-level literals still settles its
+// own and reads the earlier ones, as does a literal after it.
+// expect-output: (1,40,[2.0,0.5])
+// expect-output: ("s",40,[2.0,0.5])
+// expect-output: [1.0,2.5]
+let a0 = [0, 0 + 1];
+let a1 = [1, 1 + 1];
+let a2 = [2, 2 + 1];
+let a3 = [3, 3 + 1];
+let a4 = [4, 4 + 1];
+let a5 = [5, 5 + 1];
+let a6 = [6, 6 + 1];
+let a7 = [7, 7 + 1];
+let a8 = [8, 8 + 1];
+let a9 = [9, 9 + 1];
+let a10 = [10, 10 + 1];
+let a11 = [11, 11 + 1];
+let a12 = [12, 12 + 1];
+let a13 = [13, 13 + 1];
+let a14 = [14, 14 + 1];
+let a15 = [15, 15 + 1];
+let a16 = [16, 16 + 1];
+let a17 = [17, 17 + 1];
+let a18 = [18, 18 + 1];
+let a19 = [19, 19 + 1];
+let a20 = [20, 20 + 1];
+let a21 = [21, 21 + 1];
+let a22 = [22, 22 + 1];
+let a23 = [23, 23 + 1];
+let a24 = [24, 24 + 1];
+let a25 = [25, 25 + 1];
+let a26 = [26, 26 + 1];
+let a27 = [27, 27 + 1];
+let a28 = [28, 28 + 1];
+let a29 = [29, 29 + 1];
+let a30 = [30, 30 + 1];
+let a31 = [31, 31 + 1];
+let a32 = [32, 32 + 1];
+let a33 = [33, 33 + 1];
+let a34 = [34, 34 + 1];
+let a35 = [35, 35 + 1];
+let a36 = [36, 36 + 1];
+let a37 = [37, 37 + 1];
+let a38 = [38, 38 + 1];
+let a39 = [39, 39 + 1];
+fn total(x) { (x, a0[0] + a39[1], [2, 0.5]) }
+print(total(1));
+print(total("s"));
+let b = [1, 2.5];
+print(b);

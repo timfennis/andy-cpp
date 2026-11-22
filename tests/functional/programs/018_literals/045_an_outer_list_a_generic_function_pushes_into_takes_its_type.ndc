@@ -1,0 +1,8 @@
+// A list from outside a generic function that its body pushes into takes the
+// type of what's pushed, whichever call pushes it.
+// expect-output: [6,8]
+let xs = [];
+fn keep(x) { xs.push(x * 2); x }
+keep(3);
+keep(4);
+print(xs);

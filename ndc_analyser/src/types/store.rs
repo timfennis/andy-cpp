@@ -21,6 +21,19 @@ pub(super) enum Undo {
     ExpectedAny,
 }
 
+/// A generic function's body being analysed, from [`TypeVars::enter_level`]
+/// until [`TypeVars::leave_level`] takes it. Only the type store can make
+/// one, so a body is left once for each time one is entered.
+#[must_use = "a body that's entered has to be left"]
+#[derive(Debug)]
+pub(crate) struct Body(pub(super) ());
+
+/// A generic function's body that's been left, whose list of literals is
+/// open until [`TypeVars::close_body_literals`] takes it.
+#[must_use = "a body's list of literals has to be closed"]
+#[derive(Debug)]
+pub(crate) struct LeftBody(pub(super) ());
+
 /// The state of the variables at one point, which [`TypeVars::rollback`]
 /// returns to: see [`TypeVars::attempt_in`] and [`TypeVars::probe_in`],
 /// the only ways to take one.
@@ -141,16 +154,25 @@ impl TypeVars {
     }
 
     /// Starts the body of a generic function: the variables made until
-    /// [`Self::leave_level`] belong to it.
-    pub(crate) fn enter_level(&mut self) {
+    /// [`Self::leave_level`] belong to it, and the literals listed until
+    /// [`Self::close_body_literals`] are in its list.
+    pub(crate) fn enter_level(&mut self) -> Body {
         self.level += 1;
         self.open_body_literals();
+        Body(())
     }
 
     /// Ends the body [`Self::enter_level`] started. The variables it made
-    /// that nothing outside refers to can then be generalized.
-    pub(crate) fn leave_level(&mut self) {
+    /// that nothing outside refers to can then be generalized, and the
+    /// literals listed in it defaulted before [`Self::close_body_literals`].
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "taking the body is what ends it"
+    )]
+    pub(crate) fn leave_level(&mut self, body: Body) -> LeftBody {
+        let Body(()) = body;
         self.level -= 1;
+        LeftBody(())
     }
 
     /// Whether `var` is unsettled and belongs to a generic function's body
