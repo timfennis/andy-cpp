@@ -276,25 +276,13 @@ fn main() -> anyhow::Result<()> {
         Action::StartRepl => {
             repl::run()?;
         }
-        Action::RunLsp => start_lsp(),
+        Action::RunLsp => start_lsp()?,
     }
     Ok(())
 }
 
-fn start_lsp() {
-    #[allow(
-        clippy::expect_used,
-        clippy::diverging_sub_expression,
-        clippy::needless_return,
-        clippy::unwrap_in_result
-    )]
-    {
-        return tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("Failed building the Runtime")
-            .block_on(async { ndc_lsp::start_lsp(ndc_stdlib::register).await });
-    }
+fn start_lsp() -> anyhow::Result<()> {
+    ndc_lsp::start_lsp(ndc_stdlib::register).map_err(|error| anyhow::anyhow!(error))
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ default = ["server"]
 # The language server over stdio. Without it, the features (completion, hover,
 # diagnostics, …) are plain functions over a `Document`, which also build for
 # WebAssembly.
-server = ["dep:tokio", "dep:tower-lsp-server"]
+server = ["dep:crossbeam-channel", "dep:lsp-server", "dep:serde_json"]
 
 [dependencies]
 ndc_analysis.workspace = true
@@ -18,8 +18,9 @@ ndc_lexer.workspace = true
 ndc_interpreter.workspace = true
 ndc_core.workspace = true
 ndc_parser.workspace = true
-tokio = { workspace = true, optional = true }
-tower-lsp-server = { workspace = true, optional = true }
+crossbeam-channel = { workspace = true, optional = true }
+lsp-server = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 ndc_stdlib.workspace = true

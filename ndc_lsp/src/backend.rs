@@ -1,190 +1,296 @@
+//! The language server: a synchronous JSON-RPC loop over stdio (`lsp-server`)
+//! that answers requests on the main thread, and one worker thread that
+//! analyses documents, so a slow analysis never holds up completion or hover.
+
+use std::sync::mpsc;
+use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::thread;
+
 use ndc_core::collections::HashMap;
 
+use ls_types::notification::{
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, LogMessage,
+    Notification as _, PublishDiagnostics,
+};
+use ls_types::request::{
+    Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest, InlayHintRequest,
+};
 use ls_types::{
-    CompletionItem, CompletionOptions, CompletionParams, CompletionResponse,
+    CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    InitializedParams, InlayHint, InlayHintParams, Location, MessageType, OneOf,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
-    WorkDoneProgressOptions,
+    Hover, HoverParams, HoverProviderCapability, InlayHint, InlayHintParams, Location,
+    LogMessageParams, MessageType, OneOf, PublishDiagnosticsParams, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
-use tokio::sync::RwLock;
-use tower_lsp_server::jsonrpc::Result as JsonRPCResult;
-use tower_lsp_server::{Client, LanguageServer};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 
 use crate::document::{self, Configure};
 use crate::features::completion::FunctionInfo;
 use crate::features::{completion, definition, hover, inlay_hints, symbols};
 use crate::state::DocumentState;
 
+type Error = Box<dyn std::error::Error + Send + Sync>;
+
+/// Serves the language server over stdin and stdout until the client exits.
+pub fn serve(configure: Configure) -> Result<(), Error> {
+    let (connection, io_threads) = Connection::stdio();
+    connection.initialize(serde_json::to_value(capabilities())?)?;
+
+    let documents = Documents::default();
+    let (jobs, queue) = mpsc::channel();
+    let worker = {
+        let documents = documents.clone();
+        let sender = connection.sender.clone();
+        thread::Builder::new()
+            .name("analysis".to_string())
+            .spawn(move || analyse_jobs(&queue, &documents, &sender, configure))?
+    };
+
+    let server = Server {
+        connection,
+        documents,
+        jobs,
+        functions: FunctionInfo::collect(&document::interpreter(configure)),
+    };
+    server.notify::<LogMessage>(LogMessageParams {
+        typ: MessageType::INFO,
+        message: "server initialized".to_string(),
+    });
+    server.run()?;
+
+    // Dropping the server closes the job queue, which ends the worker, and the
+    // connection, which ends the writer thread.
+    drop(server);
+    worker
+        .join()
+        .map_err(|_panic| "the analysis thread panicked".to_string())?;
+    io_threads.join()?;
+    Ok(())
+}
+
+/// What the server can do, as it tells the client in `initialize`.
+fn capabilities() -> ServerCapabilities {
+    ServerCapabilities {
+        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        completion_provider: Some(CompletionOptions {
+            resolve_provider: Some(false),
+            trigger_characters: Some(vec![".".to_string()]),
+            ..Default::default()
+        }),
+        inlay_hint_provider: Some(OneOf::Left(true)),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+        document_symbol_provider: Some(OneOf::Left(true)),
+        definition_provider: Some(OneOf::Left(true)),
+        ..Default::default()
+    }
+}
+
 /// An open document: its state, and the client's version of the text in it.
 struct OpenDocument {
     /// Monotonic document version from the client (LSP `didChange`). Used to
-    /// discard the result of a `validate` that an overlapping later edit has
-    /// already superseded, so a slow analysis can't roll the buffer back.
+    /// discard the result of an analysis that a later edit has already
+    /// superseded, so a slow analysis can't roll the buffer back.
     version: i32,
     state: DocumentState,
 }
 
-pub struct Backend {
-    pub client: Client,
-    documents: RwLock<HashMap<Uri, OpenDocument>>,
+/// The open documents, shared by the thread that answers requests and the one
+/// that analyses.
+#[derive(Clone, Default)]
+struct Documents(Arc<RwLock<HashMap<Uri, OpenDocument>>>);
+
+impl Documents {
+    // A panic while holding the lock leaves the map as it was between two
+    // whole updates, so a poisoned lock is still safe to use.
+    fn read(&self) -> RwLockReadGuard<'_, HashMap<Uri, OpenDocument>> {
+        self.0.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn write(&self) -> RwLockWriteGuard<'_, HashMap<Uri, OpenDocument>> {
+        self.0.write().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// A version of a document's text, waiting to be analysed.
+struct Job {
+    uri: Uri,
+    text: String,
+    version: i32,
+}
+
+// Staleness & concurrency model
+// ------------------------------
+// The main thread handles messages in order. An edit updates the document's
+// source and `version` right away, so completion (triggered by `.`) always sees
+// the latest text, then queues the text for the analysis thread. That thread
+// analyses off the lock and commits the result and publishes its diagnostics
+// only if the stored `version` still equals the one it analysed, so a slow run
+// can't roll the buffer back to older text. It holds the lock across the commit
+// and the publish, as `didClose` does across its removal and its publish, so a
+// close can't slip in between and leave stale diagnostics on a closed file.
+// AST-backed features (hover, go-to-def, symbols, inlay hints) additionally
+// gate on `analysis_matches_source`, so they never map stale spans onto edited
+// text. The completion caches (`variable_types` by name, `expression_types` by
+// end-offset) are intentionally resilient: dot completion fires on a buffer
+// that doesn't parse (`x.`), and the data it reads sits at the cursor where
+// offsets are stable for the appended `.`.
+
+/// Analyses the documents queued on `queue` until the queue closes. When edits
+/// come in faster than it analyses, it skips to the latest text of each document.
+fn analyse_jobs(
+    queue: &mpsc::Receiver<Job>,
+    documents: &Documents,
+    sender: &crossbeam_channel::Sender<Message>,
     configure: Configure,
+) {
+    while let Ok(first) = queue.recv() {
+        let mut latest = HashMap::default();
+        for job in std::iter::once(first).chain(queue.try_iter()) {
+            latest.insert(job.uri.clone(), job);
+        }
+        for job in latest.into_values() {
+            let (diagnostics, analysed) = document::analyse(configure, &job.text);
+
+            let mut docs = documents.write();
+            let Some(open) = docs.get_mut(&job.uri) else {
+                continue;
+            };
+            if open.version != job.version {
+                continue;
+            }
+            // On success, commit in place (keeps the current source/line_index).
+            // On parse failure, keep the last good AST; `analysis_matches_source`
+            // is already false, so AST-backed features stay disabled.
+            if let Some((ast, analysis)) = analysed {
+                open.state.set_analysis(ast, analysis);
+            }
+            publish_diagnostics(sender, job.uri, diagnostics, Some(job.version));
+        }
+    }
+}
+
+fn publish_diagnostics(
+    sender: &crossbeam_channel::Sender<Message>,
+    uri: Uri,
+    diagnostics: Vec<Diagnostic>,
+    version: Option<i32>,
+) {
+    let params = PublishDiagnosticsParams {
+        uri,
+        diagnostics,
+        version,
+    };
+    // The send fails only once the client has gone, and then nobody's listening.
+    let _ = sender.send(Notification::new(PublishDiagnostics::METHOD.to_string(), params).into());
+}
+
+struct Server {
+    connection: Connection,
+    documents: Documents,
+    jobs: mpsc::Sender<Job>,
     /// Native-function metadata, snapshotted once at startup. The set of native
     /// functions never changes, so completion and hover read this instead of
     /// rebuilding an interpreter per request.
     functions: Vec<FunctionInfo>,
 }
 
-impl Backend {
-    pub fn new(client: Client, configure: Configure) -> Self {
-        Self {
-            client,
-            documents: RwLock::new(HashMap::default()),
-            configure,
-            functions: FunctionInfo::collect(&document::interpreter(configure)),
+impl Server {
+    fn run(&self) -> Result<(), Error> {
+        for message in &self.connection.receiver {
+            match message {
+                Message::Request(request) => {
+                    if self.connection.handle_shutdown(&request)? {
+                        return Ok(());
+                    }
+                    self.handle_request(request);
+                }
+                Message::Notification(notification) => self.handle_notification(notification),
+                Message::Response(_) => {}
+            }
         }
-    }
-
-    // Staleness & concurrency model
-    // ------------------------------
-    // `didChange` notifications can interleave at await points, so any cached
-    // state is tagged with the client's monotonic document `version`. Two rules
-    // keep async edits sound:
-    //   1. `update_source` runs synchronously under the lock and bumps `version`,
-    //      so completion (triggered by `.`) always sees the latest text.
-    //   2. `validate` runs analysis off the lock, then commits/publishes only if
-    //      the stored `version` still equals the one it analysed — a slow run
-    //      can't roll the buffer back to older text.
-    // AST-backed features (hover, go-to-def, symbols, inlay hints) additionally
-    // gate on `analysis_matches_source`, so they never map stale spans onto
-    // edited text. The completion caches (`variable_types` by name,
-    // `expression_types` by end-offset) are intentionally resilient: dot
-    // completion fires on a buffer that doesn't parse (`x.`), and the data it
-    // reads sits at the cursor where offsets are stable for the appended `.`.
-
-    /// Update the cached source text immediately and bump the document version.
-    async fn update_source(&self, uri: &Uri, text: &str, version: i32) {
-        let mut docs = self.documents.write().await;
-        if let Some(open) = docs.get_mut(uri) {
-            // The AST now predates this edit; `validate` commits a new one if
-            // the new source parses.
-            open.state.set_source(text);
-            open.version = version;
-        } else {
-            let state = DocumentState::from_source(text.to_string());
-            docs.insert(uri.clone(), OpenDocument { version, state });
-        }
-    }
-
-    /// Run diagnostics and semantic analysis for `version` of the document, then
-    /// commit the analysis and publish diagnostics only if no later edit has
-    /// superseded it. `update_source` must have run for this `version` first.
-    async fn validate(&self, uri: &Uri, text: &str, version: i32) {
-        // The interpreter uses Rc internally (non-Send); `analyse` drops it
-        // before returning, so nothing non-Send lives across the next await.
-        let (diagnostics, analysed) = document::analyse(self.configure, text);
-
-        // Hold the write lock across the commit AND the publish. `did_close`
-        // also takes this lock to remove state + clear diagnostics, so holding
-        // it here serializes the two: either close runs first (and we then see
-        // the document gone and skip), or we publish first and close clears it
-        // afterwards. Without this, a close could slip between an unlocked
-        // version check and the publish, leaving stale diagnostics on a closed
-        // file. The publish is a fire-and-forget notification, so the lock is
-        // held only briefly.
-        let mut docs = self.documents.write().await;
-        let Some(open) = docs.get_mut(uri) else {
-            return;
-        };
-        // A later edit already moved the buffer on — drop this stale run
-        // rather than committing old AST or publishing old diagnostics.
-        if open.version != version {
-            return;
-        }
-        // On success, commit in place (keeps the current source/line_index).
-        // On parse failure, keep the last good AST; `analysis_matches_source`
-        // is already false, so AST-backed features stay disabled.
-        if let Some((ast, analysis)) = analysed {
-            open.state.set_analysis(ast, analysis);
-        }
-
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
-            .await;
-    }
-}
-
-impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> JsonRPCResult<InitializeResult> {
-        Ok(InitializeResult {
-            capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
-                )),
-                completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(false),
-                    trigger_characters: Some(vec![".".to_string()]),
-                    all_commit_characters: None,
-                    work_done_progress_options: WorkDoneProgressOptions {
-                        work_done_progress: None,
-                    },
-                    completion_item: None,
-                }),
-                inlay_hint_provider: Some(OneOf::Left(true)),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
-                document_symbol_provider: Some(OneOf::Left(true)),
-                definition_provider: Some(OneOf::Left(true)),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-    }
-
-    async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "server initialized")
-            .await;
-    }
-
-    async fn shutdown(&self) -> JsonRPCResult<()> {
         Ok(())
     }
 
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri;
-        let text = params.text_document.text;
-        let version = params.text_document.version;
-        self.update_source(&uri, &text, version).await;
-        self.validate(&uri, &text, version).await;
+    /// Answers a request. A new request is one more `on` here, with its
+    /// capability in [`capabilities`].
+    fn handle_request(&self, request: Request) {
+        Requests {
+            server: self,
+            request: Some(request),
+        }
+        .on::<Completion>(Self::completion)
+        .on::<HoverRequest>(Self::hover)
+        .on::<GotoDefinition>(Self::goto_definition)
+        .on::<DocumentSymbolRequest>(Self::document_symbol)
+        .on::<InlayHintRequest>(Self::inlay_hint)
+        .finish();
     }
 
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri;
-        let version = params.text_document.version;
+    /// Acts on a notification; one the server doesn't know is ignored.
+    fn handle_notification(&self, notification: Notification) {
+        Notifications {
+            server: self,
+            notification: Some(notification),
+        }
+        .on::<DidOpenTextDocument>(Self::did_open)
+        .on::<DidChangeTextDocument>(Self::did_change)
+        .on::<DidCloseTextDocument>(Self::did_close);
+    }
+
+    fn notify<N: ls_types::notification::Notification>(&self, params: N::Params) {
+        let _ = self
+            .connection
+            .sender
+            .send(Notification::new(N::METHOD.to_string(), params).into());
+    }
+
+    /// Updates the document's source and version right away, then queues the
+    /// new text for analysis.
+    fn update_source(&self, uri: Uri, text: String, version: i32) {
+        {
+            let mut docs = self.documents.write();
+            if let Some(open) = docs.get_mut(&uri) {
+                // The AST now predates this edit; the analysis commits a new
+                // one if the new source parses.
+                open.state.set_source(&text);
+                open.version = version;
+            } else {
+                let state = DocumentState::from_source(text.clone());
+                docs.insert(uri.clone(), OpenDocument { version, state });
+            }
+        }
+        // The send fails only once the worker has gone, at shutdown.
+        let _ = self.jobs.send(Job { uri, text, version });
+    }
+
+    fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let document = params.text_document;
+        self.update_source(document.uri, document.text, document.version);
+    }
+
+    fn did_change(&self, params: DidChangeTextDocumentParams) {
         // Full-document sync: the last change carries the whole buffer, so only
         // the final one matters.
         if let Some(change) = params.content_changes.into_iter().next_back() {
-            self.update_source(&uri, &change.text, version).await;
-            self.validate(&uri, &change.text, version).await;
+            let document = params.text_document;
+            self.update_source(document.uri, change.text, document.version);
         }
     }
 
-    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+    fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         // Drop cached state so the map doesn't grow unbounded, and clear the
-        // document's diagnostics. Hold the lock across the publish so it can't
-        // interleave with a `validate` publish (see the note in `validate`).
-        let mut docs = self.documents.write().await;
+        // document's diagnostics, holding the lock across both (see the model
+        // above `analyse_jobs`).
+        let mut docs = self.documents.write();
         docs.remove(&uri);
-        self.client.publish_diagnostics(uri, Vec::new(), None).await;
+        publish_diagnostics(&self.connection.sender, uri, Vec::new(), None);
     }
 
-    async fn inlay_hint(&self, params: InlayHintParams) -> JsonRPCResult<Option<Vec<InlayHint>>> {
-        let docs = self.documents.read().await;
-        Ok(docs
-            .get(&params.text_document.uri)
+    fn inlay_hint(&self, params: &InlayHintParams) -> Option<Vec<InlayHint>> {
+        let docs = self.documents.read();
+        docs.get(&params.text_document.uri)
             .map(|open| &open.state)
             .map(|state| {
                 if !state.analysis_matches_source {
@@ -196,29 +302,24 @@ impl LanguageServer for Backend {
                     &state.source,
                     &state.line_index,
                 )
-            }))
+            })
     }
 
-    async fn hover(&self, params: HoverParams) -> JsonRPCResult<Option<Hover>> {
-        let docs = self.documents.read().await;
+    fn hover(&self, params: &HoverParams) -> Option<Hover> {
+        let docs = self.documents.read();
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        Ok(docs
-            .get(uri)
+        docs.get(uri)
             .map(|open| &open.state)
             .filter(|state| state.analysis_matches_source)
-            .and_then(|state| hover::hover(state, position, &self.functions)))
+            .and_then(|state| hover::hover(state, position, &self.functions))
     }
 
-    async fn goto_definition(
-        &self,
-        params: GotoDefinitionParams,
-    ) -> JsonRPCResult<Option<GotoDefinitionResponse>> {
-        let docs = self.documents.read().await;
+    fn goto_definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
+        let docs = self.documents.read();
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        Ok(docs
-            .get(uri)
+        docs.get(uri)
             .map(|open| &open.state)
             .filter(|state| state.analysis_matches_source)
             .and_then(|state| {
@@ -228,16 +329,12 @@ impl LanguageServer for Backend {
                         range,
                     })
                 })
-            }))
+            })
     }
 
-    async fn document_symbol(
-        &self,
-        params: DocumentSymbolParams,
-    ) -> JsonRPCResult<Option<DocumentSymbolResponse>> {
-        let docs = self.documents.read().await;
-        Ok(docs
-            .get(&params.text_document.uri)
+    fn document_symbol(&self, params: &DocumentSymbolParams) -> Option<DocumentSymbolResponse> {
+        let docs = self.documents.read();
+        docs.get(&params.text_document.uri)
             .map(|open| &open.state)
             .filter(|state| state.analysis_matches_source)
             .map(|state| {
@@ -247,27 +344,80 @@ impl LanguageServer for Backend {
                     &state.source,
                     &state.line_index,
                 ))
-            }))
+            })
     }
 
-    async fn completion(
-        &self,
-        params: CompletionParams,
-    ) -> JsonRPCResult<Option<CompletionResponse>> {
-        let docs = self.documents.read().await;
+    fn completion(&self, params: &CompletionParams) -> Option<CompletionResponse> {
+        let docs = self.documents.read();
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        // Completion is synchronous and never awaits, so we can hold the read
-        // lock and borrow the state directly (no cloning).
-        let response = completion::complete(
+        Some(completion::complete(
             docs.get(uri).map(|open| &open.state),
             position,
             &self.functions,
-        );
-        Ok(Some(response))
+        ))
+    }
+}
+
+/// Hands a request to the handler of its method, and answers it.
+struct Requests<'a> {
+    server: &'a Server,
+    /// The request, until a handler takes it.
+    request: Option<Request>,
+}
+
+impl Requests<'_> {
+    fn on<R: ls_types::request::Request>(
+        mut self,
+        handler: fn(&Server, &R::Params) -> R::Result,
+    ) -> Self {
+        let Some(request) = self.request.take_if(|request| request.method == R::METHOD) else {
+            return self;
+        };
+        let response = match serde_json::from_value(request.params) {
+            Ok(params) => Response::new_ok(request.id, handler(self.server, &params)),
+            Err(error) => Response::new_err(
+                request.id,
+                ErrorCode::InvalidParams as i32,
+                error.to_string(),
+            ),
+        };
+        let _ = self.server.connection.sender.send(response.into());
+        self
     }
 
-    async fn completion_resolve(&self, item: CompletionItem) -> JsonRPCResult<CompletionItem> {
-        Ok(item)
+    /// Answers a request that no handler took.
+    fn finish(self) {
+        if let Some(request) = self.request {
+            let response = Response::new_err(
+                request.id,
+                ErrorCode::MethodNotFound as i32,
+                format!("unhandled method: {}", request.method),
+            );
+            let _ = self.server.connection.sender.send(response.into());
+        }
+    }
+}
+
+/// Hands a notification to the handler of its method.
+struct Notifications<'a> {
+    server: &'a Server,
+    /// The notification, until a handler takes it.
+    notification: Option<Notification>,
+}
+
+impl Notifications<'_> {
+    fn on<N: ls_types::notification::Notification>(
+        mut self,
+        handler: fn(&Server, N::Params),
+    ) -> Self {
+        let taken = self
+            .notification
+            .take_if(|notification| notification.method == N::METHOD);
+        // A notification has no answer, so one with bad params is dropped.
+        if let Some(Ok(params)) = taken.map(|n| serde_json::from_value(n.params)) {
+            handler(self.server, params);
+        }
+        self
     }
 }
