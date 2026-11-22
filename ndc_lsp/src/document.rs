@@ -13,7 +13,9 @@ use ndc_parser::Parser;
 
 use crate::diagnostics;
 use crate::features::completion::FunctionInfo;
-use crate::features::{completion, definition, hover, inlay_hints, references, symbols};
+use crate::features::{
+    completion, definition, formatting, hover, inlay_hints, references, symbols,
+};
 use crate::resolved::Resolved;
 use crate::state::DocumentState;
 
@@ -188,6 +190,12 @@ impl Document {
     ) -> Result<Option<Vec<TextEdit>>, String> {
         let state = self.analysed().ok_or(references::NOT_ANALYSED)?;
         references::rename(state, self.configure, &self.functions, position, new_name)
+    }
+
+    /// The edit that formats the text, none if it's formatted already; an
+    /// error says why it can't be formatted, as when it doesn't parse.
+    pub fn format(&self) -> Result<Vec<TextEdit>, String> {
+        formatting::format(&self.state.source)
     }
 
     /// The state, if its analysis is of the current text.
