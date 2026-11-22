@@ -57,7 +57,7 @@ impl FunctionInfo {
             is_field,
         };
         match decl.kind {
-            DeclKind::Variable => Vec::new(),
+            DeclKind::Variable(_) => Vec::new(),
             DeclKind::Function(node) => {
                 let Some(StaticType::Function {
                     parameters,
@@ -359,7 +359,7 @@ fn local_completions(state: &DocumentState, position: Position) -> Vec<Completio
     let mut names: HashMap<String, Option<StaticType>> = HashMap::default();
     for decl in collect_declarations(&state.ast, scope) {
         // Functions and structs complete as functions, with their signatures.
-        if decl.kind == DeclKind::Variable && is_visible(&decl, offset) {
+        if matches!(decl.kind, DeclKind::Variable(_)) && is_visible(&decl, offset) {
             // Type is a best-effort hint from the name-keyed map (a shadowed name
             // may show the wrong type until the analyser resolution is exposed).
             let typ = state.variable_types.get(&decl.name).cloned();
@@ -439,10 +439,7 @@ mod tests {
 
     /// The state after a successful analysis of `source`.
     fn analysed(source: &str) -> DocumentState {
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
-        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
-        DocumentState::from_analysis(source.to_string(), ast, analysis)
+        DocumentState::analysed(source)
     }
 
     /// The state after the user typed `typed` at the end of `source`: the
@@ -749,6 +746,21 @@ mod tests {
             assert!(item(&items, "later").is_none());
             let items = completions(&["fn f() {\n  fn inner() { 1 }\n}\n$0"]);
             assert!(item(&items, "inner").is_none());
+        }
+
+        #[test]
+        fn a_comprehensions_expression_offers_the_names_it_binds() {
+            let items = completions(&["let xs = [1];\nlet ys = [1$0 for item in xs];\n"]);
+            let item_ = item(&items, "item").expect("`item` in the comprehension");
+            assert_eq!(item_.kind, Some(CompletionItemKind::VARIABLE));
+            // Not in its own sequence.
+            let items = completions(&["let xs = [1];\nlet ys = [1 for item in x$0s];\n"]);
+            assert!(item(&items, "item").is_none());
+            // Nor in a map comprehension's default, which is outside the loop.
+            let items = completions(&["let m = %{:0$0, item: item for item in [1]};\n"]);
+            assert!(item(&items, "item").is_none());
+            let items = completions(&["let m = %{:0, item: item$0 for item in [1]};\n"]);
+            assert!(item(&items, "item").is_some());
         }
 
         #[test]

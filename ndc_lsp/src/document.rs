@@ -7,6 +7,7 @@ use ndc_parser::ExpressionLocation;
 use crate::diagnostics;
 use crate::features::completion::FunctionInfo;
 use crate::features::{completion, definition, hover, inlay_hints, symbols};
+use crate::resolved::Resolved;
 use crate::state::DocumentState;
 
 /// The registered functions, the way an interpreter's registry is configured.
@@ -19,16 +20,29 @@ pub(crate) fn interpreter(configure: Configure) -> Interpreter {
     interpreter
 }
 
-/// What one analysis of `text` produced: the diagnostics to show, and the AST
-/// with its analysis when the text parsed.
-pub(crate) fn analyse(
-    configure: Configure,
-    text: &str,
-) -> (Vec<Diagnostic>, Option<(Vec<ExpressionLocation>, Analysis)>) {
-    let analysed = interpreter(configure).analyse_str(text);
+/// What analysing a text that parsed worked out about it.
+pub(crate) struct Analysed {
+    pub ast: Vec<ExpressionLocation>,
+    pub analysis: Analysis,
+    /// What its names refer to.
+    pub resolved: Resolved,
+}
+
+/// What one analysis of `text` produced: the diagnostics to show, and what
+/// the analysis worked out when the text parsed.
+pub(crate) fn analyse(configure: Configure, text: &str) -> (Vec<Diagnostic>, Option<Analysed>) {
+    let mut interpreter = interpreter(configure);
+    let analysed = interpreter.analyse_str(text);
     let diagnostics = diagnostics::analysis_diagnostics(text, &analysed);
-    let ast = analysed.ok().map(|(ast, result)| (ast, result.analysis));
-    (diagnostics, ast)
+    let analysed = analysed.ok().map(|(ast, result)| {
+        let resolver = interpreter.into_resolver();
+        Analysed {
+            ast,
+            resolved: Resolved::new(&resolver, &result.picks),
+            analysis: result.analysis,
+        }
+    });
+    (diagnostics, analysed)
 }
 
 /// One document and the language features over it, for a caller that holds
@@ -65,8 +79,8 @@ impl Document {
     pub fn set_text(&mut self, text: &str) -> Vec<Diagnostic> {
         self.state.set_source(text);
         let (diagnostics, analysed) = analyse(self.configure, text);
-        if let Some((ast, analysis)) = analysed {
-            self.state.set_analysis(ast, analysis);
+        if let Some(analysed) = analysed {
+            self.state.set_analysis(analysed);
         }
         diagnostics
     }
@@ -106,11 +120,12 @@ impl Document {
         })
     }
 
-    /// Where the name under `position` is declared.
+    /// Where the name under `position` is declared: usually one place, but a
+    /// name in a generic function's body can have one for each instance.
     #[must_use]
-    pub fn definition(&self, position: Position) -> Option<Range> {
+    pub fn definition(&self, position: Position) -> Vec<Range> {
         self.analysed()
-            .and_then(|state| definition::goto_definition(state, position))
+            .map_or_default(|state| definition::goto_definition(state, position))
     }
 
     /// The state, if its analysis is of the current text.
@@ -164,9 +179,10 @@ mod tests {
         };
         assert!(content.value.contains("Int"), "{}", content.value);
 
-        let range = document
-            .definition(Position::new(1, 2))
-            .expect("a definition");
+        let ranges = document.definition(Position::new(1, 2));
+        let [range] = ranges.as_slice() else {
+            panic!("one definition: {ranges:?}");
+        };
         assert_eq!(
             (range.start, range.end),
             (Position::new(0, 4), Position::new(0, 9))
@@ -179,7 +195,7 @@ mod tests {
         document.set_text("let total = 5;\ntotal + 1;");
         document.set_text("let total = 5;\ntotal +");
         assert!(document.hover(Position::new(1, 2)).is_none());
-        assert!(document.definition(Position::new(1, 2)).is_none());
+        assert!(document.definition(Position::new(1, 2)).is_empty());
         assert!(document.inlay_hints().is_empty());
         assert!(document.symbols().is_empty());
     }

@@ -208,9 +208,7 @@ mod tests {
         let mut interpreter = Interpreter::capturing();
         interpreter.configure(ndc_stdlib::register);
         let functions = FunctionInfo::collect(&interpreter);
-        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
-        let state = DocumentState::from_analysis(source.to_string(), ast, analysis);
-        (state, functions)
+        (DocumentState::analysed(source), functions)
     }
 
     fn markdown(hover: Hover) -> String {

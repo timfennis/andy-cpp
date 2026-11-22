@@ -9,6 +9,7 @@ mod document;
 mod features;
 #[cfg(test)]
 mod fixture;
+mod resolved;
 mod scope_resolve;
 mod state;
 mod util;

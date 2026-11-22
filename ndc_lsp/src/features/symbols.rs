@@ -196,13 +196,9 @@ fn make_symbol(
 mod tests {
     use super::*;
     use crate::state::DocumentState;
-    use ndc_interpreter::Interpreter;
 
     fn symbols(source: &str) -> Vec<DocumentSymbol> {
-        let mut interpreter = Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
-        let (ast, analysis) = interpreter.analyse_str(source).expect("analysis succeeds");
-        let state = DocumentState::from_analysis(source.to_string(), ast, analysis);
+        let state = DocumentState::analysed(source);
         document_symbols(
             &state.ast,
             &state.analysis,
