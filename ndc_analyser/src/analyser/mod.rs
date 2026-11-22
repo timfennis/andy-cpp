@@ -39,6 +39,12 @@ pub struct AnalysisResult {
     /// type, usually [`StaticType::Error`], so one pass reports every error
     /// it can.
     pub errors: Vec<AnalysisError>,
+    /// What the analyser picked, by symbol, before the layout turned each
+    /// symbol into where it's stored: which declaration a name means, which
+    /// overload a call takes. With [`Analyser::resolver`], it says what the
+    /// program refers to, for tools such as the language server; compiling
+    /// needs only [`Self::analysis`].
+    pub picks: Picks,
 }
 
 #[derive(Debug)]
@@ -270,6 +276,17 @@ impl Analyser {
         }
     }
 
+    /// The name resolver, which knows every symbol the program declares and
+    /// where: what [`AnalysisResult::picks`] refers to.
+    pub fn resolver(&self) -> &NameResolver {
+        &self.resolver
+    }
+
+    /// The name resolver, for a caller done with the analyser.
+    pub fn into_resolver(self) -> NameResolver {
+        self.resolver
+    }
+
     /// Take the accumulated analysis result (including any errors),
     /// resetting it for the next analysis.
     pub fn take_result(&mut self) -> AnalysisResult {
@@ -340,8 +357,9 @@ impl Analyser {
         }
 
         let mut result = std::mem::take(&mut self.result);
+        result.picks = std::mem::take(&mut self.picks);
         Layout::new(&self.resolver).lay_out(
-            std::mem::take(&mut self.picks),
+            &result.picks,
             self.laid_out_scopes,
             &mut result.analysis,
         );

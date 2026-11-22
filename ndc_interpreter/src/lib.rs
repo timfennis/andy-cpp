@@ -217,6 +217,13 @@ impl Interpreter {
         Ok((expressions, result))
     }
 
+    /// The name resolver of the analyses so far, for a caller done with the
+    /// interpreter that reads what [`AnalysisResult::picks`] refers to, such
+    /// as the language server.
+    pub fn into_resolver(self) -> ndc_resolver::NameResolver {
+        self.analyser.into_resolver()
+    }
+
     pub fn compile_str(&mut self, input: &str) -> Result<CompiledFunction, InterpreterError> {
         let source_id = self.source_db.add("<input>", input);
         let (expressions, result, _) = self.parse_and_analyse(input, source_id)?;
@@ -308,11 +315,13 @@ impl Interpreter {
             }
         });
 
-        let result = if self.line_by_line {
+        let mut result = if self.line_by_line {
             self.analyser.take_line_result()
         } else {
             self.analyser.take_result()
         };
+        // Running needs only where things are stored, not the symbols.
+        drop(std::mem::take(&mut result.picks));
         if !result.errors.is_empty() {
             return Err(InterpreterError::Analysis {
                 causes: result.errors,

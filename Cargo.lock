@@ -1019,6 +1019,7 @@ dependencies = [
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",
+ "ndc_resolver",
  "ndc_vm",
  "thiserror",
  "web-time",
