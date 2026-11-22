@@ -1054,6 +1054,7 @@ dependencies = [
  "lsp-server",
  "ndc_analysis",
  "ndc_core",
+ "ndc_fmt",
  "ndc_interpreter",
  "ndc_layout",
  "ndc_lexer",

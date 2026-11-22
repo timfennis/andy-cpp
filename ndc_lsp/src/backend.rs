@@ -15,9 +15,9 @@ use ls_types::notification::{
     Notification as _, PublishDiagnostics,
 };
 use ls_types::request::{
-    Completion, DocumentHighlightRequest, DocumentSymbolRequest, GotoDefinition, HoverRequest,
-    InlayHintRefreshRequest, InlayHintRequest, PrepareRenameRequest, References, Rename,
-    Request as _,
+    Completion, DocumentHighlightRequest, DocumentSymbolRequest, Formatting, GotoDefinition,
+    HoverRequest, InlayHintRefreshRequest, InlayHintRequest, PrepareRenameRequest, References,
+    Rename, Request as _,
 };
 use ls_types::{
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
@@ -28,16 +28,18 @@ use ls_types::{
     TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 use ls_types::{
-    DocumentChanges, DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams,
-    InitializeResult, OptionalVersionedTextDocumentIdentifier, PrepareRenameResponse,
-    ReferenceParams, RenameOptions, RenameParams, TextDocumentEdit, TextDocumentPositionParams,
-    WorkspaceEdit,
+    DocumentChanges, DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind,
+    DocumentHighlightParams, InitializeResult, OptionalVersionedTextDocumentIdentifier,
+    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, TextDocumentEdit,
+    TextDocumentPositionParams, TextEdit, WorkspaceEdit,
 };
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 
 use crate::document::{self, Configure};
 use crate::features::completion::FunctionInfo;
-use crate::features::{completion, definition, hover, inlay_hints, references, symbols};
+use crate::features::{
+    completion, definition, formatting, hover, inlay_hints, references, symbols,
+};
 use crate::state::DocumentState;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -145,6 +147,7 @@ fn capabilities(client: &Client) -> ServerCapabilities {
         document_symbol_provider: Some(OneOf::Left(true)),
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
+        document_formatting_provider: Some(OneOf::Left(true)),
         document_highlight_provider: Some(OneOf::Left(true)),
         rename_provider: Some(if client.prepares_rename {
             OneOf::Right(RenameOptions {
@@ -414,6 +417,7 @@ impl Server {
         .on::<DocumentHighlightRequest>(Self::document_highlight)
         .on_fallible::<PrepareRenameRequest>(Self::prepare_rename)
         .on_fallible::<Rename>(Self::rename)
+        .on_fallible::<Formatting>(Self::formatting)
         .finish();
     }
 
@@ -613,6 +617,18 @@ impl Server {
             }
         };
         Ok(Some(edit))
+    }
+
+    /// Formats the document's current text, which needn't be analysed yet.
+    fn formatting(
+        &self,
+        params: &DocumentFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>, String> {
+        let docs = self.documents.read();
+        let Some(open) = docs.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        formatting::format(&open.state.source).map(Some)
     }
 
     fn goto_definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
