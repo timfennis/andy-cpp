@@ -2,7 +2,11 @@ use ls_types::{CompletionResponse, Diagnostic, DocumentSymbol, Hover, InlayHint,
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
 use ndc_interpreter::{Interpreter, NativeSpec};
+#[cfg(feature = "server")]
+use ndc_lexer::{Lexer, SourceId};
 use ndc_parser::ExpressionLocation;
+#[cfg(feature = "server")]
+use ndc_parser::Parser;
 
 use crate::diagnostics;
 use crate::features::completion::FunctionInfo;
@@ -26,6 +30,15 @@ pub(crate) struct Analysed {
     pub analysis: Analysis,
     /// What its names refer to.
     pub resolved: Resolved,
+}
+
+/// Whether `text` lexes and parses, which is when [`analyse`] works something
+/// out about it, without analysing it.
+#[cfg(feature = "server")]
+pub(crate) fn parses(text: &str) -> bool {
+    Lexer::new(text, SourceId::SYNTHETIC)
+        .collect::<Result<Vec<_>, _>>()
+        .is_ok_and(|tokens| Parser::from_tokens(tokens).parse().is_ok())
 }
 
 /// What one analysis of `text` produced: the diagnostics to show, and what
