@@ -10,8 +10,7 @@ fn run_ndc_test(path: &Path) -> Result<(), std::io::Error> {
     let expect_error = contents
         .lines()
         .find_map(|line| line.trim().strip_prefix("// expect-error:"))
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
+        .map_or_default(|s| s.trim().to_string());
 
     let expect_output = contents
         .lines()
@@ -37,8 +36,7 @@ fn run_ndc_test(path: &Path) -> Result<(), std::io::Error> {
     let displayed_error = interpreter_result
         .as_ref()
         .err()
-        .map(ToString::to_string)
-        .unwrap_or_default();
+        .map_or_default(ToString::to_string);
     let actual_error = interpreter_result.map_or_else(|err| format!("{err:?}"), |v| v.to_string());
 
     assert!(
