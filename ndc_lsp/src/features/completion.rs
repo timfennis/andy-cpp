@@ -4,7 +4,7 @@ use ls_types::{
 };
 use ndc_analysis::Analysis;
 use ndc_core::collections::HashMap;
-use ndc_core::{Intrinsic, StaticType};
+use ndc_core::{Intrinsic, NodeId, StaticType};
 use ndc_interpreter::{Builtins, Interpreter};
 
 use crate::scope_resolve::{Decl, DeclKind, collect_declarations, file_scope, is_visible};
@@ -22,6 +22,9 @@ pub struct FunctionInfo {
     /// A struct field's getter, `x` for `p.x`, which completes after a dot as
     /// a field rather than a call.
     pub is_field: bool,
+    /// The declaration of a function or struct the program declares, whose
+    /// parameter or field names signature help shows.
+    pub declaration: Option<NodeId>,
 }
 
 impl FunctionInfo {
@@ -35,6 +38,7 @@ impl FunctionInfo {
             documentation: fun.documentation.clone(),
             intrinsic: Some(fun.intrinsic),
             is_field: false,
+            declaration: None,
         });
         let natives = (0..natives.len()).map(|slot| Self {
             name: natives.name(slot).to_string(),
@@ -42,6 +46,7 @@ impl FunctionInfo {
             documentation: natives.documentation(slot).map(str::to_string),
             intrinsic: None,
             is_field: false,
+            declaration: None,
         });
         natives.chain(intrinsics).collect()
     }
@@ -55,6 +60,10 @@ impl FunctionInfo {
             documentation: None,
             intrinsic: None,
             is_field,
+            declaration: match decl.kind {
+                DeclKind::Function(node) | DeclKind::Struct(node) => Some(node),
+                DeclKind::Variable(_) => None,
+            },
         };
         match decl.kind {
             DeclKind::Variable(_) => Vec::new(),
@@ -106,12 +115,7 @@ pub fn complete(
     let receiver_type = state.and_then(|s| {
         let offset = s.line_index.offset(&s.source, position)?;
         let dot_offset = find_dot_before(s.source.as_bytes(), offset)?;
-        // Try expression type map first (handles `func(args).` and any expression),
-        // then fall back to variable name lookup for simple `ident.` cases.
-        s.expression_types.get(&dot_offset).cloned().or_else(|| {
-            let ident = identifier_before_dot(&s.source, offset)?;
-            s.variable_types.get(ident).cloned()
-        })
+        receiver_type(s, dot_offset)
     });
 
     let is_dot = receiver_type.is_some();
@@ -229,7 +233,7 @@ impl OverloadGroup<'_> {
 /// The functions the program declares that are visible at `position`. While
 /// the text doesn't parse they come from the last analysis of a text that did,
 /// so the cursor is first mapped to where it was in that text.
-fn declared_functions(state: &DocumentState, position: Position) -> Vec<FunctionInfo> {
+pub(crate) fn declared_functions(state: &DocumentState, position: Position) -> Vec<FunctionInfo> {
     let (Some(offset), Some(first)) = (
         state.line_index.offset(&state.source, position),
         state.ast.first(),
@@ -385,6 +389,20 @@ fn is_normal_ident(input: &str) -> bool {
     input
         .chars()
         .all(|c| c.is_alphanumeric() || c == '?' || c == '_')
+}
+
+/// The type of what's before the dot at `dot_offset`: of the expression
+/// that ends there (`func(args).`, any expression), or else of the variable
+/// named right before it (`ident.`), which works while the text doesn't parse.
+pub(crate) fn receiver_type(state: &DocumentState, dot_offset: usize) -> Option<StaticType> {
+    state
+        .expression_types
+        .get(&dot_offset)
+        .cloned()
+        .or_else(|| {
+            let ident = identifier_before_dot(&state.source, dot_offset + 1)?;
+            state.variable_types.get(ident).cloned()
+        })
 }
 
 /// Scan backward from `offset` to find the byte position of the `.` trigger.
@@ -554,6 +572,7 @@ mod tests {
             documentation: None,
             intrinsic: None,
             is_field: false,
+            declaration: None,
         }
     }
 

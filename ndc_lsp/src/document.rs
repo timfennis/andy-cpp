@@ -14,7 +14,8 @@ use ndc_parser::Parser;
 use crate::diagnostics;
 use crate::features::completion::FunctionInfo;
 use crate::features::{
-    completion, definition, formatting, hover, inlay_hints, references, semantic_tokens, symbols,
+    completion, definition, formatting, hover, inlay_hints, references, semantic_tokens,
+    signature_help, symbols,
 };
 use crate::resolved::Resolved;
 use crate::state::DocumentState;
@@ -204,6 +205,14 @@ impl Document {
     #[must_use]
     pub fn semantic_tokens(&self) -> Vec<ls_types::SemanticToken> {
         self.analysed().map_or_default(semantic_tokens::tokens)
+    }
+
+    /// The parameters of the call being written at `position`. Like
+    /// completion, it works while the text doesn't parse, from what the last
+    /// analysis of a text that did worked out.
+    #[must_use]
+    pub fn signature_help(&self, position: Position) -> Option<ls_types::SignatureHelp> {
+        signature_help::signature_help(&self.state, &self.functions, position)
     }
 
     /// The edit that formats the text, none if it's formatted already; an
