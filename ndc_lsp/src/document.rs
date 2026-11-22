@@ -14,7 +14,7 @@ use ndc_parser::Parser;
 use crate::diagnostics;
 use crate::features::completion::FunctionInfo;
 use crate::features::{
-    completion, definition, formatting, hover, inlay_hints, references, symbols,
+    completion, definition, formatting, hover, inlay_hints, references, semantic_tokens, symbols,
 };
 use crate::resolved::Resolved;
 use crate::state::DocumentState;
@@ -190,6 +190,20 @@ impl Document {
     ) -> Result<Option<Vec<TextEdit>>, String> {
         let state = self.analysed().ok_or(references::NOT_ANALYSED)?;
         references::rename(state, self.configure, &self.functions, position, new_name)
+    }
+
+    /// What the token types and modifiers of [`Self::semantic_tokens`]
+    /// are, by their numbers.
+    #[must_use]
+    pub fn semantic_tokens_legend() -> ls_types::SemanticTokensLegend {
+        semantic_tokens::legend()
+    }
+
+    /// A token for each name whose kind is known, encoded as the protocol
+    /// wants them; none while the analysis isn't of the current text.
+    #[must_use]
+    pub fn semantic_tokens(&self) -> Vec<ls_types::SemanticToken> {
+        self.analysed().map_or_default(semantic_tokens::tokens)
     }
 
     /// The edit that formats the text, none if it's formatted already; an

@@ -17,7 +17,7 @@ use ls_types::notification::{
 use ls_types::request::{
     Completion, DocumentHighlightRequest, DocumentSymbolRequest, Formatting, GotoDefinition,
     HoverRequest, InlayHintRefreshRequest, InlayHintRequest, PrepareRenameRequest, References,
-    Rename, Request as _,
+    Rename, Request as _, SemanticTokensFullRequest, SemanticTokensRefresh,
 };
 use ls_types::{
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
@@ -30,15 +30,17 @@ use ls_types::{
 use ls_types::{
     DocumentChanges, DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind,
     DocumentHighlightParams, InitializeResult, OptionalVersionedTextDocumentIdentifier,
-    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, TextDocumentEdit,
-    TextDocumentPositionParams, TextEdit, WorkspaceEdit,
+    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SemanticTokens,
+    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, TextDocumentEdit, TextDocumentPositionParams, TextEdit,
+    WorkspaceEdit,
 };
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 
 use crate::document::{self, Configure};
 use crate::features::completion::FunctionInfo;
 use crate::features::{
-    completion, definition, formatting, hover, inlay_hints, references, symbols,
+    completion, definition, formatting, hover, inlay_hints, references, semantic_tokens, symbols,
 };
 use crate::state::DocumentState;
 
@@ -57,14 +59,7 @@ pub fn serve(configure: Configure) -> Result<(), Error> {
         ..Default::default()
     };
     connection.initialize_finish(id, serde_json::to_value(initialize_result)?)?;
-    // An inlay hint request that comes in before the analysis of its text has
-    // nothing to answer with, so the client is told to ask again once there is.
-    let refresh_inlay_hints = params
-        .capabilities
-        .workspace
-        .and_then(|workspace| workspace.inlay_hint)
-        .and_then(|inlay_hint| inlay_hint.refresh_support)
-        .unwrap_or(false);
+    let refresh = client.refresh;
 
     let documents = Documents::default();
     let (jobs, queue) = mpsc::channel();
@@ -74,7 +69,7 @@ pub fn serve(configure: Configure) -> Result<(), Error> {
         thread::Builder::new()
             .name("analysis".to_string())
             .spawn(move || {
-                analyse_jobs(&queue, &documents, &sender, configure, refresh_inlay_hints);
+                analyse_jobs(&queue, &documents, &sender, configure, refresh);
             })?
     };
 
@@ -111,6 +106,16 @@ struct Client {
     /// Whether it takes edits tied to a version of a document, so it can
     /// reject an edit made for an older text.
     versioned_edits: bool,
+    /// What it can be told to ask for again.
+    refresh: Refresh,
+}
+
+/// What the client can be told to ask for again once the current text is
+/// analysed: a request that came in before has nothing to answer with.
+#[derive(Debug, Clone, Copy, Default)]
+struct Refresh {
+    inlay_hints: bool,
+    semantic_tokens: bool,
 }
 
 impl Client {
@@ -129,6 +134,20 @@ impl Client {
                 .and_then(|workspace| workspace.workspace_edit.as_ref())
                 .and_then(|edit| edit.document_changes)
                 .unwrap_or(false),
+            refresh: Refresh {
+                inlay_hints: capabilities
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.inlay_hint.as_ref())
+                    .and_then(|inlay_hint| inlay_hint.refresh_support)
+                    .unwrap_or(false),
+                semantic_tokens: capabilities
+                    .workspace
+                    .as_ref()
+                    .and_then(|workspace| workspace.semantic_tokens.as_ref())
+                    .and_then(|tokens| tokens.refresh_support)
+                    .unwrap_or(false),
+            },
         }
     }
 }
@@ -148,6 +167,13 @@ fn capabilities(client: &Client) -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         document_formatting_provider: Some(OneOf::Left(true)),
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            SemanticTokensOptions {
+                legend: semantic_tokens::legend(),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+                ..Default::default()
+            },
+        )),
         document_highlight_provider: Some(OneOf::Left(true)),
         rename_provider: Some(if client.prepares_rename {
             OneOf::Right(RenameOptions {
@@ -227,13 +253,13 @@ fn analyse_jobs(
     documents: &Documents,
     sender: &crossbeam_channel::Sender<Message>,
     configure: Configure,
-    refresh_inlay_hints: bool,
+    refresh: Refresh,
 ) {
     let mut worker = Worker {
         documents,
         sender,
         configure,
-        refresh_inlay_hints,
+        refresh,
         refreshes: 0,
     };
     while let Ok(first) = queue.recv() {
@@ -258,8 +284,8 @@ struct Worker<'a> {
     documents: &'a Documents,
     sender: &'a crossbeam_channel::Sender<Message>,
     configure: Configure,
-    refresh_inlay_hints: bool,
-    /// The number of inlay hint refreshes sent, which numbers each one.
+    refresh: Refresh,
+    /// The number of refreshes sent, which numbers each one.
     refreshes: u64,
 }
 
@@ -329,12 +355,18 @@ impl Worker<'_> {
             open.state.set_analysis_of(job.text, analysed);
         }
         if publish && current {
-            if self.refresh_inlay_hints && open.state.analysis_matches_source {
-                self.refreshes += 1;
-                let id = RequestId::from(format!("inlay-hint-refresh-{}", self.refreshes));
-                let request = Request::new(id, InlayHintRefreshRequest::METHOD.to_string(), ());
-                // The send fails only once the client has gone.
-                let _ = self.sender.send(request.into());
+            if open.state.analysis_matches_source {
+                let refreshes = [
+                    (self.refresh.inlay_hints, InlayHintRefreshRequest::METHOD),
+                    (self.refresh.semantic_tokens, SemanticTokensRefresh::METHOD),
+                ];
+                for (_, method) in refreshes.into_iter().filter(|(wanted, _)| *wanted) {
+                    self.refreshes += 1;
+                    let id = RequestId::from(format!("refresh-{}", self.refreshes));
+                    let request = Request::new(id, method.to_string(), ());
+                    // The send fails only once the client has gone.
+                    let _ = self.sender.send(request.into());
+                }
             }
             publish_diagnostics(self.sender, job.uri, diagnostics, Some(job.version));
         }
@@ -418,6 +450,7 @@ impl Server {
         .on_fallible::<PrepareRenameRequest>(Self::prepare_rename)
         .on_fallible::<Rename>(Self::rename)
         .on_fallible::<Formatting>(Self::formatting)
+        .on_fallible::<SemanticTokensFullRequest>(Self::semantic_tokens)
         .finish();
     }
 
@@ -571,7 +604,7 @@ impl Server {
     fn prepare_rename(
         &self,
         params: &TextDocumentPositionParams,
-    ) -> Result<Option<PrepareRenameResponse>, String> {
+    ) -> Result<Option<PrepareRenameResponse>, Refusal> {
         let range = self
             .with_analysed(&params.text_document.uri, |state| {
                 references::prepare_rename(state, params.position)
@@ -580,7 +613,7 @@ impl Server {
         Ok(range.map(PrepareRenameResponse::Range))
     }
 
-    fn rename(&self, params: &RenameParams) -> Result<Option<WorkspaceEdit>, String> {
+    fn rename(&self, params: &RenameParams) -> Result<Option<WorkspaceEdit>, Refusal> {
         let position = &params.text_document_position;
         let uri = &position.text_document.uri;
         let docs = self.documents.read();
@@ -623,12 +656,33 @@ impl Server {
     fn formatting(
         &self,
         params: &DocumentFormattingParams,
-    ) -> Result<Option<Vec<TextEdit>>, String> {
+    ) -> Result<Option<Vec<TextEdit>>, Refusal> {
         let docs = self.documents.read();
         let Some(open) = docs.get(&params.text_document.uri) else {
             return Ok(None);
         };
-        formatting::format(&open.state.source).map(Some)
+        Ok(Some(formatting::format(&open.state.source)?))
+    }
+
+    /// The document's semantic tokens. While its text has changed since the
+    /// last analysis, the client is told the content was modified, so it
+    /// keeps the tokens it has; it's asked to refresh once the text is
+    /// analysed, if it can be.
+    fn semantic_tokens(
+        &self,
+        params: &SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>, Refusal> {
+        let docs = self.documents.read();
+        let Some(open) = docs.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        if !open.state.analysis_matches_source {
+            return Err(Refusal::content_modified());
+        }
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: semantic_tokens::tokens(&open.state),
+        })))
     }
 
     fn goto_definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
@@ -680,6 +734,40 @@ impl Server {
     }
 }
 
+/// Why a request gets an error rather than a result.
+struct Refusal {
+    code: ErrorCode,
+    message: String,
+}
+
+impl Refusal {
+    /// The document changed since what the request needs was worked out, so
+    /// the client should keep what it has: see [`Server::semantic_tokens`].
+    fn content_modified() -> Self {
+        Self {
+            code: ErrorCode::ContentModified,
+            message: "the document has changed since it was last analysed".to_string(),
+        }
+    }
+}
+
+/// A refusal the client shows, as a rename that would change what the
+/// program means.
+impl From<String> for Refusal {
+    fn from(message: String) -> Self {
+        Self {
+            code: ErrorCode::RequestFailed,
+            message,
+        }
+    }
+}
+
+impl From<&str> for Refusal {
+    fn from(message: &str) -> Self {
+        Self::from(message.to_string())
+    }
+}
+
 /// Hands a request to the handler of its method, and answers it.
 struct Requests<'a> {
     server: &'a Server,
@@ -699,14 +787,14 @@ impl Requests<'_> {
     /// client shows, as rename does.
     fn on_fallible<R: ls_types::request::Request>(
         self,
-        handler: fn(&Server, &R::Params) -> Result<R::Result, String>,
+        handler: fn(&Server, &R::Params) -> Result<R::Result, Refusal>,
     ) -> Self {
         self.answer::<R>(handler)
     }
 
     fn answer<R: ls_types::request::Request>(
         mut self,
-        handler: impl FnOnce(&Server, &R::Params) -> Result<R::Result, String>,
+        handler: impl FnOnce(&Server, &R::Params) -> Result<R::Result, Refusal>,
     ) -> Self {
         let Some(request) = self.request.take_if(|request| request.method == R::METHOD) else {
             return self;
@@ -714,8 +802,8 @@ impl Requests<'_> {
         let response = match serde_json::from_value(request.params) {
             Ok(params) => match handler(self.server, &params) {
                 Ok(result) => Response::new_ok(request.id, result),
-                Err(message) => {
-                    Response::new_err(request.id, ErrorCode::RequestFailed as i32, message)
+                Err(Refusal { code, message }) => {
+                    Response::new_err(request.id, code as i32, message)
                 }
             },
             Err(error) => Response::new_err(
@@ -772,19 +860,23 @@ mod tests {
     /// Runs the analysis thread's loop over the texts `texts` of one document
     /// that came in before it got to any of them, and returns the document.
     fn analyse_in_turn(texts: &[&str]) -> (OpenDocument, Vec<Message>) {
-        analyse_with(texts, false, ndc_stdlib::register)
+        analyse_with(texts, Refresh::default(), ndc_stdlib::register)
     }
 
     fn analyse_in_turn_refreshing(
         texts: &[&str],
         refresh_inlay_hints: bool,
     ) -> (OpenDocument, Vec<Message>) {
-        analyse_with(texts, refresh_inlay_hints, ndc_stdlib::register)
+        let refresh = Refresh {
+            inlay_hints: refresh_inlay_hints,
+            semantic_tokens: false,
+        };
+        analyse_with(texts, refresh, ndc_stdlib::register)
     }
 
     fn analyse_with(
         texts: &[&str],
-        refresh_inlay_hints: bool,
+        refresh: Refresh,
         configure: Configure,
     ) -> (OpenDocument, Vec<Message>) {
         let uri = Uri::from_str("file:///t.ndc").expect("a valid uri");
@@ -809,7 +901,7 @@ mod tests {
         }
         drop(jobs);
         let (sender, messages) = crossbeam_channel::unbounded();
-        analyse_jobs(&queue, &documents, &sender, configure, refresh_inlay_hints);
+        analyse_jobs(&queue, &documents, &sender, configure, refresh);
         let open = documents.write().remove(&uri).expect("the document");
         (open, messages.try_iter().collect())
     }
@@ -858,6 +950,27 @@ mod tests {
         assert_eq!(refreshes(&messages), 0);
     }
 
+    #[test]
+    fn the_client_is_told_to_refresh_semantic_tokens_once_the_current_text_is_analysed() {
+        let refresh = Refresh {
+            inlay_hints: false,
+            semantic_tokens: true,
+        };
+        let (_, messages) = analyse_with(
+            &["let x = 1 +;", "let x = 1;"],
+            refresh,
+            ndc_stdlib::register,
+        );
+        let methods: Vec<&str> = messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::Request(request) => Some(request.method.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(methods, [SemanticTokensRefresh::METHOD]);
+    }
+
     // Each analysis configures one interpreter, so a `Configure` that counts
     // its calls counts the analyses. Each test has its own, as tests run at
     // the same time.
@@ -876,7 +989,7 @@ mod tests {
         counting_configure!(configure, ANALYSES);
         let (open, messages) = analyse_with(
             &["let x = 1;", "let x = 12;", "let x = 123;"],
-            false,
+            Refresh::default(),
             configure,
         );
         assert_eq!(ANALYSES.load(std::sync::atomic::Ordering::Relaxed), 1);
@@ -892,7 +1005,7 @@ mod tests {
             "let words = [\"a\"];\nwords.len();",
             "let words = [\"a\"];\nwords.len();\nwords.",
         ];
-        let (open, messages) = analyse_with(&texts, false, configure);
+        let (open, messages) = analyse_with(&texts, Refresh::default(), configure);
         assert_eq!(ANALYSES.load(std::sync::atomic::Ordering::Relaxed), 2);
         assert!(!open.state.analysis_matches_source);
         assert!(open.state.variable_types.contains_key("words"));
@@ -905,7 +1018,7 @@ mod tests {
         counting_configure!(configure, ANALYSES);
         let (open, _) = analyse_with(
             &["let x = 1 +;", "let x = 1 + ;", "let x = 1 +  ;"],
-            false,
+            Refresh::default(),
             configure,
         );
         assert_eq!(ANALYSES.load(std::sync::atomic::Ordering::Relaxed), 1);
