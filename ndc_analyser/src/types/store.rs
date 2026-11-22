@@ -168,6 +168,19 @@ impl TypeVars {
             .collect()
     }
 
+    /// Whether `typ` has a part [`Self::generalizable_in`] would give, without
+    /// resolving `typ` or listing them: the analyser asks this of every
+    /// waiting constraint each time a generic function's body ends.
+    pub(crate) fn has_generalizable(&self, typ: &StaticType) -> bool {
+        typ.contains(&|part| match part {
+            StaticType::Var(var) => match self.solution(*var) {
+                Some(solution) => self.has_generalizable(solution),
+                None => self.levels[var.0 as usize] > self.level,
+            },
+            _ => false,
+        })
+    }
+
     /// Makes the unsettled variables in `typ` belong where the code being
     /// analysed now is, so they don't become type parameters of a generic
     /// function whose body made them.

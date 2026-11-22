@@ -10,7 +10,7 @@ use super::instances::{Cast, Scheme};
 use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
-use crate::types::TypeVars;
+use crate::types::{LiteralsFrom, TypeVars};
 use ndc_core::collections::HashSet;
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
@@ -24,6 +24,20 @@ pub(super) struct Generalizing {
     pub(super) pure: bool,
     /// Whether its return type is written.
     pub(super) return_annotated: bool,
+}
+
+/// Where the analysis was when a generic function's body started, so
+/// [`Analyser::generalize`] can look at what the body added since.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct BodyStart {
+    /// The number of generic uses.
+    pub(super) uses: usize,
+    /// The number of declared functions.
+    pub(super) functions: usize,
+    /// The number of casts.
+    pub(super) casts: usize,
+    /// The point in the list of literals' types.
+    pub(super) literals: LiteralsFrom,
 }
 
 /// A type parameter a function declares, as `T` in `fn f<T>(x: T)`: the
@@ -56,14 +70,27 @@ impl Analyser {
         declaration: NodeId,
         flags: Generalizing,
         declared: &[DeclaredTypeParameter<'_>],
-        [first_use, first_function, first_cast]: [usize; 3],
+        start: BodyStart,
     ) -> StaticType {
         let Generalizing {
             pure,
             return_annotated,
         } = flags;
+        let BodyStart {
+            uses: first_use,
+            functions: first_function,
+            casts: first_cast,
+            literals: first_literal,
+        } = start;
         self.solve_waiting();
-        self.default_literals(TypeVars::is_generalizable);
+        // A generalizable literal belongs to the body, so the body made it,
+        // and it was listed when it got its bound. So was any literal that
+        // holds one: a literal from outside holds it only through a bound
+        // it got in the body, as settling an outer variable as one of the
+        // body's would make that one belong outside. Looking only at the
+        // literals listed since the body started keeps declaring a function
+        // from taking longer the more literals the code before it has.
+        self.default_literals(first_literal, TypeVars::is_generalizable);
         let connected = self.reached_from_signature(signature);
         self.settle_ambiguous(signature, &connected);
         self.merge_copies();
@@ -92,7 +119,7 @@ impl Analyser {
                 generic_use
                     .key
                     .iter()
-                    .any(|typ| !self.vars.generalizable_in(typ).is_empty())
+                    .any(|typ| self.vars.has_generalizable(typ))
             });
         self.uses.extend(outside);
 
@@ -318,12 +345,13 @@ impl Analyser {
     /// `f`'s own body, like any other call's outside a generic function.
     fn keep_outer_constraints_outside(&mut self) {
         loop {
+            let values = self.function_values();
             let outer = self
                 .waiting
                 .values()
                 .map(|waiting| &waiting.constraint)
-                .filter(|constraint| !self.waits_on_the_function(constraint))
-                .flat_map(|constraint| self.generic_outputs(constraint))
+                .filter(|constraint| !self.waits_on_the_function(constraint, &values))
+                .flat_map(|constraint| self.generic_outputs(constraint, &values))
                 .collect::<Vec<_>>();
             if outer.is_empty() {
                 return;
@@ -343,7 +371,7 @@ impl Analyser {
                 waiting
                     .constraint
                     .types()
-                    .any(|typ| !self.vars.generalizable_in(typ).is_empty())
+                    .any(|typ| self.vars.has_generalizable(typ))
             })
             .map(|(&serial, _)| serial)
             .collect()
@@ -358,13 +386,13 @@ impl Analyser {
     /// returns, which only the first branch can say, and in `fn g(n) => if
     /// n == 0 { 1 } else { g(n - 1) & g(n - 2) }`, the `&` is passed what
     /// it returns.
-    fn generic_inputs(&self, constraint: &Constraint) -> Vec<TypeVar> {
+    fn generic_inputs(&self, constraint: &Constraint, values: &[StaticType]) -> Vec<TypeVar> {
         let inputs = match constraint {
             Constraint::Join { types, .. } => &types[..2],
             _ => constraint.inputs(),
         };
         let given = self
-            .passed_functions(constraint)
+            .passed_functions(constraint, values)
             .iter()
             .flat_map(|typ| self.vars.generalizable_in(typ))
             .collect::<Vec<_>>();
@@ -381,11 +409,11 @@ impl Analyser {
     /// they count as settled by the call too, and so does an overloaded
     /// function's name passed to one, as `signum` in `xs.map(signum)`,
     /// whose type is what the call expects of it.
-    fn generic_outputs(&self, constraint: &Constraint) -> Vec<TypeVar> {
+    fn generic_outputs(&self, constraint: &Constraint, values: &[StaticType]) -> Vec<TypeVar> {
         constraint
             .outputs()
             .iter()
-            .chain(&self.passed_functions(constraint))
+            .chain(&self.passed_functions(constraint, values))
             .flat_map(|typ| self.vars.generalizable_in(typ))
             .collect()
     }
@@ -395,40 +423,43 @@ impl Analyser {
     /// passed to it too, as one may use the function's parameters, and the
     /// branches of an `if` on theirs. What it settles itself may be one of
     /// those as well, as `n - 1` in `fn fib(n)` gives what `fib` takes.
-    fn waits_on_the_function(&self, constraint: &Constraint) -> bool {
+    fn waits_on_the_function(&self, constraint: &Constraint, values: &[StaticType]) -> bool {
         let waits_on: &[StaticType] = match constraint {
             Constraint::Call(call) => call.arguments(),
             Constraint::Join { types, .. } => &types[..2],
-            _ => return !self.generic_inputs(constraint).is_empty(),
+            _ => return !self.generic_inputs(constraint, values).is_empty(),
         };
-        waits_on
-            .iter()
-            .any(|typ| !self.vars.generalizable_in(typ).is_empty())
+        waits_on.iter().any(|typ| self.vars.has_generalizable(typ))
+    }
+
+    /// The types of the function values waiting for their overloads to be
+    /// picked, which [`Self::passed_functions`] looks among. Collected once
+    /// for all the constraints looked at together, as looking through every
+    /// waiting constraint again for each of them took a function's
+    /// declaration time in the square of the constraints waiting.
+    fn function_values(&self) -> Vec<StaticType> {
+        self.waiting
+            .values()
+            .filter_map(|waiting| match &waiting.constraint {
+                Constraint::FunctionValue(value) => Some(self.vars.resolve(value.expected())),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The functions passed to `constraint`, if it's a call, whose types
-    /// it settles: see [`Self::generic_outputs`].
-    fn passed_functions(&self, constraint: &Constraint) -> Vec<StaticType> {
+    /// it settles: see [`Self::generic_outputs`]. `values` are the
+    /// [`Self::function_values`].
+    fn passed_functions(&self, constraint: &Constraint, values: &[StaticType]) -> Vec<StaticType> {
         match constraint {
-            Constraint::Call(call) => {
-                let values = self
-                    .waiting
-                    .values()
-                    .filter_map(|waiting| match &waiting.constraint {
-                        Constraint::FunctionValue(value) => {
-                            Some(self.vars.resolve(value.expected()))
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
-                call.arguments()
-                    .iter()
-                    .map(|argument| self.vars.resolve(argument))
-                    .filter(|argument| {
-                        matches!(argument, StaticType::Function { .. }) || values.contains(argument)
-                    })
-                    .collect()
-            }
+            Constraint::Call(call) => call
+                .arguments()
+                .iter()
+                .map(|argument| self.vars.resolve(argument))
+                .filter(|argument| {
+                    matches!(argument, StaticType::Function { .. }) || values.contains(argument)
+                })
+                .collect(),
             // Picking the overload settles what the value returns.
             Constraint::FunctionValue(value) => match self.vars.resolve(value.expected()) {
                 StaticType::Function { return_type, .. } => vec![*return_type],
@@ -448,6 +479,7 @@ impl Analyser {
     /// decide.
     fn ambiguous_vars(&self, parameters: &[StaticType]) -> Vec<(u64, Vec<TypeVar>)> {
         let serials = self.generic_constraints();
+        let values = self.function_values();
         let mut decided = parameters
             .iter()
             .flat_map(|typ| self.vars.generalizable_in(typ))
@@ -475,13 +507,13 @@ impl Analyser {
                     }
                 }
                 if !self
-                    .generic_inputs(constraint)
+                    .generic_inputs(constraint, &values)
                     .iter()
                     .all(|var| decided.contains(var))
                 {
                     continue;
                 }
-                for var in self.generic_outputs(constraint) {
+                for var in self.generic_outputs(constraint, &values) {
                     changed |= decided.insert(var);
                 }
             }
@@ -494,7 +526,7 @@ impl Analyser {
             .filter_map(|serial| {
                 let constraint = &self.waiting[&serial].constraint;
                 let ambiguous = self
-                    .generic_inputs(constraint)
+                    .generic_inputs(constraint, &values)
                     .into_iter()
                     .filter(|var| !decided.contains(var))
                     .collect::<Vec<_>>();

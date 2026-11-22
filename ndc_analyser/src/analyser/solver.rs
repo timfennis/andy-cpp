@@ -8,7 +8,7 @@ use super::function_values::{Choice, FunctionValue};
 use super::generics::redefinable_parameters;
 use crate::error::AnalysisError;
 use crate::overloads::{CallKind, Overloads, ResolvedCall, is_strictly_more_specific};
-use crate::types::TypeVars;
+use crate::types::{LiteralsFrom, TypeVars};
 use itertools::Itertools;
 use ndc_analysis::{Binding, Candidate};
 use ndc_core::collections::HashSet;
@@ -803,7 +803,7 @@ impl Analyser {
         loop {
             // A literal takes its default before anything else's is applied,
             // as a call its type would settle may be waiting for it.
-            if self.default_literals(|_, var| var.0 as usize >= first) {
+            if self.default_literals(LiteralsFrom::default(), |_, var| var.0 as usize >= first) {
                 unchecked.extend(self.waiting.keys().copied());
             }
             // A branch's default may settle what a call returns, as the
@@ -917,7 +917,7 @@ impl Analyser {
             }
         }
         if !literals.is_empty() {
-            self.default_literals(|_, var| literals.contains(&var));
+            self.default_literals(LiteralsFrom::default(), |_, var| literals.contains(&var));
             self.solve_waiting();
         }
     }
@@ -926,15 +926,18 @@ impl Analyser {
     /// settled, and returns whether it settled any. Each takes its first
     /// default, which depends only on the literal, never on the calls
     /// waiting on it: `1` is an Int, and `[1, 2.5]` holds Floats.
+    /// Only literals listed since `from` are looked at, which has to take in
+    /// all that `belongs` says to settle and every literal holding one.
     pub(super) fn default_literals(
         &mut self,
+        from: LiteralsFrom,
         belongs: impl Fn(&TypeVars, TypeVar) -> bool,
     ) -> bool {
         let mut settled_any = false;
         loop {
             let mut progress = false;
-            let holders = self.vars.holders();
-            for var in self.vars.unsettled_literals(&belongs) {
+            let holders = self.vars.holders(from);
+            for var in self.vars.unsettled_literals(from, &belongs) {
                 if !self.vars.is_literal(var) {
                     continue;
                 }
@@ -975,7 +978,7 @@ impl Analyser {
                 // What's left holds literals that aren't these to settle,
                 // like `n` in `let n = 1; fn f() { [n] }`, and is what they
                 // are: a list of whatever `n` is.
-                let left = self.vars.unsettled_literals(&belongs);
+                let left = self.vars.unsettled_literals(from, &belongs);
                 if left.is_empty() {
                     return settled_any;
                 }

@@ -10,6 +10,8 @@ mod literals;
 mod store;
 mod unify;
 
+pub(crate) use literals::LiteralsFrom;
+
 use store::Undo;
 use unify::Deferred;
 
@@ -132,6 +134,9 @@ pub(crate) struct TypeVars {
     /// The variables that got a bound, in the order they got it, which are
     /// the types of literals.
     literals: Vec<TypeVar>,
+    /// How many literals' types were left the last time
+    /// [`Self::prune_literals`] pruned them.
+    literals_after_pruning: usize,
     /// Where each literal holding values is, keyed by the type its elements
     /// were made as: the whole of `[1, "a"]`, or of an `if`.
     literal_spans: HashMap<TypeVar, Span>,

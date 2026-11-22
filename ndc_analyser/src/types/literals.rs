@@ -6,7 +6,24 @@ use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{StaticType, TypeVar};
 use ndc_lexer::Span;
 
+/// A point in the list of literals' types, from which
+/// [`TypeVars::unsettled_literals`] and [`TypeVars::holders`] look: the
+/// literals that got their types or a bound after it. The default is the
+/// start of the batch.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct LiteralsFrom(usize);
+
 impl TypeVars {
+    /// The point in the list of literals' types that's here now.
+    pub(crate) fn literals_from_now(&self) -> LiteralsFrom {
+        LiteralsFrom(self.literals.len())
+    }
+
+    /// The literals' types listed since `from`.
+    fn literals_since(&self, from: LiteralsFrom) -> &[TypeVar] {
+        self.literals.get(from.0..).unwrap_or_default()
+    }
+
     /// The type of an integer literal, like `1`, which its uses settle as an
     /// `Int`, a `Float` or a `Number`: `1` in `[1.5, 1]` is a Float. It's an
     /// `Int` unless something says otherwise.
@@ -40,12 +57,12 @@ impl TypeVars {
         self.held_literals(var).into_iter().next()
     }
 
-    /// The unsettled literal types that each unsettled literal type is
-    /// held by: the element type of `[1]` holds the `1`'s.
-    pub(crate) fn holders(&self) -> HashMap<TypeVar, Vec<TypeVar>> {
+    /// The unsettled literal types listed since `from` that each unsettled
+    /// literal type is held by: the element type of `[1]` holds the `1`'s.
+    pub(crate) fn holders(&self, from: LiteralsFrom) -> HashMap<TypeVar, Vec<TypeVar>> {
         let mut holders = HashMap::<TypeVar, Vec<TypeVar>>::default();
         let mut seen = HashSet::default();
-        for &holder in &self.literals {
+        for &holder in self.literals_since(from) {
             if (holder.0 as usize) >= self.solutions.len()
                 || !self.is_literal(holder)
                 || !seen.insert(holder)
@@ -112,7 +129,8 @@ impl TypeVars {
         typ
     }
 
-    /// The unsettled types of literals that `belongs` says to settle, the
+    /// The unsettled types of literals listed since `from` that `belongs`
+    /// says to settle, the
     /// ones holding values before the numbers, so a value can still say
     /// what a number is: `1` in `[1, 2.5]` is a Float. Those whose values
     /// share no type come last, so a call waiting for the others can still
@@ -120,11 +138,12 @@ impl TypeVars {
     /// `f(x: Any, y: Int)`, once the `0` is an Int.
     pub(crate) fn unsettled_literals(
         &mut self,
+        from: LiteralsFrom,
         belongs: impl Fn(&Self, TypeVar) -> bool,
     ) -> Vec<TypeVar> {
         let mut literals = Vec::new();
         let mut seen = HashSet::default();
-        for &var in &self.literals {
+        for &var in self.literals_since(from) {
             if (var.0 as usize) < self.solutions.len()
                 && self.solution(var).is_none()
                 && !self.bounds[var.0 as usize].is_empty()
@@ -160,6 +179,32 @@ impl TypeVars {
         keyed.into_iter().map(|(_, var)| var).collect()
     }
 
+    /// Drops the settled literals from the list of literals' types, and the
+    /// ones listed twice, which no walk of it lets through, so walking it
+    /// doesn't take longer the more literals the batch has settled. It
+    /// moves what's left, so it's only for between top-level statements,
+    /// where no [`LiteralsFrom`] is held and no snapshot is open that could
+    /// unsettle one again.
+    ///
+    /// It prunes only once the list has doubled since it last did, so the
+    /// literals that stay unsettled, as a top-level `1` can until the end of
+    /// the batch, aren't walked again on every statement.
+    pub(crate) fn prune_literals(&mut self) {
+        debug_assert_eq!(
+            self.level, 0,
+            "literals are pruned inside a function's body"
+        );
+        if self.literals.len() < 2 * self.literals_after_pruning.max(32) {
+            return;
+        }
+        let mut seen = HashSet::default();
+        let solutions = &self.solutions;
+        self.literals.retain(|&var| {
+            solutions.get(var.0 as usize).is_some_and(Option::is_none) && seen.insert(var)
+        });
+        self.literals_after_pruning = self.literals.len();
+    }
+
     /// Forgets the types of literals, once they're all settled at the end
     /// of a batch.
     pub(crate) fn forget_literals(&mut self) {
@@ -170,6 +215,7 @@ impl TypeVars {
             "a literal's type is left unsettled"
         );
         self.literals.clear();
+        self.literals_after_pruning = 0;
     }
 
     /// Whether `var` is the unsettled type of a number literal, or of a

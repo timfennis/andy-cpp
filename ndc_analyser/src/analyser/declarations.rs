@@ -1,4 +1,4 @@
-use super::generics::Generalizing;
+use super::generics::{BodyStart, Generalizing};
 use super::solver::Constraint;
 use super::{Analyser, Returns};
 use crate::error::AnalysisError;
@@ -103,6 +103,7 @@ impl Analyser {
         }
         let first_use = self.uses.len();
         let first_cast = self.casts.len();
+        let first_literal = self.vars.literals_from_now();
         let annotations = parameters
             .iter()
             .map(|param| self.lower_annotation(param.annotation.as_ref()))
@@ -246,7 +247,12 @@ impl Analyser {
                     id,
                     flags,
                     &declared,
-                    [first_use, first_function, first_cast],
+                    BodyStart {
+                        uses: first_use,
+                        functions: first_function,
+                        casts: first_cast,
+                        literals: first_literal,
+                    },
                 );
                 self.check_type_parameters(symbol, type_parameters, &declared_type_parameters);
                 self.within_size_limit(symbol, name, typ, span)

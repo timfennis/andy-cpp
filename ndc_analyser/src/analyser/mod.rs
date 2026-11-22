@@ -559,6 +559,7 @@ impl Analyser {
     /// The names it still declared are bound as failed checks, so in
     /// `fn f() { missing } let g = f`, only `missing` is reported.
     pub fn analyse(&mut self, expr_loc: &ExpressionLocation) -> StaticType {
+        self.vars.prune_literals();
         let bound_before = self.resolver.current_bindings().len();
         self.resolver.resolve_statement(expr_loc);
         let name_errors = self.resolver.take_errors();

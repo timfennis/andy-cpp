@@ -65,10 +65,7 @@ fn uses(resolver: &NameResolver, symbol: SymbolId) -> usize {
 
 /// The newest built-in declared under `name`, before any source is resolved.
 fn builtin(resolver: &NameResolver, name: &str) -> SymbolId {
-    resolver
-        .scopes
-        .lookup(name, &resolver.symbols)
-        .expect("builtin is declared")
+    resolver.scopes.lookup(name).expect("builtin is declared")
 }
 
 /// The name of the `UnknownName` error that resolving `source` reports.
@@ -140,7 +137,7 @@ fn initializer_reads_outer_binding_before_shadowing() {
     assert_eq!(resolver.symbols.kind(inner), BindingKind::Plain);
     assert_eq!(uses(&resolver, outer), 2);
     assert_eq!(uses(&resolver, inner), 1);
-    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), Some(outer));
+    assert_eq!(resolver.scopes.lookup("x"), Some(outer));
 }
 
 #[test]
@@ -182,8 +179,8 @@ fn destructuring_binds_names_after_the_whole_initializer() {
         assert_eq!(uses(&resolver, symbol), 1);
     }
     let [_, _, x, y, _] = symbols;
-    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), Some(x));
-    assert_eq!(resolver.scopes.lookup("y", &resolver.symbols), Some(y));
+    assert_eq!(resolver.scopes.lookup("x"), Some(x));
+    assert_eq!(resolver.scopes.lookup("y"), Some(y));
 }
 
 #[test]
@@ -215,14 +212,8 @@ fn member_and_index_targets_resolve_receivers_without_declaring_names() {
     assert_eq!(uses(&resolver, i), 3);
     assert_eq!(uses(&resolver, object), 3);
     // `field` still means the native getter: the targets declared nothing new.
-    assert_eq!(
-        resolver.scopes.lookup("field", &resolver.symbols),
-        Some(field)
-    );
-    assert_eq!(
-        resolver.scopes.lookup("object", &resolver.symbols),
-        Some(object)
-    );
+    assert_eq!(resolver.scopes.lookup("field"), Some(field));
+    assert_eq!(resolver.scopes.lookup("object"), Some(object));
 }
 
 #[test]
@@ -288,8 +279,8 @@ fn later_comprehension_clauses_see_earlier_binders() {
     assert_eq!(uses(&resolver, xs), 1);
     assert_eq!(uses(&resolver, x), 1);
     assert_eq!(uses(&resolver, y), 2);
-    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
-    assert_eq!(resolver.scopes.lookup("y", &resolver.symbols), None);
+    assert_eq!(resolver.scopes.lookup("x"), None);
+    assert_eq!(resolver.scopes.lookup("y"), None);
 }
 
 #[test]
@@ -319,11 +310,7 @@ fn a_failed_statement_leaves_the_scopes_it_entered() {
 
         let current = &resolver.scopes.scopes[resolver.scopes.current.0];
         assert_eq!(current.kind, ScopeKind::Program, "{source}");
-        assert_eq!(
-            resolver.scopes.lookup("x", &resolver.symbols),
-            None,
-            "{source}"
-        );
+        assert_eq!(resolver.scopes.lookup("x"), None, "{source}");
     }
 }
 
@@ -484,7 +471,7 @@ fn duplicate_parameters_are_rejected() {
     };
     assert_eq!(name, "x");
     assert_eq!(span.offset(), source.rfind('x').unwrap());
-    assert_eq!(resolver.scopes.lookup("x", &resolver.symbols), None);
+    assert_eq!(resolver.scopes.lookup("x"), None);
 }
 
 #[test]
@@ -512,15 +499,11 @@ fn functions_cannot_redefine_variables_in_the_same_scope() {
         assert!(
             resolver
                 .scopes
-                .lookup("a", &resolver.symbols)
+                .lookup("a")
                 .is_none_or(|id| resolver.symbols.kind(id) == BindingKind::Plain),
             "{source}"
         );
-        assert_eq!(
-            resolver.scopes.lookup("x", &resolver.symbols),
-            None,
-            "{source}"
-        );
+        assert_eq!(resolver.scopes.lookup("x"), None, "{source}");
     }
 }
 
