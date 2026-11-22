@@ -1,88 +1,47 @@
 use ls_types::{Position, Range};
-use ndc_core::NodeId;
-use ndc_core::collections::HashMap;
 use ndc_lexer::Span;
-use ndc_parser::{
-    AssignmentTarget, AssignmentTargetLocation, Expression, ExpressionLocation, TypeExpr,
-};
 
+use crate::names::{Name, Refers};
 use crate::resolved::Definition;
 use crate::scope_resolve::{DeclKind, collect_declarations, file_scope, is_visible};
 use crate::state::DocumentState;
-use crate::visitor::{AstVisitor, node_at_offset, walk_ast};
 
-/// Where the declarations of the analysed AST are, so a [`Definition`] can be
-/// shown: by node, and each struct's fields by its declaration.
-#[derive(Default)]
-pub struct DeclarationSpans {
-    nodes: HashMap<NodeId, Span>,
-    fields: HashMap<NodeId, Vec<Span>>,
+/// The name the cursor at `offset` is on, and what it refers to: what the
+/// analyser resolved it to, so a call means the overload it picks, `p.x` the
+/// field `x`, and a type name its struct or type parameter. A name in the
+/// body of a generic function can mean one for each instance; a built-in
+/// means none. A declaration's own name means what it declares.
+pub fn definitions_at(state: &DocumentState, offset: usize) -> Option<(Name, Vec<Definition>)> {
+    let name = *state.names.at(offset)?;
+    Some((name, meaning(state, &name)))
 }
 
-impl DeclarationSpans {
-    pub fn collect(ast: &[ExpressionLocation]) -> Self {
-        let mut spans = Self::default();
-        walk_ast(&mut spans, ast);
-        spans
-    }
-
-    fn span(&self, definition: Definition) -> Option<Span> {
-        match definition {
-            Definition::Node(node) => self.nodes.get(&node).copied(),
-            Definition::Field { declaration, index } => {
-                self.fields.get(&declaration)?.get(index).copied()
-            }
-        }
-    }
-}
-
-impl AstVisitor for DeclarationSpans {
-    fn on_declaration(&mut self, _identifier: &str, node: NodeId, _: bool, span: Span) {
-        self.nodes.insert(node, span);
-    }
-
-    fn on_expression(&mut self, expr: &ExpressionLocation) {
-        match &expr.expression {
-            // Neither has a span of its own for its name yet.
-            Expression::FunctionDeclaration {
-                type_parameters, ..
-            } => {
-                self.nodes.insert(expr.id, expr.span);
-                for parameter in type_parameters {
-                    self.nodes.insert(parameter.id, parameter.span);
-                }
-            }
-            Expression::StructDeclaration { fields, .. } => {
-                self.nodes.insert(expr.id, expr.span);
-                let spans = fields.iter().map(|field| field.span).collect();
-                self.fields.insert(expr.id, spans);
-            }
-            _ => {}
-        }
+/// What `name` refers to; see [`definitions_at`].
+pub fn meaning(state: &DocumentState, name: &Name) -> Vec<Definition> {
+    match name.refers {
+        Refers::Declaration(definition) => vec![definition],
+        Refers::Node(node) => match state.resolved.definitions_of(node) {
+            Some(definitions) => definitions.to_vec(),
+            // The resolver stops a statement at an unknown name, so a name
+            // after one, as `total` in `print(missing, total)`, is found by
+            // its scope.
+            None => in_scope(state, name).into_iter().collect(),
+        },
     }
 }
 
-/// Where the name under the cursor is declared, in the order they appear:
-/// what the analyser resolved it to, so a call jumps to the overload it
-/// picks, `p.x` to the field `x`, and a type name in an annotation to its
-/// struct or type parameter. A name in the body of a generic function can
-/// have one for each instance; a built-in has none.
+/// Where the name under the cursor is declared, in the order they appear.
 pub fn goto_definition(state: &DocumentState, position: Position) -> Vec<Range> {
     let Some(offset) = state.line_index.offset(&state.source, position) else {
         return Vec::new();
     };
-    let Some(node) = name_at(&state.ast, offset) else {
+    let Some((_, definitions)) = definitions_at(state, offset) else {
         return Vec::new();
     };
-    let mut spans: Vec<Span> = match state.resolved.definitions_of(node) {
-        Some(definitions) => definitions
-            .iter()
-            .filter_map(|&definition| state.declarations.span(definition))
-            .collect(),
-        // The resolver stops a statement at an unknown name, so a name after
-        // one, as `total` in `print(missing, total)`, is found by its scope.
-        None => in_scope(state, node, offset).into_iter().collect(),
-    };
+    let mut spans: Vec<Span> = definitions
+        .into_iter()
+        .filter_map(|definition| state.names.declaration(definition))
+        .collect();
     spans.sort_by_key(|span| span.offset());
     spans
         .into_iter()
@@ -90,189 +49,24 @@ pub fn goto_definition(state: &DocumentState, position: Position) -> Vec<Range> 
         .collect()
 }
 
-/// The declaration of the identifier at `node` that is visible at `offset`
-/// in the innermost scope, the latest there.
-fn in_scope(state: &DocumentState, node: NodeId, offset: usize) -> Option<Span> {
-    let name = identifier_name(&state.ast, node)?;
+/// The declaration of `name` visible where it's written, in the innermost
+/// scope, the latest there.
+fn in_scope(state: &DocumentState, name: &Name) -> Option<Definition> {
+    let text = state.source.get(name.span.offset()..name.span.end())?;
     let first = state.ast.first()?;
     let scope = file_scope(first.span.source_id(), state.source.len());
     let scope_len = |span: Span| span.end() - span.offset();
     collect_declarations(&state.ast, scope)
         .into_iter()
-        .filter(|decl| decl.name == name && is_visible(decl, offset))
-        .filter_map(|decl| {
+        .filter(|decl| decl.name == text && is_visible(decl, name.span.offset()))
+        .map(|decl| {
             let (DeclKind::Variable(id) | DeclKind::Function(id) | DeclKind::Struct(id)) =
                 decl.kind;
-            let span = state.declarations.span(Definition::Node(id))?;
-            Some((scope_len(decl.scope_span), span))
+            (scope_len(decl.scope_span), decl.visible_from, id)
         })
         // Innermost scope first, then the latest declaration in it.
-        .min_by_key(|&(len, span)| (len, std::cmp::Reverse(span.offset())))
-        .map(|(_, span)| span)
-}
-
-/// The name of the identifier expression at `node`.
-fn identifier_name(ast: &[ExpressionLocation], node: NodeId) -> Option<String> {
-    let mut stack: Vec<&ExpressionLocation> = ast.iter().collect();
-    while let Some(expr) = stack.pop() {
-        if expr.id == node {
-            return match &expr.expression {
-                Expression::Identifier { name, .. } => Some(name.clone()),
-                _ => None,
-            };
-        }
-        stack.extend(expr.children());
-    }
-    None
-}
-
-/// The node of the name the cursor is on, as the analysis keys its
-/// definitions: an identifier, the member of a member access, a binding
-/// pattern or assignment target, or a name in a type annotation.
-fn name_at(ast: &[ExpressionLocation], offset: usize) -> Option<NodeId> {
-    let mut finder = NameFinder {
-        offset,
-        found: None,
-    };
-    walk_ast(&mut finder, ast);
-    if finder.found.is_some() {
-        return finder.found;
-    }
-    let node = node_at_offset(ast, offset)?;
-    match &node.expression {
-        Expression::Identifier {
-            identifier_span, ..
-        } if contains(*identifier_span, offset) => Some(node.id),
-        Expression::MemberAccess { member_span, .. } if contains(*member_span, offset) => {
-            Some(node.id)
-        }
-        _ => None,
-    }
-}
-
-fn contains(span: Span, offset: usize) -> bool {
-    span.offset() <= offset && offset < span.end()
-}
-
-/// Finds the binding pattern, assignment target or type name the cursor is
-/// on. Their spans don't overlap each other or an expression's name, so the
-/// first one found is the one.
-struct NameFinder {
-    offset: usize,
-    found: Option<NodeId>,
-}
-
-impl NameFinder {
-    /// The member of a target that writes through a field, as `x` in
-    /// `p.x = 1`. A plain name is reported as a declaration.
-    fn in_target(&mut self, target: &AssignmentTargetLocation) {
-        match &target.target {
-            AssignmentTarget::Member { member_span, .. } if contains(*member_span, self.offset) => {
-                self.found = Some(target.id);
-            }
-            AssignmentTarget::Sequence(targets) => {
-                for target in targets {
-                    self.in_target(target);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn in_type(&mut self, annotation: &TypeExpr) {
-        match annotation {
-            TypeExpr::Name {
-                id,
-                name,
-                args,
-                span,
-            } => {
-                let name_span = Span::new(span.source_id(), span.offset(), name.len());
-                if contains(name_span, self.offset) {
-                    self.found = Some(*id);
-                }
-                for arg in args {
-                    self.in_type(arg);
-                }
-            }
-            TypeExpr::List { element, .. } => self.in_type(element),
-            TypeExpr::Map { key, value, .. } => {
-                self.in_type(key);
-                if let Some(value) = value {
-                    self.in_type(value);
-                }
-            }
-            TypeExpr::Tuple { elements, .. } => {
-                for element in elements {
-                    self.in_type(element);
-                }
-            }
-            TypeExpr::Function {
-                parameters,
-                return_type,
-                ..
-            } => {
-                for p in parameters {
-                    self.in_type(p);
-                }
-                if let Some(return_type) = return_type {
-                    self.in_type(return_type);
-                }
-            }
-        }
-    }
-}
-
-impl AstVisitor for NameFinder {
-    fn on_declaration(&mut self, _identifier: &str, node: NodeId, _: bool, span: Span) {
-        if contains(span, self.offset) {
-            self.found = Some(node);
-        }
-    }
-
-    fn on_expression(&mut self, expr: &ExpressionLocation) {
-        if !contains(expr.span, self.offset) {
-            return;
-        }
-        match &expr.expression {
-            Expression::Identifier { type_arguments, .. } => {
-                for t in type_arguments {
-                    self.in_type(t);
-                }
-            }
-            Expression::VariableDeclaration {
-                annotated_type: Some(annotation),
-                ..
-            } => self.in_type(annotation),
-            Expression::FunctionDeclaration {
-                type_parameters,
-                parameters,
-                return_annotation,
-                ..
-            } => {
-                for parameter in type_parameters {
-                    if contains(parameter.span, self.offset) {
-                        self.found = Some(parameter.id);
-                    }
-                }
-                for annotation in parameters.iter().filter_map(|p| p.annotation.as_ref()) {
-                    self.in_type(annotation);
-                }
-                if let Some(annotation) = return_annotation {
-                    self.in_type(annotation);
-                }
-            }
-            Expression::StructDeclaration { fields, .. } => {
-                for field in fields {
-                    self.in_type(&field.annotation);
-                }
-            }
-            Expression::Assignment { l_value, .. } | Expression::OpAssignment { l_value, .. } => {
-                self.in_target(l_value);
-            }
-            _ => {}
-        }
-    }
+        .min_by_key(|&(len, from, _)| (len, std::cmp::Reverse(from)))
+        .map(|(_, _, id)| Definition::Node(id))
 }
 
 #[cfg(test)]
@@ -464,8 +258,8 @@ mod tests {
     mod resolved {
         use super::*;
 
-        /// Every definition of the name at the `n`th `needle`, as the text
-        /// each range covers.
+        /// Every definition of the name at the `n`th `needle`, as the line
+        /// it's on. Each covers just the declared name.
         fn definitions(src: &str, needle: &str, n: usize) -> Vec<String> {
             let state = analyse(src);
             let byte = src.match_indices(needle).nth(n).expect("needle").0;
@@ -475,7 +269,15 @@ mod tests {
                 .map(|range| {
                     let start = state.line_index.offset(&state.source, range.start).unwrap();
                     let end = state.line_index.offset(&state.source, range.end).unwrap();
-                    src[start..end].to_string()
+                    let name = &src[start..end];
+                    assert!(
+                        name.chars().all(|c| c.is_alphanumeric() || c == '_'),
+                        "not just a name: {name:?}"
+                    );
+                    src.lines()
+                        .nth(range.start.line as usize)
+                        .expect("a line")
+                        .to_string()
                 })
                 .collect()
         }
@@ -499,8 +301,14 @@ mod tests {
         #[test]
         fn a_field_read_or_written_jumps_to_the_field() {
             let src = "struct Point { x: Int, y: Int }\nlet p = Point(1, 2);\np.y;\np.y = 3;";
-            assert_eq!(definitions(src, "y", 1), ["y: Int"]);
-            assert_eq!(definitions(src, "y", 2), ["y: Int"]);
+            assert_eq!(
+                definitions(src, "y", 1),
+                ["struct Point { x: Int, y: Int }"]
+            );
+            assert_eq!(
+                definitions(src, "y", 2),
+                ["struct Point { x: Int, y: Int }"]
+            );
         }
 
         #[test]
@@ -508,8 +316,8 @@ mod tests {
             let src = "struct Point { x: Int }\nlet p: Point = Point(1);";
             assert_eq!(definitions(src, "Point", 1), ["struct Point { x: Int }"]);
             let src = "fn same<T>(x: T) -> T { x }";
-            assert_eq!(definitions(src, "T", 1), ["T"]);
-            assert_eq!(definitions(src, "T", 2), ["T"]);
+            assert_eq!(definitions(src, "T", 1), ["fn same<T>(x: T) -> T { x }"]);
+            assert_eq!(definitions(src, "T", 2), ["fn same<T>(x: T) -> T { x }"]);
         }
 
         #[test]
@@ -525,17 +333,17 @@ mod tests {
         #[test]
         fn an_assignment_target_jumps_to_its_declaration_despite_an_error_in_its_value() {
             let src = "let total = 1;\ntotal = missing;";
-            assert_eq!(definitions(src, "total", 1), ["total"]);
+            assert_eq!(definitions(src, "total", 1), ["let total = 1;"]);
         }
 
         #[test]
         fn a_name_after_an_unknown_name_in_the_same_statement_jumps_by_scope() {
             let src = "let total = 1;\nprint(missing, total);";
-            assert_eq!(definitions(src, "total", 1), ["total"]);
+            assert_eq!(definitions(src, "total", 1), ["let total = 1;"]);
             let src = "let total = 1;\nif missing { total }";
-            assert_eq!(definitions(src, "total", 1), ["total"]);
+            assert_eq!(definitions(src, "total", 1), ["let total = 1;"]);
             let src = "let total = 1;\nfn f() {\n  let total = 2;\n  if missing { total }\n}";
-            assert_eq!(definitions(src, "total", 2), ["total"]);
+            assert_eq!(definitions(src, "total", 2), ["  let total = 2;"]);
             assert_eq!(
                 start_offset(
                     &analyse(src),
