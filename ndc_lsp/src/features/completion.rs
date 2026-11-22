@@ -228,7 +228,7 @@ impl OverloadGroup<'_> {
 
 /// The functions the program declares that are visible at `position`. While
 /// the text doesn't parse they come from the last analysis of a text that did,
-/// whose declarations before the cursor are still where they were.
+/// so the cursor is first mapped to where it was in that text.
 fn declared_functions(state: &DocumentState, position: Position) -> Vec<FunctionInfo> {
     let (Some(offset), Some(first)) = (
         state.line_index.offset(&state.source, position),
@@ -236,6 +236,7 @@ fn declared_functions(state: &DocumentState, position: Position) -> Vec<Function
     ) else {
         return Vec::new();
     };
+    let offset = state.analysed_offset(offset);
     let scope = file_scope(first.span.source_id(), state.source.len());
     collect_declarations(&state.ast, scope)
         .iter()
@@ -748,6 +749,13 @@ mod tests {
             assert!(item(&items, "later").is_none());
             let items = completions(&["fn f() {\n  fn inner() { 1 }\n}\n$0"]);
             assert!(item(&items, "inner").is_none());
+        }
+
+        #[test]
+        fn a_dot_typed_at_the_end_of_a_block_offers_the_blocks_functions() {
+            let before = "fn main() {\n  fn double(x: Int) { x * 2 }\n  let n = 5;\n}\n";
+            let after = "fn main() {\n  fn double(x: Int) { x * 2 }\n  let n = 5;\n  n.$0}\n";
+            assert!(item(&completions(&[before, after]), "double").is_some());
         }
     }
 }

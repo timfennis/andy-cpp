@@ -27,6 +27,8 @@ pub struct DocumentState {
     pub analysis_matches_source: bool,
     /// Analysed AST from the last successful analysis.
     pub ast: Vec<ExpressionLocation>,
+    /// The text `ast` was parsed from, which its spans are offsets into.
+    analysed_source: String,
     /// What the last successful analysis worked out about `ast`: types,
     /// bindings and so on, keyed by node.
     pub analysis: Analysis,
@@ -52,6 +54,7 @@ impl DocumentState {
             line_index,
             analysis_matches_source: false,
             ast: Vec::new(),
+            analysed_source: String::new(),
             analysis: Analysis::default(),
             variable_types: HashMap::default(),
             expression_types: HashMap::default(),
@@ -97,8 +100,37 @@ impl DocumentState {
             .map(|(end, (_start, typ))| (end, typ))
             .collect();
         self.ast = ast;
+        self.analysed_source.clone_from(&self.source);
         self.analysis = analysis;
         self.analysis_matches_source = true;
+    }
+
+    /// Where `offset` in `source` was in the text the AST was parsed from,
+    /// taking everything between the first and the last byte that changed as
+    /// one edit. An offset before the edit stays, one after it moves with the
+    /// text after it, and one inside it is the start of the edit. While the
+    /// text doesn't parse, that's how a cursor finds the scopes it's in: in
+    /// `{ n.| }`, typing `n.` moved the brace, and the cursor is still
+    /// inside the block.
+    pub fn analysed_offset(&self, offset: usize) -> usize {
+        let (old, new) = (self.analysed_source.as_bytes(), self.source.as_bytes());
+        let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+        if offset <= prefix {
+            return offset;
+        }
+        let max_suffix = old.len().min(new.len()) - prefix;
+        let suffix = old
+            .iter()
+            .rev()
+            .zip(new.iter().rev())
+            .take(max_suffix)
+            .take_while(|(a, b)| a == b)
+            .count();
+        if offset >= new.len() - suffix {
+            old.len() - (new.len() - offset)
+        } else {
+            prefix
+        }
     }
 }
 
@@ -187,5 +219,21 @@ mod tests {
     fn a_document_without_analysis_does_not_match_its_source() {
         let state = DocumentState::from_source("let x = 1;".to_string());
         assert!(!state.analysis_matches_source);
+    }
+
+    #[test]
+    fn an_offset_moves_with_the_text_around_an_edit() {
+        let mut state = DocumentState::from_source(String::new());
+        state.analysed_source = "{ let n = 5; }".to_string();
+        state.set_source("{ let n = 5; n. }");
+        // Before the edit, offsets stay.
+        assert_eq!(state.analysed_offset(2), 2);
+        // After it they move back with the brace, and inside it they are its start.
+        assert_eq!(state.analysed_offset(16), 13);
+        assert_eq!(state.analysed_offset(15), 13);
+        assert_eq!(state.analysed_offset(14), 13);
+        // Text that didn't change maps to itself.
+        state.set_source("{ let n = 5; }");
+        assert_eq!(state.analysed_offset(13), 13);
     }
 }
