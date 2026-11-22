@@ -19,12 +19,4 @@ pub use ls_types;
 
 /// Serves the language server over stdin and stdout until the client exits.
 #[cfg(feature = "server")]
-pub async fn start_lsp(configure: Configure) {
-    use tower_lsp_server::{LspService, Server};
-
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-
-    let (service, socket) = LspService::new(move |client| backend::Backend::new(client, configure));
-    Server::new(stdin, stdout, socket).serve(service).await;
-}
+pub use backend::serve as start_lsp;

@@ -87,6 +87,20 @@ impl DocumentState {
     /// analysis as matching the current source. Callers must ensure `ast` was
     /// produced from the current `source`.
     pub fn set_analysis(&mut self, ast: Vec<ExpressionLocation>, analysis: Analysis) {
+        let source = self.source.clone();
+        self.set_analysis_of(source, ast, analysis);
+    }
+
+    /// Replace the analysis with one of `text`, which may be an older text
+    /// than `source`: the completion caches still work from it while the
+    /// current text doesn't parse, and the AST-backed features stay off unless
+    /// `text` is the current source.
+    pub fn set_analysis_of(
+        &mut self,
+        text: String,
+        ast: Vec<ExpressionLocation>,
+        analysis: Analysis,
+    ) {
         let mut collector = MapCollector {
             analysis: &analysis,
             variable_types: HashMap::default(),
@@ -100,9 +114,9 @@ impl DocumentState {
             .map(|(end, (_start, typ))| (end, typ))
             .collect();
         self.ast = ast;
-        self.analysed_source.clone_from(&self.source);
+        self.analysis_matches_source = text == self.source;
+        self.analysed_source = text;
         self.analysis = analysis;
-        self.analysis_matches_source = true;
     }
 
     /// The length of the text the AST was parsed from.

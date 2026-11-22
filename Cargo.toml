@@ -58,9 +58,8 @@ serde_json = { version = "1.0.154", features = ["arbitrary_precision"] }
 strsim = "0.11.1"
 tap = "1.0.1"
 thiserror = "2.0.21"
-tokio = { version = "1.54.1", features = ["full"] }
-tower-lsp-server = "0.23.0"
-# The version tower-lsp-server re-exports, so the server and the features share types.
+crossbeam-channel = "0.5.15"
+lsp-server = "0.10.0"
 ls-types = "0.0.6"
 
 # For the browser build: LTO makes the module about 10% smaller and a bit
