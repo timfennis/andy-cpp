@@ -15,17 +15,18 @@ use ls_types::notification::{
     Notification as _, PublishDiagnostics,
 };
 use ls_types::request::{
-    Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest, InlayHintRequest,
+    Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest, InlayHintRefreshRequest,
+    InlayHintRequest, Request as _,
 };
 use ls_types::{
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverParams, HoverProviderCapability, InlayHint, InlayHintParams, Location,
-    LogMessageParams, MessageType, OneOf, PublishDiagnosticsParams, ServerCapabilities,
+    Hover, HoverParams, HoverProviderCapability, InitializeParams, InlayHint, InlayHintParams,
+    Location, LogMessageParams, MessageType, OneOf, PublishDiagnosticsParams, ServerCapabilities,
     TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
-use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
+use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestId, Response};
 
 use crate::document::{self, Configure};
 use crate::features::completion::FunctionInfo;
@@ -37,7 +38,16 @@ type Error = Box<dyn std::error::Error + Send + Sync>;
 /// Serves the language server over stdin and stdout until the client exits.
 pub fn serve(configure: Configure) -> Result<(), Error> {
     let (connection, io_threads) = Connection::stdio();
-    connection.initialize(serde_json::to_value(capabilities())?)?;
+    let params: InitializeParams =
+        serde_json::from_value(connection.initialize(serde_json::to_value(capabilities())?)?)?;
+    // An inlay hint request that comes in before the analysis of its text has
+    // nothing to answer with, so the client is told to ask again once there is.
+    let refresh_inlay_hints = params
+        .capabilities
+        .workspace
+        .and_then(|workspace| workspace.inlay_hint)
+        .and_then(|inlay_hint| inlay_hint.refresh_support)
+        .unwrap_or(false);
 
     let documents = Documents::default();
     let (jobs, queue) = mpsc::channel();
@@ -46,7 +56,9 @@ pub fn serve(configure: Configure) -> Result<(), Error> {
         let sender = connection.sender.clone();
         thread::Builder::new()
             .name("analysis".to_string())
-            .spawn(move || analyse_jobs(&queue, &documents, &sender, configure))?
+            .spawn(move || {
+                analyse_jobs(&queue, &documents, &sender, configure, refresh_inlay_hints);
+            })?
     };
 
     let server = Server {
@@ -151,7 +163,9 @@ fn analyse_jobs(
     documents: &Documents,
     sender: &crossbeam_channel::Sender<Message>,
     configure: Configure,
+    refresh_inlay_hints: bool,
 ) {
+    let mut refreshes = 0;
     for job in queue {
         // A bug in the analyser mustn't end this thread, or diagnostics would
         // stop for the rest of the session: skip the text instead.
@@ -186,6 +200,13 @@ fn analyse_jobs(
             open.state.set_analysis_of(job.text, ast, analysis);
         }
         if current {
+            if refresh_inlay_hints && open.state.analysis_matches_source {
+                refreshes += 1;
+                let id = RequestId::from(format!("inlay-hint-refresh-{refreshes}"));
+                let request = Request::new(id, InlayHintRefreshRequest::METHOD.to_string(), ());
+                // The send fails only once the client has gone.
+                let _ = sender.send(request.into());
+            }
             publish_diagnostics(sender, job.uri, diagnostics, Some(job.version));
         }
     }
@@ -474,6 +495,13 @@ mod tests {
     /// Runs the analysis thread's loop over the texts `texts` of one document
     /// that came in before it got to any of them, and returns the document.
     fn analyse_in_turn(texts: &[&str]) -> (OpenDocument, Vec<Message>) {
+        analyse_in_turn_refreshing(texts, false)
+    }
+
+    fn analyse_in_turn_refreshing(
+        texts: &[&str],
+        refresh_inlay_hints: bool,
+    ) -> (OpenDocument, Vec<Message>) {
         let uri = Uri::from_str("file:///t.ndc").expect("a valid uri");
         let documents = Documents::default();
         let (jobs, queue) = mpsc::channel();
@@ -496,7 +524,13 @@ mod tests {
         }
         drop(jobs);
         let (sender, messages) = crossbeam_channel::unbounded();
-        analyse_jobs(&queue, &documents, &sender, ndc_stdlib::register);
+        analyse_jobs(
+            &queue,
+            &documents,
+            &sender,
+            ndc_stdlib::register,
+            refresh_inlay_hints,
+        );
         let open = documents.write().remove(&uri).expect("the document");
         (open, messages.try_iter().collect())
     }
@@ -516,5 +550,32 @@ mod tests {
     fn the_analysis_of_the_current_text_matches_it() {
         let (open, _) = analyse_in_turn(&["let x = 1 +;", "let x = 1;"]);
         assert!(open.state.analysis_matches_source);
+    }
+
+    fn refreshes(messages: &[Message]) -> usize {
+        messages
+            .iter()
+            .filter(|message| {
+                matches!(message, Message::Request(r) if r.method == InlayHintRefreshRequest::METHOD)
+            })
+            .count()
+    }
+
+    #[test]
+    fn the_client_is_told_to_refresh_inlay_hints_once_the_current_text_is_analysed() {
+        let (_, messages) = analyse_in_turn_refreshing(&["let x = 1 +;", "let x = 1;"], true);
+        assert_eq!(refreshes(&messages), 1);
+    }
+
+    #[test]
+    fn inlay_hints_are_not_refreshed_while_the_current_text_does_not_parse() {
+        let (_, messages) = analyse_in_turn_refreshing(&["let x = 1;", "let x = 1 +;"], true);
+        assert_eq!(refreshes(&messages), 0);
+    }
+
+    #[test]
+    fn inlay_hints_are_not_refreshed_for_a_client_that_cannot() {
+        let (_, messages) = analyse_in_turn(&["let x = 1;"]);
+        assert_eq!(refreshes(&messages), 0);
     }
 }
