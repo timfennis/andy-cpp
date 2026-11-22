@@ -6,7 +6,72 @@ use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{StaticType, TypeVar};
 use ndc_lexer::Span;
 
+/// Which of the listed literals' types a walk looks at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Listed {
+    /// All of the batch's.
+    InBatch,
+    /// Those listed while the innermost open generic function's body was:
+    /// see [`TypeVars::open_body_literals`].
+    InBody,
+}
+
 impl TypeVars {
+    /// The literals' types listed in `which`, oldest first.
+    fn listed(&self, which: Listed) -> impl Iterator<Item = TypeVar> + '_ {
+        let lists: &[Vec<TypeVar>] = match which {
+            Listed::InBatch => &self.literals,
+            Listed::InBody => self.literals.last().map_or(&[], std::slice::from_ref),
+        };
+        lists.iter().flatten().copied()
+    }
+
+    /// Lists `var` as a literal's type, in the innermost open body's list.
+    /// This is the only place a literal's type gets listed: when it's made
+    /// with its bounds, or when another literal's bounds join it. So a
+    /// variable a body made that has bounds was listed while the body was
+    /// open, and so was any literal that came to hold one of its variables,
+    /// as only a bound joined in the body can make an outer literal hold
+    /// one. That's what lets [`Listed::InBody`] stand for all of them.
+    pub(super) fn list_literal(&mut self, var: TypeVar) {
+        if self.literals.is_empty() {
+            self.literals.push(Vec::new());
+        }
+        self.literals
+            .last_mut()
+            .expect("the batch has a list of literals")
+            .push(var);
+    }
+
+    /// Starts a list of the literals' types listed in a generic function's
+    /// body, which [`Self::close_body_literals`] ends.
+    pub(super) fn open_body_literals(&mut self) {
+        if self.literals.is_empty() {
+            self.literals.push(Vec::new());
+        }
+        self.literals.push(Vec::new());
+    }
+
+    /// Ends the innermost body's list once its literals are defaulted, and
+    /// adds what's left of it to the enclosing list, the program's or an
+    /// enclosing body's. Settled literals are left out unless a snapshot is
+    /// open, as a rollback could unsettle one.
+    pub(crate) fn close_body_literals(&mut self) {
+        debug_assert!(self.literals.len() >= 2, "no body's literals are open");
+        let Some(body) = self.literals.pop() else {
+            return;
+        };
+        let keep_settled = self.open_snapshots > 0;
+        let solutions = &self.solutions;
+        let left = body.into_iter().filter(|&var| {
+            keep_settled || solutions.get(var.0 as usize).is_some_and(Option::is_none)
+        });
+        match self.literals.last_mut() {
+            Some(enclosing) => enclosing.extend(left),
+            None => self.literals.push(left.collect()),
+        }
+    }
+
     /// The type of an integer literal, like `1`, which its uses settle as an
     /// `Int`, a `Float` or a `Number`: `1` in `[1.5, 1]` is a Float. It's an
     /// `Int` unless something says otherwise.
@@ -40,12 +105,12 @@ impl TypeVars {
         self.held_literals(var).into_iter().next()
     }
 
-    /// The unsettled literal types that each unsettled literal type is
-    /// held by: the element type of `[1]` holds the `1`'s.
-    pub(crate) fn holders(&self) -> HashMap<TypeVar, Vec<TypeVar>> {
+    /// The unsettled literal types listed in `which` that each unsettled
+    /// literal type is held by: the element type of `[1]` holds the `1`'s.
+    pub(crate) fn holders(&self, which: Listed) -> HashMap<TypeVar, Vec<TypeVar>> {
         let mut holders = HashMap::<TypeVar, Vec<TypeVar>>::default();
         let mut seen = HashSet::default();
-        for &holder in &self.literals {
+        for holder in self.listed(which) {
             if (holder.0 as usize) >= self.solutions.len()
                 || !self.is_literal(holder)
                 || !seen.insert(holder)
@@ -108,11 +173,12 @@ impl TypeVars {
             unreachable!("a fresh type is a variable");
         };
         self.bounds[var.0 as usize] = Bounds::new(bounds);
-        self.literals.push(var);
+        self.list_literal(var);
         typ
     }
 
-    /// The unsettled types of literals that `belongs` says to settle, the
+    /// The unsettled types of literals listed in `which` that `belongs`
+    /// says to settle, the
     /// ones holding values before the numbers, so a value can still say
     /// what a number is: `1` in `[1, 2.5]` is a Float. Those whose values
     /// share no type come last, so a call waiting for the others can still
@@ -120,11 +186,12 @@ impl TypeVars {
     /// `f(x: Any, y: Int)`, once the `0` is an Int.
     pub(crate) fn unsettled_literals(
         &mut self,
+        which: Listed,
         belongs: impl Fn(&Self, TypeVar) -> bool,
     ) -> Vec<TypeVar> {
         let mut literals = Vec::new();
         let mut seen = HashSet::default();
-        for &var in &self.literals {
+        for var in self.listed(which) {
             if (var.0 as usize) < self.solutions.len()
                 && self.solution(var).is_none()
                 && !self.bounds[var.0 as usize].is_empty()
@@ -160,16 +227,41 @@ impl TypeVars {
         keyed.into_iter().map(|(_, var)| var).collect()
     }
 
+    /// Drops the settled literals from the program's list of literals'
+    /// types, and the ones listed twice, which no walk of it lets through,
+    /// so walking it doesn't take longer the more literals the batch has
+    /// settled. It does nothing while a body's list or a snapshot is open,
+    /// as a rollback could unsettle one, and it prunes only once the list
+    /// has doubled since it last did, so the literals that stay unsettled,
+    /// as a top-level `1` can until the end of the batch, aren't walked
+    /// again on every statement.
+    pub(crate) fn prune_literals(&mut self) {
+        if self.open_snapshots > 0 || self.literals.len() != 1 {
+            return;
+        }
+        let program = &mut self.literals[0];
+        if program.len() < 2 * self.literals_after_pruning.max(32) {
+            return;
+        }
+        let mut seen = HashSet::default();
+        let solutions = &self.solutions;
+        program.retain(|&var| {
+            solutions.get(var.0 as usize).is_some_and(Option::is_none) && seen.insert(var)
+        });
+        self.literals_after_pruning = program.len();
+    }
+
     /// Forgets the types of literals, once they're all settled at the end
     /// of a batch.
     pub(crate) fn forget_literals(&mut self) {
+        debug_assert!(self.literals.len() <= 1, "a body's literals are still open");
         debug_assert!(
-            self.literals
-                .iter()
-                .all(|&var| var.0 as usize >= self.solutions.len() || !self.is_literal(var)),
+            self.listed(Listed::InBatch)
+                .all(|var| var.0 as usize >= self.solutions.len() || !self.is_literal(var)),
             "a literal's type is left unsettled"
         );
         self.literals.clear();
+        self.literals_after_pruning = 0;
     }
 
     /// Whether `var` is the unsettled type of a number literal, or of a

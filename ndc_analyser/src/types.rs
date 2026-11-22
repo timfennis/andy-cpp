@@ -10,6 +10,8 @@ mod literals;
 mod store;
 mod unify;
 
+pub(crate) use literals::Listed;
+
 use store::Undo;
 use unify::Deferred;
 
@@ -130,8 +132,16 @@ pub(crate) struct TypeVars {
     /// trail says was settled, so a [`store::Snapshot`] can take it back.
     undo: Vec<Undo>,
     /// The variables that got a bound, in the order they got it, which are
-    /// the types of literals.
-    literals: Vec<TypeVar>,
+    /// the types of literals: one list for the program, and one for each
+    /// generic function's body being analysed, innermost last. See
+    /// [`Self::list_literal`].
+    literals: Vec<Vec<TypeVar>>,
+    /// How many literals' types were left the last time
+    /// [`Self::prune_literals`] pruned them.
+    literals_after_pruning: usize,
+    /// How many [`store::Snapshot`]s are open. While one is, a rollback can
+    /// unsettle a variable, so a settled literal isn't settled for good.
+    open_snapshots: u32,
     /// Where each literal holding values is, keyed by the type its elements
     /// were made as: the whole of `[1, "a"]`, or of an `if`.
     literal_spans: HashMap<TypeVar, Span>,

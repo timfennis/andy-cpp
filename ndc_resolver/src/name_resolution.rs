@@ -6,6 +6,7 @@ use ndc_parser::{
     AssignmentTarget, AssignmentTargetLocation, BindingPattern, BindingPatternLocation, Expression,
     ExpressionLocation, ForBody, ForIteration, StructField, TypeExpr, TypeParameter,
 };
+use std::rc::Rc;
 
 /// A scope in the resolver's scope tree.
 #[derive(Debug, Eq, PartialEq, Copy, Clone, Hash)]
@@ -19,9 +20,16 @@ pub struct Scope {
     /// `let a = 1; { let b = 2; } let c = 3;`, the block was entered after 1.
     entered_after: usize,
     bindings: Vec<SymbolId>,
+    /// The `bindings` of each name, oldest first, once the scope binds
+    /// [`INDEXED_FROM`] values: looking a name up then doesn't take longer
+    /// the more the scope binds, while a small scope is looked through.
+    by_name: Option<HashMap<Rc<str>, Vec<SymbolId>>>,
     types: Vec<SymbolId>,
     kind: ScopeKind,
 }
+
+/// How many values a scope binds before it indexes them by name.
+const INDEXED_FROM: usize = 16;
 
 #[derive(Debug)]
 pub(crate) struct ScopeTree {
@@ -225,6 +233,7 @@ impl Scope {
             parent,
             entered_after,
             bindings: Vec::default(),
+            by_name: None,
             types: Vec::default(),
             kind,
         }
@@ -250,8 +259,23 @@ impl Scope {
         self.entered_after
     }
 
-    pub(crate) fn bind(&mut self, symbol_id: SymbolId) {
+    pub(crate) fn bind(&mut self, symbol_id: SymbolId, table: &SymbolTable) {
         self.bindings.push(symbol_id);
+        if let Some(by_name) = &mut self.by_name {
+            by_name
+                .entry(table.shared_name(symbol_id))
+                .or_default()
+                .push(symbol_id);
+        } else if self.bindings.len() >= INDEXED_FROM {
+            let mut by_name = HashMap::<Rc<str>, Vec<SymbolId>>::default();
+            for &symbol in &self.bindings {
+                by_name
+                    .entry(table.shared_name(symbol))
+                    .or_default()
+                    .push(symbol);
+            }
+            self.by_name = Some(by_name);
+        }
     }
 
     pub(crate) fn bind_type(&mut self, symbol_id: SymbolId) {
@@ -259,7 +283,12 @@ impl Scope {
     }
 
     pub(crate) fn lookup(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
-        Self::newest(&self.bindings, name, table)
+        match &self.by_name {
+            Some(by_name) => by_name
+                .get(name)
+                .and_then(|symbols| symbols.last().copied()),
+            None => Self::newest(&self.bindings, name, table),
+        }
     }
 
     pub(crate) fn lookup_type(&self, name: &str, table: &SymbolTable) -> Option<SymbolId> {
@@ -275,12 +304,18 @@ impl Scope {
     }
 
     fn candidates(&self, name: &str, table: &SymbolTable) -> Vec<SymbolId> {
-        self.bindings
-            .iter()
-            .rev()
-            .filter(|id| table.name(**id) == name)
-            .copied()
-            .collect()
+        match &self.by_name {
+            Some(by_name) => by_name
+                .get(name)
+                .map_or_else(Vec::new, |symbols| symbols.iter().rev().copied().collect()),
+            None => self
+                .bindings
+                .iter()
+                .rev()
+                .filter(|id| table.name(**id) == name)
+                .copied()
+                .collect(),
+        }
     }
 }
 
@@ -294,14 +329,14 @@ impl ScopeTree {
         }
     }
 
-    pub(crate) fn bind(&mut self, symbol_id: SymbolId) {
-        self.bind_in(self.current, symbol_id);
+    pub(crate) fn bind(&mut self, symbol_id: SymbolId, table: &SymbolTable) {
+        self.bind_in(self.current, symbol_id, table);
     }
 
     /// Binds a value in `scope`, which may not be the current one.
-    fn bind_in(&mut self, scope: ScopeId, symbol_id: SymbolId) {
+    fn bind_in(&mut self, scope: ScopeId, symbol_id: SymbolId, table: &SymbolTable) {
         let position = self.scopes[scope.0].bindings.len();
-        self.scopes[scope.0].bind(symbol_id);
+        self.scopes[scope.0].bind(symbol_id, table);
         self.bound_in.insert(symbol_id, (scope, position));
     }
 
@@ -471,7 +506,7 @@ impl NameResolver {
         let mut intrinsics = HashMap::default();
         for (slot, (builtin, intrinsic)) in builtins.into_iter().enumerate() {
             let symbol = symbols.declare(builtin.to_string(), BindingKind::Function);
-            scopes.bind(symbol);
+            scopes.bind(symbol, &symbols);
             native_slots.insert(symbol, slot);
             if let Some(intrinsic) = intrinsic {
                 intrinsics.insert(symbol, intrinsic);
@@ -560,7 +595,7 @@ impl NameResolver {
     pub fn declare_instance(&mut self, name: String) -> SymbolId {
         let symbol = self.symbols.declare(name, BindingKind::Function);
         let program = self.scopes.program();
-        self.scopes.bind_in(program, symbol);
+        self.scopes.bind_in(program, symbol, &self.symbols);
         symbol
     }
 
@@ -1068,7 +1103,7 @@ impl NameResolver {
 
     fn declare_function(&mut self, name: String) -> SymbolId {
         let symbol = self.symbols.declare(name, BindingKind::Function);
-        self.scopes.bind(symbol);
+        self.scopes.bind(symbol, &self.symbols);
         symbol
     }
 
@@ -1246,7 +1281,7 @@ impl NameResolver {
                 let symbol = self
                     .symbols
                     .declare(identifier.to_owned(), BindingKind::Plain);
-                self.scopes.bind(symbol);
+                self.scopes.bind(symbol, &self.symbols);
                 self.declarations.insert(pattern.id, symbol);
             }
             BindingPattern::Sequence(items) => {
@@ -1408,9 +1443,9 @@ mod test {
         let other = table.declare("another".to_string(), BindingKind::Plain);
 
         let mut scope = Scope::new(ScopeKind::Block, None, 0);
-        scope.bind(first);
-        scope.bind(second);
-        scope.bind(other);
+        scope.bind(first, &table);
+        scope.bind(second, &table);
+        scope.bind(other, &table);
 
         // The second binding shadows the first
         assert_eq!(scope.lookup("foo", &table), Some(second));
@@ -1423,6 +1458,29 @@ mod test {
     }
 
     #[test]
+    fn a_scope_that_indexes_its_bindings_finds_what_looking_through_them_does() {
+        let mut table = SymbolTable::default();
+        let mut scope = Scope::new(ScopeKind::Block, None, 0);
+        let mut bound = Vec::new();
+        for i in 0..3 * super::INDEXED_FROM {
+            let symbol = table.declare(format!("n{}", i % 5), BindingKind::Plain);
+            scope.bind(symbol, &table);
+            bound.push(symbol);
+            for name in ["n0", "n3", "n4", "missing"] {
+                let same_named = bound
+                    .iter()
+                    .rev()
+                    .copied()
+                    .filter(|&id| table.name(id) == name)
+                    .collect::<Vec<_>>();
+                assert_eq!(scope.lookup(name, &table), same_named.first().copied());
+                assert_eq!(scope.candidates(name, &table), same_named);
+            }
+        }
+        assert!(scope.by_name.is_some());
+    }
+
+    #[test]
     fn lookup_searches_enclosing_scopes() {
         let mut table = SymbolTable::default();
         let first = table.declare("foo".to_string(), BindingKind::Plain);
@@ -1430,16 +1488,16 @@ mod test {
         let late = table.declare("baz".to_string(), BindingKind::Plain);
 
         let mut tree = ScopeTree::new();
-        tree.bind(first);
+        tree.bind(first, &table);
         tree.enter_scope(ScopeKind::Block);
-        tree.bind(middle);
+        tree.bind(middle, &table);
         tree.enter_scope(ScopeKind::Block);
         assert_eq!(tree.lookup("foo", &table), Some(first));
         assert_eq!(tree.lookup("bar", &table), Some(middle));
         assert_eq!(tree.lookup("missing", &table), None);
 
         // Looking further out doesn't move where new bindings go.
-        tree.bind(late);
+        tree.bind(late, &table);
         assert_eq!(tree.lookup("baz", &table), Some(late));
         tree.leave_scope();
         assert_eq!(tree.lookup("baz", &table), None);
@@ -1456,9 +1514,9 @@ mod test {
         let second = table.declare("foo".to_string(), BindingKind::Plain);
 
         let mut tree = ScopeTree::new();
-        tree.bind(first);
+        tree.bind(first, &table);
         tree.enter_scope(ScopeKind::Block);
-        tree.bind(second);
+        tree.bind(second, &table);
         assert_eq!(tree.lookup("foo", &table), Some(second));
 
         tree.leave_scope();
@@ -1473,13 +1531,13 @@ mod test {
 
         let mut tree = ScopeTree::new();
         tree.enter_scope(ScopeKind::Block);
-        tree.bind(first);
+        tree.bind(first, &table);
         tree.leave_scope();
         assert_eq!(tree.lookup("first", &table), None);
 
         tree.enter_scope(ScopeKind::Block);
         assert_eq!(tree.lookup("first", &table), None);
-        tree.bind(second);
+        tree.bind(second, &table);
         assert_eq!(tree.lookup("second", &table), Some(second));
         tree.leave_scope();
         assert_eq!(tree.lookup("first", &table), None);
