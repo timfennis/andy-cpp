@@ -2,11 +2,12 @@ use ls_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionResponse,
     Documentation, MarkupContent, MarkupKind, Position,
 };
+use ndc_analysis::Analysis;
 use ndc_core::collections::HashMap;
 use ndc_core::{Intrinsic, StaticType};
 use ndc_interpreter::{Builtins, Interpreter};
 
-use crate::scope_resolve::{collect_declarations, file_scope, is_visible};
+use crate::scope_resolve::{Decl, DeclKind, collect_declarations, file_scope, is_visible};
 use crate::state::DocumentState;
 
 /// A `Send` snapshot of a registered native function, built once at startup so
@@ -18,6 +19,9 @@ pub struct FunctionInfo {
     pub documentation: Option<String>,
     /// What the compiler writes in its place, if it's an intrinsic.
     pub intrinsic: Option<Intrinsic>,
+    /// A struct field's getter, `x` for `p.x`, which completes after a dot as
+    /// a field rather than a call.
+    pub is_field: bool,
 }
 
 impl FunctionInfo {
@@ -30,14 +34,66 @@ impl FunctionInfo {
             static_type: fun.static_type.clone(),
             documentation: fun.documentation.clone(),
             intrinsic: Some(fun.intrinsic),
+            is_field: false,
         });
         let natives = (0..natives.len()).map(|slot| Self {
             name: natives.name(slot).to_string(),
             static_type: natives.static_type(slot).clone(),
             documentation: natives.documentation(slot).map(str::to_string),
             intrinsic: None,
+            is_field: false,
         });
         natives.chain(intrinsics).collect()
+    }
+
+    /// The functions a declaration in the program declares: a named
+    /// function, or a struct's constructor and its fields' getters.
+    fn declared(decl: &Decl, analysis: &Analysis) -> Vec<Self> {
+        let declared = |name: &str, static_type: StaticType, is_field: bool| Self {
+            name: name.to_string(),
+            static_type,
+            documentation: None,
+            intrinsic: None,
+            is_field,
+        };
+        match decl.kind {
+            DeclKind::Variable => Vec::new(),
+            DeclKind::Function(node) => {
+                let Some(StaticType::Function {
+                    parameters,
+                    return_type,
+                }) = analysis.function_types.get(&node)
+                else {
+                    return Vec::new();
+                };
+                // Without an annotation the declared return type is `Any`;
+                // what the body returns says more.
+                let return_type = analysis
+                    .inferred_return_types
+                    .get(&node)
+                    .map_or_else(|| return_type.clone(), |t| Box::new(t.clone()));
+                let static_type = StaticType::Function {
+                    parameters: parameters.clone(),
+                    return_type,
+                };
+                vec![declared(&decl.name, static_type, false)]
+            }
+            DeclKind::Struct(node) => {
+                let Some(declared_struct) = analysis.structs.get(&node) else {
+                    return Vec::new();
+                };
+                let info = &declared_struct.info;
+                let constructor = declared(&decl.name, info.constructor_type(), false);
+                let fields = info.fields.iter().map(|(field, typ)| {
+                    let getter = StaticType::Function {
+                        parameters: Some(vec![info.static_type()]),
+                        return_type: Box::new(typ.clone()),
+                    };
+                    declared(field, getter, true)
+                });
+                std::iter::once(constructor).chain(fields).collect()
+            }
+        }
     }
 }
 
@@ -60,7 +116,10 @@ pub fn complete(
 
     let is_dot = receiver_type.is_some();
 
-    let groups = group_overloads(functions, receiver_type.as_ref());
+    // The program's own functions join the built-ins; one with a built-in's
+    // name and number of parameters folds into the same item.
+    let declared = state.map_or_else(Vec::new, |state| declared_functions(state, position));
+    let groups = group_overloads(declared.iter().chain(functions), receiver_type.as_ref());
     let function_items = groups.iter().map(|group| group.render(is_dot));
 
     if is_dot {
@@ -88,6 +147,8 @@ pub fn complete(
 /// while `randf()` and `randf(max)` stay separate items.
 struct OverloadGroup<'a> {
     name: &'a str,
+    /// A struct field, completed as `p.x` rather than a call.
+    is_field: bool,
     /// Distinct candidate types per parameter position. `None` when the
     /// overloads don't declare their parameters.
     parameters: Option<Vec<Vec<&'a StaticType>>>,
@@ -99,6 +160,9 @@ impl OverloadGroup<'_> {
     /// Render this group as one completion item. In dot mode the first
     /// parameter is the receiver and is omitted from the displayed signature.
     fn render(&self, is_dot: bool) -> CompletionItem {
+        if self.is_field {
+            return self.render_field();
+        }
         let param_detail = match &self.parameters {
             Some(positions) => {
                 let ps = positions
@@ -143,19 +207,60 @@ impl OverloadGroup<'_> {
     }
 }
 
+impl OverloadGroup<'_> {
+    /// A field shows the type it holds, as `x: Int`.
+    fn render_field(&self) -> CompletionItem {
+        let typ = merged_type_display(&self.return_types);
+        CompletionItem {
+            label: self.name.to_string(),
+            detail: Some(format!("{}: {typ}", self.name)),
+            label_details: Some(CompletionItemLabelDetails {
+                detail: None,
+                description: Some(typ),
+            }),
+            kind: Some(CompletionItemKind::FIELD),
+            // Above the functions that take the struct, which are many.
+            sort_text: Some(format!("!{}", self.name)),
+            ..Default::default()
+        }
+    }
+}
+
+/// The functions the program declares that are visible at `position`. While
+/// the text doesn't parse they come from the last analysis of a text that did,
+/// whose declarations before the cursor are still where they were.
+fn declared_functions(state: &DocumentState, position: Position) -> Vec<FunctionInfo> {
+    let (Some(offset), Some(first)) = (
+        state.line_index.offset(&state.source, position),
+        state.ast.first(),
+    ) else {
+        return Vec::new();
+    };
+    let scope = file_scope(first.span.source_id(), state.source.len());
+    collect_declarations(&state.ast, scope)
+        .iter()
+        .filter(|decl| is_visible(decl, offset))
+        .flat_map(|decl| FunctionInfo::declared(decl, &state.analysis))
+        .collect()
+}
+
 /// Group registered functions by (name, arity), keeping registration order and
 /// deduplicating the types seen at each parameter position. When
 /// `receiver_type` is given (dot completion), overloads whose first parameter
 /// doesn't accept the receiver are dropped before grouping.
 fn group_overloads<'a>(
-    functions: &'a [FunctionInfo],
+    functions: impl IntoIterator<Item = &'a FunctionInfo>,
     receiver_type: Option<&StaticType>,
 ) -> Vec<OverloadGroup<'a>> {
     let mut groups: Vec<OverloadGroup<'a>> = Vec::new();
-    let mut index: HashMap<(&'a str, Option<usize>), usize> = HashMap::default();
+    let mut index: HashMap<(&'a str, Option<usize>, bool), usize> = HashMap::default();
 
     for fun in functions {
         if !is_normal_ident(&fun.name) {
+            continue;
+        }
+        // `p.x` reads a field; `x(p)` would too, but nobody writes that.
+        if fun.is_field && receiver_type.is_none() {
             continue;
         }
         let StaticType::Function {
@@ -171,10 +276,15 @@ fn group_overloads<'a>(
             continue;
         }
 
-        let key = (fun.name.as_str(), parameters.as_ref().map(Vec::len));
+        let key = (
+            fun.name.as_str(),
+            parameters.as_ref().map(Vec::len),
+            fun.is_field,
+        );
         let slot = *index.entry(key).or_insert_with(|| {
             groups.push(OverloadGroup {
                 name: &fun.name,
+                is_field: fun.is_field,
                 parameters: parameters
                     .as_ref()
                     .map(|params| vec![Vec::new(); params.len()]),
@@ -247,7 +357,8 @@ fn local_completions(state: &DocumentState, position: Position) -> Vec<Completio
 
     let mut names: HashMap<String, Option<StaticType>> = HashMap::default();
     for decl in collect_declarations(&state.ast, scope) {
-        if is_visible(&decl, offset) {
+        // Functions and structs complete as functions, with their signatures.
+        if decl.kind == DeclKind::Variable && is_visible(&decl, offset) {
             // Type is a best-effort hint from the name-keyed map (a shadowed name
             // may show the wrong type until the analyser resolution is exposed).
             let typ = state.variable_types.get(&decl.name).cloned();
@@ -444,6 +555,7 @@ mod tests {
             },
             documentation: None,
             intrinsic: None,
+            is_field: false,
         }
     }
 
@@ -576,5 +688,66 @@ mod tests {
             has_label(&items, "fn"),
             "keywords should still be offered while mid-edit"
         );
+    }
+
+    mod declared {
+        use crate::fixture::{completions, item};
+        use ls_types::CompletionItemKind;
+
+        const DOUBLE: &str = "fn double(x: Int) { x * 2 }\nlet n = 5;\nlet s = \"a\";\n";
+
+        fn after_typing(before: &str, typed: &str) -> Vec<ls_types::CompletionItem> {
+            completions(&[before, &format!("{before}{typed}$0")])
+        }
+
+        #[test]
+        fn a_dot_offers_the_programs_functions_that_take_the_receiver() {
+            let items = after_typing(DOUBLE, "n.");
+            let double = item(&items, "double").expect("`double` after `n.`");
+            assert_eq!(double.kind, Some(CompletionItemKind::FUNCTION));
+            assert_eq!(double.detail.as_deref(), Some("double() -> Int"));
+
+            assert!(item(&after_typing(DOUBLE, "s."), "double").is_none());
+        }
+
+        #[test]
+        fn a_dot_offers_a_function_without_annotations_for_any_receiver() {
+            let source = "fn twice(x) { [x, x] }\nlet s = \"a\";\n";
+            assert!(item(&after_typing(source, "s."), "twice").is_some());
+        }
+
+        #[test]
+        fn a_dot_after_a_struct_offers_its_fields() {
+            let source = "struct Point { x: Int, label: String }\nlet p = Point(1, \"a\");\n";
+            let items = after_typing(source, "p.");
+            let x = item(&items, "x").expect("field `x` after `p.`");
+            assert_eq!(x.kind, Some(CompletionItemKind::FIELD));
+            assert_eq!(x.detail.as_deref(), Some("x: Int"));
+            assert!(item(&items, "label").is_some());
+
+            // Another struct's fields, or a list's, aren't offered.
+            let source = format!("{source}let xs = [1];\n");
+            assert!(item(&after_typing(&source, "xs."), "x").is_none());
+        }
+
+        #[test]
+        fn without_a_dot_the_programs_functions_complete_as_functions() {
+            let items = completions(&["fn words() { [\"a\"] }\nstruct Point { x: Int }\n$0"]);
+            let words = item(&items, "words").expect("`words`");
+            assert_eq!(words.kind, Some(CompletionItemKind::FUNCTION));
+            assert_eq!(words.detail.as_deref(), Some("words() -> [String]"));
+            let point = item(&items, "Point").expect("the constructor `Point`");
+            assert_eq!(point.kind, Some(CompletionItemKind::FUNCTION));
+            // A field is read after a dot, not called.
+            assert!(item(&items, "x").is_none());
+        }
+
+        #[test]
+        fn a_function_declared_after_the_cursor_is_not_offered() {
+            let items = completions(&["let n = 5;\n$0\nfn later(x: Int) { x }\n"]);
+            assert!(item(&items, "later").is_none());
+            let items = completions(&["fn f() {\n  fn inner() { 1 }\n}\n$0"]);
+            assert!(item(&items, "inner").is_none());
+        }
     }
 }
