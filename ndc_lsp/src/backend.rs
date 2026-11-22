@@ -15,9 +15,10 @@ use ls_types::notification::{
     Notification as _, PublishDiagnostics,
 };
 use ls_types::request::{
-    Completion, DocumentHighlightRequest, DocumentSymbolRequest, Formatting, GotoDefinition,
-    HoverRequest, InlayHintRefreshRequest, InlayHintRequest, PrepareRenameRequest, References,
-    Rename, Request as _, SemanticTokensFullRequest, SemanticTokensRefresh, SignatureHelpRequest,
+    Completion, DocumentHighlightRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting,
+    GotoDefinition, HoverRequest, InlayHintRefreshRequest, InlayHintRequest, PrepareRenameRequest,
+    References, Rename, Request as _, SelectionRangeRequest, SemanticTokensFullRequest,
+    SemanticTokensRefresh, SignatureHelpRequest,
 };
 use ls_types::{
     CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
@@ -29,9 +30,11 @@ use ls_types::{
 };
 use ls_types::{
     DocumentChanges, DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind,
-    DocumentHighlightParams, InitializeResult, OptionalVersionedTextDocumentIdentifier,
-    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SemanticTokens,
-    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    DocumentHighlightParams, FoldingRange, FoldingRangeParams, FoldingRangeProviderCapability,
+    InitializeResult, OptionalVersionedTextDocumentIdentifier, PrepareRenameResponse,
+    ReferenceParams, RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
+    SelectionRangeProviderCapability, SemanticTokens, SemanticTokensFullOptions,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
     TextDocumentEdit, TextDocumentPositionParams, TextEdit, WorkspaceEdit,
 };
@@ -40,7 +43,7 @@ use lsp_server::{Connection, ErrorCode, Message, Notification, Request, RequestI
 use crate::document::{self, Configure};
 use crate::features::completion::FunctionInfo;
 use crate::features::{
-    completion, definition, formatting, hover, inlay_hints, references, semantic_tokens,
+    completion, definition, formatting, hover, inlay_hints, ranges, references, semantic_tokens,
     signature_help, symbols,
 };
 use crate::state::DocumentState;
@@ -168,6 +171,8 @@ fn capabilities(client: &Client) -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         document_formatting_provider: Some(OneOf::Left(true)),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         signature_help_provider: Some(SignatureHelpOptions {
             trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
             ..Default::default()
@@ -457,6 +462,8 @@ impl Server {
         .on_fallible::<Rename>(Self::rename)
         .on_fallible::<Formatting>(Self::formatting)
         .on_fallible::<SemanticTokensFullRequest>(Self::semantic_tokens)
+        .on_fallible::<FoldingRangeRequest>(Self::folding_ranges)
+        .on_fallible::<SelectionRangeRequest>(Self::selection_ranges)
         .finish();
     }
 
@@ -679,6 +686,44 @@ impl Server {
         Ok(Some(formatting::format(&open.state.source)?))
     }
 
+    /// What can be folded. Like semantic tokens, a request for text that
+    /// changed since the last analysis is told so, and the editor keeps
+    /// what it has.
+    fn folding_ranges(
+        &self,
+        params: &FoldingRangeParams,
+    ) -> Result<Option<Vec<FoldingRange>>, Refusal> {
+        self.with_current(&params.text_document.uri, ranges::folding_ranges)
+    }
+
+    /// What expanding the selection grows to; see [`Self::folding_ranges`].
+    fn selection_ranges(
+        &self,
+        params: &SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>, Refusal> {
+        self.with_current(&params.text_document.uri, |state| {
+            ranges::selection_ranges(state, &params.positions)
+        })
+    }
+
+    /// Runs `feature` on the document at `uri`, `None` if it isn't open,
+    /// and tells the client the content changed while its text has changed
+    /// since the last analysis.
+    fn with_current<T>(
+        &self,
+        uri: &Uri,
+        feature: impl FnOnce(&DocumentState) -> T,
+    ) -> Result<Option<T>, Refusal> {
+        let docs = self.documents.read();
+        let Some(open) = docs.get(uri) else {
+            return Ok(None);
+        };
+        if !open.state.analysis_matches_source {
+            return Err(Refusal::content_modified());
+        }
+        Ok(Some(feature(&open.state)))
+    }
+
     /// The document's semantic tokens. While its text has changed since the
     /// last analysis, the client is told the content was modified, so it
     /// keeps the tokens it has; it's asked to refresh once the text is
@@ -687,17 +732,13 @@ impl Server {
         &self,
         params: &SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>, Refusal> {
-        let docs = self.documents.read();
-        let Some(open) = docs.get(&params.text_document.uri) else {
-            return Ok(None);
-        };
-        if !open.state.analysis_matches_source {
-            return Err(Refusal::content_modified());
-        }
-        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-            result_id: None,
-            data: semantic_tokens::tokens(&open.state),
-        })))
+        let data = self.with_current(&params.text_document.uri, semantic_tokens::tokens)?;
+        Ok(data.map(|data| {
+            SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data,
+            })
+        }))
     }
 
     fn goto_definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
