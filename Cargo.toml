@@ -16,7 +16,6 @@ debug = true
 
 [workspace.package]
 edition = "2024"
-publish = false
 version = "0.4.1"
 license = "MIT"
 

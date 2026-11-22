@@ -358,8 +358,7 @@ impl Analyser {
     fn emit(&mut self, err: AnalysisError) {
         let mut calls = self
             .recording
-            .map(|instance| self.calls_needing(instance))
-            .unwrap_or_default();
+            .map_or_default(|instance| self.calls_needing(instance));
         calls.extend(
             self.copied_through
                 .iter()
