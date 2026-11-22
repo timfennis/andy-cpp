@@ -1,4 +1,7 @@
-use ls_types::{CompletionResponse, Diagnostic, DocumentSymbol, Hover, InlayHint, Position, Range};
+use ls_types::{
+    CompletionResponse, Diagnostic, DocumentHighlight, DocumentHighlightKind, DocumentSymbol,
+    Hover, InlayHint, Position, Range, TextEdit,
+};
 use ndc_analysis::Analysis;
 use ndc_core::FunctionRegistry;
 use ndc_interpreter::{Interpreter, NativeSpec};
@@ -10,7 +13,7 @@ use ndc_parser::Parser;
 
 use crate::diagnostics;
 use crate::features::completion::FunctionInfo;
-use crate::features::{completion, definition, hover, inlay_hints, symbols};
+use crate::features::{completion, definition, hover, inlay_hints, references, symbols};
 use crate::resolved::Resolved;
 use crate::state::DocumentState;
 
@@ -139,6 +142,52 @@ impl Document {
     pub fn definition(&self, position: Position) -> Vec<Range> {
         self.analysed()
             .map_or_default(|state| definition::goto_definition(state, position))
+    }
+
+    /// Every place the declarations of the name under `position` are named,
+    /// with the declarations themselves if `include_declaration`.
+    #[must_use]
+    pub fn references(&self, position: Position, include_declaration: bool) -> Vec<Range> {
+        self.analysed()
+            .map_or_default(|state| references::references(state, position, include_declaration))
+    }
+
+    /// The places to highlight while the cursor is on the name at
+    /// `position`: every name that means the same declarations.
+    #[must_use]
+    pub fn highlights(&self, position: Position) -> Vec<DocumentHighlight> {
+        let occurrences = self
+            .analysed()
+            .map_or_default(|state| references::highlights(state, position));
+        occurrences
+            .into_iter()
+            .map(|occurrence| DocumentHighlight {
+                range: occurrence.range,
+                kind: Some(if occurrence.write {
+                    DocumentHighlightKind::WRITE
+                } else {
+                    DocumentHighlightKind::READ
+                }),
+            })
+            .collect()
+    }
+
+    /// The range of the name under `position`, if it can be renamed, and
+    /// `None` when it isn't on a name; an error says why it can't be.
+    pub fn prepare_rename(&self, position: Position) -> Result<Option<Range>, String> {
+        let state = self.analysed().ok_or(references::NOT_ANALYSED)?;
+        references::prepare_rename(state, position)
+    }
+
+    /// The edits that rename the name under `position` to `new_name`, and
+    /// `None` when it isn't on a name; an error says why it can't be.
+    pub fn rename(
+        &self,
+        position: Position,
+        new_name: &str,
+    ) -> Result<Option<Vec<TextEdit>>, String> {
+        let state = self.analysed().ok_or(references::NOT_ANALYSED)?;
+        references::rename(state, self.configure, &self.functions, position, new_name)
     }
 
     /// The state, if its analysis is of the current text.

@@ -6,7 +6,7 @@ use ndc_lexer::Span;
 use ndc_parser::ExpressionLocation;
 
 use crate::document::Analysed;
-use crate::features::definition::DeclarationSpans;
+use crate::names::Names;
 use crate::resolved::Resolved;
 use crate::util::LineIndex;
 use crate::visitor::{AstVisitor, walk_ast};
@@ -30,8 +30,8 @@ pub struct DocumentState {
     pub ast: Vec<ExpressionLocation>,
     /// The text `ast` was parsed from, which its spans are offsets into.
     analysed_source: String,
-    /// Where the declarations in `ast` are, for go-to-definition.
-    pub declarations: DeclarationSpans,
+    /// Every name written in `ast`.
+    pub names: Names,
     /// What the names in `ast` refer to.
     pub resolved: Resolved,
     /// What the last successful analysis worked out about `ast`: types,
@@ -60,7 +60,7 @@ impl DocumentState {
             analysis_matches_source: false,
             ast: Vec::new(),
             analysed_source: String::new(),
-            declarations: DeclarationSpans::default(),
+            names: Names::default(),
             resolved: Resolved::default(),
             analysis: Analysis::default(),
             variable_types: HashMap::default(),
@@ -118,7 +118,7 @@ impl DocumentState {
             .into_iter()
             .map(|(end, (_start, typ))| (end, typ))
             .collect();
-        self.declarations = DeclarationSpans::collect(&ast);
+        self.names = Names::collect(&ast, &text);
         self.ast = ast;
         self.analysis_matches_source = text == self.source;
         self.analysed_source = text;
