@@ -2,11 +2,12 @@ use ndc_core::collections::HashMap;
 
 use ndc_analysis::Analysis;
 use ndc_core::{NodeId, StaticType};
-#[cfg(test)]
-use ndc_interpreter::AnalysisResult;
 use ndc_lexer::Span;
 use ndc_parser::ExpressionLocation;
 
+use crate::document::Analysed;
+use crate::features::definition::DeclarationSpans;
+use crate::resolved::Resolved;
 use crate::util::LineIndex;
 use crate::visitor::{AstVisitor, walk_ast};
 
@@ -29,6 +30,10 @@ pub struct DocumentState {
     pub ast: Vec<ExpressionLocation>,
     /// The text `ast` was parsed from, which its spans are offsets into.
     analysed_source: String,
+    /// Where the declarations in `ast` are, for go-to-definition.
+    pub declarations: DeclarationSpans,
+    /// What the names in `ast` refer to.
+    pub resolved: Resolved,
     /// What the last successful analysis worked out about `ast`: types,
     /// bindings and so on, keyed by node.
     pub analysis: Analysis,
@@ -55,6 +60,8 @@ impl DocumentState {
             analysis_matches_source: false,
             ast: Vec::new(),
             analysed_source: String::new(),
+            declarations: DeclarationSpans::default(),
+            resolved: Resolved::default(),
             analysis: Analysis::default(),
             variable_types: HashMap::default(),
             expression_types: HashMap::default(),
@@ -69,16 +76,14 @@ impl DocumentState {
         self.analysis_matches_source = false;
     }
 
-    /// Build a state from a successful analysis. Test-only convenience; the
-    /// server commits analysis in place via [`set_analysis`](Self::set_analysis).
+    /// The state after analysing `source`, which must parse, with the
+    /// standard library. Test-only convenience; the server commits analysis
+    /// in place via [`set_analysis`](Self::set_analysis).
     #[cfg(test)]
-    pub fn from_analysis(
-        source: String,
-        ast: Vec<ExpressionLocation>,
-        result: AnalysisResult,
-    ) -> Self {
-        let mut state = Self::from_source(source);
-        state.set_analysis(ast, result.analysis);
+    pub fn analysed(source: &str) -> Self {
+        let (_, analysed) = crate::document::analyse(ndc_stdlib::register, source);
+        let mut state = Self::from_source(source.to_string());
+        state.set_analysis(analysed.expect("the source parses"));
         state
     }
 
@@ -86,21 +91,21 @@ impl DocumentState {
     /// place, leaving `source` and `line_index` untouched, and mark the
     /// analysis as matching the current source. Callers must ensure `ast` was
     /// produced from the current `source`.
-    pub fn set_analysis(&mut self, ast: Vec<ExpressionLocation>, analysis: Analysis) {
+    pub fn set_analysis(&mut self, analysed: Analysed) {
         let source = self.source.clone();
-        self.set_analysis_of(source, ast, analysis);
+        self.set_analysis_of(source, analysed);
     }
 
     /// Replace the analysis with one of `text`, which may be an older text
     /// than `source`: the completion caches still work from it while the
     /// current text doesn't parse, and the AST-backed features stay off unless
     /// `text` is the current source.
-    pub fn set_analysis_of(
-        &mut self,
-        text: String,
-        ast: Vec<ExpressionLocation>,
-        analysis: Analysis,
-    ) {
+    pub fn set_analysis_of(&mut self, text: String, analysed: Analysed) {
+        let Analysed {
+            ast,
+            analysis,
+            resolved,
+        } = analysed;
         let mut collector = MapCollector {
             analysis: &analysis,
             variable_types: HashMap::default(),
@@ -113,10 +118,12 @@ impl DocumentState {
             .into_iter()
             .map(|(end, (_start, typ))| (end, typ))
             .collect();
+        self.declarations = DeclarationSpans::collect(&ast);
         self.ast = ast;
         self.analysis_matches_source = text == self.source;
         self.analysed_source = text;
         self.analysis = analysis;
+        self.resolved = resolved;
     }
 
     /// The length of the text the AST was parsed from.
@@ -200,12 +207,7 @@ mod tests {
     use super::*;
 
     fn expression_types(source: &str) -> HashMap<usize, StaticType> {
-        let mut interpreter = ndc_interpreter::Interpreter::capturing();
-        interpreter.configure(ndc_stdlib::register);
-        let (ast, result) = interpreter
-            .analyse_str(source)
-            .expect("analysis should succeed");
-        DocumentState::from_analysis(source.to_string(), ast, result).expression_types
+        DocumentState::analysed(source).expression_types
     }
 
     #[test]

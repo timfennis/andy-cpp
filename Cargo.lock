@@ -1019,6 +1019,7 @@ dependencies = [
  "ndc_core",
  "ndc_lexer",
  "ndc_parser",
+ "ndc_resolver",
  "ndc_vm",
  "thiserror",
  "web-time",
@@ -1054,8 +1055,10 @@ dependencies = [
  "ndc_analysis",
  "ndc_core",
  "ndc_interpreter",
+ "ndc_layout",
  "ndc_lexer",
  "ndc_parser",
+ "ndc_resolver",
  "ndc_stdlib",
  "serde_json",
 ]

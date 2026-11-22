@@ -695,6 +695,52 @@ impl NameResolver {
         &self.structs[&node]
     }
 
+    /// The symbol each binding pattern identifier or named function
+    /// declares, by its node, as [`Self::declared_symbol`] has them.
+    pub fn declarations(&self) -> impl Iterator<Item = (NodeId, SymbolId)> + '_ {
+        self.declarations
+            .iter()
+            .map(|(&node, &symbol)| (node, symbol))
+    }
+
+    /// Every symbol each identifier use could mean, by the identifier's
+    /// node, as [`Self::reference_candidates`] has them.
+    pub fn references(&self) -> impl Iterator<Item = (NodeId, &Candidates)> + '_ {
+        self.references
+            .iter()
+            .map(|(&node, candidates)| (node, candidates))
+    }
+
+    /// The symbol each identifier assignment target writes to, by the
+    /// target's node, as [`Self::assigned_symbol`] has them.
+    pub fn assignments(&self) -> impl Iterator<Item = (NodeId, SymbolId)> + '_ {
+        self.assignments
+            .iter()
+            .map(|(&node, &symbol)| (node, symbol))
+    }
+
+    /// The type each name in an annotation refers to, by the name's node, as
+    /// [`Self::type_name_symbol`] has them.
+    pub fn type_names(&self) -> impl Iterator<Item = (NodeId, SymbolId)> + '_ {
+        self.type_names
+            .iter()
+            .map(|(&node, &symbol)| (node, symbol))
+    }
+
+    /// What each struct declaration binds, by its node, as
+    /// [`Self::struct_symbols`] has them.
+    pub fn structs(&self) -> impl Iterator<Item = (NodeId, &StructSymbols)> + '_ {
+        self.structs.iter().map(|(&node, symbols)| (node, symbols))
+    }
+
+    /// The type each type parameter declares, by its node, as
+    /// [`Self::type_parameter_symbol`] has them.
+    pub fn type_parameters(&self) -> impl Iterator<Item = (NodeId, SymbolId)> + '_ {
+        self.type_parameters
+            .iter()
+            .map(|(&node, &symbol)| (node, symbol))
+    }
+
     /// The errors recorded so far, leaving none behind.
     pub fn take_errors(&mut self) -> Vec<NameResolutionError> {
         std::mem::take(&mut self.errors)

@@ -248,7 +248,7 @@ fn captures_from_a_block_of_the_enclosing_function_use_its_slot() {
 /// Lays out a batch with no picks, which still sizes its frames.
 fn lay_out_batch(resolver: &NameResolver, first_scope: usize) -> Analysis {
     let mut analysis = Analysis::default();
-    Layout::new(resolver).lay_out(Picks::default(), first_scope, &mut analysis);
+    Layout::new(resolver).lay_out(&Picks::default(), first_scope, &mut analysis);
     analysis
 }
 
@@ -315,7 +315,7 @@ fn a_captured_local_is_a_cell_in_its_frame_and_an_upvalue_in_the_closure() {
             .insert(use_of_x.id, Binding::Resolved(Candidate::Scalar(symbol)));
     }
     let mut analysis = Analysis::default();
-    Layout::new(&resolver).lay_out(picks, 0, &mut analysis);
+    Layout::new(&resolver).lay_out(&picks, 0, &mut analysis);
 
     let mut locations = analysis
         .bindings
@@ -353,7 +353,7 @@ fn a_use_of_an_intrinsic_is_the_intrinsic_not_its_slot() {
             .insert(use_of_name.id, Binding::Resolved(Candidate::Scalar(symbol)));
     }
     let mut analysis = Analysis::default();
-    Layout::new(&resolver).lay_out(picks, 0, &mut analysis);
+    Layout::new(&resolver).lay_out(&picks, 0, &mut analysis);
 
     let picked = |name| {
         analysis

@@ -196,8 +196,8 @@ fn analyse_jobs(
         }
         let current = open.version == job.version;
         // On parse failure, keep the last good AST.
-        if let Some((ast, analysis)) = analysed {
-            open.state.set_analysis_of(job.text, ast, analysis);
+        if let Some(analysed) = analysed {
+            open.state.set_analysis_of(job.text, analysed);
         }
         if current {
             if refresh_inlay_hints && open.state.analysis_matches_source {
@@ -384,17 +384,22 @@ impl Server {
         let docs = self.documents.read();
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        docs.get(uri)
+        let state = docs
+            .get(uri)
             .map(|open| &open.state)
-            .filter(|state| state.analysis_matches_source)
-            .and_then(|state| {
-                definition::goto_definition(state, position).map(|range| {
-                    GotoDefinitionResponse::Scalar(Location {
-                        uri: uri.clone(),
-                        range,
-                    })
-                })
+            .filter(|state| state.analysis_matches_source)?;
+        let locations: Vec<Location> = definition::goto_definition(state, position)
+            .into_iter()
+            .map(|range| Location {
+                uri: uri.clone(),
+                range,
             })
+            .collect();
+        match <[Location; 1]>::try_from(locations) {
+            Ok([location]) => Some(GotoDefinitionResponse::Scalar(location)),
+            Err(locations) if locations.is_empty() => None,
+            Err(locations) => Some(GotoDefinitionResponse::Array(locations)),
+        }
     }
 
     fn document_symbol(&self, params: &DocumentSymbolParams) -> Option<DocumentSymbolResponse> {

@@ -150,34 +150,36 @@ impl<'a> Layout<'a> {
     /// those after the first `first_scope`: where each of the analyser's
     /// `picks` lives, seen from the function its use sits in, and the frame
     /// size and captures of each function the batch declares.
-    pub fn lay_out(self, picks: Picks, first_scope: usize, analysis: &mut Analysis) {
+    pub fn lay_out(self, picks: &Picks, first_scope: usize, analysis: &mut Analysis) {
         let locate_use =
             |node: NodeId, symbol: SymbolId| self.location(symbol, self.resolver.use_site(node));
         // An intrinsic isn't stored anywhere: the compiler writes it in place.
-        let locate_binding = |(node, binding): (NodeId, Binding<SymbolId>)| {
-            let binding = binding.map(|symbol| match self.resolver.intrinsic(symbol) {
-                Some(intrinsic) => Callee::Intrinsic(intrinsic),
-                None => Callee::Var(locate_use(node, symbol)),
-            });
+        let locate_binding = |(&node, binding): (&NodeId, &Binding<SymbolId>)| {
+            let binding = binding
+                .clone()
+                .map(|symbol| match self.resolver.intrinsic(symbol) {
+                    Some(intrinsic) => Callee::Intrinsic(intrinsic),
+                    None => Callee::Var(locate_use(node, symbol)),
+                });
             (node, binding)
         };
         // In the order the instances were made, which is the order of their
         // slots, as the compiler compiles them in the order they're listed.
-        let mut instances = picks.instances.into_iter().collect::<Vec<_>>();
-        instances.sort_unstable_by_key(|(symbol, _)| *symbol);
+        let mut instances = picks.instances.iter().collect::<Vec<_>>();
+        instances.sort_unstable_by_key(|(symbol, _)| **symbol);
         for (symbol, picks) in instances {
             let instance = Instance {
-                variable: self.location(symbol, None),
-                bindings: picks.bindings.into_iter().map(locate_binding).collect(),
-                getters: picks.getters.into_iter().map(locate_binding).collect(),
-                setters: picks.setters.into_iter().map(locate_binding).collect(),
+                variable: self.location(*symbol, None),
+                bindings: picks.bindings.iter().map(locate_binding).collect(),
+                getters: picks.getters.iter().map(locate_binding).collect(),
+                setters: picks.setters.iter().map(locate_binding).collect(),
                 augmented_assignments: picks
                     .augmented_assignments
-                    .into_iter()
+                    .iter()
                     .map(locate_binding)
                     .collect(),
-                function_types: picks.function_types,
-                cast_checks: picks.cast_checks,
+                function_types: picks.function_types.clone(),
+                cast_checks: picks.cast_checks.clone(),
             };
             analysis
                 .instances
@@ -187,28 +189,33 @@ impl<'a> Layout<'a> {
         }
         analysis
             .bindings
-            .extend(picks.bindings.into_iter().map(locate_binding));
+            .extend(picks.bindings.iter().map(locate_binding));
         analysis
             .getters
-            .extend(picks.getters.into_iter().map(locate_binding));
+            .extend(picks.getters.iter().map(locate_binding));
         analysis
             .setters
-            .extend(picks.setters.into_iter().map(locate_binding));
+            .extend(picks.setters.iter().map(locate_binding));
         analysis
             .augmented_assignments
-            .extend(picks.augmented_assignments.into_iter().map(locate_binding));
-        analysis.cast_checks.extend(picks.cast_checks);
+            .extend(picks.augmented_assignments.iter().map(locate_binding));
+        analysis.cast_checks.extend(
+            picks
+                .cast_checks
+                .iter()
+                .map(|(&node, typ)| (node, typ.clone())),
+        );
         // A declaration is in the frame it is made in, so only an assignment
         // target can be a use from a function further in.
         analysis.variables.extend(
             picks
                 .variables
-                .into_iter()
-                .map(|(node, symbol)| (node, locate_use(node, symbol))),
+                .iter()
+                .map(|(&node, &symbol)| (node, locate_use(node, symbol))),
         );
         analysis
             .structs
-            .extend(picks.structs.into_iter().map(|(node, info)| {
+            .extend(picks.structs.iter().map(|(&node, info)| {
                 let fields = self
                     .resolver
                     .struct_symbols(node)
@@ -219,7 +226,13 @@ impl<'a> Layout<'a> {
                         setter: self.location(setter, None),
                     })
                     .collect();
-                (node, DeclaredStruct { info, fields })
+                (
+                    node,
+                    DeclaredStruct {
+                        info: info.clone(),
+                        fields,
+                    },
+                )
             }));
 
         // One sweep over the batch's scopes: each frame needs one past the

@@ -43,9 +43,12 @@ impl Editor {
         json(&self.document.hover(Position::new(line, character)))
     }
 
+    /// The first place the name is declared, or `null`; the playground
+    /// jumps to one.
     #[must_use]
     pub fn definition(&self, line: u32, character: u32) -> String {
-        json(&self.document.definition(Position::new(line, character)))
+        let definitions = self.document.definition(Position::new(line, character));
+        json(&definitions.first())
     }
 }
 
