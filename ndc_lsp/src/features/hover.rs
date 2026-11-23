@@ -5,6 +5,7 @@ use ndc_lexer::Span;
 use ndc_parser::Expression;
 
 use crate::features::completion::FunctionInfo;
+use crate::features::type_arguments;
 use crate::state::DocumentState;
 use crate::visitor::{AstVisitor, node_at_offset, walk_ast};
 
@@ -30,16 +31,16 @@ pub fn hover(
         if typ.has_errors() {
             return None;
         }
-        return markup(state, span, format!("```ndc\n{typ}\n```"));
+        return markup(state, span, with_type_arguments(state, &typ, offset));
     }
 
     let node = node_at_offset(&state.ast, offset)?;
     let markdown = match &node.expression {
         Expression::Identifier { .. } => {
             native_hover(&overloads_at(&state.analysis, node.id), functions)
-                .or_else(|| type_hover(state, node.id))
+                .or_else(|| type_hover(state, node.id, offset))
         }
-        _ => type_hover(state, node.id),
+        _ => type_hover(state, node.id, offset),
     }?;
 
     markup(state, node.span, markdown)
@@ -162,13 +163,23 @@ fn function_markdown(fun: &FunctionInfo) -> String {
 }
 
 /// Markdown showing the inferred type of an expression, unless its check failed.
-fn type_hover(state: &DocumentState, id: NodeId) -> Option<String> {
+fn type_hover(state: &DocumentState, id: NodeId, offset: usize) -> Option<String> {
     let typ = state
         .analysis
         .expr_types
         .get(&id)
         .filter(|typ| !typ.has_errors())?;
-    Some(format!("```ndc\n{typ}\n```"))
+    Some(with_type_arguments(state, typ, offset))
+}
+
+/// `typ` as a code block, and if it has type parameters of the generic
+/// function it's in, what they are at the calls the program makes of it.
+fn with_type_arguments(state: &DocumentState, typ: &StaticType, offset: usize) -> String {
+    let code = format!("```ndc\n{typ}\n```");
+    match type_arguments::describe(state, typ, offset) {
+        Some(calls) => format!("{code}\n\n{calls}"),
+        None => code,
+    }
 }
 
 /// Render a function name plus its [`StaticType`] as `name(p1, p2) -> ret`,
@@ -346,6 +357,20 @@ mod tests {
             !content.value.contains("len("),
             "must not show the built-in signature for a shadowing local, got: {}",
             content.value
+        );
+    }
+
+    #[test]
+    fn hover_in_a_generic_function_says_what_its_calls_make_its_types() {
+        let src = "fn merge_ranges(ranges) {\n    let rc = deepcopy(ranges);\n    rc\n}\nlet rr = [(1, 2), (3, 4)];\nlet merged = merge_ranges(rr);\n";
+        let (state, functions) = analyse(src);
+        let hover = hover(&state, Position::new(1, 9), &functions).expect("hover on `rc`");
+        let HoverContents::Markup(content) = hover.contents else {
+            panic!("expected markup");
+        };
+        assert_eq!(
+            content.value,
+            "```ndc\nA\n```\n\n`A` is `[(Int, Int)]` in `merge_ranges(rr)`, line 6"
         );
     }
 }
