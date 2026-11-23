@@ -72,7 +72,7 @@ If you need the elements more than once, make them into a list with `list`, and 
 
 ## Where it goes
 
-A `for` loop, a comprehension and these functions read a lazy sequence: `list`, `set`, `sorted`, `sum`, `product`, `min`, `max`, `join`, `count`, `find`, `any`, `all`, `none`, `first_or`, `fold`, `reduce` and `in`. These add a step to one: `map`, `filter`, `flat_map`, `enumerate`, `take`, `skip`, `take_while`, `skip_while` and `combinations`. `repeat(x)` is a lazy sequence that gives `x` without end, and `repeat(x, n)` a list of `n` of them.
+A `for` loop, a comprehension and these functions read a lazy sequence: `list`, `set`, `sorted`, `sum`, `product`, `min`, `max`, `join`, `count`, `find`, `any`, `all`, `none`, `first_or`, `fold`, `reduce` and `in`. These add a step to one: `map`, `filter`, `flat_map`, `enumerate`, `take`, `skip`, `take_while`, `skip_while` and `combinations`. `repeat(x)` is a lazy sequence that gives `x` without end, and `repeat(x, n)` a list of `n` of them, or for a string the string `n` times over.
 
 Other functions that take a list don't take a lazy sequence. Make it into a list first:
 

@@ -111,6 +111,26 @@ mod inner {
         string.push_str(value);
     }
 
+    /// Returns the string `times` times over: `"ab".repeat(3)` gives `"ababab"`.
+    #[function(name = "repeat", signature = "(String, Int) -> String")]
+    pub fn repeat_string(string: &str, times: usize) -> anyhow::Result<String> {
+        // Nothing bounds the loop below for an empty string, as it needs no memory.
+        if string.is_empty() {
+            return Ok(String::new());
+        }
+        let len = string
+            .len()
+            .checked_mul(times)
+            .ok_or_else(|| anyhow::anyhow!("can't make a string {times} times as long"))?;
+        let mut out = String::new();
+        out.try_reserve_exact(len)
+            .map_err(|_too_long| anyhow::anyhow!("can't make a string {times} times as long"))?;
+        for _ in 0..times {
+            out.push_str(string);
+        }
+        Ok(out)
+    }
+
     /// Concatenates two strings into a new string.
     #[function(name = "++")]
     pub fn concat(left: &str, right: &str) -> String {
