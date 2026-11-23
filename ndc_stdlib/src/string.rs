@@ -114,6 +114,10 @@ mod inner {
     /// Returns the string `times` times over: `"ab".repeat(3)` gives `"ababab"`.
     #[function(name = "repeat", signature = "(String, Int) -> String")]
     pub fn repeat_string(string: &str, times: usize) -> anyhow::Result<String> {
+        // Nothing bounds the loop below for an empty string, as it needs no memory.
+        if string.is_empty() {
+            return Ok(String::new());
+        }
         let len = string
             .len()
             .checked_mul(times)
