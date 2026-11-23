@@ -47,6 +47,45 @@ mod inner {
         map.remove(&key);
     }
 
+    /// Removes the entry at `key` from the map and returns its value, or
+    /// `None` if the map has no entry for it.
+    #[function(name = "remove?", signature = "<K, V>(%{K: V}, K) -> Option<V>")]
+    pub fn maybe_remove(map: &mut HashMap<Value, Value>, key: Value) -> Value {
+        Value::option(map.remove(&key))
+    }
+
+    /// Returns the value at `key`, or `None` if the map has no entry for it.
+    /// Unlike `map[key]`, it doesn't fall back on the map's default and adds
+    /// nothing to the map.
+    #[function(name = "get?", signature = "<K, V>(%{K: V}, K) -> Option<V>")]
+    pub fn maybe_get(map: &HashMap<Value, Value>, key: Value) -> Value {
+        Value::option(map.get(&key).cloned())
+    }
+
+    /// Removes every entry from the map or set. Its default stays.
+    #[function(signature = "<K, V>(%{K: V})")]
+    pub fn clear(map: &mut HashMap<Value, Value>) {
+        map.clear();
+    }
+
+    /// Returns true if every key of `left` is a key of `right`.
+    #[function(signature = "<K, V, W>(%{K: V}, %{K: W}) -> Bool")]
+    pub fn is_subset(left: &HashMap<Value, Value>, right: &HashMap<Value, Value>) -> bool {
+        left.keys().all(|key| right.contains_key(key))
+    }
+
+    /// Returns true if every key of `right` is a key of `left`.
+    #[function(signature = "<K, V, W>(%{K: V}, %{K: W}) -> Bool")]
+    pub fn is_superset(left: &HashMap<Value, Value>, right: &HashMap<Value, Value>) -> bool {
+        right.keys().all(|key| left.contains_key(key))
+    }
+
+    /// Returns true if `left` and `right` have no key in common.
+    #[function(signature = "<K, V, W>(%{K: V}, %{K: W}) -> Bool")]
+    pub fn is_disjoint(left: &HashMap<Value, Value>, right: &HashMap<Value, Value>) -> bool {
+        left.keys().all(|key| !right.contains_key(key))
+    }
+
     /// Removes all keys from the `left` map/set that are present in the `right` map/set.
     #[function(name = "remove", signature = "<K, V, W>(%{K: V}, %{K: W})")]
     pub fn remove_map(left: &mut HashMap<Value, Value>, right: &HashMap<Value, Value>) {
@@ -152,6 +191,14 @@ mod inner {
         combine(&left, right, "&", intersection)
     }
 
+    /// Returns the difference (elements of `left` that aren't in `right`) of two maps or sets.
+    ///
+    /// This is the same as evaluating the expression `left - right`.
+    #[function(alias = "-", signature = "<K, V, W>(%{K: V}, %{K: W}) -> %{K: V}")]
+    pub fn difference(left: Value, right: &HashMap<Value, Value>) -> anyhow::Result<Value> {
+        combine(&left, right, "-", difference)
+    }
+
     /// Returns the symmetric difference (elements that are either in `left` or `right` but not both) of two maps or sets.
     ///
     /// This is the same as evaluating the expression `left ~ right`.
@@ -220,6 +267,17 @@ where
                 None
             }
         })
+        .collect()
+}
+
+fn difference<K, V>(left: &HashMap<K, V>, right: &HashMap<K, V>) -> HashMap<K, V>
+where
+    K: Clone + Hash + Eq,
+    V: Clone,
+{
+    left.iter()
+        .filter(|(key, _)| !right.contains_key(key))
+        .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
 }
 

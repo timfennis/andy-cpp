@@ -1,0 +1,10 @@
+// `remove?` takes the entry at a key out of the map and gives its value, or
+// `None` if there was none.
+// expect-output: Some(1) None %{"b": 2}
+// expect-output: Some(()) %{}
+
+let m = %{"a": 1, "b": 2};
+print(m.remove?("a"), m.remove?("a"), m);
+
+let s = %{7};
+print(s.remove?(7), s);

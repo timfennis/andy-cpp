@@ -22,6 +22,17 @@ let my_map = %{
 print(my_map["apples"]);  // 60
 ```
 
+Reading a key the map doesn't have is an error. `get?` gives an [Option](./option.md) instead, and `remove?` takes the entry out and gives its value:
+
+```ndc
+let stock = %{"apples": 60};
+print(stock.get?("pears"));                // None
+print(stock.get?("pears").unwrap_or(0));   // 0
+print(stock.remove?("apples"), stock);     // Some(60) %{}
+```
+
+`clear` empties a map or a set.
+
 ## Default values
 
 ```ndc
@@ -103,11 +114,20 @@ print(words["b"]);  // ["bean"]
 | :-: | --- | --- | --- |
 | `\|` | Union | `true` | `false` |
 | `&` | Intersection | `true` | `false` |
+| `-` | Difference: the keys of `lhs` that aren't in `rhs` | `true` | `false` |
 | `~` | [Symmetric difference](https://en.wikipedia.org/wiki/Symmetric_difference) | `true` | `false` |
 | `in` | Test if `lhs` is part of the Set or a key in the Map | `true` | `true` |
 | `==` | Equality | `false` | `true` |
 | `!=` | Inequality | `false` | `true` |
 
-> **Note:** The union, intersection and symmetric difference operations retain the default value from the **left operand**
+> **Note:** The union, intersection, difference and symmetric difference operations retain the default value from the **left operand**
+
+`is_subset`, `is_superset` and `is_disjoint` compare the keys of two maps or sets:
+
+```ndc
+let small = %{1, 2};
+print(small.is_subset(%{1, 2, 3}));  // true
+print(small.is_disjoint(%{3}));      // true
+```
 
 > **Note:** The equality operations ignore the default value

@@ -1,0 +1,13 @@
+// `is_subset`, `is_superset` and `is_disjoint` compare the keys of two maps or
+// sets.
+// expect-output: true false true
+// expect-output: true false
+// expect-output: true false
+// expect-output: true
+
+let small = %{1, 2};
+let big = %{1, 2, 3};
+print(small.is_subset(big), big.is_subset(small), small.is_subset(small));
+print(big.is_superset(small), small.is_superset(big));
+print(small.is_disjoint(%{4}), small.is_disjoint(big));
+print(%{"a": 1}.is_subset(%{"a", "b"}));

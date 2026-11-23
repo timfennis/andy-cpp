@@ -1,0 +1,16 @@
+// `get?` gives the value at a key, or `None` when the map has no entry for
+// it. It doesn't fall back on the map's default, and adds nothing to the map.
+// expect-output: Some(1) None
+// expect-output: None %{}
+// expect-output: 0
+// expect-output: Some(()) None
+
+let m = %{"a": 1};
+print(m.get?("a"), m.get?("b"));
+
+let counts = %{:0};
+print(counts.get?("x"), counts);
+print(m.get?("b").unwrap_or(0));
+
+let s = %{1};
+print(s.get?(1), s.get?(2));
