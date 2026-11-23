@@ -1,0 +1,8 @@
+// `chunk_by` splits a sequence into runs of equal neighbours, or of neighbours
+// a function says belong together.
+// expect-output: [[1,1],[2],[1,1]] []
+// expect-output: [["a","a"],["b"],["c","c","c"]]
+// expect-output: [[1,2,3],[5,6],[8]]
+print([1, 1, 2, 1, 1].chunk_by(), [].chunk_by());
+print("aabccc".chunk_by());
+print([1, 2, 3, 5, 6, 8].chunk_by(fn(a, b) => b == a + 1));

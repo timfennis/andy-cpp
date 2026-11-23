@@ -54,6 +54,17 @@ print(my_list.index?(-9));  // None
 `index` works like the `[]` operator, and `index?` gives `None` instead of an
 error.
 
+## Runs
+
+`chunk_by` splits a list (or any sequence) into runs of equal neighbours, and with a function, into runs of neighbours the function gives `true` for:
+
+```ndc
+print([1, 1, 2, 1, 1].chunk_by());                         // [[1,1],[2],[1,1]]
+print([1, 2, 3, 5, 6].chunk_by(fn(a, b) => b == a + 1));  // [[1,2,3],[5,6]]
+```
+
+To group equal elements wherever they are, rather than only neighbours, use `group_by` on [maps](./map-and-set.md#grouping).
+
 ## Slicing
 
 {{#include ../../snippets/slices.md}}

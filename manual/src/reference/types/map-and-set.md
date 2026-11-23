@@ -87,6 +87,16 @@ for (k, v) in m {
 
 **Keys are snapshotted at the start of the loop.** A key added to the map during the loop isn't visited, and a key removed before the loop gets to it is skipped. Values read during iteration do reflect changes to existing keys. Functions that take a function, like `map` and `filter`, go over a map the same way.
 
+## Grouping
+
+`group_by(seq, key)` makes a map from each key the function gives to the elements with that key, in the order they came:
+
+```ndc
+let words = ["apple", "bean", "avocado"].group_by(fn(word) => word[0]);
+print(words["a"]);  // ["apple","avocado"]
+print(words["b"]);  // ["bean"]
+```
+
 ## Operators
 
 | Operator | Function | Support augmented assignment <sup>[[1]](../../features/augmented-assignment.md)</sup> | Augmentable with `not` |
