@@ -122,6 +122,8 @@ print(words["b"]);  // ["bean"]
 
 > **Note:** The union, intersection, difference and symmetric difference operations retain the default value from the **left operand**
 
+> **Note:** The equality operations ignore the default value
+
 `is_subset`, `is_superset` and `is_disjoint` compare the keys of two maps or sets:
 
 ```ndc
@@ -129,5 +131,3 @@ let small = %{1, 2};
 print(small.is_subset(%{1, 2, 3}));  // true
 print(small.is_disjoint(%{3}));      // true
 ```
-
-> **Note:** The equality operations ignore the default value
