@@ -413,13 +413,8 @@ impl TypeVars {
     /// values aren't known yet is passed as its pairs.
     pub(super) fn passes(&mut self, expected: &StaticType, takes: &StaticType) -> bool {
         match (self.shallow(takes), self.resolve(expected)) {
-            (StaticType::Iterable(element), map @ StaticType::Map { .. }) => {
-                if map.is_set() {
-                    return false;
-                }
-                let StaticType::Map { key, value } = map else {
-                    unreachable!("matched a map");
-                };
+            (StaticType::Iterable(_), map @ StaticType::Map { .. }) if map.is_set() => false,
+            (StaticType::Iterable(element), StaticType::Map { key, value }) => {
                 let pair = StaticType::Tuple(vec![*key, *value]);
                 self.bind_argument(&element, &pair)
             }

@@ -36,7 +36,7 @@ use crate::native_op::{NativeOp, list_element, list_index_error, list_set};
 use crate::value::{
     ClosureFunction, CompiledFunction, Function, NativeFunc, NativeFunction, Range,
 };
-use crate::{Natives, Object, Value};
+use crate::{Lazy, Natives, Object, Value};
 use ndc_analysis::CaptureSource;
 use ndc_core::StaticType;
 use ndc_lexer::Span;
@@ -909,9 +909,10 @@ impl Vm {
                             Err(message) => break Exit::Error(VmError::native(message)),
                         }
                     }
-                    Instr::Keys { dst, src } => {
-                        regs[dst.index()] = keys_of(&regs[src.index()]);
-                    }
+                    Instr::Keys { dst, src } => match keys_of(&regs[src.index()]) {
+                        Ok(keys) => regs[dst.index()] = keys,
+                        Err(message) => break Exit::Error(VmError::native(message)),
+                    },
                     Instr::IterNext { iter, dst, offset } => {
                         let (iter, position) = (iter.index(), iter.index() + 1);
                         // A position is never negative.
@@ -1555,17 +1556,18 @@ fn iterator_of(value: &Value) -> Result<Value, String> {
     }
 }
 
-/// A list of the keys of `value`, a map: what a set iterates as.
+/// The lazy sequence of the keys of `value`, a map: what a set iterates
+/// as, which a loop or a native reads as it reads a map, without copying
+/// the keys first.
 #[inline(never)]
-fn keys_of(value: &Value) -> Value {
-    let Value::Object(object) = value else {
-        unreachable!("internal error: the analyser takes the keys of a set");
-    };
-    let Object::Map { entries, .. } = object.as_ref() else {
-        unreachable!("internal error: the analyser takes the keys of a set");
-    };
-    let keys = entries.borrow().keys().cloned().collect::<Vec<_>>();
-    Value::Object(Rc::new(Object::list(keys)))
+fn keys_of(value: &Value) -> Result<Value, String> {
+    let keys = Lazy::keys(value.clone()).ok_or_else(|| {
+        format!(
+            "internal error: the keys of {} were taken as a set's",
+            value.static_type()
+        )
+    })?;
+    Ok(Value::Object(Rc::new(Object::Lazy(keys))))
 }
 
 /// Find the broadcast-axis length for a vec call: the shared length of every

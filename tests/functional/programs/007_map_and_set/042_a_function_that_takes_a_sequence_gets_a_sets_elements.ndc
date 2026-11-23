@@ -1,4 +1,6 @@
-// The functions that take any kind of sequence get a set's elements.
+// The functions that take any kind of sequence get a set's elements, and so
+// does a slice written with one. A lazy sequence of a set reads it as it is
+// when it's read, as one of a map does.
 // expect-output: 6
 // expect-output: [1,2,3]
 // expect-output: true
@@ -8,6 +10,8 @@
 // expect-output: 3
 // expect-output: [2,4,6]
 // expect-output: [1,2,3]
+// expect-output: [7,3]
+// expect-output: [1,3]
 
 let s = %{1, 2, 3};
 print(s.sum());
@@ -19,3 +23,11 @@ print(s.filter(fn(x) => x > 1).sorted());
 print(s.max());
 print(s.lazy.map(fn(x) => x * 2).sorted());
 print([s].flat_map(fn(x) => x.keys()).sorted());
+
+let xs = [1, 2, 3];
+xs[0..2] = %{7};
+print(xs);
+
+let later = s.lazy;
+s.remove(2);
+print(later.sorted());

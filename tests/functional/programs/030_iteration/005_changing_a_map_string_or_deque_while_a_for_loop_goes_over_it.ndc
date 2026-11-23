@@ -1,11 +1,12 @@
-// A `for` loop over a map doesn't visit keys added in the loop, and skips keys
-// removed before it gets to them. One over a string goes over the string as it
+// A `for` loop over a map or a set doesn't visit keys added in the loop, and
+// skips keys removed before it gets to them. One over a string goes over the string as it
 // is when it gets to each character, by the character's position: added
 // characters are visited, the loop ends early when it gets shorter, and a
 // change that moves where characters start in the string doesn't break it. One
 // over a deque visits elements pushed at the back.
 // expect-output: [1,2] 4
 // expect-output: true true 2
+// expect-output: 1 1 2
 // expect-output: ["a","b","c","x","x"] abcxx
 // expect-output: ["a","c"] cd
 // expect-output: ["a","b","c","d"]
@@ -29,6 +30,25 @@ for k in shrinking {
     }
 }
 print(1 in visited, 10 in visited, shrinking.len());
+
+// Removing every other key on the first pass leaves nothing more to visit,
+// whichever key comes first.
+let emptied = %{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+let passes = 0;
+for k in emptied {
+    passes += 1;
+    for other in 1..=10 {
+        if other != k { emptied.remove(other); }
+    }
+}
+
+let growing = %{1};
+let seen = [];
+for k in growing {
+    seen.push(k);
+    growing.insert(k + 1);
+}
+print(passes, seen.len(), growing.len());
 
 let s = "abc";
 let grown = [];

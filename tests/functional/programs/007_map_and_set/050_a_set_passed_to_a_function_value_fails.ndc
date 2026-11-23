@@ -1,0 +1,5 @@
+// A function passed as a value that takes any kind of sequence would go over a
+// set as (key, `()`) pairs, so it isn't given one: `.keys()` gives the
+// elements as a list.
+// expect-error: No overload of 'sorted'
+print([%{2, 1}].map(sorted));

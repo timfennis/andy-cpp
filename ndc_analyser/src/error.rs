@@ -84,6 +84,10 @@ impl AnalysisError {
     /// kind of sequence is expected, is told.
     pub(crate) const SET_RETURNED_AS_SEQUENCE: &str = "a function that returns a set doesn't give its elements here: return `.keys()`, a list of them";
 
+    /// What a function value that would be given a set where it takes any
+    /// kind of sequence is told.
+    pub(crate) const SET_PASSED_TO_FUNCTION_VALUE: &str = "a function passed as a value doesn't get a set's elements: pass it `.keys()`, a list of them";
+
     /// This error with a note at `span` saying `note`.
     pub(crate) fn with_note(mut self, span: Span, note: &str) -> Self {
         self.notes.push((span, note.to_string()));
@@ -277,7 +281,7 @@ impl AnalysisError {
     /// goes over its elements.
     pub(crate) fn set_not_iterated_here(span: Span) -> Self {
         Self::new("a set can't be used as a sequence here", span).with_help(
-            "a `for` loop, or a function given the set as an argument, goes over its elements; `.keys()` gives them as a list",
+            "only a `for` loop, or a call that passes the set itself, as in `s.sum()`, goes over its elements; `.keys()` gives them as a list",
         )
     }
 

@@ -561,19 +561,24 @@ impl Compiler {
     }
 
     /// `arguments` with each the analyser found to be a set passed where a
-    /// native at `site` takes any kind of sequence made the set's keys.
+    /// native at `site` takes any kind of sequence made the set's keys. The
+    /// instance being compiled adds the sets its types make to those the
+    /// function's own body has, as for [`Self::iterates_set`].
     fn with_set_keys(&self, site: NodeId, arguments: Vec<Arg>) -> Vec<Arg> {
-        let Some(positions) = self
-            .instance_pick(|instance| instance.set_arguments.get(&site))
-            .or_else(|| self.analysis.set_arguments.get(&site))
-        else {
+        let own = self.analysis.set_arguments.get(&site);
+        let instance = self.instance_pick(|instance| instance.set_arguments.get(&site));
+        if own.is_none() && instance.is_none() {
             return arguments;
+        }
+        let is_set = |position: &usize| {
+            own.is_some_and(|positions| positions.contains(position))
+                || instance.is_some_and(|positions| positions.contains(position))
         };
         arguments
             .into_iter()
             .enumerate()
             .map(|(position, argument)| {
-                if positions.contains(&position) {
+                if is_set(&position) {
                     Arg::Keys(Box::new(argument))
                 } else {
                     argument
@@ -1861,7 +1866,7 @@ impl Compiler {
                 span: *span,
             },
         };
-        let args = vec![read, Arg::Expr(value)];
+        let args = self.with_set_keys(id, vec![read, Arg::Expr(value)]);
         // A local takes the result in its own register; any other target
         // has it stored from a temporary.
         if let PreparedTarget::Variable {
