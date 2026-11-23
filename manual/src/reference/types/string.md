@@ -42,6 +42,14 @@ let string = r###"raw string with r#"stop doing this"#"###;
 print(string);  // raw string with r#"stop doing this"#
 ```
 
+## Repeating
+
+`repeat(string, n)` gives the string `n` times over:
+
+```ndc
+print("ab".repeat(3));  // ababab
+```
+
 ## Removing prefixes and suffixes
 
 `strip_prefix(string, prefix)` and `strip_suffix(string, suffix)` remove one matching

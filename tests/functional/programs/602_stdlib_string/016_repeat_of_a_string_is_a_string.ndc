@@ -1,0 +1,8 @@
+// `repeat` on a string gives the string that many times over, not a list of
+// copies; other values still give a list.
+// expect-output: ababab
+// expect-output: true
+// expect-output: ["ab"] [1,1]
+print("ab".repeat(3));
+print("x".repeat(0) == "");
+print(["ab"].repeat(2)[0], 1.repeat(2));

@@ -1,8 +1,8 @@
 // `repeat(x)` gives `x` without end, as a lazy sequence; with a count it
-// gives a list.
+// gives a list, or for a string the string that many times over.
 // expect-output: [0,0,0]
-// expect-output: ["a","a"]
+// expect-output: [true,true] aa
 // expect-output: repeat(0).take(3)
 print(repeat(0).take(3).list);
-print(repeat("a", 2));
+print(repeat(true, 2), repeat("a", 2));
 print(repeat(0).take(3));
