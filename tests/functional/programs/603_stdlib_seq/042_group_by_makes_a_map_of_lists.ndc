@@ -1,0 +1,9 @@
+// `group_by` puts each element in the list of its key, keeping their order.
+// expect-output: ["apple","avocado"] ["bean"] 2
+// expect-output: [3,6,9] [1,4,7] [2,5,8]
+// expect-output: 0
+let by_letter: %{String: [String]} = ["apple", "bean", "avocado"].group_by(fn(s) => s[0]);
+print(by_letter["a"], by_letter["b"], by_letter.len());
+let by_rest = (1..10).group_by(fn(x) => x % 3);
+print(by_rest[0], by_rest[1], by_rest[2]);
+print([].group_by(fn(x) => x).len());

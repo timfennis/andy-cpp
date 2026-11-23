@@ -884,6 +884,53 @@ mod inner {
         ))
     }
 
+    /// Groups the elements of `seq` by the key `key` gives each, in a map from each key to the
+    /// elements with that key, in the order they come in `seq`:
+    /// `["apple", "bean", "avocado"].group_by(fn(s) => s[0])` gives
+    /// `%{"a": ["apple", "avocado"], "b": ["bean"]}`.
+    #[function(signature = "<T, K>(Iterable<T>, fn(T) -> K) -> %{K: [T]}")]
+    pub fn group_by(seq: Value, key: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        use ndc_vm::hash_map::HashMap;
+
+        let mut groups: HashMap<Value, Vec<Value>> = HashMap::default();
+        for element in seq
+            .iter()
+            .ok_or_else(|| anyhow!("group_by requires a sequence"))?
+        {
+            let key = key
+                .call(std::slice::from_ref(&element))
+                .map_err(|e| anyhow!(e))?;
+            groups.entry(key).or_default().push(element);
+        }
+        let entries = groups
+            .into_iter()
+            .map(|(key, group)| (key, Value::list(group)))
+            .collect();
+        Ok(Value::Object(Rc::new(Object::map(entries, None))))
+    }
+
+    /// Splits `seq` into runs of equal neighbours: `[1, 1, 2, 1, 1].chunk_by()` gives
+    /// `[[1, 1], [2], [1, 1]]`.
+    #[function(signature = "<T>(Iterable<T>) -> [[T]]")]
+    pub fn chunk_by(seq: Value) -> anyhow::Result<Value> {
+        chunk_by_with(&seq, |a, b| Ok(a == b))
+    }
+
+    /// Splits `seq` into runs, starting a new one between two neighbours `same` gives `false`
+    /// for: `[1, 2, 3, 5, 6].chunk_by(fn(a, b) => b == a + 1)` gives `[[1, 2, 3], [5, 6]]`.
+    #[function(
+        name = "chunk_by",
+        signature = "<T>(Iterable<T>, fn(T, T) -> Bool) -> [[T]]"
+    )]
+    pub fn chunk_by_predicate(seq: Value, same: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        chunk_by_with(&seq, |a, b| {
+            match same.call(&[a.clone(), b.clone()]).map_err(|e| anyhow!(e))? {
+                Value::Bool(same) => Ok(same),
+                _ => Err(anyhow!("return value of predicate must be a boolean")),
+            }
+        })
+    }
+
     /// Returns a list of `times` copies of `value`. Use `repeat(value)` for a lazy sequence of them without end.
     #[function(name = "repeat", signature = "<T>(T, Int) -> [T]")]
     pub fn repeat_times(value: Value, times: usize) -> anyhow::Result<Value> {
@@ -894,6 +941,30 @@ mod inner {
         values.resize(times, value);
         Ok(Value::list(values))
     }
+}
+
+/// The runs of `seq`, a new one starting between two neighbours `same` gives `false` for.
+fn chunk_by_with(
+    seq: &Value,
+    mut same: impl FnMut(&Value, &Value) -> anyhow::Result<bool>,
+) -> anyhow::Result<Value> {
+    let mut chunks = Vec::new();
+    let mut chunk: Vec<Value> = Vec::new();
+    for element in seq
+        .iter()
+        .ok_or_else(|| anyhow!("chunk_by requires a sequence"))?
+    {
+        if let Some(last) = chunk.last()
+            && !same(last, &element)?
+        {
+            chunks.push(Value::list(std::mem::take(&mut chunk)));
+        }
+        chunk.push(element);
+    }
+    if !chunk.is_empty() {
+        chunks.push(Value::list(chunk));
+    }
+    Ok(Value::list(chunks))
 }
 
 fn transpose(seq: &Value) -> anyhow::Result<Value> {
