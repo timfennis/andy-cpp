@@ -2072,7 +2072,7 @@ impl Analyser {
             return StaticType::Error;
         }
         // `a op= b` with no operator that takes the operands calls an in-place
-        // overload if one does, as a set has `-=` but no `-`, which keeps `a`.
+        // overload if one does, which keeps `a`.
         if matches!(binding, Binding::None)
             && let CallSite::OpAssignment(id) = call.site
         {

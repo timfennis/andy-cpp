@@ -1,4 +1,5 @@
-// This test validates that using the |= operator modifies the variable in place
+// This test validates that using the |=, &= and -= operators modifies the
+// variable in place
 
 let x = %{
   "foo": 1,
@@ -19,4 +20,9 @@ z &= %{"bar": 10};
 
 assert(x == y and y == z);
 assert(x.len == 1 and y.len == 1 and z.len == 1);
+
+z -= %{"bar"};
+
+assert(x == y and y == z);
+assert(x.is_empty() and y.is_empty() and z.is_empty());
 

@@ -1,0 +1,13 @@
+// `clear` takes every entry out of a map or set, and keeps its default.
+// expect-output: %{} true
+// expect-output: %{}
+// expect-output: 0
+
+let s = %{1, 2};
+s.clear();
+print(s, s.is_empty());
+
+let counts = %{:0, "a": 3};
+counts.clear();
+print(counts);
+print(counts["a"]);

@@ -5,8 +5,8 @@ nested[0] ++= [2, 3];
 assert_eq(aliased, [1, 2, 3]);
 assert_eq(nested[0], [1, 2, 3]);
 
-// Map -= Map exists without an ordinary Map - Map overload. Indexed
-// augmentation must therefore use -= directly.
+// Indexed augmentation of a map takes the in-place -= over -, so the set the
+// list holds is changed, not replaced.
 let set = %{1, 2, 3};
 let sets = [set];
 sets[0] -= %{2};
