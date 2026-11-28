@@ -1110,6 +1110,29 @@ fn an_operator_whose_overload_takes_tuples_whole_does_not_wait() {
 }
 
 #[test]
+fn a_call_whose_overloads_all_return_one_type_returns_it_before_the_pick() {
+    // Whichever `to_int` `x` picks, it returns an Int; `echo`'s depend on it.
+    let globals = natives(&[
+        ("to_int", "(Float) -> Int"),
+        ("to_int", "(String) -> Int"),
+        ("echo", "(Float) -> Float"),
+        ("echo", "(String) -> String"),
+    ]);
+    let returns = |source: &str| {
+        let (_, result) = analyse_with_globals(source, globals.clone());
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let returns = result.analysis.inferred_return_types.values();
+        returns.map(ToString::to_string).collect::<Vec<_>>()
+    };
+    assert_eq!(returns("fn f(x) { let n = to_int(x); n }"), ["Int"]);
+    assert_ne!(returns("fn f(x) { let s = echo(x); s }"), ["Float"]);
+    assert_eq!(
+        analyse_last_type_with_globals("fn f(x) => to_int(x); f(\"1\")", globals.clone()),
+        StaticType::Int
+    );
+}
+
+#[test]
 fn an_operator_waits_while_a_tuple_operand_would_not_fit_its_overload() {
     // `x` must be a String for `in` to take it whole, so a tuple of them
     // is looked up one element at a time.
