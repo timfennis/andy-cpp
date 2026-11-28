@@ -1125,6 +1125,7 @@ fn a_call_whose_overloads_all_return_one_type_returns_it_before_the_pick() {
         returns.map(ToString::to_string).collect::<Vec<_>>()
     };
     assert_eq!(returns("fn f(x) { let n = to_int(x); n }"), ["Int"]);
+    assert_eq!(returns("fn f(x) { let n = x.to_int; n }"), ["Int"]);
     assert_ne!(returns("fn f(x) { let s = echo(x); s }"), ["Float"]);
     assert_eq!(
         analyse_last_type_with_globals("fn f(x) => to_int(x); f(\"1\")", globals.clone()),

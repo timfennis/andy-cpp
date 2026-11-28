@@ -412,12 +412,12 @@ impl Analyser {
 
     /// What a call that waits for its overload returns whichever it picks:
     /// the type every function it can name returns, when that's one type
-    /// known now. `int(x)` is an Int before `x`'s type picks the overload,
-    /// as every `int` returns an Int. An operator may apply to each element
+    /// known now. `int(x)` and `x.int` are Ints before `x`'s type picks the
+    /// overload, as every `int` returns an Int. An operator may apply to each element
     /// of a tuple, and `[]` on a tuple or an `Any` picks no overload, so
     /// neither counts.
     fn returned_by_every_overload(&self, call: &CallConstraint) -> Option<StaticType> {
-        if !matches!(call.site, CallSite::Call(_))
+        if !matches!(call.site, CallSite::Call(_) | CallSite::Getter(_))
             || call.kind == CallKind::Operator
             || call.name == "[]"
         {
