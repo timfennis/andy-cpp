@@ -19,15 +19,15 @@ Printing a lazy sequence shows what it will do, not its elements, as making them
 
 ## Stopping early
 
-A lazy sequence is useful when you don't need every element. Here `find` stops at the first square over 5, so `map` runs only three times:
+A lazy sequence is useful when you don't need every element. Here `first` stops at the first square over 5, so `map` runs only three times:
 
 ```ndc
 let checked = [];
-let first = [1, 2, 3, 4, 5]
+let square = [1, 2, 3, 4, 5]
     .lazy
     .map(fn(x) { checked.push(x); x * x })
-    .find(fn(x) => x > 5);
-print(first, checked);  // 9 [1,2,3]
+    .first(fn(x) => x > 5);
+print(square, checked);  // 9 [1,2,3]
 ```
 
 ## Picking elements
@@ -72,7 +72,7 @@ If you need the elements more than once, make them into a list with `list`, and 
 
 ## Where it goes
 
-A `for` loop, a comprehension and these functions read a lazy sequence: `list`, `set`, `sorted`, `sum`, `product`, `min`, `max`, `join`, `count`, `find`, `any`, `all`, `none`, `first_or`, `fold`, `reduce` and `in`. These add a step to one: `map`, `filter`, `flat_map`, `enumerate`, `take`, `skip`, `take_while`, `skip_while` and `combinations`. `repeat(x)` is a lazy sequence that gives `x` without end, and `repeat(x, n)` a list of `n` of them, or for a string the string `n` times over.
+A `for` loop, a comprehension and these functions read a lazy sequence: `list`, `set`, `sorted`, `sum`, `product`, `min`, `max`, `join`, `count`, `first`, `first?`, `last`, `last?`, `any`, `all`, `none`, `first_or`, `fold`, `reduce` and `in`. These add a step to one: `map`, `filter`, `flat_map`, `enumerate`, `take`, `skip`, `take_while`, `skip_while` and `combinations`. `repeat(x)` is a lazy sequence that gives `x` without end, and `repeat(x, n)` a list of `n` of them, or for a string the string `n` times over.
 
 Other functions that take a list don't take a lazy sequence. Make it into a list first:
 

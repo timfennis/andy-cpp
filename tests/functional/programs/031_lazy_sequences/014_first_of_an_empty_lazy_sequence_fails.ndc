@@ -1,0 +1,2 @@
+// expect-error: empty
+print([1, 2].lazy.filter(fn(x) => x > 2).first);

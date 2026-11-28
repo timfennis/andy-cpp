@@ -1,0 +1,2 @@
+// expect-error: last did not find anything
+print([1, 2, 3].last(fn(x) => x > 5));

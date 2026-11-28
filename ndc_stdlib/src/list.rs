@@ -209,34 +209,6 @@ mod inner {
         list.truncate(len);
     }
 
-    /// Returns a copy of the first element of the list or results in an error if the list is empty.
-    #[function(signature = "<T>([T]) -> T")]
-    pub fn first(list: &[Value]) -> anyhow::Result<Value> {
-        list.first()
-            .cloned()
-            .ok_or_else(|| anyhow!("collection is empty"))
-    }
-
-    /// Returns a copy of the first element, or `None` if the list is empty.
-    #[function(name = "first?", signature = "<T>([T]) -> Option<T>")]
-    pub fn maybe_first(list: &[Value]) -> Value {
-        Value::option(list.first().cloned())
-    }
-
-    /// Returns a copy of the last element of the list or results in an error if the list is empty.
-    #[function(signature = "<T>([T]) -> T")]
-    pub fn last(list: &[Value]) -> anyhow::Result<Value> {
-        list.last()
-            .cloned()
-            .ok_or_else(|| anyhow!("the list is empty"))
-    }
-
-    /// Returns a copy of the last element, or `None` if the list is empty.
-    #[function(name = "last?", signature = "<T>([T]) -> Option<T>")]
-    pub fn maybe_last(list: &[Value]) -> Value {
-        Value::option(list.last().cloned())
-    }
-
     /// Returns the Cartesian product of two lists as a list of tuples.
     #[function(signature = "<T, U>([T], [U]) -> [(T, U)]")]
     pub fn cartesian_product(list_a: &[Value], list_b: &[Value]) -> Value {

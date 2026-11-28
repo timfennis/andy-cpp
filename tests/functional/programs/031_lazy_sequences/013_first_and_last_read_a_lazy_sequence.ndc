@@ -1,0 +1,22 @@
+// `first` and `first?` make elements only until they have one; `last` and
+// `last?` make all of them.
+// expect-output: 1 [1]
+// expect-output: Some(3) [1,2,3]
+// expect-output: None [1,2,3,4,5]
+// expect-output: 5 [1,2,3,4,5]
+// expect-output: Some(4) [1,2,3,4,5]
+// expect-output: None 4
+// expect-output: 7
+let seen = [];
+let numbers = [1, 2, 3, 4, 5].lazy.map(fn(x) { seen.push(x); x });
+print(numbers.first, seen);
+seen = [];
+print(numbers.first?(fn(x) => x == 3), seen);
+seen = [];
+print(numbers.first?(fn(x) => x > 5), seen);
+seen = [];
+print(numbers.last, seen);
+seen = [];
+print(numbers.last?(fn(x) => x % 2 == 0), seen);
+print([].lazy.first?, [1, 2, 3].lazy.map(fn(x) => x + 1).last(fn(x) => x < 5));
+print((1..).map(fn(x) => x * 7).first);

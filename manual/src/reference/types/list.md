@@ -54,6 +54,18 @@ print(my_list.index?(-9));  // None
 `index` works like the `[]` operator, and `index?` gives `None` instead of an
 error.
 
+### First and last
+
+`first` and `last` give the first and last element of a list (or any sequence), and with a function, the first and last element the function gives `true` for. Their `?` forms give `None` where they would fail:
+
+```ndc
+let numbers = [1, 4, 5, 8, 9];
+print(numbers.first, numbers.last);                // 1 9
+print(numbers.first(fn(x) => x % 2 == 0));         // 4
+print(numbers.last(fn(x) => x % 2 == 0));          // 8
+print(numbers.first?(fn(x) => x > 10), [].last?);  // None None
+```
+
 ## Runs
 
 `chunk_by` splits a list (or any sequence) into runs of equal neighbours, and with a function, into runs of neighbours the function gives `true` for:
