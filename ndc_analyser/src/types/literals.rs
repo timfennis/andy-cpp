@@ -1,6 +1,7 @@
 //! The types of literals: what the values they hold say they can be.
 
 use super::bounds::{Bound, Bounds, Held, Literals, takes_a_number};
+use super::store::LeftBody;
 use super::{TypeVars, Unshared};
 use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{StaticType, TypeVar};
@@ -56,7 +57,12 @@ impl TypeVars {
     /// adds what's left of it to the enclosing list, the program's or an
     /// enclosing body's. Settled literals are left out unless a snapshot is
     /// open, as a rollback could unsettle one.
-    pub(crate) fn close_body_literals(&mut self) {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "taking the body is what ends it"
+    )]
+    pub(crate) fn close_body_literals(&mut self, body: LeftBody) {
+        let LeftBody(()) = body;
         debug_assert!(self.literals.len() >= 2, "no body's literals are open");
         let Some(body) = self.literals.pop() else {
             return;

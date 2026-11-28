@@ -1,0 +1,7 @@
+// The literals in a generic function's body take their defaults with the
+// function, whatever it's called with: the list holds Floats in each instance.
+// expect-output: ("s",[1.0,2.5],[3])
+// expect-output: (1,[1.0,2.5],[3])
+fn pair(a) { (a, [1, 2.5], [3]) }
+print(pair("s"));
+print(pair(1));

@@ -1,0 +1,9 @@
+// A literal argument in a generic function's body picks its overload by its
+// default, while the parameter's picks it by what each instance is given.
+// expect-output: ("int","float","int","int")
+// expect-output: ("int","float","float","float")
+fn pick(x: Int) { "int" }
+fn pick(x: Float) { "float" }
+fn both(a) { (pick(1), pick(1.5), pick(a), pick(a * 2)) }
+print(both(2));
+print(both(2.5));

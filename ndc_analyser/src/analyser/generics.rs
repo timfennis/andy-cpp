@@ -10,7 +10,7 @@ use super::instances::{Cast, Scheme};
 use super::solver::{CallConstraint, Constraint, Waiting};
 use crate::error::AnalysisError;
 use crate::overloads::is_strictly_more_specific;
-use crate::types::{Listed, TypeVars};
+use crate::types::{LeftBody, Listed, TypeVars};
 use ndc_core::collections::HashSet;
 use ndc_core::{NodeId, StaticType, TypeVar};
 use ndc_lexer::Span;
@@ -26,9 +26,10 @@ pub(super) struct Generalizing {
     pub(super) return_annotated: bool,
 }
 
-/// Where the analysis was when a generic function's body started, so
-/// [`Analyser::generalize`] can look at what the body added since.
-#[derive(Debug, Clone, Copy)]
+/// What [`Analyser::generalize`] needs of a generic function's body that's
+/// been left: where the analysis was when it started, so it can look at
+/// what the body added since, and its list of literals, still open.
+#[derive(Debug)]
 pub(super) struct BodyStart {
     /// The number of generic uses.
     pub(super) uses: usize,
@@ -36,6 +37,8 @@ pub(super) struct BodyStart {
     pub(super) functions: usize,
     /// The number of casts.
     pub(super) casts: usize,
+    /// The body's list of literals, which `generalize` closes.
+    pub(super) literals: LeftBody,
 }
 
 /// A type parameter a function declares, as `T` in `fn f<T>(x: T)`: the
@@ -78,6 +81,7 @@ impl Analyser {
             uses: first_use,
             functions: first_function,
             casts: first_cast,
+            literals,
         } = start;
         self.solve_waiting();
         // A generalizable literal belongs to the body, so the body made it
@@ -86,7 +90,7 @@ impl Analyser {
         // declaring a function from taking longer the more literals the code
         // before it has.
         self.default_literals(Listed::InBody, TypeVars::is_generalizable);
-        self.vars.close_body_literals();
+        self.vars.close_body_literals(literals);
         let connected = self.reached_from_signature(signature);
         self.settle_ambiguous(signature, &connected);
         self.merge_copies();
