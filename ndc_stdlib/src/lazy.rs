@@ -281,22 +281,7 @@ fn register_readers(env: &mut FunctionRegistry<NativeSpec>) {
             Ok(Value::Int(count))
         },
     );
-    with_vm(
-        env,
-        "find",
-        "Gives the first element of the lazy sequence the function gives `true` for, making no elements after it.",
-        "<T>(Lazy<T>, fn(T) -> Bool) -> T",
-        |args, vm| {
-            let predicate = function_of(&args[1])?;
-            let mut cursor = lazy_of(&args[0])?.cursor();
-            while let Some(value) = cursor.next(vm)? {
-                if test(vm, &predicate, &value)? {
-                    return Ok(value);
-                }
-            }
-            Err(VmError::native("find did not find anything"))
-        },
-    );
+    register_ends(env);
     for (name, doc, stop_on, found) in [
         (
             "any",
@@ -400,6 +385,125 @@ fn fold(
         accumulator = vm.call_callback(function.clone(), &[accumulator, value])?;
     }
     Ok(accumulator)
+}
+
+/// An element of a lazy sequence that `first` or `last` reads: what it's
+/// called, its documentation, its signature, whether it takes a function,
+/// whether it reads to the end, and the error it gives when it finds no
+/// element, if it doesn't give an `Option`.
+type End = (
+    &'static str,
+    &'static str,
+    &'static str,
+    bool,
+    bool,
+    Option<&'static str>,
+);
+
+/// `first`, `last`, their `?` forms, each with and without a function, and
+/// `find`, the same as `first` with a function.
+fn register_ends(env: &mut FunctionRegistry<NativeSpec>) {
+    let ends: [End; 9] = [
+        (
+            "first",
+            "Gives the first element of the lazy sequence, making no others, or results in an error if it has none.",
+            "<T>(Lazy<T>) -> T",
+            false,
+            false,
+            Some("collection is empty"),
+        ),
+        (
+            "first?",
+            "Gives the first element of the lazy sequence, making no others, or `None` if it has none.",
+            "<T>(Lazy<T>) -> Option<T>",
+            false,
+            false,
+            None,
+        ),
+        (
+            "last",
+            "Gives the last element of the lazy sequence, making all of them, or results in an error if it has none.",
+            "<T>(Lazy<T>) -> T",
+            false,
+            true,
+            Some("collection is empty"),
+        ),
+        (
+            "last?",
+            "Gives the last element of the lazy sequence, making all of them, or `None` if it has none.",
+            "<T>(Lazy<T>) -> Option<T>",
+            false,
+            true,
+            None,
+        ),
+        (
+            "first",
+            "Gives the first element of the lazy sequence the function gives `true` for, making no elements after it, or results in an error if there's none.",
+            "<T>(Lazy<T>, fn(T) -> Bool) -> T",
+            true,
+            false,
+            Some("first did not find anything"),
+        ),
+        (
+            "first?",
+            "Gives the first element of the lazy sequence the function gives `true` for, making no elements after it, or `None` if there's none.",
+            "<T>(Lazy<T>, fn(T) -> Bool) -> Option<T>",
+            true,
+            false,
+            None,
+        ),
+        (
+            "last",
+            "Gives the last element of the lazy sequence the function gives `true` for, making all of them, or results in an error if there's none.",
+            "<T>(Lazy<T>, fn(T) -> Bool) -> T",
+            true,
+            true,
+            Some("last did not find anything"),
+        ),
+        (
+            "last?",
+            "Gives the last element of the lazy sequence the function gives `true` for, making all of them, or `None` if there's none.",
+            "<T>(Lazy<T>, fn(T) -> Bool) -> Option<T>",
+            true,
+            true,
+            None,
+        ),
+        (
+            "find",
+            "The same as `first` with a function: gives the first element of the lazy sequence the function gives `true` for, making no elements after it.",
+            "<T>(Lazy<T>, fn(T) -> Bool) -> T",
+            true,
+            false,
+            Some("find did not find anything"),
+        ),
+    ];
+    for (name, doc, signature, takes_function, to_the_end, error) in ends {
+        with_vm(env, name, doc, signature, move |args, vm| {
+            let predicate = if takes_function {
+                Some(function_of(&args[1])?)
+            } else {
+                None
+            };
+            let mut cursor = lazy_of(&args[0])?.cursor();
+            let mut found = None;
+            while let Some(value) = cursor.next(vm)? {
+                let matches = match &predicate {
+                    Some(predicate) => test(vm, predicate, &value)?,
+                    None => true,
+                };
+                if matches {
+                    found = Some(value);
+                    if !to_the_end {
+                        break;
+                    }
+                }
+            }
+            match error {
+                Some(error) => found.ok_or_else(|| VmError::native(error)),
+                None => Ok(Value::option(found)),
+            }
+        });
+    }
 }
 
 /// What `predicate`, a function its type says gives a `Bool`, gives for

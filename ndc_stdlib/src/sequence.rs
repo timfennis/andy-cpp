@@ -44,6 +44,70 @@ pub(crate) fn try_sort_by<E>(
     Ok(())
 }
 
+/// The elements of `seq` from its last to its first, for `last`: a list,
+/// tuple, deque or range is read from its end, another sequence is read to
+/// its end first. A range without an end has no last element.
+fn backwards(seq: &Value, name: &str) -> anyhow::Result<Box<dyn Iterator<Item = Value>>> {
+    if let Value::Object(object) = seq {
+        match object.as_ref() {
+            Object::List(_) | Object::Tuple(_) | Object::Deque(_) => {
+                let object = std::rc::Rc::clone(object);
+                let len = match object.as_ref() {
+                    Object::List(list) => list.borrow().len(),
+                    Object::Tuple(tuple) => tuple.len(),
+                    Object::Deque(deque) => deque.borrow().len(),
+                    _ => unreachable!("matched a list, tuple or deque"),
+                };
+                // The predicate may shorten the list, so an index past its
+                // end is skipped.
+                return Ok(Box::new((0..len).rev().filter_map(
+                    move |index| match object.as_ref() {
+                        Object::List(list) => list.borrow().get(index).cloned(),
+                        Object::Tuple(tuple) => tuple.get(index).cloned(),
+                        Object::Deque(deque) => deque.borrow().get(index).cloned(),
+                        _ => unreachable!("matched a list, tuple or deque"),
+                    },
+                )));
+            }
+            Object::Range(range) => {
+                return Ok(match range.bounds() {
+                    Some((first, last)) => Box::new((first..=last).rev().map(Value::Int)),
+                    None => Box::new(std::iter::empty()),
+                });
+            }
+            Object::RangeFrom(_) => {
+                return Err(anyhow!(
+                    "{name} of a range without an end: it has no last element"
+                ));
+            }
+            _ => {}
+        }
+    }
+    let elements = seq
+        .iter()
+        .ok_or_else(|| anyhow!("{name} requires a sequence"))?
+        .collect_vec();
+    Ok(Box::new(elements.into_iter().rev()))
+}
+
+/// The first element of `elements` that `predicate` gives `true` for.
+fn first_match(
+    elements: impl Iterator<Item = Value>,
+    predicate: &mut VmCallable<'_>,
+) -> anyhow::Result<Option<Value>> {
+    for element in elements {
+        match predicate
+            .call(std::slice::from_ref(&element))
+            .map_err(|e| anyhow!(e))?
+        {
+            Value::Bool(true) => return Ok(Some(element)),
+            Value::Bool(false) => {}
+            _ => return Err(anyhow!("return value of predicate must be a boolean")),
+        }
+    }
+    Ok(None)
+}
+
 /// The element of `iter` that compares `better` (`Greater` for the largest)
 /// than the others, the first of equal ones.
 pub(crate) fn vm_try_extreme(
@@ -72,7 +136,7 @@ fn extreme_name(better: Ordering) -> &'static str {
 
 #[export_module]
 mod inner {
-    use super::{extreme_name, try_sort_by, vm_try_extreme};
+    use super::{backwards, extreme_name, first_match, try_sort_by, vm_try_extreme};
     use itertools::Itertools;
     use ndc_vm::VmCallable;
     use std::cmp::Ordering;
@@ -494,23 +558,88 @@ mod inner {
         Ok(Value::Int(out))
     }
 
-    /// Returns the value of the first element for which the `predicate` is true for the given input sequence.
+    /// Returns the first element of the sequence, or results in an error if it's empty.
+    #[function(signature = "<T>(Iterable<T>) -> T")]
+    pub fn first(seq: Value) -> anyhow::Result<Value> {
+        seq.iter()
+            .ok_or_else(|| anyhow!("first requires a sequence"))?
+            .next()
+            .ok_or_else(|| anyhow!("collection is empty"))
+    }
+
+    /// Returns the first element of the sequence, or `None` if it's empty.
+    #[function(name = "first?", signature = "<T>(Iterable<T>) -> Option<T>")]
+    pub fn maybe_first(seq: Value) -> anyhow::Result<Value> {
+        Ok(Value::option(
+            seq.iter()
+                .ok_or_else(|| anyhow!("first? requires a sequence"))?
+                .next(),
+        ))
+    }
+
+    /// Returns the last element of the sequence, or results in an error if it's empty.
+    #[function(signature = "<T>(Iterable<T>) -> T")]
+    pub fn last(seq: Value) -> anyhow::Result<Value> {
+        backwards(&seq, "last")?
+            .next()
+            .ok_or_else(|| anyhow!("collection is empty"))
+    }
+
+    /// Returns the last element of the sequence, or `None` if it's empty.
+    #[function(name = "last?", signature = "<T>(Iterable<T>) -> Option<T>")]
+    pub fn maybe_last(seq: Value) -> anyhow::Result<Value> {
+        Ok(Value::option(backwards(&seq, "last?")?.next()))
+    }
+
+    /// Returns the first element the `predicate` is true for, or results in an error if there's none.
+    #[function(name = "first", signature = "<T>(Iterable<T>, fn(T) -> Bool) -> T")]
+    pub fn first_where(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        let elements = seq
+            .iter()
+            .ok_or_else(|| anyhow!("first requires a sequence"))?;
+        first_match(elements, predicate)?.ok_or_else(|| anyhow!("first did not find anything"))
+    }
+
+    /// Returns the first element the `predicate` is true for, or `None` if there's none.
+    #[function(
+        name = "first?",
+        signature = "<T>(Iterable<T>, fn(T) -> Bool) -> Option<T>"
+    )]
+    pub fn maybe_first_where(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        let elements = seq
+            .iter()
+            .ok_or_else(|| anyhow!("first? requires a sequence"))?;
+        Ok(Value::option(first_match(elements, predicate)?))
+    }
+
+    /// Returns the last element the `predicate` is true for, or results in an error if there's none.
+    /// It tries the elements from the last one back.
+    #[function(name = "last", signature = "<T>(Iterable<T>, fn(T) -> Bool) -> T")]
+    pub fn last_where(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        first_match(backwards(&seq, "last")?, predicate)?
+            .ok_or_else(|| anyhow!("last did not find anything"))
+    }
+
+    /// Returns the last element the `predicate` is true for, or `None` if there's none.
+    /// It tries the elements from the last one back.
+    #[function(
+        name = "last?",
+        signature = "<T>(Iterable<T>, fn(T) -> Bool) -> Option<T>"
+    )]
+    pub fn maybe_last_where(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
+        Ok(Value::option(first_match(
+            backwards(&seq, "last?")?,
+            predicate,
+        )?))
+    }
+
+    /// The same as `first` with a function: returns the first element the `predicate` is true for.
     #[function(signature = "<T>(Iterable<T>, fn(T) -> Bool) -> T")]
     pub fn find(seq: Value, predicate: &mut VmCallable<'_>) -> anyhow::Result<Value> {
-        for element in seq
+        let elements = seq
             .iter()
-            .ok_or_else(|| anyhow!("find requires a sequence"))?
-        {
-            match predicate
-                .call(std::slice::from_ref(&element))
-                .map_err(|e| anyhow!(e))?
-            {
-                Value::Bool(true) => return Ok(element),
-                Value::Bool(false) => {}
-                _ => return Err(anyhow!("return value of predicate must be a boolean")),
-            }
-        }
-        Err(anyhow!("find did not find anything"))
+            .ok_or_else(|| anyhow!("find requires a sequence"))?;
+        first_match(elements, predicate)?.ok_or_else(|| anyhow!("find did not find anything"))
     }
 
     /// Returns the first index of the element for which the `predicate` is true in the input sequence.

@@ -1,0 +1,12 @@
+// `first` and `last` with a function give the first and last element the
+// function gives `true` for; `first?` and `last?` give `None` when there's none.
+// expect-output: 4 8
+// expect-output: Some(4) Some(8) None None
+// expect-output: b d
+// expect-output: 1 1
+let xs = [1, 4, 5, 8, 9];
+let even = fn(x) => x % 2 == 0;
+print(xs.first(even), xs.last(even));
+print(xs.first?(even), xs.last?(even), xs.first?(fn(x) => x > 9), [].last?(even));
+print("abcd".first(fn(c) => c > "a"), "abcd".last(fn(c) => c < "e"));
+print((1..).first(fn(x) => x * x > 0), (1..=3).last(fn(x) => x < 2));

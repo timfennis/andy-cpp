@@ -1,0 +1,15 @@
+// `first`, `first?`, `last` and `last?` take any sequence, not only a list.
+// expect-output: a c
+// expect-output: 1 4 3 None
+// expect-output: 2 9 Some(2) Some(9)
+// expect-output: 1 7 None
+let d = Deque();
+d.push_back(2);
+d.push_back(9);
+let heap = MinHeap();
+heap.push(7);
+heap.push(1);
+print("abc".first, "abc".last);
+print((1..=4).first, (1..=4).last, (1..4).last, (1..1).last?);
+print(d.first, d.last, d.first?, d.last?);
+print(heap.first, heap.last, "".first?);
