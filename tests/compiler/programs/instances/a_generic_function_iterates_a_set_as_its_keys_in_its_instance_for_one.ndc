@@ -1,0 +1,7 @@
+// A generic function whose parameter's type isn't written iterates what it's
+// given as that iterates: its instance for a set takes the set's keys with
+// `Keys` before the loop, its instance for a map goes over the pairs.
+// compile: stdlib
+fn each(xs) => [x for x in xs];
+each(%{1});
+each(%{1: 2});

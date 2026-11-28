@@ -44,6 +44,36 @@ pub(super) enum CallSite {
     OpAssignment(NodeId),
 }
 
+impl CallSite {
+    /// The node the site's pick is keyed by.
+    pub(super) fn node(self) -> NodeId {
+        match self {
+            Self::Call(id)
+            | Self::Getter(id)
+            | Self::Setter(id)
+            | Self::FieldSetter(id)
+            | Self::OpAssignment(id) => id,
+        }
+    }
+}
+
+/// Where a sequence is iterated, which says what iterating over a set there
+/// does: the compiler gives a loop, or a native that takes any kind of
+/// sequence, the set's keys.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Iterated {
+    /// The sequence of a `for` loop or a comprehension.
+    Loop(NodeId),
+    /// The argument at this position of the call at the site, passed for an
+    /// `Iterable<T>`.
+    Argument(CallSite, usize),
+    /// What a function returns where an `Iterable<T>` is expected, as
+    /// `flat_map`'s function does, or an argument of a call of a function
+    /// value: there's no place for the compiler to take a set's keys, so a
+    /// set isn't taken there.
+    Elsewhere,
+}
+
 /// Something that waits until the types it depends on are known.
 #[derive(Debug, Clone)]
 pub(super) enum Constraint {
@@ -57,6 +87,7 @@ pub(super) enum Constraint {
         sequence: StaticType,
         element: StaticType,
         span: Span,
+        iterated: Iterated,
     },
     /// `let (a, b) = v`: what each name gets from `value`.
     Unpack {
@@ -138,10 +169,12 @@ impl Constraint {
                 sequence,
                 element,
                 span,
+                iterated,
             } => Self::Iterate {
                 sequence: replace(sequence),
                 element: replace(element),
                 span: *span,
+                iterated: *iterated,
             },
             Self::Unpack { value, parts, span } => Self::Unpack {
                 value: replace(value),
@@ -375,30 +408,56 @@ impl Analyser {
         result
     }
 
-    /// What iterating over a value of type `sequence` gives, which waits
-    /// until the kind of sequence is known.
-    pub(super) fn constrain_iteration(&mut self, sequence: StaticType, span: Span) -> StaticType {
+    /// What iterating over a value of type `sequence` where `iterated` says
+    /// gives, which waits until the kind of sequence is known.
+    pub(super) fn constrain_iteration(
+        &mut self,
+        sequence: StaticType,
+        span: Span,
+        iterated: Iterated,
+    ) -> StaticType {
         if self.vars.waits_to_iterate(&sequence) {
             let element = self.vars.fresh();
             self.wait(Constraint::Iterate {
                 sequence,
                 element: element.clone(),
                 span,
+                iterated,
             });
             return element;
         }
-        self.iteration_gives(&sequence, span)
+        self.iteration_gives(&sequence, span, iterated)
     }
 
-    /// What iterating over a value of the known type `sequence` gives,
-    /// reporting a value that doesn't iterate, like `true`.
-    fn iteration_gives(&mut self, sequence: &StaticType, span: Span) -> StaticType {
-        if self.vars.resolve(sequence) == StaticType::Any {
+    /// What iterating over a value of the known type `sequence` where
+    /// `iterated` says gives, reporting a value that doesn't iterate, like
+    /// `true`. A set iterates as its keys, which the compiler takes where
+    /// it's iterated.
+    fn iteration_gives(
+        &mut self,
+        sequence: &StaticType,
+        span: Span,
+        iterated: Iterated,
+    ) -> StaticType {
+        let resolved = self.vars.resolve(sequence);
+        if resolved == StaticType::Any {
             let error = AnalysisError::not_iterable(&StaticType::Any, span);
             self.emit(error);
             return StaticType::Error;
         }
         if let Some(element) = self.vars.element_type(sequence) {
+            if resolved.is_set() {
+                match iterated {
+                    Iterated::Loop(node) => self.record_iterated_set(node),
+                    Iterated::Argument(site, position) => {
+                        self.record_set_arguments(site, &[position]);
+                    }
+                    Iterated::Elsewhere => {
+                        self.emit(AnalysisError::set_not_iterated_here(span));
+                        return StaticType::Error;
+                    }
+                }
+            }
             return element;
         }
         let error = AnalysisError::not_iterable(&self.vars.shown(sequence), span);
@@ -1139,13 +1198,14 @@ impl Analyser {
                 sequence,
                 element,
                 span,
+                iterated,
             } => {
                 let sequence = self.vars.resolve(sequence);
                 if self.vars.waits_to_iterate(&sequence) {
                     return false;
                 }
-                let (element, span) = (element.clone(), *span);
-                let found = self.iteration_gives(&sequence, span);
+                let (element, span, iterated) = (element.clone(), *span, *iterated);
+                let found = self.iteration_gives(&sequence, span, iterated);
                 self.check_write(&element, &found, span);
                 true
             }
@@ -2256,11 +2316,17 @@ impl Analyser {
     /// instance its types need; a call of a value, with no `site`, calls
     /// whatever function the value is.
     pub(super) fn flush_copies(&mut self, site: Option<CallSite>, call: Span) {
-        match site {
-            Some(site) => self.record_uses(site, false, call),
-            None => self.pending.uses.clear(),
+        let sets = std::mem::take(&mut self.pending.set_arguments);
+        if let Some(site) = site {
+            self.record_set_arguments(site, &sets);
+            self.record_uses(site, false, call);
+        } else {
+            if !sets.is_empty() {
+                self.emit(AnalysisError::set_not_iterated_here(call));
+            }
+            self.pending.uses.clear();
         }
-        self.add_copies(call);
+        self.add_copies(call, site);
     }
 
     /// Adds the constraints [`Self::instantiate_function`] copied for the
@@ -2286,17 +2352,23 @@ impl Analyser {
             self.vars.fall_back_as_errors(&StaticType::Var(var));
         }
         self.record_uses(CallSite::Call(id), true, span);
-        self.add_copies(span);
+        self.pending.set_arguments.clear();
+        self.add_copies(span, None);
     }
 
     /// Adds the constraints [`Self::instantiate_function`] copied for a
     /// call or function value at `call`, and solves the ones it can.
-    fn add_copies(&mut self, call: Span) {
-        for (sequence, element) in std::mem::take(&mut self.pending.iterations) {
+    fn add_copies(&mut self, call: Span, site: Option<CallSite>) {
+        for (sequence, element, position) in std::mem::take(&mut self.pending.iterations) {
+            let iterated = match (site, position) {
+                (Some(site), Some(position)) => Iterated::Argument(site, position),
+                _ => Iterated::Elsewhere,
+            };
             self.wait(Constraint::Iterate {
                 sequence,
                 element,
                 span: call,
+                iterated,
             });
         }
         let copies = std::mem::take(&mut self.pending.copies);
@@ -2350,7 +2422,54 @@ impl Analyser {
         }
         let iterations = self.iterations_waited_for(parameters, arguments);
         self.pending.iterations.extend(iterations);
+        let sets = self.sets_passed_as_sequences(parameters, arguments);
+        self.pending.set_arguments.extend(sets);
         Some(self.vars.resolve(return_type))
+    }
+
+    /// The positions of the arguments that are sets passed for an
+    /// `Iterable<T>`, which get the set's keys.
+    fn sets_passed_as_sequences(
+        &self,
+        parameters: &[StaticType],
+        arguments: &[StaticType],
+    ) -> Vec<usize> {
+        parameters
+            .iter()
+            .zip(arguments)
+            .enumerate()
+            .filter(|(_, (parameter, argument))| {
+                matches!(self.vars.resolve(parameter), StaticType::Iterable(_))
+                    && self.vars.resolve(argument).is_set()
+            })
+            .map(|(position, _)| position)
+            .collect()
+    }
+
+    /// Records that the sequence of the loop at `node` is a set, whose keys
+    /// the loop goes over.
+    fn record_iterated_set(&mut self, node: NodeId) {
+        if self.copied_through.is_none() {
+            self.pick_tables(self.recording).iterated_sets.insert(node);
+        }
+    }
+
+    /// Records that the arguments at `positions` of the call at `site` are
+    /// sets passed for an `Iterable<T>`, whose keys the callee gets.
+    fn record_set_arguments(&mut self, site: CallSite, positions: &[usize]) {
+        if positions.is_empty() || self.copied_through.is_some() {
+            return;
+        }
+        let recorded = self
+            .pick_tables(self.recording)
+            .set_arguments
+            .entry(site.node())
+            .or_default();
+        for &position in positions {
+            if !recorded.contains(&position) {
+                recorded.push(position);
+            }
+        }
     }
 
     /// Each argument nothing is known about yet that was passed for an
@@ -2363,14 +2482,17 @@ impl Analyser {
         &self,
         parameters: &[StaticType],
         arguments: &[StaticType],
-    ) -> Vec<(StaticType, StaticType)> {
+    ) -> Vec<(StaticType, StaticType, Option<usize>)> {
         parameters
             .iter()
             .zip(arguments)
-            .filter_map(|(parameter, argument)| {
-                let (element, sequence) =
+            .enumerate()
+            .filter_map(|(position, (parameter, argument))| {
+                let (element, sequence, position) =
                     match (self.vars.resolve(parameter), self.vars.resolve(argument)) {
-                        (StaticType::Iterable(element), sequence) => (*element, sequence),
+                        (StaticType::Iterable(element), sequence) => {
+                            (*element, sequence, Some(position))
+                        }
                         (
                             StaticType::Function { return_type, .. },
                             StaticType::Function {
@@ -2378,7 +2500,7 @@ impl Analyser {
                                 ..
                             },
                         ) => match *return_type {
-                            StaticType::Iterable(element) => (*element, *returns),
+                            StaticType::Iterable(element) => (*element, *returns, None),
                             _ => return None,
                         },
                         _ => return None,
@@ -2386,11 +2508,14 @@ impl Analyser {
                 match sequence {
                     // A literal whose type isn't known yet either, as the
                     // element of `[1][0]` is, waits like any other value.
-                    StaticType::Var(_) => Some((sequence, element)),
+                    StaticType::Var(_) => Some((sequence, element, position)),
                     // So does a tuple whose elements aren't known yet, as
-                    // `(x, x)` in `[0].flat_map(fn(_) => (x, x))`.
-                    StaticType::Tuple(_) if self.vars.waits_to_iterate(&sequence) => {
-                        Some((sequence, element))
+                    // `(x, x)` in `[0].flat_map(fn(_) => (x, x))`, and a map
+                    // whose values aren't, which may be a set.
+                    StaticType::Tuple(_) | StaticType::Map { .. }
+                        if self.vars.waits_to_iterate(&sequence) =>
+                    {
+                        Some((sequence, element, position))
                     }
                     _ => None,
                 }
@@ -2762,6 +2887,17 @@ impl Analyser {
                 }
                 _ => AnalysisError::function_not_found(&call.name, arguments, call.span),
             },
+        };
+        // A function that returns a set doesn't give a sequence to what goes
+        // over what it returns, as `flat_map` does, which looks wrong when
+        // the set doesn't say why.
+        let returns_set = arguments.iter().any(|argument| {
+            matches!(argument, StaticType::Function { return_type, .. } if return_type.is_set())
+        });
+        let error = if returns_set {
+            error.with_note(call.span, AnalysisError::SET_RETURNED_AS_SEQUENCE)
+        } else {
+            error
         };
         self.emit(error);
     }

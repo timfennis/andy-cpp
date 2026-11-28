@@ -445,11 +445,19 @@ impl Analyser {
                 true
             }
             Choice::None => {
-                self.emit(AnalysisError::no_overload_fits(
-                    &value.name,
-                    &self.vars.shown(&expected),
-                    value.span,
-                ));
+                let shown = self.vars.shown(&expected);
+                let error = AnalysisError::no_overload_fits(&value.name, &shown, value.span);
+                // An overload that takes any kind of sequence would go over a
+                // set as its pairs, so none fits one, which the set doesn't
+                // say why.
+                let takes_set = matches!(&shown, StaticType::Function { parameters: Some(parameters), .. }
+                    if parameters.iter().any(StaticType::is_set));
+                let error = if takes_set {
+                    error.with_note(value.span, AnalysisError::SET_PASSED_TO_FUNCTION_VALUE)
+                } else {
+                    error
+                };
+                self.emit(error);
                 self.give_up_on_function_value(value);
                 true
             }

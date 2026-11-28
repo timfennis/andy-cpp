@@ -322,8 +322,11 @@ impl TypeVars {
             (StaticType::Var(var), StaticType::Any) if self.is_literal(*var) => false,
             (StaticType::Iterable(_), StaticType::Var(var)) if !self.is_literal(*var) => true,
             // So does a tuple whose elements aren't known yet: `(x, 1)`
-            // iterates as Ints once `x` is one.
-            (StaticType::Iterable(_), StaticType::Tuple(_)) if self.waits_to_iterate(&argument) => {
+            // iterates as Ints once `x` is one. And so does a map whose
+            // values aren't, which iterates as its keys if it's a set.
+            (StaticType::Iterable(_), StaticType::Tuple(_) | StaticType::Map { .. })
+                if self.waits_to_iterate(&argument) =>
+            {
                 true
             }
             // A literal passed for an `Iterable<T>` is the sequence it holds,
@@ -381,11 +384,13 @@ impl TypeVars {
                     _ => true,
                 };
                 // A function returning an `Iterable<U>` may return any kind of
-                // sequence of `U`s, as `flat_map`'s callback does.
+                // sequence of `U`s, as `flat_map`'s callback does, but a set:
+                // what goes over it can't take its keys.
                 // A function's value goes where an `Any` is expected back,
                 // as any value does.
                 parameters
                     && match self.shallow(p) {
+                        StaticType::Iterable(_) if self.resolve(a).is_set() => false,
                         StaticType::Iterable(_) | StaticType::Any => self.bind_argument(p, a),
                         _ => self.unify(p, a),
                     }
@@ -403,26 +408,44 @@ impl TypeVars {
     /// sequence for an `Iterable<T>`, as `len` takes the lists that
     /// `[[1], [2]].map(len)` passes, or anything for an `Any`, as
     /// `fn show(x: Any)` takes the Strings of `["a"].map(show)`.
+    /// A function given a set as an `Iterable<T>` would go over it as
+    /// (key, `()`) pairs, so a set isn't passed for one, and a map whose
+    /// values aren't known yet is passed as its pairs.
     pub(super) fn passes(&mut self, expected: &StaticType, takes: &StaticType) -> bool {
-        match self.shallow(takes) {
-            StaticType::Iterable(_) | StaticType::Any => self.bind_argument(takes, expected),
+        match (self.shallow(takes), self.resolve(expected)) {
+            (StaticType::Iterable(_), map @ StaticType::Map { .. }) if map.is_set() => false,
+            (StaticType::Iterable(element), StaticType::Map { key, value }) => {
+                let pair = StaticType::Tuple(vec![*key, *value]);
+                self.bind_argument(&element, &pair)
+            }
+            (StaticType::Iterable(_) | StaticType::Any, _) => self.bind_argument(takes, expected),
             _ => self.unify(expected, takes),
         }
     }
 
     /// Whether what iterating over a value of type `typ` gives isn't known
     /// yet: it's not known what `typ` is, or it's a tuple whose elements
-    /// aren't all known.
+    /// aren't all known, or a map whose values aren't, which iterates as its
+    /// keys if it turns out to be a set. A map whose values are of a type
+    /// parameter its function declares is never a set to its function.
     pub(crate) fn waits_to_iterate(&self, typ: &StaticType) -> bool {
         match self.resolve(typ) {
-            // A number never iterates, but a literal holding values is what
-            // they are once they're settled: the values of `%{"a": ["b"]}`.
-            StaticType::Var(var) => {
-                !self.is_literal(var) || self.number_literal_span(var).is_none()
-            }
+            StaticType::Map { value, .. } => match *value {
+                StaticType::Var(var) => !self.is_type_parameter(&value) && self.may_hold_any(var),
+                _ => false,
+            },
+            StaticType::Var(var) => self.may_hold_any(var),
             StaticType::Tuple(elements) => elements.iter().any(|e| self.has_unknowns(e)),
             _ => false,
         }
+    }
+
+    /// Whether the unsettled `var` may still become any type: it isn't a
+    /// literal's type, or the literal holds values that are what they are
+    /// once they're settled, as the values of `%{"a": ["b"]}` or the `()`s
+    /// of `%{1: ()}`. A number is never anything else.
+    fn may_hold_any(&self, var: TypeVar) -> bool {
+        !self.is_literal(var) || self.number_literal_span(var).is_none()
     }
 
     /// Whether `typ` has a part not known yet that isn't a literal's type.

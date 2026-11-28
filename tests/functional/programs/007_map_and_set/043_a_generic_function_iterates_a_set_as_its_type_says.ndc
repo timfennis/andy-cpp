@@ -1,0 +1,23 @@
+// A function whose parameter's type isn't written iterates a set as its
+// elements, as the call gives it one. A function that declares its map as a
+// `%{K: V}` iterates it as (key, value) pairs whatever `V` is, a set's `()`
+// too.
+// expect-output: 6
+// expect-output: [("a",1)]
+// expect-output: 6
+// expect-output: [(1,()),(2,())]
+
+fn total(xs) => xs.sum();
+fn each(xs) => [x for x in xs].sorted();
+print(total(%{1, 2, 3}));
+print(each(%{"a": 1}));
+print(total([1, 2, 3]));
+
+fn pairs<K, V>(m: %{K: V}) -> [(K, V)] {
+    let out = [];
+    for (k, v) in m {
+        out.push((k, v));
+    }
+    out.sorted()
+}
+print(pairs(%{1, 2}));

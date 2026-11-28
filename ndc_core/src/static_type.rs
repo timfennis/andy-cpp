@@ -246,6 +246,7 @@ impl StaticType {
     /// - `String` → `String`
     /// - `(T1, ..., Tn)` → the join of `T1`, ..., `Tn`
     /// - `%{K: V}` → `(K, V)`
+    /// - `%{K}`, a set, which is a `%{K: ()}` → `K`
     pub fn sequence_element_type(&self) -> Option<Self> {
         match self {
             Self::Iterable(t)
@@ -257,6 +258,7 @@ impl StaticType {
             Self::String => Some(Self::String),
             Self::Range | Self::RangeFrom => Some(Self::Int),
             Self::Tuple(elems) => Some(Self::compute_tuple_element_type(elems)),
+            Self::Map { key, .. } if self.is_set() => Some(key.as_ref().clone()),
             Self::Map { key, value } => Some(Self::Tuple(vec![
                 key.as_ref().clone(),
                 value.as_ref().clone(),
@@ -523,6 +525,13 @@ impl StaticType {
         Self::Tuple(vec![])
     }
 
+    /// Whether this is the type of a set: a map whose values are `()`,
+    /// `%{K}`, which iterates as its keys.
+    #[must_use]
+    pub fn is_set(&self) -> bool {
+        matches!(self, Self::Map { value, .. } if matches!(value.as_ref(), Self::Tuple(elements) if elements.is_empty()))
+    }
+
     /// Checks whether some runtime value could satisfy both `self` and `other`.
     ///
     /// # Examples
@@ -587,10 +596,10 @@ impl StaticType {
             (Self::Iterable(t), Self::Tuple(elems)) | (Self::Tuple(elems), Self::Iterable(t)) => {
                 elems.iter().all(|elem| elem.overlaps(t))
             }
-            (Self::Iterable(t), Self::Map { key, value })
-            | (Self::Map { key, value }, Self::Iterable(t)) => {
-                let pair = Self::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]);
-                Self::held_overlap(t, &pair)
+            (Self::Iterable(t), map @ Self::Map { .. })
+            | (map @ Self::Map { .. }, Self::Iterable(t)) => {
+                let element = map.sequence_element_type().expect("a map has elements");
+                Self::held_overlap(t, &element)
             }
 
             // Containers of the same kind overlap when what they hold could be

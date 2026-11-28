@@ -63,6 +63,20 @@ impl ValueIter {
     }
 }
 
+impl ValueIter {
+    /// A cursor over the keys of `value`, a map, or `None` if it isn't one:
+    /// what a set iterates as, read as a map is.
+    pub fn keys(value: &Value) -> Option<Self> {
+        let Value::Object(object) = value else {
+            return None;
+        };
+        match object.as_ref() {
+            Object::Map { .. } => Some(Self::Map(MapIter::keys(Rc::clone(object)))),
+            _ => None,
+        }
+    }
+}
+
 impl Iterator for ValueIter {
     type Item = Value;
 
@@ -127,7 +141,7 @@ impl SeqIter {
     }
 }
 
-/// Iterates over a map, yielding `(key, value)` tuples.
+/// Iterates over a map, yielding `(key, value)` tuples, or only the keys.
 ///
 /// Keys are collected at creation time for a stable iteration order; values are
 /// cloned from the map on demand so the full entry set is never duplicated.
@@ -136,10 +150,21 @@ pub struct MapIter {
     obj: Rc<Object>,
     keys: Vec<Value>,
     index: usize,
+    /// Whether it yields the keys alone, as a set iterates.
+    keys_only: bool,
 }
 
 impl MapIter {
     pub fn new(obj: Rc<Object>) -> Self {
+        Self::with(obj, false)
+    }
+
+    /// Iterates over the keys of the map alone, as a set iterates.
+    pub fn keys(obj: Rc<Object>) -> Self {
+        Self::with(obj, true)
+    }
+
+    fn with(obj: Rc<Object>, keys_only: bool) -> Self {
         let keys = match obj.as_ref() {
             Object::Map { entries, .. } => entries.borrow().keys().cloned().collect(),
             _ => unreachable!("MapIter requires a Map object"),
@@ -148,6 +173,7 @@ impl MapIter {
             obj,
             keys,
             index: 0,
+            keys_only,
         }
     }
 
@@ -159,6 +185,9 @@ impl MapIter {
         while let Some(key) = self.keys.get(self.index) {
             self.index += 1;
             if let Some(value) = entries.get(key) {
+                if self.keys_only {
+                    return Some(key.clone());
+                }
                 return Some(Value::tuple(vec![key.clone(), value.clone()]));
             }
         }

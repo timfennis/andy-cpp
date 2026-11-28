@@ -216,6 +216,11 @@ pub enum Instr {
     /// for a deque, string, map, heap or range, and a cursor at its start
     /// for a lazy sequence.
     GetIterator { dst: Reg, src: Reg },
+    /// `dst` = a lazy sequence of the keys of the map in `src`, which may be
+    /// `dst`: what a set iterates as, which a loop goes over and a native
+    /// that takes any kind of sequence gets. It reads the map as a loop over
+    /// it does, skipping a key removed before it gets to it.
+    Keys { dst: Reg, src: Reg },
     /// `dst` = the next value of what `GetIterator` put in `iter`, or if it
     /// has none left, goes `offset` instructions on. Of a list or tuple,
     /// that's the element at the position in the register after `iter`,
@@ -438,6 +443,7 @@ impl Instr {
             Self::MakeRangeInclusive { .. } => "MakeRangeInclusive",
             Self::MakeRangeFrom { .. } => "MakeRangeFrom",
             Self::GetIterator { .. } => "GetIterator",
+            Self::Keys { .. } => "Keys",
             Self::TupleIndex { .. } => "TupleIndex",
             Self::ListIndex { .. } => "ListIndex",
             Self::ListSet { .. } => "ListSet",
@@ -675,7 +681,9 @@ impl fmt::Display for Instr {
             Self::MakeRange { dst, start, end } | Self::MakeRangeInclusive { dst, start, end } => {
                 write!(f, "{dst}, {start}, {end}")
             }
-            Self::MakeRangeFrom { dst, start } | Self::GetIterator { dst, src: start } => {
+            Self::MakeRangeFrom { dst, start }
+            | Self::GetIterator { dst, src: start }
+            | Self::Keys { dst, src: start } => {
                 write!(f, "{dst}, {start}")
             }
             Self::IterNext { iter, dst, offset } => {

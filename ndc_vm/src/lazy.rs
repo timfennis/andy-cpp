@@ -29,6 +29,9 @@ enum Source {
     Elements(Value),
     /// One value, again and again: `repeat(x)`.
     Repeat(Value),
+    /// The keys of a map: the elements of a set, which the compiler makes a
+    /// lazy sequence of where a set is iterated.
+    Keys(Value),
 }
 
 /// One step of a lazy sequence, which makes its elements from those of the
@@ -69,6 +72,24 @@ impl Lazy {
         source.iter()?;
         Some(Self {
             source: Source::Elements(source),
+            steps: Rc::from([]),
+        })
+    }
+
+    /// The lazy sequence of the keys of `map`, read as a `for` loop reads a
+    /// map: the keys it has when a cursor starts, but those removed before
+    /// the cursor gets to them. `None` if `map` isn't a map.
+    pub fn keys(map: Value) -> Option<Self> {
+        // Checked without making a cursor, which would copy every key only
+        // to drop the copy: `Self::cursor` copies them when it starts.
+        let Value::Object(object) = &map else {
+            return None;
+        };
+        if !matches!(object.as_ref(), Object::Map { .. }) {
+            return None;
+        }
+        Some(Self {
+            source: Source::Keys(map),
             steps: Rc::from([]),
         })
     }
@@ -115,6 +136,9 @@ impl Lazy {
                     .expect("internal error: a lazy sequence's source is iterable"),
             ),
             Source::Repeat(value) => SourceCursor::Repeat(value.clone()),
+            Source::Keys(map) => SourceCursor::Elements(
+                ValueIter::keys(map).expect("internal error: a lazy sequence's keys are a map's"),
+            ),
         };
         LazyCursor {
             source,
@@ -140,6 +164,7 @@ impl Lazy {
         let source = match &self.source {
             Source::Elements(value) => Source::Elements(copy(value)),
             Source::Repeat(value) => Source::Repeat(copy(value)),
+            Source::Keys(map) => Source::Keys(copy(map)),
         };
         Self {
             source,
@@ -153,7 +178,7 @@ impl Lazy {
 impl fmt::Display for Lazy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.source {
-            Source::Elements(value) => write!(f, "lazy({value:?})")?,
+            Source::Elements(value) | Source::Keys(value) => write!(f, "lazy({value:?})")?,
             Source::Repeat(value) => write!(f, "repeat({value:?})")?,
         }
         for step in self.steps.iter() {

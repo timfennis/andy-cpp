@@ -12,7 +12,7 @@ use super::solver::{CallSite, Constraint, Origin, Waiting};
 use crate::error::AnalysisError;
 use itertools::izip;
 use ndc_analysis::{Binding, Candidate};
-use ndc_core::collections::HashMap;
+use ndc_core::collections::{HashMap, HashSet};
 use ndc_core::{NodeId, StaticType};
 use ndc_layout::InstancePicks;
 use ndc_lexer::Span;
@@ -114,24 +114,35 @@ pub(super) struct Pending {
     /// The function and the types the call gives its key.
     pub(super) uses: Vec<(SymbolId, Vec<StaticType>)>,
     /// The arguments not known yet that were passed for an `Iterable<T>`,
-    /// with the `T` their elements settle once they're known.
-    pub(super) iterations: Vec<(StaticType, StaticType)>,
+    /// with the `T` their elements settle once they're known, and the
+    /// argument's position, or `None` for what a function passed for one
+    /// returns.
+    pub(super) iterations: Vec<(StaticType, StaticType, Option<usize>)>,
+    /// The positions of the arguments that are sets passed for an
+    /// `Iterable<T>`.
+    pub(super) set_arguments: Vec<usize>,
 }
 
 impl Pending {
     /// How much is pending, to [`Self::truncate`] to later.
-    pub(super) fn len(&self) -> [usize; 3] {
-        [self.copies.len(), self.uses.len(), self.iterations.len()]
+    pub(super) fn len(&self) -> [usize; 4] {
+        [
+            self.copies.len(),
+            self.uses.len(),
+            self.iterations.len(),
+            self.set_arguments.len(),
+        ]
     }
 
-    pub(super) fn truncate(&mut self, [copies, uses, iterations]: [usize; 3]) {
+    pub(super) fn truncate(&mut self, [copies, uses, iterations, sets]: [usize; 4]) {
         self.copies.truncate(copies);
         self.uses.truncate(uses);
         self.iterations.truncate(iterations);
+        self.set_arguments.truncate(sets);
     }
 
     pub(super) fn clear(&mut self) {
-        self.truncate([0; 3]);
+        self.truncate([0; 4]);
     }
 }
 
@@ -310,6 +321,8 @@ impl Analyser {
                 setters: &mut picks.setters,
                 augmented_assignments: &mut picks.augmented_assignments,
                 cast_checks: &mut picks.cast_checks,
+                iterated_sets: &mut picks.iterated_sets,
+                set_arguments: &mut picks.set_arguments,
             },
             None => PickTables {
                 bindings: &mut picks.bindings,
@@ -317,6 +330,8 @@ impl Analyser {
                 setters: &mut picks.setters,
                 augmented_assignments: &mut picks.augmented_assignments,
                 cast_checks: &mut picks.cast_checks,
+                iterated_sets: &mut picks.iterated_sets,
+                set_arguments: &mut picks.set_arguments,
             },
         }
     }
@@ -562,6 +577,11 @@ pub(super) struct PickTables<'a> {
     /// The type each cast checks its value against as the program runs, if
     /// any.
     pub(super) cast_checks: &'a mut HashMap<NodeId, Option<StaticType>>,
+    /// The sequences of loops that are sets.
+    pub(super) iterated_sets: &'a mut HashSet<NodeId>,
+    /// The positions of the arguments of each call that are sets passed for
+    /// an `Iterable<T>`.
+    pub(super) set_arguments: &'a mut HashMap<NodeId, Vec<usize>>,
 }
 
 impl<'a> PickTables<'a> {

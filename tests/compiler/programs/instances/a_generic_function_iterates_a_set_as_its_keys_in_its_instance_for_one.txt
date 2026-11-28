@@ -1,0 +1,36 @@
+== <script> (registers: 5, globals: 3) ==
+0000  LoadK r1, k0                         <fn #1 each>
+0001  SetGlobal g1, r1
+0002  LoadK r1, k1                         <fn #2 each>
+0003  SetGlobal g2, r1
+0004  GetGlobal r1, g1
+0005  LoadK r3, k2                         1
+0006  LoadUnit r4
+0007  MakeMap r2, r3, 1
+0008  Call r1, 1
+0009  GetGlobal r1, g2
+0010  LoadK r3, k3                         1
+0011  LoadK r4, k4                         2
+0012  MakeMap r2, r3, 1
+0013  Call r1, 1
+0014  LoadUnit r0
+0015  Halt r0
+
+== #1 each (registers: 6) ==
+0000  MakeList r2, r2, 0
+0001  Keys r3, r0
+0002  GetIterator r3, r3
+0003  IterNext r3, r1, +3                  -> 0007
+0004  Copy r5, r1
+0005  ListPush r2, r5
+0006  Jump -4                              -> 0003
+0007  Return r2
+
+== #2 each (registers: 6) ==
+0000  MakeList r2, r2, 0
+0001  GetIterator r3, r0
+0002  IterNext r3, r1, +3                  -> 0006
+0003  Copy r5, r1
+0004  ListPush r2, r5
+0005  Jump -4                              -> 0002
+0006  Return r2

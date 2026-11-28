@@ -86,7 +86,9 @@ impl Analyser {
             .map(|parameter| {
                 let symbol = self.resolver.type_parameter_symbol(parameter.id);
                 let var = if generic {
-                    self.vars.fresh()
+                    let var = self.vars.fresh();
+                    self.vars.mark_type_parameter(&var);
+                    var
                 } else {
                     StaticType::Error
                 };
