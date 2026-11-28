@@ -69,7 +69,9 @@ impl Lazy {
         {
             return Some(lazy.clone());
         }
-        source.iter()?;
+        if !ValueIter::iterates(&source) {
+            return None;
+        }
         Some(Self {
             source: Source::Elements(source),
             steps: Rc::from([]),

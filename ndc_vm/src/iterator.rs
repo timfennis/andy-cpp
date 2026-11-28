@@ -31,6 +31,32 @@ pub enum ValueIter {
 }
 
 impl ValueIter {
+    /// Whether [`Self::new`] makes a cursor over `value`, found without
+    /// making one: a cursor over a map copies its keys, and one over a heap
+    /// its elements, sorted.
+    pub fn iterates(value: &Value) -> bool {
+        let Value::Object(object) = value else {
+            return false;
+        };
+        match object.as_ref() {
+            Object::List(_)
+            | Object::Tuple(_)
+            | Object::Deque(_)
+            | Object::String(_)
+            | Object::Map { .. }
+            | Object::MinHeap(_)
+            | Object::MaxHeap(_)
+            | Object::Range(_)
+            | Object::RangeFrom(_) => true,
+            Object::Lazy(lazy) => !lazy.calls_functions(),
+            Object::Some(_)
+            | Object::Function(_)
+            | Object::Struct { .. }
+            | Object::Cursor(_)
+            | Object::LazyCursor(_) => false,
+        }
+    }
+
     /// A cursor over the elements of `value`, or `None` if it isn't something
     /// a `for` loop iterates over without the VM.
     pub fn new(value: &Value) -> Option<Self> {
@@ -258,5 +284,33 @@ impl StringIter {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.string.char_count().saturating_sub(self.index);
         (remaining, Some(remaining))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ValueIter;
+    use crate::{Object, Value};
+    use std::rc::Rc;
+
+    #[test]
+    fn iterates_says_whether_new_makes_a_cursor() {
+        let values = [
+            Value::Int(1),
+            Value::None,
+            Value::list(vec![Value::Int(1)]),
+            Value::tuple(vec![Value::Int(1), Value::Int(2)]),
+            Value::string("ab"),
+            Value::Object(Rc::new(Object::map(Default::default(), None))),
+            Value::range_from(3),
+            Value::option(Some(Value::Int(1))),
+        ];
+        for value in values {
+            assert_eq!(
+                ValueIter::iterates(&value),
+                ValueIter::new(&value).is_some(),
+                "{value:?}"
+            );
+        }
     }
 }
