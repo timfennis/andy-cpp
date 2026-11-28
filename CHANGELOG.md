@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.5.0](https://github.com/timfennis/andy-cpp/compare/v0.4.1...v0.5.0) (2026-11-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* repeat a string into a string 🔁 ([#559](https://github.com/timfennis/andy-cpp/issues/559))
+* **vm:** a named function can only be declared as a statement; inside an expression it is now an error.
+
+### Features
+
+* **analyser:** type a call by the return its overloads share 🎯 ([#566](https://github.com/timfennis/andy-cpp/issues/566)) ([e41eb9a](https://github.com/timfennis/andy-cpp/commit/e41eb9adf2d4581b8b13518431dea3d4f5b22e21))
+* iterate a set as its elements 🧺 ([#561](https://github.com/timfennis/andy-cpp/issues/561)) ([0461bd3](https://github.com/timfennis/andy-cpp/commit/0461bd3045717bd6de76675d0abcfb7d1e12e768))
+* **lexer:** accept float literals with an exponent like 1e-12 🔬 ([#477](https://github.com/timfennis/andy-cpp/issues/477)) ([e2e1032](https://github.com/timfennis/andy-cpp/commit/e2e1032b35f1a80b86d0fc212694b06d63784e3e))
+* **lexer:** support \u{...} Unicode escapes in strings 🦄 ([#478](https://github.com/timfennis/andy-cpp/issues/478)) ([751c60f](https://github.com/timfennis/andy-cpp/commit/751c60f962aaff3668643749f9d196d3a0be1644))
+* **lsp:** complete the program's own functions and struct fields after a dot 🎯 ([#545](https://github.com/timfennis/andy-cpp/issues/545)) ([0d7125a](https://github.com/timfennis/andy-cpp/commit/0d7125a088ff3594319dad1fe987e5b8735d5ec0))
+* **lsp:** find references, highlight and rename names 🔦 ([#548](https://github.com/timfennis/andy-cpp/issues/548)) ([ada50f7](https://github.com/timfennis/andy-cpp/commit/ada50f778ae965758e33d69d1c7232574e1c6e18))
+* **lsp:** fold code and grow the selection by expression 🪗 ([#555](https://github.com/timfennis/andy-cpp/issues/555)) ([d9102bf](https://github.com/timfennis/andy-cpp/commit/d9102bfca395d582d54c5aeb10f8fa0ee0c75b9d))
+* **lsp:** format documents with ndc fmt 🧹 ([#551](https://github.com/timfennis/andy-cpp/issues/551)) ([b58700f](https://github.com/timfennis/andy-cpp/commit/b58700f657445b7dab6201046f0c942c9924561f))
+* **lsp:** highlight names by what they are 🎨 ([#553](https://github.com/timfennis/andy-cpp/issues/553)) ([3cad882](https://github.com/timfennis/andy-cpp/commit/3cad882cb2a4d2534eb3bf215f64707aa9fb4729))
+* **lsp:** jump to what the analyser resolved a name to 🎯 ([#547](https://github.com/timfennis/andy-cpp/issues/547)) ([e998c78](https://github.com/timfennis/andy-cpp/commit/e998c78dba93a0a88c700fcff547975c58f5adb9))
+* **lsp:** keep answering while the text doesn't parse ⏳ ([#557](https://github.com/timfennis/andy-cpp/issues/557)) ([41a7ee2](https://github.com/timfennis/andy-cpp/commit/41a7ee2d375101b24a50313864b2bbf95ca58086))
+* **lsp:** say what a generic function's types are at its calls 🧬 ([#558](https://github.com/timfennis/andy-cpp/issues/558)) ([26c0aac](https://github.com/timfennis/andy-cpp/commit/26c0aac4cfafb585a9738bac35b3d92624aa06b2))
+* **lsp:** show the parameters of the call being written ✍️ ([#554](https://github.com/timfennis/andy-cpp/issues/554)) ([b9c3bd9](https://github.com/timfennis/andy-cpp/commit/b9c3bd93623213c3aaf9c4c79287f6fb747b14dc))
+* make ranges values and count through them in loops 📏 ([#538](https://github.com/timfennis/andy-cpp/issues/538)) ([b8a12c5](https://github.com/timfennis/andy-cpp/commit/b8a12c53b77e1edf8c5d3dc264f2e0cfdab1bc01))
+* repeat a string into a string 🔁 ([#559](https://github.com/timfennis/andy-cpp/issues/559)) ([5262b14](https://github.com/timfennis/andy-cpp/commit/5262b140a2d46bb50a4c37039098a6c005d82645))
+* **stdlib:** add first and last with a predicate, and for any sequence 🥇 ([#563](https://github.com/timfennis/andy-cpp/issues/563)) ([4f702c2](https://github.com/timfennis/andy-cpp/commit/4f702c2b27e0ac252f5ae3ecc3a293c67ad32c3f))
+* **stdlib:** add get?, remove?, clear, - and subset tests for maps 🗝️ ([#562](https://github.com/timfennis/andy-cpp/issues/562)) ([e9b9b7f](https://github.com/timfennis/andy-cpp/commit/e9b9b7f85a285e40a53a3bbc0eeb328fd7f38507))
+
+
+### Bug Fixes
+
+* **analyser:** settle what the last fallbacks' solving makes 🧷 ([#484](https://github.com/timfennis/andy-cpp/issues/484)) ([90bfdbe](https://github.com/timfennis/andy-cpp/commit/90bfdbeb64a7ed5e05be39ad99b1e827ce4691fd))
+* **lexer:** spell the invalid-escape error "Invalid escape sequence" ✏️ ([#471](https://github.com/timfennis/andy-cpp/issues/471)) ([94454c9](https://github.com/timfennis/andy-cpp/commit/94454c97c172d3e19680715a59f956e06fb32cbd))
+* **lsp:** give each end offset the type of the smallest expression ending there 🗺️ ([#480](https://github.com/timfennis/andy-cpp/issues/480)) ([545b4eb](https://github.com/timfennis/andy-cpp/commit/545b4eb49bf48c71c707f967915539ac8d553284))
+* **lsp:** leave out types whose check failed instead of showing Any 🙈 ([#479](https://github.com/timfennis/andy-cpp/issues/479)) ([3aaa34e](https://github.com/timfennis/andy-cpp/commit/3aaa34e258ed5ab34a8bb93b1c575d3e6c823f66))
+* **parser:** say what's missing instead of "Expected an expression" 🧭 ([#483](https://github.com/timfennis/andy-cpp/issues/483)) ([90d1364](https://github.com/timfennis/andy-cpp/commit/90d1364cba261f1381c6e76b2f27519024dec77c))
+* **vm:** deepcopy copies each container once, keeping cycles and sharing 🔁 ([#482](https://github.com/timfennis/andy-cpp/issues/482)) ([edf2b70](https://github.com/timfennis/andy-cpp/commit/edf2b70a9345ecbb6f45d090e58e6f04f9ff3204))
+* **vm:** iterate a string or map that changes during the loop 🔂 ([#537](https://github.com/timfennis/andy-cpp/issues/537)) ([c9106c8](https://github.com/timfennis/andy-cpp/commit/c9106c8eb315346c57affd76b7d25c1508c0c89c))
+
+
+### Performance Improvements
+
+* **analyser:** stop analysis time growing with the square of the program 📈 ([#550](https://github.com/timfennis/andy-cpp/issues/550)) ([99ca2ec](https://github.com/timfennis/andy-cpp/commit/99ca2ec9a765507e34e6967ac9ddff00984bf3c4))
+* **compiler:** load a string literal an instruction only reads as its constant 🧵 ([#539](https://github.com/timfennis/andy-cpp/issues/539)) ([fa349f0](https://github.com/timfennis/andy-cpp/commit/fa349f0c78a06ba0f7286fd59f27876f0ee66ecf))
+* exit without freeing the program's values 🚪 ([#481](https://github.com/timfennis/andy-cpp/issues/481)) ([41fb803](https://github.com/timfennis/andy-cpp/commit/41fb803c67233af2f2db088016d2e834f7f5ad2b))
+* **lsp:** analyse only the newest queued text of a document 🏃 ([#549](https://github.com/timfennis/andy-cpp/issues/549)) ([6058311](https://github.com/timfennis/andy-cpp/commit/605831117f4e1242b281eab01910a97ad5f96f83))
+* read a tuple's element at a literal index in place 📦 ([#491](https://github.com/timfennis/andy-cpp/issues/491)) ([ed19ec5](https://github.com/timfennis/andy-cpp/commit/ed19ec585347a5c6038531876a233d54903749b6))
+* **stdlib:** decode JSON integers without allocating 🔢 ([#474](https://github.com/timfennis/andy-cpp/issues/474)) ([3625aac](https://github.com/timfennis/andy-cpp/commit/3625aac84495b95bdef378b90ef8454a105dac37))
+* **vm:** hash maps with FxHash and memo keys with 128 bits 🧮 ([#533](https://github.com/timfennis/andy-cpp/issues/533)) ([57ba180](https://github.com/timfennis/andy-cpp/commit/57ba180f10ae2f575d1d77f56a0c487e393d8fea))
+* **vm:** make a lazy sequence of a map or heap without copying it first 🪶 ([#565](https://github.com/timfennis/andy-cpp/issues/565)) ([7983ec1](https://github.com/timfennis/andy-cpp/commit/7983ec143ea446e6e543ee12fa2bab82f16d9abb))
+* **vm:** read a local tuple's element at a literal index in one instruction 🎯 ([#492](https://github.com/timfennis/andy-cpp/issues/492)) ([8b6437b](https://github.com/timfennis/andy-cpp/commit/8b6437bea58f4675a4d6658ba67f77b7ede777ee))
+* **vm:** read and write a list element in one instruction 📇 ([#534](https://github.com/timfennis/andy-cpp/issues/534)) ([25bf432](https://github.com/timfennis/andy-cpp/commit/25bf43229620a30d7b2c66caa4ba4fdfc1bcb77e))
+* **vm:** replace the stack VM with a register VM 🚀 ([#523](https://github.com/timfennis/andy-cpp/issues/523)) ([a5ae39e](https://github.com/timfennis/andy-cpp/commit/a5ae39eb4f60dd6bd7ef0d7047220b1eb034529a))
+* **vm:** unpack a pattern of locals straight into their slots 📥 ([#493](https://github.com/timfennis/andy-cpp/issues/493)) ([5b291ce](https://github.com/timfennis/andy-cpp/commit/5b291ce99a25adc554d0774f697f249c11bad3e8))
+* **vm:** write natives as instructions and call the rest by their slot 🏎️ ([#485](https://github.com/timfennis/andy-cpp/issues/485)) ([a6dc860](https://github.com/timfennis/andy-cpp/commit/a6dc86030cdd52134d6f848778d380d492c9dad6))
+
 ## [0.4.1](https://github.com/timfennis/andy-cpp/compare/v0.4.0...v0.4.1) (2026-11-19)
 
 
