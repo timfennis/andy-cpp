@@ -403,9 +403,48 @@ impl Analyser {
         // `1 + 1` are Floats in `if c { 2.5 } else { -1 }`.
         if let Some(literal) = self.literal_arithmetic(&call) {
             self.vars.unify(&result, &literal);
+        } else if let Some(returned) = self.returned_by_every_overload(&call) {
+            self.vars.unify(&result, &returned);
         }
         self.wait(Constraint::Call(call));
         result
+    }
+
+    /// What a call that waits for its overload returns whichever it picks:
+    /// the type every function it can name returns, when that's one type
+    /// known now. `int(x)` is an Int before `x`'s type picks the overload,
+    /// as every `int` returns an Int. An operator may apply to each element
+    /// of a tuple, and `[]` on a tuple or an `Any` picks no overload, so
+    /// neither counts.
+    fn returned_by_every_overload(&self, call: &CallConstraint) -> Option<StaticType> {
+        if !matches!(call.site, CallSite::Call(_))
+            || call.kind == CallKind::Operator
+            || call.name == "[]"
+        {
+            return None;
+        }
+        let mut returned = None;
+        for symbol in self.overloads().reachable_symbols(&call.candidates) {
+            let StaticType::Function { return_type, .. } =
+                self.vars.resolve(self.types.get_type(symbol))
+            else {
+                return None;
+            };
+            if return_type.contains(&|typ| {
+                matches!(
+                    typ,
+                    StaticType::Var(_)
+                        | StaticType::Generic(_)
+                        | StaticType::Unknown
+                        | StaticType::Error
+                )
+            }) || returned.is_some_and(|returned| returned != *return_type)
+            {
+                return None;
+            }
+            returned = Some(*return_type);
+        }
+        returned
     }
 
     /// What iterating over a value of type `sequence` where `iterated` says
