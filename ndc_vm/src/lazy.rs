@@ -80,7 +80,14 @@ impl Lazy {
     /// map: the keys it has when a cursor starts, but those removed before
     /// the cursor gets to them. `None` if `map` isn't a map.
     pub fn keys(map: Value) -> Option<Self> {
-        ValueIter::keys(&map)?;
+        // Checked without making a cursor, which would copy every key only
+        // to drop the copy: `Self::cursor` copies them when it starts.
+        let Value::Object(object) = &map else {
+            return None;
+        };
+        if !matches!(object.as_ref(), Object::Map { .. }) {
+            return None;
+        }
         Some(Self {
             source: Source::Keys(map),
             steps: Rc::from([]),
